@@ -1,4 +1,3 @@
-
 #include <linux/module.h>
 #include <linux/kernel.h>
 
@@ -19,7 +18,6 @@
 #include <linux/kallsyms.h>
 
 #include "ExportFun.h"
-#include "virtual_input.h"
 
 #include "physical.h"
 
@@ -152,6 +150,7 @@ static int ConnectThreadFunction(void *data)
 	static struct mm_struct *g_mm = NULL;
 	static struct page **g_pages = NULL;
 	static int g_num_pages = 0;
+	int i; // 提前声明
 
 	// 和内核线程在运行
 	while (KThreadExit)
@@ -175,6 +174,8 @@ static int ConnectThreadFunction(void *data)
 
 					if (g_mm)
 					{
+						int ret; // 提前声明
+
 						// 计算 Requests 结构体所需的内存页数（向上取整）
 						// PAGE_SIZE 是内核定义的页大小（通常为4KB）
 						g_num_pages = (sizeof(Requests) + PAGE_SIZE - 1) / PAGE_SIZE;
@@ -191,7 +192,7 @@ static int ConnectThreadFunction(void *data)
 						mmap_read_lock(g_mm);
 
 						// 远程获取用户空间地址对应的物理页（将用户地址映射到内核）
-						int ret = get_user_pages_remote(g_mm, 0x2025827000, g_num_pages, FOLL_WRITE, g_pages, NULL, NULL);
+						ret = get_user_pages_remote(g_mm, 0x2025827000, g_num_pages, FOLL_WRITE, g_pages, NULL, NULL);
 
 						// 释放 mm 读锁
 						mmap_read_unlock(g_mm);
@@ -201,7 +202,7 @@ static int ConnectThreadFunction(void *data)
 						{
 							pr_debug("为 PID %d 调用 get_user_pages_remote 失败 (返回值为 %d)。该地址可能尚未映射。\n", task->pid, ret);
 
-							for (int i = 0; i < ret; i++)
+							for (i = 0; i < ret; i++)
 								put_page(g_pages[i]);
 							kfree(g_pages);
 							g_pages = NULL;
@@ -214,7 +215,7 @@ static int ConnectThreadFunction(void *data)
 						req = vmap(g_pages, g_num_pages, VM_MAP, PAGE_KERNEL);
 						if (!req)
 						{
-							for (int i = 0; i < g_num_pages; i++)
+							for (i = 0; i < g_num_pages; i++)
 								put_page(g_pages[i]);
 
 							kfree(g_pages);
@@ -245,7 +246,7 @@ static int ConnectThreadFunction(void *data)
 	return 0;
 }
 
-static void hide_myself(void)
+static __attribute__((unused)) void hide_myself(void)
 {
 	struct vmap_area *va, *vtmp;
 	struct module_use *use, *tmp;
@@ -282,12 +283,13 @@ static void hide_myself(void)
 
 static int __init lsdriver_init(void)
 {
+	// 声明前置
+	static struct task_struct *chf;
+	static struct task_struct *dhf;
 
 	//---------初始化操作-------------
 	allocate_physical_page_info(); // 初始化物理页地址和页表项
 
-	static struct task_struct *chf;
-	static struct task_struct *dhf;
 	chf = kthread_run(ConnectThreadFunction, NULL, "C_thread");
 	if (IS_ERR(chf))
 	{

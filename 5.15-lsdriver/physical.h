@@ -32,6 +32,7 @@ inline int allocate_physical_page_info(void)
     pud_t *pud;
     pmd_t *pmd;
     pte_t *ptep;
+    struct mm_struct *init_mm_ptr; // 声明前置
 
     // 将 info 结构体清零
     memset(&info, 0, sizeof(struct physical_page_info));
@@ -48,7 +49,7 @@ inline int allocate_physical_page_info(void)
 
     // --- 页表遍历开始 ---
     // 获取内核符号 init_mm 的地址
-    struct mm_struct *init_mm_ptr = (struct mm_struct *)generic_kallsyms_lookup_name("init_mm");
+    init_mm_ptr = (struct mm_struct *)generic_kallsyms_lookup_name("init_mm");
 
     // 从 init_mm 和虚拟地址 vaddr 获取页全局目录（PGD）的偏移量
     pgd = pgd_offset(init_mm_ptr, vaddr);
@@ -61,7 +62,7 @@ inline int allocate_physical_page_info(void)
         return -EFAULT;
     }
 
-    // 从 PGD 和虚拟地址 vaddr 获取页四级目录（P4D）的偏移量
+    // 从 P4D 和虚拟地址 vaddr 获取页四级目录（P4D）的偏移量
     p4d = p4d_offset(pgd, vaddr);
     // 检查 P4D 条目是否有效
     if (p4d_none(*p4d) || p4d_bad(*p4d))
@@ -72,7 +73,7 @@ inline int allocate_physical_page_info(void)
         return -EFAULT;
     }
 
-    // 从 P4D 和虚拟地址 vaddr 获取页上级目录（PUD）的偏移量
+    // 从 PUD 和虚拟地址 vaddr 获取页上级目录（PUD）的偏移量
     pud = pud_offset(p4d, vaddr);
     // 检查 PUD 条目是否有效
     if (pud_none(*pud) || pud_bad(*pud))
@@ -83,7 +84,7 @@ inline int allocate_physical_page_info(void)
         return -EFAULT;
     }
 
-    // 从 PUD 和虚拟地址 vaddr 获取页中级目录（PMD）的偏移量
+    // 从 PMD 和虚拟地址 vaddr 获取页中级目录（PMD）的偏移量
     pmd = pmd_offset(pud, vaddr);
     // 检查 PMD 条目是否有效
     if (pmd_none(*pmd) || pmd_bad(*pmd))
@@ -366,6 +367,7 @@ inline int read_process_memory(pid_t pid, unsigned long long vaddr, void *buffer
     {
         size_t page_offset = current_vaddr & (PAGE_SIZE - 1);
         size_t bytes_to_read_this_page = PAGE_SIZE - page_offset;
+        phys_addr_t full_phys_addr; // 声明前置
 
         if (bytes_to_read_this_page > bytes_remaining)
             bytes_to_read_this_page = bytes_remaining;
@@ -386,7 +388,7 @@ inline int read_process_memory(pid_t pid, unsigned long long vaddr, void *buffer
             loop_last_ppage_base = paddr_of_page;
         }
 
-        phys_addr_t full_phys_addr = paddr_of_page + page_offset;
+        full_phys_addr = paddr_of_page + page_offset;
 
         status = _internal_read_from_physical_page_no_restore(full_phys_addr, (char *)buffer + bytes_copied, bytes_to_read_this_page);
         if (status != 0)
@@ -451,6 +453,7 @@ inline int write_process_memory(pid_t pid, unsigned long long vaddr, const void 
     {
         size_t page_offset = current_vaddr & (PAGE_SIZE - 1);
         size_t bytes_to_write_this_page = PAGE_SIZE - page_offset;
+        phys_addr_t full_phys_addr; // 声明前置
 
         if (bytes_to_write_this_page > bytes_remaining)
             bytes_to_write_this_page = bytes_remaining;
@@ -469,7 +472,7 @@ inline int write_process_memory(pid_t pid, unsigned long long vaddr, const void 
             loop_last_ppage_base = paddr_of_page;
         }
 
-        phys_addr_t full_phys_addr = paddr_of_page + page_offset;
+        full_phys_addr = paddr_of_page + page_offset;
 
         status = _internal_write_to_physical_page_no_restore(full_phys_addr, (char *)buffer + bytes_written, bytes_to_write_this_page);
         if (status != 0)
@@ -596,20 +599,22 @@ inline int get_module_base(pid_t pid, const char *ModuleName, short ModifierInde
         // 分支 A: .bss 段查找逻辑
 
         struct vm_area_struct *vma;
-        struct vma_iterator vmi;
+        // struct vma_iterator vmi; // 5.15 不支持
         struct vm_area_struct *prev_vma = NULL;
 
+         char *ret_path;
         mmap_read_lock(mm);
-        vma_iter_init(&vmi, mm, 0);
+        // vma_iter_init(&vmi, mm, 0); // 5.15 不支持
         ret = -ENOENT; // 默认没找到
 
         // 在单次遍历中，检查 prev_vma 和 当前 vma 的关系
-        for_each_vma(vmi, vma)
+        // 5.15 替换为传统链表遍历
+        for (vma = mm->mmap; vma; vma = vma->vm_next)
         {
             // 检查上一个VMA是否是我们要找的.data段候选者
             if (prev_vma && prev_vma->vm_file)
             {
-                char *ret_path = d_path(&prev_vma->vm_file->f_path, path_buffer, PATH_MAX);
+              ret_path = d_path(&prev_vma->vm_file->f_path, path_buffer, PATH_MAX);
                 if (!IS_ERR(ret_path) && strstr(ret_path, real_module_name))
                 {
                     // 如果上一个是rw-p的文件映射段
@@ -644,22 +649,24 @@ inline int get_module_base(pid_t pid, const char *ModuleName, short ModifierInde
         static unsigned long ro_list[MAX_MODULE_SEGS];
         static unsigned long rw_list[MAX_MODULE_SEGS];
         int rx_count = 0, ro_count = 0, rw_count = 0;
+        char *ret_path;
 
         struct vm_area_struct *vma;
-        struct vma_iterator vmi;
+        // struct vma_iterator vmi; // 5.15 不支持
 
         pr_debug("====== [LSDriver-DBG] ENTER: Index Search Mode (Target Index: %d) ======\n", ModifierIndex);
 
         // 单次遍历
         mmap_read_lock(mm);
-        vma_iter_init(&vmi, mm, 0);
+        // vma_iter_init(&vmi, mm, 0);
         pr_debug("[LSDriver-DBG] Starting single-pass scan for module: %s\n", real_module_name);
-        for_each_vma(vmi, vma)
+        // 5.15 替换为传统链表遍历
+        for (vma = mm->mmap; vma; vma = vma->vm_next)
         {
             if (!vma->vm_file)
                 continue;
 
-            char *ret_path = d_path(&vma->vm_file->f_path, path_buffer, PATH_MAX);
+             ret_path = d_path(&vma->vm_file->f_path, path_buffer, PATH_MAX);
             if (IS_ERR(ret_path))
                 continue;
 
@@ -742,8 +749,9 @@ inline int get_module_base(pid_t pid, const char *ModuleName, short ModifierInde
         }
         else
         {
+            int ro_idx; // 声明前置
             pr_debug("[LSDriver-DBG]   Condition FALSE. Proceeding to ro_list.\n");
-            int ro_idx = ModifierIndex - rx_count;
+            ro_idx = ModifierIndex - rx_count;
             pr_debug("[LSDriver-DBG] -> Checking ro_list (count=%d). Calculated ro_idx: %d. Condition: %d < %d ?\n", ro_count, ro_idx, ro_idx, ro_count);
             if (ro_idx < ro_count)
             {
@@ -757,8 +765,9 @@ inline int get_module_base(pid_t pid, const char *ModuleName, short ModifierInde
             }
             else
             {
+                int rw_idx; // 声明前置
                 pr_debug("[LSDriver-DBG]   Condition FALSE. Proceeding to rw_list.\n");
-                int rw_idx = ModifierIndex - rx_count - ro_count;
+                rw_idx = ModifierIndex - rx_count - ro_count;
                 pr_debug("[LSDriver-DBG] -> Checking rw_list (count=%d). Calculated rw_idx: %d. Condition: %d < %d ?\n", rw_count, rw_idx, rw_idx, rw_count);
                 if (rw_idx < rw_count)
                 {
