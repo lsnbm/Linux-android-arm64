@@ -73,7 +73,7 @@
 //     int i;
 //     struct class *input_class_ptr;
 
-//     // --- 步骤1: 查找并锁定物理触摸屏设备 ---
+//     // 查找并锁定物理触摸屏设备 
 //     input_class_ptr = (struct class *)generic_kallsyms_lookup_name("input_class");
 //     if (!input_class_ptr)
 //     {
@@ -89,7 +89,7 @@
 //         return -ENODEV;
 //     }
 
-//     // --- 步骤2: 分配并克隆设备属性 ---
+//     // 分配并克隆设备属性 
 //     v_input_dev = input_allocate_device();
 //     if (!v_input_dev)
 //     {
@@ -139,7 +139,7 @@
 //         }
 //     }
 
-//     // ---  注册设备并初始化状态机 ---
+//     // 注册设备并初始化状态机 
 //     error = input_register_device(v_input_dev);
 //     if (error)
 //     {
