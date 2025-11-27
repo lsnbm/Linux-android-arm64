@@ -30,7 +30,6 @@ kobject_del
 kstrdup
 kthread_create_on_node
 mas_find
-mem_section
 memcpy
 memset
 memstart_addr

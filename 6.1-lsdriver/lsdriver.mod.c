@@ -22,6 +22,8 @@ __section(".gnu.linkonce.this_module") = {
 	.arch = MODULE_ARCH_INIT,
 };
 
+MODULE_INFO(scmversion, "gff992d68744d-dirty");
+
 #ifdef CONFIG_RETPOLINE
 MODULE_INFO(retpoline, "Y");
 #endif
@@ -34,7 +36,6 @@ __used __section("__versions") = {
 	{ 0xeb78b1ed, "unregister_kprobe" },
 	{ 0x9688de8b, "memstart_addr" },
 	{ 0x999e8297, "vfree" },
-	{ 0xa3521253, "mem_section" },
 	{ 0x4829a47e, "memcpy" },
 	{ 0xbd628752, "__tracepoint_mmap_lock_start_locking" },
 	{ 0x88f5cdef, "down_read_trylock" },

