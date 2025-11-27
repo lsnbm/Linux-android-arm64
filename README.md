@@ -7,7 +7,8 @@
 代码实现了一个基于 Linux 内核模块的高性能、高隐匿性内存读写驱动。摒弃了标准的虚拟内存管理接口，转而通过手动页表遍历和直接 PTE（页表项）操纵来实现物理内存的读写。
 这种方法的核心优势在于：
 - **极致性能**：通过多级缓存机制（Context Cache + Software TLB）和TLB 刷新，将读写延迟压缩至微秒级。实际测试采用共享内存通信1000000次读，用户层->内核层->用户层平均单次读取在1us左右
-<img width="906" height="300" alt="image" src="https://github.com/user-attachments/assets/8311b35b-5b3b-4470-9275-2a098e97f3b8" />
+2025.11.27(不加自旋锁可以提升到0.5us左右，前提是单线程调用)
+<img width="1399" height="452" alt="image" src="https://github.com/user-attachments/assets/9d7a8215-4cd8-4f46-9ea3-5a183630e0bc" />
 
 
 - **高度隐匿**：绕过内核标准内存管理，自定义页表项标志位。支持任意物理访问。

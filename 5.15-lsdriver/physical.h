@@ -133,104 +133,96 @@ inline void __attribute__((unused)) free_physical_page_info(void)
 }
 
 // 通过直接操作PTE，从指定的物理地址读取数据。
-inline int _internal_read_from_physical_page_no_restore(phys_addr_t paddr, void *buffer, size_t size)
+
+// 通过直接操作PTE，从指定的物理地址读取数据。
+inline void _internal_read_fast(phys_addr_t paddr, void *buffer, size_t size)
 {
+    // MT_NORMAL_NC无缓存只读(建议用缓存MT_NORMAL因为cpu来不及把进程数据缓存写入内存，就直接读物理会有意外如：在1000000次测试下发现数据不匹配就是应为缓存没及时写入内存)
+    static const u64 FLAGS = PTE_TYPE_PAGE | PTE_VALID | PTE_AF | PTE_SHARED | PTE_PXN | PTE_UXN | PTE_ATTRINDX(MT_NORMAL);
+    unsigned long pfn = __phys_to_pfn(paddr);
 
-    // 用于“无缓存只读”操作
-    static const u64 FLAGS = PTE_TYPE_PAGE | PTE_VALID | PTE_AF | PTE_SHARED | PTE_PXN | PTE_UXN | PTE_ATTRINDX(MT_NORMAL_NC);
-    unsigned long pfn;
-
-    if (unlikely(size == 0))
-    {
-        return -EINVAL;
-    }
-    if (unlikely(!buffer))
-    {
-        return -EINVAL;
-    }
-
-    // 检查我们的PTE映射器是否已成功初始化
-    if (unlikely(!info.base_address || !info.pte_address))
-    {
-        return -EINVAL;
-    }
-    // 检查请求的读取大小是否会跨越页边界。此函数设计为不支持跨页读。
-    if (unlikely(size > PAGE_SIZE - (paddr & ~PAGE_MASK)))
-    {
-        return -EINVAL;
-    }
-
-    // 将物理地址转换为页帧号 PFN
-    pfn = __phys_to_pfn(paddr);
-
-    // 检查物理页帧号是否属于合法的系统RAM
-    if (unlikely(!pfn_valid(pfn)))
-    {
-        return -EINVAL;
-    }
-
-    // 修改pte
+    // 直接修改 PTE 指向目标物理页
     set_pte(info.pte_address, pfn_pte(pfn, __pgprot(FLAGS)));
 
-    // 只刷新当前核心TLB
+    // 内存全序屏障
+    // dsb(ishst);
+
+    // 刷新 TLB (只刷新单个页);
     flush_tlb_kernel_range((unsigned long)info.base_address, (unsigned long)info.base_address + PAGE_SIZE);
+    // flush_tlb_all();//刷新全部cpu核心TLB
+    // isb(); // 刷新流水线，确保后续读取使用新的映射
 
-    // 刷新全部核心TLB
-    // flush_tlb_all();
-
-    // 屏障：确保 TLB 刷新完成，并且后续的 memcpy 不会乱序执行到前面
-    isb();
-
-    memcpy(buffer, (char *)info.base_address + (paddr & ~PAGE_MASK), size);
-
-    return 0;
+    /*
+    拷贝数据(这里没用likely检查字节对齐极端情况会导致：)
+    1.地址正好跨越了缓存行的边界（比如一个 float 一半在 Cache Line A，一半在 Cache Line B），CPU 必须发起两次总线事务。
+        在这两次读取的间隙，用户态程序正好改写了这个值。你读到的就是“前半截是新值，后半截是旧值”的撕裂数据
+    2.使用 __attribute__((packed)) 的结构体强行紧凑布局和不对齐导致
+    */
+    switch (size)
+    {
+    case 4:
+    {
+        *(uint32_t *)buffer = READ_ONCE(*(volatile uint32_t *)(info.base_address + (paddr & ~PAGE_MASK)));
+        break;
+    }
+    case 8:
+    {
+        *(uint64_t *)buffer = READ_ONCE(*(volatile uint64_t *)(info.base_address + (paddr & ~PAGE_MASK)));
+        break;
+    }
+    case 1:
+    {
+        *(uint8_t *)buffer = READ_ONCE(*(volatile uint8_t *)(info.base_address + (paddr & ~PAGE_MASK)));
+        break;
+    }
+    case 2:
+    {
+        *(uint16_t *)buffer = READ_ONCE(*(volatile uint16_t *)(info.base_address + (paddr & ~PAGE_MASK)));
+        break;
+    }
+    default:
+        memcpy(buffer, (char *)info.base_address + (paddr & ~PAGE_MASK), size);
+        break;
+    }
 }
-
-inline int _internal_write_to_physical_page_no_restore(phys_addr_t paddr, void *buffer, size_t size)
+inline void _internal_write_fast(phys_addr_t paddr, const void *buffer, size_t size)
 {
-    // 用于“无缓存只写”操作
-    static const u64 FLAGS = PTE_TYPE_PAGE | PTE_VALID | PTE_AF | PTE_SHARED | PTE_WRITE | PTE_PXN | PTE_UXN | PTE_ATTRINDX(MT_NORMAL_NC);
-
-    unsigned long pfn;
-
-    if (unlikely(size == 0))
-    {
-        return -EINVAL;
-    }
-    if (unlikely(!buffer))
-    {
-        return -EINVAL;
-    }
-    if (unlikely(!info.base_address || !info.pte_address))
-    {
-        return -EINVAL;
-    }
-    if (unlikely(size > PAGE_SIZE - (paddr & ~PAGE_MASK)))
-    {
-        return -EINVAL;
-    }
-
-    pfn = __phys_to_pfn(paddr);
-
-    if (unlikely(!pfn_valid(pfn)))
-    {
-        return -EINVAL;
-    }
+    // MT_NORMAL_NC无缓存只读(建议用缓存MT_NORMAL因为cpu来不及把进程数据缓存写入内存，就直接读物理会有意外如：在1000000次测试下发现数据不匹配原因就是缓存没及时写入内存)
+    static const u64 FLAGS = PTE_TYPE_PAGE | PTE_VALID | PTE_AF | PTE_SHARED | PTE_WRITE | PTE_PXN | PTE_UXN | PTE_ATTRINDX(MT_NORMAL);
+    unsigned long pfn = __phys_to_pfn(paddr);
 
     set_pte(info.pte_address, pfn_pte(pfn, __pgprot(FLAGS)));
-
-    // 只刷新当前核心TLB
     flush_tlb_kernel_range((unsigned long)info.base_address, (unsigned long)info.base_address + PAGE_SIZE);
 
-    // 刷新全部核心TLB
-    // flush_tlb_all();
-
-    isb();
-
-    memcpy((char *)info.base_address + (paddr & ~PAGE_MASK), buffer, size);
-
-    return 0;
+    switch (size)
+    {
+    case 4:
+    {
+        WRITE_ONCE(*(volatile uint32_t *)(info.base_address + (paddr & ~PAGE_MASK)), *(const uint32_t *)buffer);
+        break;
+    }
+    case 8:
+    {
+        WRITE_ONCE(*(volatile uint64_t *)(info.base_address + (paddr & ~PAGE_MASK)), *(const uint64_t *)buffer);
+        break;
+    }
+    case 1:
+    {
+        WRITE_ONCE(*(volatile uint8_t *)(info.base_address + (paddr & ~PAGE_MASK)), *(const uint8_t *)buffer);
+        break;
+    }
+    case 2:
+    {
+        WRITE_ONCE(*(volatile uint16_t *)(info.base_address + (paddr & ~PAGE_MASK)), *(const uint16_t *)buffer);
+        break;
+    }
+    default:
+        memcpy((char *)info.base_address + (paddr & ~PAGE_MASK), buffer, size);
+        break;
+    }
 }
+
+
 
 // 只负责走页表
 inline int manual_va_to_pa_arm(struct mm_struct *mm, unsigned long long vaddr, phys_addr_t *paddr)
@@ -390,9 +382,8 @@ inline int read_process_memory(pid_t pid, unsigned long long vaddr, void *buffer
 
         full_phys_addr = paddr_of_page + page_offset;
 
-        status = _internal_read_from_physical_page_no_restore(full_phys_addr, (char *)buffer + bytes_copied, bytes_to_read_this_page);
-        if (status != 0)
-            return status;
+        _internal_read_fast(full_phys_addr, (char *)buffer + bytes_copied, bytes_to_read_this_page);
+  
 
         bytes_remaining -= bytes_to_read_this_page;
         bytes_copied += bytes_to_read_this_page;
@@ -474,9 +465,8 @@ inline int write_process_memory(pid_t pid, unsigned long long vaddr, const void 
 
         full_phys_addr = paddr_of_page + page_offset;
 
-        status = _internal_write_to_physical_page_no_restore(full_phys_addr, (char *)buffer + bytes_written, bytes_to_write_this_page);
-        if (status != 0)
-            return status;
+       _internal_write_fast(full_phys_addr, (char *)buffer + bytes_written, bytes_to_write_this_page);
+    
 
         bytes_remaining -= bytes_to_write_this_page;
         bytes_written += bytes_to_write_this_page;

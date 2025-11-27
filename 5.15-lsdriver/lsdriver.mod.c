@@ -37,7 +37,6 @@ __used __section("__versions") = {
 	{ 0x5efdd68b, "__tracepoint_mmap_lock_released" },
 	{ 0xbe118c52, "__tracepoint_mmap_lock_acquire_returned" },
 	{ 0xbd628752, "__tracepoint_mmap_lock_start_locking" },
-	{ 0xa3521253, "mem_section" },
 	{ 0x9688de8b, "memstart_addr" },
 	{ 0xdf7a4c69, "__ubsan_handle_cfi_check_fail_abort" },
 	{ 0xc3055d20, "usleep_range_state" },

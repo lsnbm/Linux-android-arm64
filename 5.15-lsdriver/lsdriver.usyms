@@ -28,7 +28,6 @@ kmalloc_caches
 kmem_cache_alloc_trace
 kstrdup
 kthread_create_on_node
-mem_section
 memcpy
 memstart_addr
 mmput
