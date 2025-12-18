@@ -1,4 +1,3 @@
-__cfi_slowpath_diag
 __mmap_lock_do_trace_acquire_returned
 __mmap_lock_do_trace_released
 __mmap_lock_do_trace_start_locking
@@ -28,19 +27,19 @@ kmalloc_caches
 kmem_cache_alloc_trace
 kstrdup
 kthread_create_on_node
+mem_section
 memcpy
+memset
 memstart_addr
 mmput
 msleep
 pid_task
 put_pid
 refcount_warn_saturate
-register_kprobe
 sort
 strchr
 strcmp
 strstr
-unregister_kprobe
 up_read
 usleep_range_state
 vfree

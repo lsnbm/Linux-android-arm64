@@ -1,268 +1,271 @@
-// #ifndef VIRTUAL_INPUT_H
-// #define VIRTUAL_INPUT_H
+#include <linux/kernel.h>
+#include <linux/module.h>
+#include <linux/input.h>
+#include <linux/input/mt.h>
+#include <linux/mutex.h>
+#include <linux/device.h>
+#include <linux/slab.h>
+#include <linux/version.h>
 
-// #include <linux/module.h>
-// #include <linux/kernel.h>
-// #include <linux/init.h>
-// #include <linux/input.h>
-// #include <linux/input/mt.h>
-// #include <linux/device.h>
-// #include <linux/slab.h>
-// #include <linux/kallsyms.h>
-// #include <linux/random.h> 
-// #include <linux/delay.h>  
+// --- 配置区域 ---
+#define VTOUCH_TRACKING_ID_BASE 40000 
+#define TARGET_SLOT_IDX 9  // Android 最大支持到 Slot 9 (第10个手指)
+// ----------------
 
-// #define MAX_VIRTUAL_SLOTS 10 // 我们最多模拟10个手指
+static DEFINE_MUTEX(g_lock);
 
-// // 描述一个虚拟触摸点的状态
-// struct virtual_touch_slot
-// {
-//     bool active;     // 此插槽是否正在被使用
-//     int tracking_id; // 此触摸点的唯一跟踪ID
-// };
+static struct input_dev *g_touch_input_dev = NULL;
+static struct input_mt *g_original_mt = NULL;
+static struct input_mt *g_hijacked_mt = NULL;
+static bool g_initialized = false;
+static int g_tracking_id = -1;
 
-// 
-// static struct input_dev *real_ts_dev = NULL; // 指向被克隆的物理触摸屏设备
-// static struct input_dev *v_input_dev = NULL; // 我们的虚拟触摸屏设备
+// 核心函数：扩容并初始化 MT 结构体
+// 策略：确保存储空间足够 10 个 Slot，但默认只告诉驱动有 9 个
+static int hijack_init_slots(struct input_dev *dev)
+{
+    struct input_mt *old_mt = dev->mt;
+    struct input_mt *new_mt;
+    int old_num_slots;
+    int alloc_num_slots;
+    int size;
 
-// // --- 虚拟触摸状态机变量 ---
-// static struct virtual_touch_slot v_slots[MAX_VIRTUAL_SLOTS];
-// static int active_touch_count = 0;
-// static int next_tracking_id = 1000; // 跟踪ID的起始值
+    if (!old_mt) return -1;
 
-// static int slots; // 保存分配的触摸点槽位
+    old_num_slots = old_mt->num_slots;
+    
+    // 我们至少需要 10 个空间 (0-9)
+    // 如果原设备小于 10，我们扩容到 10。
+    // 如果原设备大于等于 10，我们保持原大小。
+    alloc_num_slots = (old_num_slots < 10) ? 10 : old_num_slots;
 
-// static int match_and_set_touchscreen(struct device *dev, void *data)
-// {
-//     struct input_dev *input_dev = to_input_dev(dev);
+    size = sizeof(struct input_mt) + alloc_num_slots * sizeof(struct input_mt_slot);
 
-//     // 通过设备能力判断是否为多点触摸屏
-//     if (test_bit(EV_ABS, input_dev->evbit) &&
-//         test_bit(ABS_MT_POSITION_X, input_dev->absbit) &&
-//         test_bit(ABS_MT_POSITION_Y, input_dev->absbit))
-//     {
-//         // 确保我们不会克隆我们自己或其他已知的虚拟设备
-//         if (input_dev->id.bustype == BUS_VIRTUAL)
-//         {
-//             return 0;
-//         }
+    new_mt = kzalloc(size, GFP_KERNEL);
+    if (!new_mt) {
+        pr_err("vtouch: 内存分配失败\n");
+        return -1;
+    }
 
-//         pr_debug("克隆触摸: 发现物理触摸屏设备: '%s' (Bus: %d)\n", input_dev->name, input_dev->id.bustype);
+    // 复制旧数据
+    new_mt->trkid = old_mt->trkid;
+    // --- 关键欺骗 ---
+    // 我们将 num_slots 设置为 9 (前提是 alloc >= 10)
+    // 这样物理驱动只会循环 0-8，Slot 9 对它来说是不存在的
+    new_mt->num_slots = 9; 
+    
+    new_mt->flags = old_mt->flags;
+    new_mt->frame = old_mt->frame;
+    // new_mt->red = old_mt->red; // 视内核版本
 
-//         // 获取设备引用，防止其在使用中被卸载
-//         real_ts_dev = input_get_device(input_dev);
-//         return 1; // 返回1表示已找到并停止遍历
-//     }
+    // 复制旧的 slot 状态 (只复制原来有效的部分)
+    memcpy(new_mt->slots, old_mt->slots, old_num_slots * sizeof(struct input_mt_slot));
 
-//     return 0;
-// }
+    // --- Flag 设置 ---
+    new_mt->flags &= ~INPUT_MT_DROP_UNUSED; // 即使没更新也不要丢弃
+    new_mt->flags |= INPUT_MT_DIRECT;
+    new_mt->flags &= ~INPUT_MT_POINTER; // 禁用内核自动按键计算，防止 Key Flapping
 
-// // 初始化虚拟触摸状态机
-// static inline void virtual_touch_init(void)
-// {
-//     memset(v_slots, 0, sizeof(v_slots));
-//     active_touch_count = 0;
-//     pr_debug("克隆触摸: 虚拟触摸状态机已初始化。\n");
-// }
+    // 替换指针
+    g_original_mt = old_mt;
+    g_hijacked_mt = new_mt; 
+    dev->mt = new_mt;
 
+    // --- 告诉 Android 我们有 10 个 Slot ---
+    // 虽然 num_slots 设为 9 (给驱动看)，但我们要告诉 Android 我们支持到 9 (即10个)
+    input_set_abs_params(dev, ABS_MT_SLOT, 0, 9, 0, 0);
 
-// //初始化调用
-// static int __maybe_unused create_virtual_touch_from_clone(void)
-// {
-//     int error;
-//     int i;
-//     struct class *input_class_ptr;
+    pr_info("vtouch: 劫持成功！内存容量: %d, 伪装 Slot 数: 9. 目标 Slot: 9\n", alloc_num_slots);
 
-//     // 查找并锁定物理触摸屏设备 
-//     input_class_ptr = (struct class *)generic_kallsyms_lookup_name("input_class");
-//     if (!input_class_ptr)
-//     {
-//         pr_err("克隆触摸: 严重错误 - 'input_class' 符号未找到！\n");
-//         return -EFAULT;
-//     }
+    return 0;
+}
 
-//     class_for_each_device(input_class_ptr, NULL, NULL, match_and_set_touchscreen);
+static void vtouch_send_report(int x, int y, bool is_touching)
+{
+    if (!g_touch_input_dev) return;
 
-//     if (!real_ts_dev)
-//     {
-//         pr_err("克隆触摸: 未找到可供克隆的物理触摸屏, 模块加载中止。\n");
-//         return -ENODEV;
-//     }
+    // --- 瞬间开启 Slot 9 ---
+    // 物理驱动读到的是 9，平时不会碰 Slot 9。
+    // 我们现在把门打开，写入数据，然后立刻关上。
+    g_touch_input_dev->mt->num_slots = 10; 
 
-//     // 分配并克隆设备属性 
-//     v_input_dev = input_allocate_device();
-//     if (!v_input_dev)
-//     {
-//         pr_err("克隆触摸: 分配虚拟输入设备内存失败。\n");
-//         input_put_device(real_ts_dev); // 释放之前获取的设备引用
-//         return -ENOMEM;
-//     }
+    // 1. 选中 Slot 9
+    input_mt_slot(g_touch_input_dev, TARGET_SLOT_IDX);
 
-//     pr_debug("克隆触摸: 正在从 '%s' 克隆属性。\n", real_ts_dev->name);
+    // 2. 报告状态
+    input_mt_report_slot_state(g_touch_input_dev, MT_TOOL_FINGER, is_touching);
 
-//     // 克隆所有关键属性
-//     v_input_dev->name = kasprintf(GFP_KERNEL, "%s", real_ts_dev->name);
-//     if (real_ts_dev->phys)
-//         v_input_dev->phys = kasprintf(GFP_KERNEL, "%s", real_ts_dev->phys);
-//     if (real_ts_dev->uniq)
-//         v_input_dev->uniq = kasprintf(GFP_KERNEL, "%s", real_ts_dev->uniq);
+    if (is_touching)
+    {
+        input_report_abs(g_touch_input_dev, ABS_MT_POSITION_X, x);
+        input_report_abs(g_touch_input_dev, ABS_MT_POSITION_Y, y);
+        
+        // 伪造面积 (必须有)
+        if (test_bit(ABS_MT_TOUCH_MAJOR, g_touch_input_dev->absbit))
+            input_report_abs(g_touch_input_dev, ABS_MT_TOUCH_MAJOR, 10);
+        if (test_bit(ABS_MT_WIDTH_MAJOR, g_touch_input_dev->absbit))
+            input_report_abs(g_touch_input_dev, ABS_MT_WIDTH_MAJOR, 10);
+            
+        // 压力
+        if (test_bit(ABS_MT_PRESSURE, g_touch_input_dev->absbit))
+            input_report_abs(g_touch_input_dev, ABS_MT_PRESSURE, 60);
+    }
 
-//     v_input_dev->id.bustype = real_ts_dev->id.bustype;
-//     v_input_dev->id.vendor = real_ts_dev->id.vendor;
-//     v_input_dev->id.product = real_ts_dev->id.product;
-//     v_input_dev->id.version = real_ts_dev->id.version;
+    // 3. 同步 Slot 帧
+    // 这里因为 num_slots 暂时是 10，sync_frame 会扫描到 Slot 9 并生成事件
+    input_mt_sync_frame(g_touch_input_dev);
 
-//     // 克隆所有能力位图
-//     memcpy(v_input_dev->evbit, real_ts_dev->evbit, sizeof(v_input_dev->evbit));
-//     memcpy(v_input_dev->keybit, real_ts_dev->keybit, sizeof(v_input_dev->keybit));
-//     memcpy(v_input_dev->relbit, real_ts_dev->relbit, sizeof(v_input_dev->relbit));
-//     memcpy(v_input_dev->absbit, real_ts_dev->absbit, sizeof(v_input_dev->absbit));
-//     memcpy(v_input_dev->mscbit, real_ts_dev->mscbit, sizeof(v_input_dev->mscbit));
-//     memcpy(v_input_dev->ledbit, real_ts_dev->ledbit, sizeof(v_input_dev->ledbit));
-//     memcpy(v_input_dev->sndbit, real_ts_dev->sndbit, sizeof(v_input_dev->sndbit));
-//     memcpy(v_input_dev->ffbit, real_ts_dev->ffbit, sizeof(v_input_dev->ffbit));
-//     memcpy(v_input_dev->swbit, real_ts_dev->swbit, sizeof(v_input_dev->swbit));
-//     memcpy(v_input_dev->propbit, real_ts_dev->propbit, sizeof(v_input_dev->propbit));
+    // --- 瞬间关闭 Slot 9 ---
+    // 恢复为 9，防止物理驱动下一次中断时清洗 Slot 9
+    g_touch_input_dev->mt->num_slots = 9;
 
-//     // 克隆绝对坐标轴信息 (维度, 精度等)
-//     v_input_dev->absinfo = kcalloc(ABS_CNT, sizeof(struct input_absinfo), GFP_KERNEL);
-//     if (!v_input_dev->absinfo)
-//     {
-//         error = -ENOMEM;
-//         goto err_free_dev;
-//     }
-//     for (i = 0; i < ABS_CNT; i++)
-//     {
-//         if (test_bit(i, real_ts_dev->absbit))
-//         {
-//             v_input_dev->absinfo[i] = real_ts_dev->absinfo[i];
-//         }
-//     }
+    // 4. 手动控制按键 (因为禁用了 POINTER 标志)
+    if (is_touching) {
+        input_report_key(g_touch_input_dev, BTN_TOUCH, 1);
+        input_report_key(g_touch_input_dev, BTN_TOOL_FINGER, 1);
+    } else {
+        // 只有确实需要抬起时才发 UP
+        input_report_key(g_touch_input_dev, BTN_TOUCH, 0);
+        input_report_key(g_touch_input_dev, BTN_TOOL_FINGER, 0);
+    }
 
-//     // 注册设备并初始化状态机 
-//     error = input_register_device(v_input_dev);
-//     if (error)
-//     {
-//         pr_err("克隆触摸: 注册虚拟设备失败, 错误码: %d\n", error);
-//         goto err_free_dev;
-//     }
+    // 5. 提交总帧
+    input_sync(g_touch_input_dev);
+}
 
-//     virtual_touch_init(); // 初始化我们的触摸状态机
+static int _match_physical_touchscreen(struct device *dev, void *data)
+{
+    struct input_dev *input_dev = to_input_dev(dev);
+    struct input_dev **result = data;
 
-//     pr_debug("克隆触摸: 虚拟触摸屏 '%s' 创建并注册成功！\n", v_input_dev->name);
-//     return 0;
+    if (test_bit(EV_ABS, input_dev->evbit) &&
+        test_bit(ABS_MT_SLOT, input_dev->absbit) &&
+        input_dev->mt) 
+    {
+        if (test_bit(BTN_TOUCH, input_dev->keybit))
+        {
+            *result = input_dev;
+            return 1;
+        }
+    }
+    return 0;
+}
 
-// err_free_dev:
-//     kfree(v_input_dev->name);
-//     kfree(v_input_dev->phys);
-//     kfree(v_input_dev->uniq);
-//     kfree(v_input_dev->absinfo);
-//     input_free_device(v_input_dev);
-//     v_input_dev = NULL;
-//     input_put_device(real_ts_dev); // 释放物理设备引用
-//     real_ts_dev = NULL;
-//     return error;
-// }
+int v_touch_init(int *max_x, int *max_y)
+{
+    struct input_dev *found_dev = NULL;
+    struct class *input_class = (struct class *)generic_kallsyms_lookup_name("input_class");
+    int ret = 0;
 
-// // req->TOUCHSCREEN_MAX_X = v_input_dev->absinfo[ABS_MT_POSITION_X].maximum + 1;
-// // req->TOUCHSCREEN_MAX_Y = v_input_dev->absinfo[ABS_MT_POSITION_Y].maximum + 1;
-// //结束清理调用
-// static inline void destroy_virtual_touch(void)
-// {
-//     if (v_input_dev)
-//     {
-//         input_unregister_device(v_input_dev);
-//         v_input_dev = NULL;
-//     }
-//     if (real_ts_dev)
-//     {
-//         input_put_device(real_ts_dev);
-//         real_ts_dev = NULL;
-//     }
-//     pr_debug("克隆触摸: 虚拟触摸屏已销毁。\n");
-// }
+    if (!max_x || !max_y) return -EINVAL;
 
+    mutex_lock(&g_lock);
 
-// static inline void v_touch_down(int x, int y)
-// {
-//     int slot = -1, i;
+    if (g_initialized) {
+        *max_x = g_touch_input_dev->absinfo[ABS_MT_POSITION_X].maximum;
+        *max_y = g_touch_input_dev->absinfo[ABS_MT_POSITION_Y].maximum;
+        mutex_unlock(&g_lock);
+        return 0;
+    }
 
-//     if (!v_input_dev)
-//         return;
+    if (!input_class) { ret = -EFAULT; goto cleanup; }
 
-//     for (i = 1; i < MAX_VIRTUAL_SLOTS; i++)
-//     {
-//         if (!v_slots[i].active)
-//         {
-//             slot = i;
-//             break;
-//         }
-//     }
-//     if (slot == -1)
-//         return; // 没有可用插槽
+    class_for_each_device(input_class, NULL, &found_dev, _match_physical_touchscreen);
 
-//     v_slots[slot].active = true;
-//     v_slots[slot].tracking_id = next_tracking_id++;
-//     active_touch_count++;
+    if (!found_dev) {
+        pr_err("vtouch: 未能找到物理触摸屏设备。\n");
+        ret = -ENODEV;
+        goto cleanup;
+    }
 
-//     // 切换到当前操作的插槽
-//     input_event(v_input_dev, EV_ABS, ABS_MT_SLOT, slot);
-//     input_event(v_input_dev, EV_ABS, ABS_MT_TRACKING_ID, v_slots[slot].tracking_id);
+    get_device(&found_dev->dev);
+    g_touch_input_dev = found_dev;
 
-//     // 第一个手指按下时，才发送 BTN_TOUCH DOWN
-//     if (active_touch_count == 1)
-//     {
-//         input_event(v_input_dev, EV_KEY, BTN_TOUCH, 1);
-//         input_event(v_input_dev, EV_KEY, BTN_TOOL_FINGER, 1);
-//     }
+    // 执行劫持初始化
+    if (hijack_init_slots(g_touch_input_dev) != 0) {
+        ret = -ENOMEM;
+        put_device(&g_touch_input_dev->dev);
+        goto cleanup;
+    }
 
-//     // 上报带有“人性化”随机噪声的物理属性
-//     input_event(v_input_dev, EV_ABS, ABS_MT_WIDTH_MAJOR, 8 + (get_random_u32() % 5));
-//     input_event(v_input_dev, EV_ABS, ABS_MT_PRESSURE, 8 + (get_random_u32() % 5));
-//     input_event(v_input_dev, EV_ABS, ABS_MT_POSITION_X, x);
-//     input_event(v_input_dev, EV_ABS, ABS_MT_POSITION_Y, y);
-//     if (test_bit(ABS_PROFILE, v_input_dev->absbit))
-//     {
-//         input_event(v_input_dev, EV_ABS, ABS_PROFILE, 100 + (get_random_u32() % 500));
-//     }
+    // 回传分辨率
+    *max_x = g_touch_input_dev->absinfo[ABS_MT_POSITION_X].maximum;
+    *max_y = g_touch_input_dev->absinfo[ABS_MT_POSITION_Y].maximum;
+    g_initialized = true;
 
-//     input_sync(v_input_dev);
-//     slots = slot; // 保存到全局方便后续操作
-// }
+    pr_info("vtouch: 初始化成功 [%s] X_MAX=%d, Y_MAX=%d\n", 
+            g_touch_input_dev->name, *max_x, *max_y);
 
-// static inline void v_touch_move(int x, int y)
-// {
-//     if (!v_input_dev || slots < 0 || slots >= MAX_VIRTUAL_SLOTS || !v_slots[slots].active)
-//         return;
+    mutex_unlock(&g_lock);
+    return 0;
 
-//     input_event(v_input_dev, EV_ABS, ABS_MT_SLOT, slots);
-//     input_event(v_input_dev, EV_ABS, ABS_MT_POSITION_X, x);
-//     input_event(v_input_dev, EV_ABS, ABS_MT_POSITION_Y, y);
-//     input_event(v_input_dev, EV_ABS, ABS_MT_PRESSURE, 7 + (get_random_u32() % 6));
+cleanup:
+    mutex_unlock(&g_lock);
+    return ret;
+}
 
-//     input_sync(v_input_dev);
-// }
+void v_touch_destroy(void)
+{
+    mutex_lock(&g_lock);
+    if (!g_initialized) goto cleanup;
 
+    // 抬起
+    if (g_tracking_id != -1) {
+        g_tracking_id = -1;
+        vtouch_send_report(0, 0, false);
+    }
 
-// static inline void v_touch_up(void)
-// {
-//     if (!v_input_dev || slots < 0 || slots >= MAX_VIRTUAL_SLOTS || !v_slots[slots].active)
-//         return;
+    // 恢复
+    if (g_touch_input_dev && g_original_mt) {
+        g_touch_input_dev->mt = g_original_mt;
+        // 恢复 ABS 参数
+        input_set_abs_params(g_touch_input_dev, ABS_MT_SLOT, 0, g_original_mt->num_slots - 1, 0, 0);
+    }
 
-//     active_touch_count--;
-//     v_slots[slots].active = false;
+    if (g_hijacked_mt) {
+        kfree(g_hijacked_mt);
+        g_hijacked_mt = NULL;
+    }
 
-//     input_event(v_input_dev, EV_ABS, ABS_MT_SLOT, slots);
-//     input_event(v_input_dev, EV_ABS, ABS_MT_TRACKING_ID, -1);
+    put_device(&g_touch_input_dev->dev);
+    g_touch_input_dev = NULL;
+    g_initialized = false;
+    g_tracking_id = -1;
 
-//     // 最后一个手指抬起时，才发送 BTN_TOUCH UP
-//     if (active_touch_count == 0)
-//     {
-//         input_event(v_input_dev, EV_KEY, BTN_TOUCH, 0);
-//         input_event(v_input_dev, EV_KEY, BTN_TOOL_FINGER, 0);
-//     }
+cleanup:
+    mutex_unlock(&g_lock);
+}
 
-//     input_sync(v_input_dev);
-// }
+void v_touch_down(int x, int y)
+{
+    mutex_lock(&g_lock);
+    if (!g_initialized) goto cleanup;
 
-// #endif // VIRTUAL_INPUT_H
+    if (g_tracking_id == -1) {
+        g_tracking_id = VTOUCH_TRACKING_ID_BASE;
+        vtouch_send_report(x, y, true);
+    }
+
+cleanup:
+    mutex_unlock(&g_lock);
+}
+
+void v_touch_move(int x, int y)
+{
+    mutex_lock(&g_lock);
+    if (!g_initialized || g_tracking_id == -1) goto cleanup;
+    vtouch_send_report(x, y, true);
+cleanup:
+    mutex_unlock(&g_lock);
+}
+
+void v_touch_up(void)
+{
+    mutex_lock(&g_lock);
+    if (!g_initialized || g_tracking_id == -1) goto cleanup;
+    g_tracking_id = -1;
+    vtouch_send_report(0, 0, false);
+cleanup:
+    mutex_unlock(&g_lock);
+}
+

@@ -22,8 +22,6 @@ __section(".gnu.linkonce.this_module") = {
 	.arch = MODULE_ARCH_INIT,
 };
 
-MODULE_INFO(scmversion, "gff992d68744d-dirty");
-
 #ifdef CONFIG_RETPOLINE
 MODULE_INFO(retpoline, "Y");
 #endif
@@ -31,12 +29,26 @@ MODULE_INFO(retpoline, "Y");
 
 static const struct modversion_info ____versions[]
 __used __section("__versions") = {
-	{ 0xd6ee688f, "vmalloc" },
 	{ 0x472cf3b, "register_kprobe" },
+	{ 0xd5977bfb, "mutex_lock" },
+	{ 0x3e37109e, "class_for_each_device" },
+	{ 0xf181d237, "get_device" },
+	{ 0xc0052169, "put_device" },
 	{ 0xeb78b1ed, "unregister_kprobe" },
-	{ 0x9688de8b, "memstart_addr" },
-	{ 0x999e8297, "vfree" },
+	{ 0xed55cabd, "mutex_unlock" },
+	{ 0x92997ed8, "_printk" },
+	{ 0xeb233a45, "__kmalloc" },
 	{ 0x4829a47e, "memcpy" },
+	{ 0xf28ecabf, "input_set_abs_params" },
+	{ 0x37a0cba, "kfree" },
+	{ 0x4d18d895, "input_event" },
+	{ 0xe83a2318, "input_mt_report_slot_state" },
+	{ 0xe49ba9bc, "input_mt_sync_frame" },
+	{ 0x9688de8b, "memstart_addr" },
+	{ 0xd6ee688f, "vmalloc" },
+	{ 0xdcb764ad, "memset" },
+	{ 0x999e8297, "vfree" },
+	{ 0xa3521253, "mem_section" },
 	{ 0xbd628752, "__tracepoint_mmap_lock_start_locking" },
 	{ 0x88f5cdef, "down_read_trylock" },
 	{ 0xbe118c52, "__tracepoint_mmap_lock_acquire_returned" },
@@ -65,13 +77,10 @@ __used __section("__versions") = {
 	{ 0x2469810f, "__rcu_read_unlock" },
 	{ 0x9acf31c6, "mas_find" },
 	{ 0x4aef61ee, "d_path" },
-	{ 0x37a0cba, "kfree" },
 	{ 0xb7c0f443, "sort" },
-	{ 0x92997ed8, "_printk" },
 	{ 0xb0f4ab9f, "kthread_create_on_node" },
 	{ 0x73e2bcf1, "wake_up_process" },
 	{ 0xe1537255, "__list_del_entry_valid" },
-	{ 0xdcb764ad, "memset" },
 	{ 0x4d9b652b, "rb_erase" },
 	{ 0xd56b3592, "kobject_del" },
 	{ 0xdfb076f5, "sysfs_remove_link" },

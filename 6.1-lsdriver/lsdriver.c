@@ -31,6 +31,8 @@ typedef enum _req_op
 	op_down = 4,
 	op_move = 5,
 	op_up = 6,
+	op_InitTouch = 50, // 初始化触摸
+	op_DelTouch = 60,  // 清理触摸触摸
 
 	exit = 100,
 	kexit = 200
@@ -47,16 +49,18 @@ typedef struct _req_Obj
 
 	// 内存读取
 	int TargetProcessId;
-	unsigned long long TargetAddress;
+	uint64_t TargetAddress;
 	int TransferSize;
 	char UserBufferAddress[1024];
 
 	// 模块基地址获取
 	char ModuleName[46];
 	short SegmentIndex; // 模块区段
-	unsigned long long ModuleBaseAddress;
-	unsigned long long ModuleSize;
+	uint64_t ModuleBaseAddress;
+	uint64_t ModuleSize;
 
+	// 初始化触摸驱动返回屏幕维度
+	int POSITION_X, POSITION_Y;
 	// 触摸坐标
 	int x, y;
 
@@ -101,10 +105,26 @@ static int DispatchThreadFunction(void *data)
 					case op_m:
 						req->status = get_module_base(req->TargetProcessId, req->ModuleName, req->SegmentIndex, &req->ModuleBaseAddress);
 						break;
+					case op_down:
+						v_touch_down(req->x, req->y);
+						break;
+					case op_move:
+						v_touch_move(req->x, req->y);
+						break;
+					case op_up:
+						v_touch_up();
+						break;
+					case op_InitTouch:
+						v_touch_init(&req->POSITION_X, &req->POSITION_Y);
+						break;
+					case op_DelTouch:
+						v_touch_destroy();
+						break;
 					case exit:
 						ProcessExit = 0;
 						break;
 					case kexit:
+
 						KThreadExit = 0;
 						break;
 					default:
@@ -223,7 +243,7 @@ static int ConnectThreadFunction(void *data)
 						}
 
 						// 映射成功，打印信息
-						pr_debug("成功：已将 PID %d 的地址 0x%lx 映射到内核地址 %p。\n", task->pid, (unsigned long)0x20258270000, req);
+						pr_debug("成功：已将 PID %d 的地址 0x%llx 映射到内核地址 %p。\n", task->pid, (uint64_t)0x20258270000, req);
 
 						ProcessExit = 1;
 						// 通知请求线程处理完成
@@ -256,7 +276,7 @@ static void __attribute__((unused)) hide_myself(void)
 	// 摘除vmalloc调用关系链，/proc/vmallocinfo中不可见
 	list_for_each_entry_safe(va, vtmp, _vmap_area_list, list)
 	{
-		if ((unsigned long)THIS_MODULE > va->va_start && (unsigned long)THIS_MODULE < va->va_end)
+		if ((uint64_t)THIS_MODULE > va->va_start && (uint64_t)THIS_MODULE < va->va_end)
 		{
 			list_del(&va->list);
 			// rbtree中摘除，无法通过rbtree找到
@@ -282,7 +302,7 @@ static int __init lsdriver_init(void)
 {
 
 	//---------初始化操作-------------
-	allocate_physical_page_info(); // 初始化物理页地址和页表项
+	// allocate_physical_page_info();//pte读写需要，线性读写不需要 // 初始化物理页地址和页表项
 
 	static struct task_struct *chf;
 	static struct task_struct *dhf;

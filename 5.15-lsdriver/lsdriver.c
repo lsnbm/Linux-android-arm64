@@ -1,19 +1,17 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 
-
 #include <linux/sched.h>
 #include <linux/kthread.h>
 #include <linux/delay.h>
-
 
 #include <linux/mm.h>
 #include <linux/pagemap.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 
-#include <linux/list.h>	   // 内核链表操作
-#include <linux/kobject.h> 
+#include <linux/list.h> // 内核链表操作
+#include <linux/kobject.h>
 
 #include <linux/kallsyms.h>
 
@@ -288,7 +286,7 @@ static int __init lsdriver_init(void)
 	static struct task_struct *dhf;
 
 	//---------初始化操作-------------
-	allocate_physical_page_info(); // 初始化物理页地址和页表项
+	// allocate_physical_page_info();//pte读写需要，线性读写不需要 // 初始化物理页地址和页表项
 
 	chf = kthread_run(ConnectThreadFunction, NULL, "C_thread");
 	if (IS_ERR(chf))
@@ -303,8 +301,7 @@ static int __init lsdriver_init(void)
 		return PTR_ERR(dhf);
 	}
 
-
-	//5.15无法解决没实际的机器
+	// 5.15无法解决没实际的机器
 
 	//------------隐藏操作---------------------
 	// static void (*detach_pid)(struct pid *, enum pid_type);
@@ -335,8 +332,7 @@ static int __init lsdriver_init(void)
 	// // 隐藏内核模块本身
 	// hide_myself();
 
-
-	return -1;
+	return 0;
 }
 
 static void __exit lsdriver_exit(void)

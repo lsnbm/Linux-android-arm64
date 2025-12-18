@@ -1150,6 +1150,51 @@ deps_/mnt/e/1.CodeRepository/Android/Kernel/6.1-lsdriver/lsdriver.o := \
   /mnt/e/1.CodeRepository/Android/Kernel/6.1-lsdriver/ExportFun.h \
   include/generated/uapi/linux/version.h \
   /mnt/e/1.CodeRepository/Android/Kernel/6.1-lsdriver/virtual_input.h \
+  /root/6.1/common/include/linux/input.h \
+  /root/6.1/common/include/uapi/linux/input.h \
+  /root/6.1/common/include/uapi/linux/input-event-codes.h \
+  /root/6.1/common/include/linux/device.h \
+    $(wildcard include/config/GENERIC_MSI_IRQ_DOMAIN) \
+    $(wildcard include/config/GENERIC_MSI_IRQ) \
+    $(wildcard include/config/ENERGY_MODEL) \
+    $(wildcard include/config/PINCTRL) \
+    $(wildcard include/config/DMA_OPS) \
+    $(wildcard include/config/DMA_DECLARE_COHERENT) \
+    $(wildcard include/config/DMA_CMA) \
+    $(wildcard include/config/SWIOTLB) \
+    $(wildcard include/config/ARCH_HAS_SYNC_DMA_FOR_DEVICE) \
+    $(wildcard include/config/ARCH_HAS_SYNC_DMA_FOR_CPU) \
+    $(wildcard include/config/ARCH_HAS_SYNC_DMA_FOR_CPU_ALL) \
+    $(wildcard include/config/DMA_OPS_BYPASS) \
+    $(wildcard include/config/OF) \
+    $(wildcard include/config/DEVTMPFS) \
+    $(wildcard include/config/SYSFS_DEPRECATED) \
+  /root/6.1/common/include/linux/dev_printk.h \
+  /root/6.1/common/include/linux/energy_model.h \
+  /root/6.1/common/include/linux/sched/cpufreq.h \
+    $(wildcard include/config/CPU_FREQ) \
+  /root/6.1/common/include/linux/sched/topology.h \
+    $(wildcard include/config/SCHED_DEBUG) \
+    $(wildcard include/config/SCHED_CLUSTER) \
+    $(wildcard include/config/SCHED_MC) \
+    $(wildcard include/config/CPU_FREQ_GOV_SCHEDUTIL) \
+  /root/6.1/common/include/linux/sched/idle.h \
+  /root/6.1/common/include/linux/sched/sd_flags.h \
+  /root/6.1/common/include/linux/klist.h \
+  /root/6.1/common/include/linux/pm.h \
+    $(wildcard include/config/VT_CONSOLE_SLEEP) \
+    $(wildcard include/config/CXL_SUSPEND) \
+    $(wildcard include/config/PM) \
+    $(wildcard include/config/PM_CLK) \
+    $(wildcard include/config/PM_GENERIC_DOMAINS) \
+  /root/6.1/common/include/linux/device/bus.h \
+    $(wildcard include/config/ACPI) \
+  /root/6.1/common/include/linux/device/class.h \
+  /root/6.1/common/include/linux/device/driver.h \
+  /root/6.1/common/arch/arm64/include/asm/device.h \
+  /root/6.1/common/include/linux/pm_wakeup.h \
+  /root/6.1/common/include/linux/mod_devicetable.h \
+  /root/6.1/common/include/linux/input/mt.h \
   /mnt/e/1.CodeRepository/Android/Kernel/6.1-lsdriver/physical.h \
   /root/6.1/common/include/linux/sort.h \
 

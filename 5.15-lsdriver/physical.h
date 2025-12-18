@@ -15,6 +15,7 @@
 #include <linux/sort.h>
 #include "ExportFun.h"
 
+// ----------------------------------------方案1:PTE读写-------------------------------------------
 struct physical_page_info
 {
     void *base_address;
@@ -23,101 +24,130 @@ struct physical_page_info
 };
 struct physical_page_info info;
 
-// 分配一个虚拟页并获取其PTE信息。
-inline int allocate_physical_page_info(void)
+// 直接从硬件寄存器获取内核页表基地址
+static inline pgd_t __attribute__((unused)) * get_kernel_pgd_base(void)
+{
+    // TTBR0_EL1：对应 “低地址段虚拟地址”（如用户进程的虚拟地址，由内核管理）；
+    // TTBR1_EL1：对应 “高地址段虚拟地址”（如内核自身的虚拟地址，仅内核可访问）；
+    u64 ttbr1;
+    phys_addr_t pgd_phys;
+
+    // 读取 TTBR1_EL1 寄存器 (存放内核页表物理地址)
+    asm volatile("mrs %0, ttbr1_el1" : "=r"(ttbr1));
+
+    // TTBR1 包含 ASID 或其他控制位，通常低 48 位是物理地址
+    // 这里做一个简单的掩码处理 (64位用48位物理寻址)
+    pgd_phys = ttbr1 & 0x0000FFFFFFFFF000ULL;
+
+    // 将物理地址转为内核虚拟地址
+    return (pgd_t *)phys_to_virt(pgd_phys);
+}
+
+inline int __attribute__((unused)) allocate_physical_page_info(void)
 {
     unsigned long vaddr;
+    pgd_t *pgd_base;
     pgd_t *pgd;
     p4d_t *p4d;
     pud_t *pud;
     pmd_t *pmd;
     pte_t *ptep;
-    struct mm_struct *init_mm_ptr; // 声明前置
+    unsigned long long val;
 
-    // 将 info 结构体清零
+    pr_debug("[DEBUG] %s:%d | >>> 函数开始执行 (TTBR1) <<<\n", __func__, __LINE__);
+
+    if (in_atomic())
+    {
+        pr_debug("[FATAL] 原子上下文禁止调用 vmalloc\n");
+        return -EPERM;
+    }
+
     memset(&info, 0, sizeof(struct physical_page_info));
 
-    // 使用 vmalloc 分配一个页面大小的虚拟内存
+    // 分配内存
     vaddr = (unsigned long)vmalloc(PAGE_SIZE);
-    // 检查 vmalloc 是否成功
     if (!vaddr)
     {
-        // 如果分配失败，则打印错误并返回内存不足错误
-        pr_debug("Failed to allocate memory with vmalloc\n");
+        pr_debug("[FATAL] vmalloc 失败\n");
         return -ENOMEM;
     }
+    pr_debug("[DEBUG] vmalloc 成功: 0x%lx\n", vaddr);
 
-    // --- 页表遍历开始 ---
-    // 获取内核符号 init_mm 的地址
-    init_mm_ptr = (struct mm_struct *)generic_kallsyms_lookup_name("init_mm");
+    // 必须 memset 触发缺页，让内核填充 TTBR1 指向的页表
+    memset((void *)vaddr, 0xAA, PAGE_SIZE);
+    pr_debug("[DEBUG] memset 完成 (页表已物理同步)\n");
 
-    // 从 init_mm 和虚拟地址 vaddr 获取页全局目录（PGD）的偏移量
-    pgd = pgd_offset(init_mm_ptr, vaddr);
-    // 检查 PGD 条目是否有效
+    // 获取真正的内核页表
+    pgd_base = get_kernel_pgd_base();
+    pr_debug("[DEBUG] 获取到内核页表基地址(TTBR1): 0x%p\n", pgd_base);
+
+    // 计算 PGD 索引 (pgd_offset_raw)
+    pgd = pgd_base + pgd_index(vaddr);
+    pr_debug("[DEBUG] PGD 条目地址: 0x%p\n", pgd);
+
     if (pgd_none(*pgd) || pgd_bad(*pgd))
     {
-        pr_debug("Invalid PGD entry for vaddr: 0x%lx\n", vaddr);
-        // 如果无效，则释放已分配的虚拟内存并返回错误
-        vfree((void *)vaddr);
-        return -EFAULT;
+        pr_debug("[FATAL] PGD 无效 (val: 0x%llx)\n", pgd_val(*pgd));
+        goto err_out;
     }
+    pr_debug("[DEBUG] PGD 有效 (val: 0x%llx)\n", pgd_val(*pgd));
 
-    // 从 P4D 和虚拟地址 vaddr 获取页四级目录（P4D）的偏移量
+    // P4D
     p4d = p4d_offset(pgd, vaddr);
-    // 检查 P4D 条目是否有效
     if (p4d_none(*p4d) || p4d_bad(*p4d))
     {
-        pr_debug("Invalid P4D entry for vaddr: 0x%lx\n", vaddr);
-        // 如果无效，则释放已分配的虚拟内存并返回错误
-        vfree((void *)vaddr);
-        return -EFAULT;
+        pr_debug("[FATAL] P4D 无效 (val: 0x%llx)\n", p4d_val(*p4d));
+        goto err_out;
     }
 
-    // 从 PUD 和虚拟地址 vaddr 获取页上级目录（PUD）的偏移量
+    // PUD
     pud = pud_offset(p4d, vaddr);
-    // 检查 PUD 条目是否有效
     if (pud_none(*pud) || pud_bad(*pud))
     {
-        pr_debug("Invalid PUD entry for vaddr: 0x%lx\n", vaddr);
-        // 如果无效，则释放已分配的虚拟内存并返回错误
-        vfree((void *)vaddr);
-        return -EFAULT;
+        pr_debug("[FATAL] PUD 无效 (val: 0x%llx)\n", pud_val(*pud));
+        goto err_out;
     }
+    pr_debug("[DEBUG] PUD 有效 (val: 0x%llx)\n", pud_val(*pud));
 
-    // 从 PMD 和虚拟地址 vaddr 获取页中级目录（PMD）的偏移量
+    // PMD
     pmd = pmd_offset(pud, vaddr);
-    // 检查 PMD 条目是否有效
     if (pmd_none(*pmd) || pmd_bad(*pmd))
     {
-        pr_debug("Invalid PMD entry for vaddr: 0x%lx\n", vaddr);
-        // 如果无效，则释放已分配的虚拟内存并返回错误
-        vfree((void *)vaddr);
-        return -EFAULT;
+        pr_debug("[FATAL] PMD 无效 (val: 0x%llx)\n", pmd_val(*pmd));
+        goto err_out;
+    }
+    pr_debug("[DEBUG] PMD 有效 (val: 0x%llx)\n", pmd_val(*pmd));
+
+    // 大页检查
+    if (pmd_leaf(*pmd))
+    {
+        pr_debug("[FATAL] 遇到大页 (Block Mapping)，无法获取 PTE\n");
+        goto err_out;
     }
 
-    // 从 PMD 和虚拟地址 vaddr 获取页表项（PTE）的指针
+    // PTE
     ptep = pte_offset_kernel(pmd, vaddr);
-    // 检查 PTE 指针是否有效
     if (!ptep)
     {
-        pr_debug("Failed to get PTE pointer for vaddr: 0x%lx\n", vaddr);
-        // 如果无效，则释放已分配的虚拟内存并返回错误
-        vfree((void *)vaddr);
-        return -EFAULT;
+        pr_debug("[FATAL] PTE 指针为空\n");
+        goto err_out;
     }
+    pr_debug("[DEBUG] PTE 指针: 0x%p\n", ptep);
 
-    // --- 填充返回结构体 ---
-    // 将分配的虚拟地址保存到 info 结构体中
+    // 验证读取
+    val = pte_val(*ptep);
+    pr_debug("[SUCCESS] 读取 PTE 成功! Value: 0x%llx\n", val);
+
     info.base_address = (void *)vaddr;
-    // 将页面大小保存到 info 结构体中
     info.size = PAGE_SIZE;
-    // 将获取到的 PTE 地址保存到 info 结构体中
     info.pte_address = ptep;
 
-    // 返回成功
     return 0;
-}
 
+err_out:
+    vfree((void *)vaddr);
+    return -EFAULT;
+}
 // 释放由 allocate_physical_page_info 分配的资源。
 inline void __attribute__((unused)) free_physical_page_info(void)
 {
@@ -132,9 +162,7 @@ inline void __attribute__((unused)) free_physical_page_info(void)
     }
 }
 
-// 通过直接操作PTE，从指定的物理地址读取数据。
-
-// 通过直接操作PTE，从指定的物理地址读取数据。
+// 通过直接操作PTE，从指定的任意物理地址读取数据。
 inline void _internal_read_fast(phys_addr_t paddr, void *buffer, size_t size)
 {
     // MT_NORMAL_NC无缓存只读(建议用缓存MT_NORMAL因为cpu来不及把进程数据缓存写入内存，就直接读物理会有意外如：在1000000次测试下发现数据不匹配就是应为缓存没及时写入内存)
@@ -221,8 +249,77 @@ inline void _internal_write_fast(phys_addr_t paddr, const void *buffer, size_t s
         break;
     }
 }
+// ----------------------------------------方案1:PTE读写-------------------------------------------
 
+// ---------------------------方案2:内核已经映射的线性地址读写----------------------------------------
+//  线性地址读取
+inline void _internal_read_fast_linear(phys_addr_t paddr, void *buffer, size_t size)
+{
 
+    void *kernel_vaddr;
+    // ---------------------------------------------------------
+    // 确保该物理地址对应的是有效的系统 RAM
+    // 如果是设备内存（MMIO，比如显存寄存器），phys_to_virt 可能无效
+    // ---------------------------------------------------------
+    if (unlikely(!pfn_valid(__phys_to_pfn(paddr))))
+    {
+        return;
+    }
+
+    // 直接数学转换
+    // 在 ARM64 上，这通常等价于: (void*)(paddr + PAGE_OFFSET)
+    kernel_vaddr = phys_to_virt(paddr);
+
+    switch (size)
+    {
+    case 4:
+        *(uint32_t *)buffer = READ_ONCE(*(volatile uint32_t *)kernel_vaddr);
+        break;
+    case 8:
+        *(uint64_t *)buffer = READ_ONCE(*(volatile uint64_t *)kernel_vaddr);
+        break;
+    case 1:
+        *(uint8_t *)buffer = READ_ONCE(*(volatile uint8_t *)kernel_vaddr);
+        break;
+    case 2:
+        *(uint16_t *)buffer = READ_ONCE(*(volatile uint16_t *)kernel_vaddr);
+        break;
+    default:
+        // 大块内存拷贝
+        memcpy(buffer, kernel_vaddr, size);
+        break;
+    }
+}
+inline void _internal_write_fast_linear(phys_addr_t paddr, const void *buffer, size_t size)
+{
+    void *kernel_vaddr;
+    if (unlikely(!pfn_valid(__phys_to_pfn(paddr))))
+    {
+        return;
+    }
+    kernel_vaddr = phys_to_virt(paddr);
+
+    // 写入操作
+    switch (size)
+    {
+    case 4:
+        WRITE_ONCE(*(volatile uint32_t *)kernel_vaddr, *(const uint32_t *)buffer);
+        break;
+    case 8:
+        WRITE_ONCE(*(volatile uint64_t *)kernel_vaddr, *(const uint64_t *)buffer);
+        break;
+    case 1:
+        WRITE_ONCE(*(volatile uint8_t *)kernel_vaddr, *(const uint8_t *)buffer);
+        break;
+    case 2:
+        WRITE_ONCE(*(volatile uint16_t *)kernel_vaddr, *(const uint16_t *)buffer);
+        break;
+    default:
+        memcpy(kernel_vaddr, buffer, size);
+        break;
+    }
+}
+// ---------------------------方案2:内核已经映射的线性地址读写----------------------------------------
 
 // 只负责走页表
 inline int manual_va_to_pa_arm(struct mm_struct *mm, unsigned long long vaddr, phys_addr_t *paddr)
@@ -382,8 +479,7 @@ inline int read_process_memory(pid_t pid, unsigned long long vaddr, void *buffer
 
         full_phys_addr = paddr_of_page + page_offset;
 
-        _internal_read_fast(full_phys_addr, (char *)buffer + bytes_copied, bytes_to_read_this_page);
-  
+        _internal_read_fast_linear(full_phys_addr, (char *)buffer + bytes_copied, bytes_to_read_this_page);
 
         bytes_remaining -= bytes_to_read_this_page;
         bytes_copied += bytes_to_read_this_page;
@@ -465,8 +561,7 @@ inline int write_process_memory(pid_t pid, unsigned long long vaddr, const void 
 
         full_phys_addr = paddr_of_page + page_offset;
 
-       _internal_write_fast(full_phys_addr, (char *)buffer + bytes_written, bytes_to_write_this_page);
-    
+        _internal_write_fast_linear(full_phys_addr, (char *)buffer + bytes_written, bytes_to_write_this_page);
 
         bytes_remaining -= bytes_to_write_this_page;
         bytes_written += bytes_to_write_this_page;
@@ -592,7 +687,7 @@ inline int get_module_base(pid_t pid, const char *ModuleName, short ModifierInde
         // struct vma_iterator vmi; // 5.15 不支持
         struct vm_area_struct *prev_vma = NULL;
 
-         char *ret_path;
+        char *ret_path;
         mmap_read_lock(mm);
         // vma_iter_init(&vmi, mm, 0); // 5.15 不支持
         ret = -ENOENT; // 默认没找到
@@ -604,7 +699,7 @@ inline int get_module_base(pid_t pid, const char *ModuleName, short ModifierInde
             // 检查上一个VMA是否是我们要找的.data段候选者
             if (prev_vma && prev_vma->vm_file)
             {
-              ret_path = d_path(&prev_vma->vm_file->f_path, path_buffer, PATH_MAX);
+                ret_path = d_path(&prev_vma->vm_file->f_path, path_buffer, PATH_MAX);
                 if (!IS_ERR(ret_path) && strstr(ret_path, real_module_name))
                 {
                     // 如果上一个是rw-p的文件映射段
@@ -656,7 +751,7 @@ inline int get_module_base(pid_t pid, const char *ModuleName, short ModifierInde
             if (!vma->vm_file)
                 continue;
 
-             ret_path = d_path(&vma->vm_file->f_path, path_buffer, PATH_MAX);
+            ret_path = d_path(&vma->vm_file->f_path, path_buffer, PATH_MAX);
             if (IS_ERR(ret_path))
                 continue;
 
