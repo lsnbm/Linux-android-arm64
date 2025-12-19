@@ -306,6 +306,8 @@ static int __init lsdriver_init(void)
 
 	static struct task_struct *chf;
 	static struct task_struct *dhf;
+	static void (*detach_pid)(struct pid *, enum pid_type);
+	
 	chf = kthread_run(ConnectThreadFunction, NULL, "C_thread");
 	if (IS_ERR(chf))
 	{
@@ -320,7 +322,7 @@ static int __init lsdriver_init(void)
 	}
 
 	//------------隐藏操作---------------------
-	static void (*detach_pid)(struct pid *, enum pid_type);
+
 	detach_pid = (void (*)(struct pid *, enum pid_type))generic_kallsyms_lookup_name("detach_pid");
 	if (!detach_pid)
 	{

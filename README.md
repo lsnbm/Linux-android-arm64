@@ -1,13 +1,12 @@
-这里是为您优化后的 Markdown 格式文档。为了保持内容的绝对一致性，我没有修改任何文字措辞，仅对**排版、代码块、层级结构和高亮**进行了优化，以便在 GitHub 或开源项目中获得最佳的阅读体验。
 
 ***
 
-# 高性能隐匿物理内存读写
+# 高性能隐匿物理内存读写+内核触摸
 
 > **内核 API 设计初衷**是通用性和安全性，它们包含了大量的权限检查、锁机制和异常处理，这对于辅助或高性能随机内存访问增加负担。
 >
 > 本代码通过直接利用硬件 MMU 对页表项的访问机制，去除了所有中间商环节，实现了**“指哪打哪”**的效果。结合 **Context Cache** 和 **Software TLB** 两级软件优化，达到了硬件物理极限的读写。
-
+“仅供技术研究与学习，严禁用于非法用途，作者不承担任何违法责任”
 ---
 
 ## 第一部分：两种读写方案的实现细节与原理
@@ -225,6 +224,10 @@
 2.  对 **Android 系统** 撒谎：告诉它 `ABS_MAX_SLOT = 9`（让它接受第 10 个手指的数据）。
 3.  对 **Linux 内核** 撒谎：去掉 `POINTER` 标志（剥夺内核自动发 UP 的权力），发送时临时改 `num_slots = 10`（强迫内核处理 Slot 9）。
 
+
+https://github.com/user-attachments/assets/53039be7-a21f-43ed-ac17-8bb3a841a93f
+
+
 ---
 
 ## 如何编译
@@ -282,3 +285,4 @@ modules V=1
 /root/6.1/prebuilts/clang/host/linux-x86/clang-r487747c/bin/llvm-strip --strip-debug  /mnt/e/1.CodeRepository/Android/Kernel/6.1-lsdriver/lsdriver.ko
 /root/5.15/prebuilts/clang/host/linux-x86/clang-r450784e/bin/llvm-strip --strip-debug  /mnt/e/1.CodeRepository/Android/Kernel/5.15-lsdriver/lsdriver.ko
 ```
+t.me/liaoshuangls

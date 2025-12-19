@@ -1,4 +1,4 @@
-cmd_/mnt/e/1.CodeRepository/Android/Kernel/5.15-lsdriver/lsdriver.o := clang -Wp,-MMD,/mnt/e/1.CodeRepository/Android/Kernel/5.15-lsdriver/.lsdriver.o.d -nostdinc -isystem /root/5.15/prebuilts/clang/host/linux-x86/clang-r450784e/lib64/clang/14.0.7/include -I/root/5.15/common/arch/arm64/include -I./arch/arm64/include/generated -I/root/5.15/common/include -I./include -I/root/5.15/common/arch/arm64/include/uapi -I./arch/arm64/include/generated/uapi -I/root/5.15/common/include/uapi -I./include/generated/uapi -include /root/5.15/common/include/linux/compiler-version.h -include /root/5.15/common/include/linux/kconfig.h -include /root/5.15/common/include/linux/compiler_types.h -D__KERNEL__ --target=aarch64-linux-android -fintegrated-as -Werror=unknown-warning-option -Werror=ignored-optimization-argument -mlittle-endian -DKASAN_SHADOW_SCALE_SHIFT= -Qunused-arguments -fmacro-prefix-map=/root/5.15/common/= -Wall -Wundef -Werror=strict-prototypes -Wno-trigraphs -fno-strict-aliasing -fno-common -fshort-wchar -fno-PIE -Werror=implicit-function-declaration -Werror=implicit-int -Werror=return-type -Wno-format-security -std=gnu89 -mgeneral-regs-only -DCONFIG_CC_HAS_K_CONSTRAINT=1 -Wno-psabi -fno-asynchronous-unwind-tables -fno-unwind-tables -mbranch-protection=pac-ret+leaf+bti -Wa,-march=armv8.5-a -DARM64_ASM_ARCH='"armv8.5-a"' -ffixed-x18 -DKASAN_SHADOW_SCALE_SHIFT= -fno-delete-null-pointer-checks -Wno-frame-address -Wno-address-of-packed-member -O2 -Wframe-larger-than=2048 -fstack-protector-strong -Werror -Wno-gnu -mno-global-merge -Wno-unused-but-set-variable -Wno-unused-const-variable -fno-omit-frame-pointer -fno-optimize-sibling-calls -ftrivial-auto-var-init=zero -enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang -fno-stack-clash-protection -g -gdwarf-4 -fsanitize=shadow-call-stack -fno-lto -flto -fvisibility=default -fsanitize=cfi -fsanitize-cfi-cross-dso -fno-sanitize-cfi-canonical-jump-tables -fno-sanitize-trap=cfi -fno-sanitize-blacklist -Wdeclaration-after-statement -Wvla -Wno-pointer-sign -Wno-array-bounds -fno-strict-overflow -fno-stack-check -Werror=date-time -Werror=incompatible-pointer-types -fno-builtin-wcslen -Wno-initializer-overrides -Wno-format -Wno-sign-compare -Wno-format-zero-length -Wno-pointer-to-enum-cast -Wno-tautological-constant-out-of-range-compare -Wno-unaligned-access -Wno-enum-compare-conditional -mstack-protector-guard=sysreg -mstack-protector-guard-reg=sp_el0 -mstack-protector-guard-offset=1504 -O3 -fno-stack-protector -fomit-frame-pointer -funroll-loops -finline-functions -fstrict-aliasing -ffunction-sections -fdata-sections  -fsanitize=array-bounds -fsanitize=local-bounds -fsanitize-undefined-trap-on-error  -DMODULE  -DKBUILD_BASENAME='"lsdriver"' -DKBUILD_MODNAME='"lsdriver"' -D__KBUILD_MODNAME=kmod_lsdriver -c -o /mnt/e/1.CodeRepository/Android/Kernel/5.15-lsdriver/lsdriver.o /mnt/e/1.CodeRepository/Android/Kernel/5.15-lsdriver/lsdriver.c
+cmd_/mnt/e/1.CodeRepository/Android/Kernel/5.15-lsdriver/lsdriver.o := clang -Wp,-MMD,/mnt/e/1.CodeRepository/Android/Kernel/5.15-lsdriver/.lsdriver.o.d -nostdinc -isystem /root/5.15/prebuilts/clang/host/linux-x86/clang-r450784e/lib64/clang/14.0.7/include -I/root/5.15/common/arch/arm64/include -I./arch/arm64/include/generated -I/root/5.15/common/include -I./include -I/root/5.15/common/arch/arm64/include/uapi -I./arch/arm64/include/generated/uapi -I/root/5.15/common/include/uapi -I./include/generated/uapi -include /root/5.15/common/include/linux/compiler-version.h -include /root/5.15/common/include/linux/kconfig.h -include /root/5.15/common/include/linux/compiler_types.h -D__KERNEL__ --target=aarch64-linux-android -fintegrated-as -Werror=unknown-warning-option -Werror=ignored-optimization-argument -mlittle-endian -DKASAN_SHADOW_SCALE_SHIFT= -Qunused-arguments -fmacro-prefix-map=/root/5.15/common/= -Wall -Wundef -Werror=strict-prototypes -Wno-trigraphs -fno-strict-aliasing -fno-common -fshort-wchar -fno-PIE -Werror=implicit-function-declaration -Werror=implicit-int -Werror=return-type -Wno-format-security -std=gnu89 -mgeneral-regs-only -DCONFIG_CC_HAS_K_CONSTRAINT=1 -Wno-psabi -fno-asynchronous-unwind-tables -fno-unwind-tables -mbranch-protection=pac-ret+leaf+bti -Wa,-march=armv8.5-a -DARM64_ASM_ARCH='"armv8.5-a"' -ffixed-x18 -DKASAN_SHADOW_SCALE_SHIFT= -fno-delete-null-pointer-checks -Wno-frame-address -Wno-address-of-packed-member -O2 -Wframe-larger-than=2048 -fstack-protector-strong -Werror -Wno-gnu -mno-global-merge -Wno-unused-but-set-variable -Wno-unused-const-variable -fno-omit-frame-pointer -fno-optimize-sibling-calls -ftrivial-auto-var-init=zero -enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang -fno-stack-clash-protection -g -gdwarf-4 -fsanitize=shadow-call-stack -fno-lto -flto -fvisibility=default -fsanitize=cfi -fsanitize-cfi-cross-dso -fno-sanitize-cfi-canonical-jump-tables -fno-sanitize-trap=cfi -fno-sanitize-blacklist -Wdeclaration-after-statement -Wvla -Wno-pointer-sign -Wno-array-bounds -fno-strict-overflow -fno-stack-check -Werror=date-time -Werror=incompatible-pointer-types -fno-builtin-wcslen -Wno-initializer-overrides -Wno-format -Wno-sign-compare -Wno-format-zero-length -Wno-pointer-to-enum-cast -Wno-tautological-constant-out-of-range-compare -Wno-unaligned-access -Wno-enum-compare-conditional -mstack-protector-guard=sysreg -mstack-protector-guard-reg=sp_el0 -mstack-protector-guard-offset=1504 -O3 -fno-stack-protector -fomit-frame-pointer -funroll-loops -finline-functions -fstrict-aliasing -ffunction-sections -fdata-sections -DDEBUG  -fsanitize=array-bounds -fsanitize=local-bounds -fsanitize-undefined-trap-on-error  -DMODULE  -DKBUILD_BASENAME='"lsdriver"' -DKBUILD_MODNAME='"lsdriver"' -D__KBUILD_MODNAME=kmod_lsdriver -c -o /mnt/e/1.CodeRepository/Android/Kernel/5.15-lsdriver/lsdriver.o /mnt/e/1.CodeRepository/Android/Kernel/5.15-lsdriver/lsdriver.c
 
 source_/mnt/e/1.CodeRepository/Android/Kernel/5.15-lsdriver/lsdriver.o := /mnt/e/1.CodeRepository/Android/Kernel/5.15-lsdriver/lsdriver.c
 
@@ -1105,6 +1105,49 @@ deps_/mnt/e/1.CodeRepository/Android/Kernel/5.15-lsdriver/lsdriver.o := \
     $(wildcard include/config/SCHED_DEBUG) \
   /mnt/e/1.CodeRepository/Android/Kernel/5.15-lsdriver/ExportFun.h \
   include/generated/uapi/linux/version.h \
+  /mnt/e/1.CodeRepository/Android/Kernel/5.15-lsdriver/virtual_input.h \
+  /root/5.15/common/include/linux/input.h \
+  /root/5.15/common/include/uapi/linux/input.h \
+  /root/5.15/common/include/uapi/linux/input-event-codes.h \
+  /root/5.15/common/include/linux/device.h \
+    $(wildcard include/config/ENERGY_MODEL) \
+    $(wildcard include/config/GENERIC_MSI_IRQ_DOMAIN) \
+    $(wildcard include/config/PINCTRL) \
+    $(wildcard include/config/GENERIC_MSI_IRQ) \
+    $(wildcard include/config/DMA_OPS) \
+    $(wildcard include/config/DMA_DECLARE_COHERENT) \
+    $(wildcard include/config/DMA_CMA) \
+    $(wildcard include/config/SWIOTLB) \
+    $(wildcard include/config/ARCH_HAS_SYNC_DMA_FOR_DEVICE) \
+    $(wildcard include/config/ARCH_HAS_SYNC_DMA_FOR_CPU) \
+    $(wildcard include/config/ARCH_HAS_SYNC_DMA_FOR_CPU_ALL) \
+    $(wildcard include/config/DMA_OPS_BYPASS) \
+    $(wildcard include/config/OF) \
+    $(wildcard include/config/DEVTMPFS) \
+    $(wildcard include/config/SYSFS_DEPRECATED) \
+  /root/5.15/common/include/linux/dev_printk.h \
+  /root/5.15/common/include/linux/energy_model.h \
+  /root/5.15/common/include/linux/sched/cpufreq.h \
+    $(wildcard include/config/CPU_FREQ) \
+  /root/5.15/common/include/linux/sched/topology.h \
+    $(wildcard include/config/SCHED_MC) \
+    $(wildcard include/config/CPU_FREQ_GOV_SCHEDUTIL) \
+  /root/5.15/common/include/linux/sched/idle.h \
+  /root/5.15/common/include/linux/sched/sd_flags.h \
+  /root/5.15/common/include/linux/klist.h \
+  /root/5.15/common/include/linux/pm.h \
+    $(wildcard include/config/VT_CONSOLE_SLEEP) \
+    $(wildcard include/config/PM) \
+    $(wildcard include/config/PM_CLK) \
+    $(wildcard include/config/PM_GENERIC_DOMAINS) \
+  /root/5.15/common/include/linux/device/bus.h \
+    $(wildcard include/config/ACPI) \
+  /root/5.15/common/include/linux/device/class.h \
+  /root/5.15/common/include/linux/device/driver.h \
+  /root/5.15/common/arch/arm64/include/asm/device.h \
+  /root/5.15/common/include/linux/pm_wakeup.h \
+  /root/5.15/common/include/linux/mod_devicetable.h \
+  /root/5.15/common/include/linux/input/mt.h \
   /mnt/e/1.CodeRepository/Android/Kernel/5.15-lsdriver/physical.h \
   /root/5.15/common/include/linux/sort.h \
 

@@ -16,6 +16,7 @@
 #include <linux/kallsyms.h>
 
 #include "ExportFun.h"
+#include "virtual_input.h"
 
 #include "physical.h"
 
@@ -29,6 +30,8 @@ typedef enum _req_op
 	op_down = 4,
 	op_move = 5,
 	op_up = 6,
+	op_InitTouch = 50, // 初始化触摸
+	op_DelTouch = 60,  // 清理触摸触摸
 
 	exit = 100,
 	kexit = 200
@@ -45,16 +48,18 @@ typedef struct _req_Obj
 
 	// 内存读取
 	int TargetProcessId;
-	unsigned long long TargetAddress;
+	uint64_t TargetAddress;
 	int TransferSize;
 	char UserBufferAddress[1024];
 
 	// 模块基地址获取
 	char ModuleName[46];
 	short SegmentIndex; // 模块区段
-	unsigned long long ModuleBaseAddress;
-	unsigned long long ModuleSize;
+	uint64_t ModuleBaseAddress;
+	uint64_t ModuleSize;
 
+	// 初始化触摸驱动返回屏幕维度
+	int POSITION_X, POSITION_Y;
 	// 触摸坐标
 	int x, y;
 
@@ -99,10 +104,26 @@ static int DispatchThreadFunction(void *data)
 					case op_m:
 						req->status = get_module_base(req->TargetProcessId, req->ModuleName, req->SegmentIndex, &req->ModuleBaseAddress);
 						break;
+					case op_down:
+						v_touch_down(req->x, req->y);
+						break;
+					case op_move:
+						v_touch_move(req->x, req->y);
+						break;
+					case op_up:
+						v_touch_up();
+						break;
+					case op_InitTouch:
+						v_touch_init(&req->POSITION_X, &req->POSITION_Y);
+						break;
+					case op_DelTouch:
+						v_touch_destroy();
+						break;
 					case exit:
 						ProcessExit = 0;
 						break;
 					case kexit:
+
 						KThreadExit = 0;
 						break;
 					default:
@@ -284,6 +305,7 @@ static int __init lsdriver_init(void)
 	// 声明前置
 	static struct task_struct *chf;
 	static struct task_struct *dhf;
+	static void (*detach_pid)(struct pid *, enum pid_type);
 
 	//---------初始化操作-------------
 	// allocate_physical_page_info();//pte读写需要，线性读写不需要 // 初始化物理页地址和页表项
@@ -301,36 +323,33 @@ static int __init lsdriver_init(void)
 		return PTR_ERR(dhf);
 	}
 
-	// 5.15无法解决没实际的机器
-
 	//------------隐藏操作---------------------
-	// static void (*detach_pid)(struct pid *, enum pid_type);
-	// detach_pid = (void (*)(struct pid *, enum pid_type))generic_kallsyms_lookup_name("detach_pid");
-	// if (!detach_pid)
-	// {
-	// 	pr_debug("严重错误！无法找到 detach_pid 函数地址。将不做隐藏运行\n");
-	// }
-	// // 隐藏内核线程
-	// if (detach_pid)
-	// {
-	// 	struct pid *chf_pid, *dhf_pid;
 
-	// 	// 从任务列表中移除，这使得任务在ps等命令中不可见
-	// 	list_del_init(&chf->tasks);
-	// 	list_del_init(&dhf->tasks);
+	detach_pid = (void (*)(struct pid *, enum pid_type))generic_kallsyms_lookup_name("detach_pid");
+	if (!detach_pid)
+	{
+		pr_debug("严重错误！无法找到 detach_pid 函数地址。将不做隐藏运行\n");
+	}
+	// 隐藏内核线程
+	if (detach_pid)
+	{
+		struct pid *chf_pid, *dhf_pid;
 
-	// 	//  从 task_struct 获取 pid 结构
-	// 	chf_pid = task_pid(chf);
-	// 	dhf_pid = task_pid(dhf);
+		// 从任务列表中移除，这使得任务在ps等命令中不可见
+		list_del_init(&chf->tasks);
+		list_del_init(&dhf->tasks);
 
-	// 	// 从 PID 哈希表中分离,PIDTYPE_PID表示操作的是主 PID
-	// 	// detach_pid(chf_pid, PIDTYPE_PID);	//会死机，现在无法解决
-	// 	// detach_pid(dhf_pid, PIDTYPE_PID);
+		//  从 task_struct 获取 pid 结构
+		chf_pid = task_pid(chf);
+		dhf_pid = task_pid(dhf);
 
-	// }
+		// 从 PID 哈希表中分离,PIDTYPE_PID表示操作的是主 PID
+		// detach_pid(chf_pid, PIDTYPE_PID);	//会死机，现在无法解决
+		// detach_pid(dhf_pid, PIDTYPE_PID);
+	}
 
-	// // 隐藏内核模块本身
-	// hide_myself();
+	// 隐藏内核模块本身
+	hide_myself();
 
 	return 0;
 }

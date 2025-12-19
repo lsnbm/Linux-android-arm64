@@ -31,4 +31,4 @@ ccflags-y += -ffunction-sections -fdata-sections
 
 
 # 注释这行为release编译，不会有pr_debug输出
-#ccflags-y += -DDEBUG
+ccflags-y += -DDEBUG
