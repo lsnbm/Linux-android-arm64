@@ -71,6 +71,7 @@ __used __section("__versions") = {
 	{ 0xeb78b1ed, "unregister_kprobe" },
 	{ 0x472cf3b, "register_kprobe" },
 	{ 0xb7c0f443, "sort" },
+	{ 0x92997ed8, "_printk" },
 	{ 0xdfb814f4, "d_path" },
 	{ 0x1273c714, "find_vpid" },
 	{ 0x75c08240, "pid_task" },
@@ -89,7 +90,6 @@ __used __section("__versions") = {
 	{ 0x313a6dce, "put_device" },
 	{ 0x13fca8b1, "get_device" },
 	{ 0x70ae2e0e, "class_for_each_device" },
-	{ 0x92997ed8, "_printk" },
 	{ 0xed55cabd, "mutex_unlock" },
 	{ 0xd5977bfb, "mutex_lock" },
 };
