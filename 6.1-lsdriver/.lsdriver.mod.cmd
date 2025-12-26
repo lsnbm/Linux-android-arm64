@@ -1,1 +1,0 @@
-cmd_/mnt/e/1.CodeRepository/Android/Kernel/6.1-lsdriver/lsdriver.mod := printf '%s\n'   lsdriver.o | awk '!x[$$0]++ { print("/mnt/e/1.CodeRepository/Android/Kernel/6.1-lsdriver/"$$0) }' > /mnt/e/1.CodeRepository/Android/Kernel/6.1-lsdriver/lsdriver.mod

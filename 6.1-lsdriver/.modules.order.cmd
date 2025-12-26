@@ -1,1 +1,0 @@
-cmd_/mnt/e/1.CodeRepository/Android/Kernel/6.1-lsdriver/modules.order := {   echo /mnt/e/1.CodeRepository/Android/Kernel/6.1-lsdriver/lsdriver.ko; :; } > /mnt/e/1.CodeRepository/Android/Kernel/6.1-lsdriver/modules.order

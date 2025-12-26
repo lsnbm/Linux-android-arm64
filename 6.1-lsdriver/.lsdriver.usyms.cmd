@@ -1,1 +1,0 @@
-cmd_/mnt/e/1.CodeRepository/Android/Kernel/6.1-lsdriver/lsdriver.usyms := llvm-nm /mnt/e/1.CodeRepository/Android/Kernel/6.1-lsdriver/lsdriver.o | sed -n 's/^  *U //p' > /mnt/e/1.CodeRepository/Android/Kernel/6.1-lsdriver/lsdriver.usyms

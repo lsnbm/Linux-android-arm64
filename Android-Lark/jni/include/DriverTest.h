@@ -6,13 +6,12 @@
 #include <random>
 #include <unistd.h>
 #include <stdlib.h>
-#include <cstdint> // 为使用 uint64_t 添加头文件
+#include <cstdint>
 #include "../include/DriverMemory.h"
 
 class DriverTest
 {
 public:
-    // 修复 1: 在构造函数初始化列表中初始化 MDr 成员
     DriverTest() : MDr(false), MPid(0) {}
 
     ~DriverTest()
@@ -76,7 +75,7 @@ private:
             return;
 
         std::cout << "请输入目标地址 (HEX): ";
-        // 修复 2: 将地址类型统一为 uint64_t
+
         uint64_t Address;
         if (!(std::cin >> std::hex >> Address))
         {
@@ -99,7 +98,6 @@ private:
             return;
 
         std::cout << "请输入目标地址 (HEX): ";
-        // 修复 2: 将地址类型统一为 uint64_t
         uint64_t Address;
         if (!(std::cin >> std::hex >> Address))
         {
@@ -132,7 +130,6 @@ private:
 
         int SegmentIndex = Input<int>("模块区段 (1:代码, 2:只读, 3:可读写): ");
 
-        // 修复 2: 将地址类型统一为 uint64_t，确保与 GetModuleBase 函数参数类型匹配
         uint64_t BaseAddress = 0;
         MDr.GetModuleBase(ModuleName.c_str(), SegmentIndex, &BaseAddress);
 
@@ -148,79 +145,93 @@ private:
         std::cout << "========== 性能测试 (No Warm-up) ==========\n";
         std::cout << "测试对象: 自身进程 (PID=" << SelfPid << ")\n";
 
+        // 申请内存
         int *MemoryPointer = new int(0);
-        // 修复 2: 将地址类型统一为 uint64_t
         uint64_t TargetAddress = reinterpret_cast<uint64_t>(MemoryPointer);
 
-        // 生成随机验证码
+        // 生成随机验证码用于初始化
         std::random_device RandomDevice;
         std::mt19937 Generator(RandomDevice());
-        int TestValue = std::uniform_int_distribution<int>(100000, 999999)(Generator);
-        *MemoryPointer = TestValue;
+        int InitialRandomValue = std::uniform_int_distribution<int>(100000, 999999)(Generator);
+        *MemoryPointer = InitialRandomValue;
 
         // 切换驱动目标
         MDr.SetGlobalPid(SelfPid);
 
-        // 直接开始压测 (无预热检查)
-        const int LoopCount = 1000000;
-        volatile int FailCount = 0;
+        const int LoopCount = 1000000; // 100万次
 
-        std::cout << "正在执行 " << std::dec << LoopCount << " 次读取...\n";
-
-        auto StartTime = std::chrono::high_resolution_clock::now();
-
-        for (int i = 0; i < LoopCount; ++i)
+        // --- 1. 读取性能测试 ---
         {
-            if (MDr.Read<int>(TargetAddress) != TestValue)
+            std::cout << "\n[1/3] 正在执行 " << std::dec << LoopCount << " 次读取...\n";
+            volatile int FailCount = 0;
+            auto StartTime = std::chrono::high_resolution_clock::now();
+
+            for (int i = 0; i < LoopCount; ++i)
             {
-                FailCount++;
+                if (MDr.Read<int>(TargetAddress) != InitialRandomValue)
+                {
+                    FailCount++;
+                }
             }
+
+            auto EndTime = std::chrono::high_resolution_clock::now();
+            double TotalMs = std::chrono::duration<double, std::milli>(EndTime - StartTime).count();
+
+            std::cout << ">>> 读取结果:\n";
+            std::cout << "总耗时  : " << std::fixed << std::setprecision(2) << TotalMs << " ms\n";
+            std::cout << "平均延迟: " << std::setprecision(4) << (TotalMs * 1000) / LoopCount << " us\n";
+            std::cout << "吞吐量  : " << std::setprecision(0) << (LoopCount / TotalMs) * 1000 << " ops/sec\n";
+            std::cout << "完整性  : " << (FailCount == 0 ? "[通过]" : "[失败]") << " 错误数: " << FailCount << "\n";
         }
 
-        auto EndTime = std::chrono::high_resolution_clock::now();
-
-        // 统计
-        double TotalMilliseconds = std::chrono::duration<double, std::milli>(EndTime - StartTime).count();
-        double AverageMicroseconds = (TotalMilliseconds * 1000) / LoopCount;
-        double QueriesPerSecond = (LoopCount / TotalMilliseconds) * 1000;
-
-        std::cout << "========== 测试结果 ==========\n";
-        std::cout << "总耗时  : " << std::fixed << std::setprecision(2) << TotalMilliseconds << " ms\n";
-        std::cout << "平均延迟: " << std::setprecision(4) << AverageMicroseconds << " us\n";
-        std::cout << "吞吐量  : " << std::setprecision(0) << QueriesPerSecond << " ops/sec\n";
-
-        if (FailCount == 0)
+        // --- 2. 写入性能测试 ---
         {
-            std::cout << "完整性  : [通过] 数据全部正确\n";
-        }
-        else
-        {
-            std::cout << "完整性  : [失败] 错误次数: " << FailCount << "\n";
-            if (FailCount == LoopCount)
+            std::cout << "\n[2/3] 正在执行 " << std::dec << LoopCount << " 次写入 (目标值: 2025)...\n";
+
+            // 确保开始前不是 2025
+            *MemoryPointer = InitialRandomValue;
+            int WriteVal = 2025;
+
+            auto StartTime = std::chrono::high_resolution_clock::now();
+
+            for (int i = 0; i < LoopCount; ++i)
             {
-                std::cout << "警告    : 所有读取均失败，请检查驱动是否支持读取自身。\n";
+                MDr.Write<int>(TargetAddress, WriteVal);
             }
+
+            auto EndTime = std::chrono::high_resolution_clock::now();
+            double TotalMs = std::chrono::duration<double, std::milli>(EndTime - StartTime).count();
+
+            // 验证写入结果
+            bool IsSuccess = (*MemoryPointer == 2025);
+
+            std::cout << ">>> 写入结果:\n";
+            std::cout << "总耗时  : " << std::fixed << std::setprecision(2) << TotalMs << " ms\n";
+            std::cout << "平均延迟: " << std::setprecision(4) << (TotalMs * 1000) / LoopCount << " us\n";
+            std::cout << "吞吐量  : " << std::setprecision(0) << (LoopCount / TotalMs) * 1000 << " ops/sec\n";
+            std::cout << "最后验证: " << (IsSuccess ? "[成功] 内存值为 2025" : "[失败] 内存值不匹配!") << "\n";
         }
 
-        auto StartTimeIo = std::chrono::high_resolution_clock::now();
-
-        for (int i = 0; i < LoopCount; ++i)
+        // --- 3. NULLIO 通信压力测试 ---
         {
-            MDr.NullIo();
+            std::cout << "\n[3/3] 正在执行 " << std::dec << LoopCount << " 次空指令 (NULLIO)...\n";
+
+            auto StartTimeIo = std::chrono::high_resolution_clock::now();
+
+            for (int i = 0; i < LoopCount; ++i)
+            {
+                MDr.NullIo();
+            }
+
+            auto EndTimeIo = std::chrono::high_resolution_clock::now();
+            double TotalMsIo = std::chrono::duration<double, std::milli>(EndTimeIo - StartTimeIo).count();
+
+            std::cout << ">>> NULLIO 结果 (驱动通讯极限):\n";
+            std::cout << "总耗时  : " << std::fixed << std::setprecision(2) << TotalMsIo << " ms\n";
+            std::cout << "极限吞吐: " << std::setprecision(0) << (LoopCount / TotalMsIo) * 1000 << " ops/sec\n";
         }
 
-        auto EndTimeIo = std::chrono::high_resolution_clock::now();
-
-        // 统计 NULLIO
-        double TotalMillisecondsIo = std::chrono::duration<double, std::milli>(EndTimeIo - StartTimeIo).count();
-        double AverageMicrosecondsIo = (TotalMillisecondsIo * 1000) / LoopCount;
-        double QueriesPerSecondIo = (LoopCount / TotalMillisecondsIo) * 1000;
-
-        std::cout << "完成\n";
-        std::cout << ">>> NULLIO 结果 (通信链路极限):\n";
-        std::cout << "总耗时  : " << std::fixed << std::setprecision(2) << TotalMillisecondsIo << " ms\n";
-        std::cout << "单次延迟: " << std::setprecision(4) << AverageMicrosecondsIo << " us\n";
-        std::cout << "极限吞吐: " << std::setprecision(0) << QueriesPerSecondIo << " ops/sec\n";
+        std::cout << "\n========== 测试结束 ==========\n";
 
         // 清理
         delete MemoryPointer;

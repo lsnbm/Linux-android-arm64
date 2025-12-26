@@ -111,7 +111,7 @@ public:
         IoCommitAndWait();
 
         *moduleAddr = MIoPacket->ModuleBaseAddress;
-        return MIoPacket->status == 0;
+        return MIoPacket->status;
     }
 
     void TouchDown(int x, int y, int screenW, int screenH)
@@ -306,11 +306,11 @@ private:
                 IoCommitAndWait();
 
                 if (MIoPacket->status != 0)
-                    return 0;
+                    return MIoPacket->status;
                 memcpy((char *)buffer + processed, MIoPacket->UserBufferAddress, chunk);
                 processed += chunk;
             }
-            return 1;
+            return MIoPacket->status;
         }
 
         // [原有逻辑] 小数据快速通道
@@ -340,7 +340,7 @@ private:
             break;
         }
 
-        return MIoPacket->status == 0;
+        return MIoPacket->status;
     }
 
     int KWriteProcessMemory(pid_t pid, uint64_t addr, void *buffer, size_t size)
@@ -362,10 +362,10 @@ private:
                 IoCommitAndWait();
 
                 if (MIoPacket->status != 0)
-                    return 0;
+                    return MIoPacket->status;
                 processed += chunk;
             }
-            return 1;
+            return MIoPacket->status;
         }
 
         // [原有逻辑] 小数据快速通道
@@ -395,7 +395,7 @@ private:
 
         IoCommitAndWait();
 
-        return MIoPacket->status == 0;
+        return MIoPacket->status;
     }
 };
 

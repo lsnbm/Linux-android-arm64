@@ -3,9 +3,7 @@
 
 # 高性能隐匿物理内存读写+内核触摸
 
-> **内核 API 设计初衷**是通用性和安全性，它们包含了大量的权限检查、锁机制和异常处理，这对于辅助或高性能随机内存访问增加负担。
->
-> 本代码通过直接利用硬件 MMU 对页表项的访问机制，去除了所有中间商环节，实现了**“指哪打哪”**的效果。结合 **Context Cache** 和 **Software TLB** 两级软件优化，达到了硬件物理极限的读写。
+**Context Cache** 和 **Software TLB** 两级软件优化，达到了硬件物理极限的读写。
 “仅供技术研究与学习，严禁用于非法用途，作者不承担任何违法责任”
 ---
 
@@ -236,43 +234,73 @@ https://github.com/user-attachments/assets/53039be7-a21f-43ed-ac17-8bb3a841a93f
 
 ### 第零步：下载对应通用内核源码和一个 linux 系统
 
-### 第一步：清理编译环境
+
+
+
+
+# 使用build_all.sh并配置KERNELS_ROOT和DRIVER_SRC和修改执行流程build_kernel后面名称为你的内核源码目录名称或下面手动编译
+
+## 第一步：清理编译环境
+清除 Bazel 构建缓存，确保环境干净：
 ```bash
 tools/bazel clean --expunge
 ```
 
-### 第二步：在内核源码树使用 Bazel 编译内核
+## 第二步：使用 Bazel 编译内核
+在内核源码树的根目录执行，编译 aarch64 架构内核本体：
 ```bash
-tools/bazel build //common:kernel_aarch64 //common:kernel_aarch64_modules_prepare
+tools/bazel build //common:kernel_aarch64
 ```
 
-### 第三步：进入内核输出目录并准备环境
+## 第三步：进入内核输出目录并准备模块编译环境
+进入 Bazel 生成的内核输出目录，解压模块编译所需的预处理文件，**此步骤完成后无需重复执行**：
 ```bash
 cd $(readlink -f bazel-bin/common/kernel_aarch64)
 tar -xzf ../kernel_aarch64_modules_prepare/modules_prepare_outdir.tar.gz
 ```
-上面 3 步设置好后就不用每次设置了，可以直接编译外部模块（下面路径需替换为自己源码的路径）。
 
-### 第四步：设置外部模块编译的环境变量
+## 第四步：设置外部模块编译环境变量
+添加编译器工具链到系统 PATH，确保编译时能找到对应版本的 clang 和交叉编译工具：
 ```bash
 export PATH=/root/6.1/prebuilts/clang/host/linux-x86/clang-r487747c/bin:$PATH
+export PATH=/root/android13-5.10/prebuilts/clang/host/linux-x86/clang-r450784e/bin:$PATH
 export PATH=/root/5.15/prebuilts/clang/host/linux-x86/clang-r450784e/bin:$PATH
+export PATH=/root/6.6/prebuilts/clang/host/linux-x86/clang-r510928/bin:$PATH
 ```
 
-### 第五步：使用 Make 编译外部内核模块
+## 第五步：使用 Make 编译外部内核模块
+针对不同内核版本执行对应的编译命令，生成 `lsdriver.ko` 模块文件：
+
+### 版本 1：内核 6.1
 ```bash
 make -C /root/6.1/common \
 O=$(readlink -f bazel-bin/common/kernel_aarch64) \
-M=/mnt/e/1.CodeRepository/Android/Kernel/6.1-lsdriver \
+M=/mnt/e/1.CodeRepository/Android/Kernel/lsdriver \
 ARCH=arm64 \
 LLVM=1 \
 LLVM_TOOLCHAIN_PATH=/root/6.1/prebuilts/clang/host/linux-x86/clang-r487747c \
 CROSS_COMPILE=/root/6.1/prebuilts/ndk-r23/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android- \
 modules V=1
+```
 
+### 版本 2：Android 13 5.10
+```bash
+make -C /root/android13-5.10/common \
+O=$(readlink -f bazel-bin/common/kernel_aarch64) \
+M=/mnt/e/1.CodeRepository/Android/Kernel/lsdriver \
+ARCH=arm64 \
+LLVM=1 \
+LLVM_TOOLCHAIN_PATH=/root/android13-5.10/prebuilts/clang/host/linux-x86/clang-r450784e \
+CROSS_COMPILE=/root/android13-5.10/prebuilts/ndk-r23/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android- \
+KBUILD_MODPOST_WARN=1 \
+modules V=1
+```
+
+### 版本 3：内核 5.15
+```bash
 make -C /root/5.15/common \
 O=$(readlink -f bazel-bin/common/kernel_aarch64) \
-M=/mnt/e/1.CodeRepository/Android/Kernel/5.15-lsdriver \
+M=/mnt/e/1.CodeRepository/Android/Kernel/lsdriver \
 ARCH=arm64 \
 LLVM=1 \
 LLVM_TOOLCHAIN_PATH=/root/5.15/prebuilts/clang/host/linux-x86/clang-r450784e \
@@ -280,9 +308,36 @@ CROSS_COMPILE=/root/5.15/prebuilts/ndk-r23/toolchains/llvm/prebuilt/linux-x86_64
 modules V=1
 ```
 
-### 第六步：绝对路径工具剥离符号
+### 版本 4：内核 6.6
 ```bash
-/root/6.1/prebuilts/clang/host/linux-x86/clang-r487747c/bin/llvm-strip --strip-debug  /mnt/e/1.CodeRepository/Android/Kernel/6.1-lsdriver/lsdriver.ko
-/root/5.15/prebuilts/clang/host/linux-x86/clang-r450784e/bin/llvm-strip --strip-debug  /mnt/e/1.CodeRepository/Android/Kernel/5.15-lsdriver/lsdriver.ko
+make -C /root/6.6/common \
+O=$(readlink -f bazel-bin/common/kernel_aarch64) \
+M=/mnt/e/1.CodeRepository/Android/Kernel/lsdriver \
+ARCH=arm64 \
+LLVM=1 \
+LLVM_IAS=1 \
+CLANG_TRIPLE=aarch64-linux-gnu- \
+CROSS_COMPILE=aarch64-linux-gnu- \
+modules V=1
 ```
+
+## 第六步：剥离调试符号并生成版本化模块文件
+使用对应版本的 `llvm-strip` 工具移除调试信息，生成不同内核版本的模块文件，避免覆盖：
+```bash
+# 内核 6.1
+/root/6.1/prebuilts/clang/host/linux-x86/clang-r487747c/bin/llvm-strip --strip-debug -o /mnt/e/1.CodeRepository/Android/Kernel/lsdriver/6.1lsdriver.ko /mnt/e/1.CodeRepository/Android/Kernel/lsdriver/lsdriver.ko
+
+# Android 13 5.10
+/root/android13-5.10/prebuilts/clang/host/linux-x86/clang-r450784e/bin/llvm-strip --strip-debug -o /mnt/e/1.CodeRepository/Android/Kernel/lsdriver/13-5.10lsdriver.ko /mnt/e/1.CodeRepository/Android/Kernel/lsdriver/lsdriver.ko
+
+# 内核 5.15
+/root/5.15/prebuilts/clang/host/linux-x86/clang-r450784e/bin/llvm-strip --strip-debug -o /mnt/e/1.CodeRepository/Android/Kernel/lsdriver/5.15lsdriver.ko /mnt/e/1.CodeRepository/Android/Kernel/lsdriver/lsdriver.ko
+
+# 内核 6.6
+/root/6.6/prebuilts/clang/host/linux-x86/clang-r510928/bin/llvm-strip --strip-debug -o /mnt/e/1.CodeRepository/Android/Kernel/lsdriver/6.6lsdriver.ko /mnt/e/1.CodeRepository/Android/Kernel/lsdriver/lsdriver.ko
+```
+
+
+
+
 t.me/liaoshuangls
