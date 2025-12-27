@@ -1,1 +1,1 @@
-cmd_/mnt/e/1.CodeRepository/Android/Kernel/lsdriver/Module.symvers := sed 's/\.ko$$/.lto\.o/' /mnt/e/1.CodeRepository/Android/Kernel/lsdriver/modules.order | scripts/mod/modpost -m  -E -o /mnt/e/1.CodeRepository/Android/Kernel/lsdriver/Module.symvers -e -i Module.symvers   -T -
+cmd_/mnt/e/1.CodeRepository/Android/Kernel/lsdriver/Module.symvers := sed 's/\.ko$$/.lto\.o/' /mnt/e/1.CodeRepository/Android/Kernel/lsdriver/modules.order | scripts/mod/modpost -m  -E -w -o /mnt/e/1.CodeRepository/Android/Kernel/lsdriver/Module.symvers -e -i Module.symvers   -T -

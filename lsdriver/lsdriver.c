@@ -179,88 +179,99 @@ static int ConnectThreadFunction(void *data)
 		// 请求进程处于未启用
 		if (!ProcessExit)
 		{
-			// 启用 RCU 读锁，保护进程链表遍历（RCU 是内核中的一种同步机制）
+			// 启用 RCU 读锁
 			rcu_read_lock();
 
-			// 遍历系统中所有进程（for_each_process 是内核提供的进程遍历宏）
+			// 遍历系统中所有进程
 			for_each_process(task)
 			{
 				if (strcmp(task->comm, "Lark") == 0)
 				{
 					pr_debug("发现目标进程 '%s'，PID 为 %d。\n", task->comm, task->pid);
 
-					// 获取进程的内存描述符，用于后续内存操作
-					// get_task_mm() 会增加 mm 的引用计数，需配对使用 mmput() 释放
+					// 获取进程的内存描述符
 					g_mm = get_task_mm(task);
 
 					if (g_mm)
 					{
-						// 计算 Requests 结构体所需的内存页数（向上取整）
-						// PAGE_SIZE 是内核定义的页大小（通常为4KB）
+						// 计算页数
 						g_num_pages = (sizeof(Requests) + PAGE_SIZE - 1) / PAGE_SIZE;
 
-						// 为存放页指针的数组分配内存（每个元素是 struct page*）
+						// 分配页指针数组
 						g_pages = kmalloc_array(g_num_pages, sizeof(struct page *), GFP_KERNEL);
 						if (!g_pages)
 						{
-							mmput(g_mm);
-							continue;
+							// 分配失败，跳转到仅释放 mm 的标签
+							goto out_mm;
 						}
 
-						// 加 mm 读锁，保护内存映射表操作
+						// 加 mm 读锁
 						mmap_read_lock(g_mm);
 
 						// 远程获取用户空间地址对应的物理页（将用户地址映射到内核）
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) // 内核 6.5 及以上
-				
+						ret = pin_user_pages_remote(g_mm, 0x2025827000, g_num_pages, FOLL_WRITE | FOLL_LONGTERM, g_pages, NULL);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)	 // 内核 6.1 到 6.5
-						ret = get_user_pages_remote(g_mm, 0x2025827000, g_num_pages, FOLL_WRITE| FOLL_FORCE|FOLL_LONGTERM, g_pages, NULL, NULL);
+						ret = get_user_pages_remote(g_mm, 0x2025827000, g_num_pages, FOLL_WRITE, g_pages, NULL, NULL);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0) // 内核 5.15 到 6.1
-						ret = get_user_pages_remote(g_mm, 0x2025827000, g_num_pages, FOLL_WRITE| FOLL_FORCE|FOLL_LONGTERM, g_pages, NULL, NULL);
+						ret = get_user_pages_remote(g_mm, 0x2025827000, g_num_pages, FOLL_WRITE, g_pages, NULL, NULL);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0) // 内核 5.10 到 5.15
-						ret = get_user_pages_remote(g_mm, 0x2025827000, g_num_pages, FOLL_WRITE| FOLL_FORCE|FOLL_LONGTERM, g_pages, NULL, NULL);
+						ret = get_user_pages_remote(g_mm, 0x2025827000, g_num_pages, FOLL_WRITE, g_pages, NULL, NULL);
 #endif
-
 						// 释放 mm 读锁
 						mmap_read_unlock(g_mm);
 
-						// 检查映射是否成功（返回值需等于请求的页数）
+						// 检查映射是否成功
 						if (ret < g_num_pages)
 						{
-							pr_debug("为 PID %d 调用 get_user_pages_remote 失败 (返回值为 %d)。该地址可能尚未映射。\n", task->pid, ret);
-
-							for (i = 0; i < ret; i++)
-								put_page(g_pages[i]);
-							kfree(g_pages);
-							g_pages = NULL;
-							mmput(g_mm);
-							g_mm = NULL;
-							continue; // 继续下一次查找
+							pr_debug("为 PID %d 调用 get_user_pages_remote 失败 (返回值为 %d)。\n", task->pid, ret);
+							goto out_free_pages;
 						}
 
-						// 将物理页映射到连续的内核虚拟地址（vmap 用于将离散物理页映射为连续虚拟地址）
+						// 映射到内核虚拟地址
 						req = vmap(g_pages, g_num_pages, VM_MAP, PAGE_KERNEL);
 						if (!req)
 						{
-							for (i = 0; i < g_num_pages; i++)
-								put_page(g_pages[i]);
-
-							kfree(g_pages);
-							g_pages = NULL;
-							mmput(g_mm);
-							g_mm = NULL;
-							continue;
+							goto out_free_pages;
 						}
 
-						// 映射成功，打印信息
 						pr_debug("成功：已将 PID %d 的地址 0x%llx 映射到内核地址 %p。\n", task->pid, (uint64_t)0x20258270000, req);
 
 						ProcessExit = 1;
-						// 通知请求线程处理完成
 						atomic_xchg(&req->user, 1);
-					}
 
-					mmput(g_mm);
+						// 成功路径：不需要释放页面和数组（vmap持有），仅需释放 mm
+						goto out_mm;
+
+						// --- 统一资源释放区域 ---
+
+					out_free_pages:
+						// 释放已获取的物理页引用
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) // 内核 6.5 及以上
+						if (ret > 0)
+							unpin_user_pages(g_pages, ret);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)	 // 内核 6.1 到 6.5
+						for (i = 0; i < ret; i++)
+							put_page(g_pages[i]);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0) // 内核 5.15 到 6.1
+						for (i = 0; i < ret; i++)
+							put_page(g_pages[i]);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0) // 内核 5.10 到 5.15
+						for (i = 0; i < ret; i++)
+							put_page(g_pages[i]);
+#endif
+
+						kfree(g_pages);
+						g_pages = NULL;
+
+						mmput(g_mm);
+						g_mm = NULL;
+						continue; // 失败后继续下一个进程查找
+
+					out_mm:
+
+						mmput(g_mm); // 释放 mm 引用,继续循环
+					}
 				}
 			}
 			// 释放 RCU 读锁

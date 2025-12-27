@@ -1,1 +1,1 @@
-cmd_/mnt/e/1.CodeRepository/Android/Kernel/lsdriver/lsdriver.mod := printf '%s\n'   lsdriver.o | awk '!x[$$0]++ { print("/mnt/e/1.CodeRepository/Android/Kernel/lsdriver/"$$0) }' > /mnt/e/1.CodeRepository/Android/Kernel/lsdriver/lsdriver.mod
+cmd_/mnt/e/1.CodeRepository/Android/Kernel/lsdriver/lsdriver.mod := { echo  /mnt/e/1.CodeRepository/Android/Kernel/lsdriver/lsdriver.o; llvm-nm /mnt/e/1.CodeRepository/Android/Kernel/lsdriver/lsdriver.lto.o | awk '$$1 == "U" { printf("%s%s", x++ ? " " : "", $$2) }'; echo; } > /mnt/e/1.CodeRepository/Android/Kernel/lsdriver/lsdriver.mod
