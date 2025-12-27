@@ -175,7 +175,21 @@ inline void _internal_read_fast(phys_addr_t paddr, void *buffer, size_t size)
 {
     // MT_NORMAL_NC无缓存只读(建议用缓存MT_NORMAL因为cpu来不及把进程数据缓存写入内存，就直接读物理会有意外如：在1000000次测试下发现数据不匹配就是应为缓存没及时写入内存)
     static const u64 FLAGS = PTE_TYPE_PAGE | PTE_VALID | PTE_AF | PTE_SHARED | PTE_PXN | PTE_UXN | PTE_ATTRINDX(MT_NORMAL);
+
+    if (unlikely(!size || !buffer))
+        return;
+
+    // 跨页检查：(起始偏移 + 长度) 不超过单页大小
+    if (unlikely(((paddr & ~PAGE_MASK) + size) > PAGE_SIZE))
+    {
+        return;
+    }
+
     uint64_t pfn = __phys_to_pfn(paddr);
+
+    // PFN 有效性检查：确保物理页帧在系统内存管理范围内
+    if (unlikely(!pfn_valid(pfn)))
+        return;
 
     // 直接修改 PTE 指向目标物理页
     set_pte(info.pte_address, pfn_pte(pfn, __pgprot(FLAGS)));
@@ -223,9 +237,20 @@ inline void _internal_read_fast(phys_addr_t paddr, void *buffer, size_t size)
 }
 inline void _internal_write_fast(phys_addr_t paddr, const void *buffer, size_t size)
 {
-    // MT_NORMAL_NC无缓存只读(建议用缓存MT_NORMAL因为cpu来不及把进程数据缓存写入内存，就直接读物理会有意外如：在1000000次测试下发现数据不匹配原因就是缓存没及时写入内存)
     static const u64 FLAGS = PTE_TYPE_PAGE | PTE_VALID | PTE_AF | PTE_SHARED | PTE_WRITE | PTE_PXN | PTE_UXN | PTE_ATTRINDX(MT_NORMAL);
+
+    if (unlikely(!size || !buffer))
+        return;
+
+    if (unlikely(((paddr & ~PAGE_MASK) + size) > PAGE_SIZE))
+    {
+        return;
+    }
+
     uint64_t pfn = __phys_to_pfn(paddr);
+
+    if (unlikely(!pfn_valid(pfn)))
+        return;
 
     set_pte(info.pte_address, pfn_pte(pfn, __pgprot(FLAGS)));
     flush_tlb_kernel_range((uint64_t)info.base_address, (uint64_t)info.base_address + PAGE_SIZE);
@@ -257,6 +282,7 @@ inline void _internal_write_fast(phys_addr_t paddr, const void *buffer, size_t s
         break;
     }
 }
+
 // ----------------------------------------方案1:PTE读写-------------------------------------------
 
 // ---------------------------方案2:内核已经映射的线性地址读写----------------------------------------
