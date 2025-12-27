@@ -1,1 +1,0 @@
-cmd_/mnt/e/1.CodeRepository/Android/Kernel/lsdriver/lsdriver.lto.o := ld.lld -EL  -maarch64elf -z norelro -mllvm -import-instr-limit=5 -z noexecstack   -r -o /mnt/e/1.CodeRepository/Android/Kernel/lsdriver/lsdriver.lto.o  --whole-archive /mnt/e/1.CodeRepository/Android/Kernel/lsdriver/lsdriver.o
