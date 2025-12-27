@@ -45,8 +45,8 @@ build_kernel() {
 
     # 如果输出目录不在，则执行 Bazel 编译
     if [ ! -d "$BAZEL_OUT" ]; then
-        echo -e "${YELLOW}检测到 $VERSION 未进行内核编译，正在执行 tools/bazel build //common:kernel_aarch64...${NC}"
-        tools/bazel build //common:kernel_aarch64
+        echo -e "${YELLOW}检测到 $VERSION 未进行内核编译，正在执行   tools/bazel build //common:kernel_aarch64 //common:kernel_aarch64_modules_prepare...${NC}"
+        tools/bazel  build //common:kernel_aarch64 //common:kernel_aarch64_modules_prepare
         
         # 编译后重新获取路径
         BAZEL_OUT=$(readlink -f bazel-bin/common/kernel_aarch64)
@@ -103,6 +103,14 @@ build_kernel() {
 
 # --- 执行流程 ---
 #修改对应内核源码目录名称
+
+#修改对应内核源码目录名称, 6.6和6.12剥离符号无法加载驱动
+
+build_kernel "6.12" \
+    "$KERNELS_ROOT/6.12/prebuilts/clang/host/linux-x86/clang-r536225" \
+    "aarch64-linux-gnu-" \
+    "CLANG_TRIPLE=aarch64-linux-gnu-"
+
 
 # 1. 编译 6.6
 build_kernel "6.6" \

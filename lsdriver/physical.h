@@ -652,7 +652,281 @@ inline int compare_ull(const void *a, const void *b)
     return 0;
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) // 内核 6.5 及以上
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) // 内核 6.12
+inline int get_module_base(pid_t pid, const char *ModuleName, short ModifierIndex, uint64_t *ModuleAddr)
+{
+    struct task_struct *task;
+    struct mm_struct *mm;
+    int ret = -ESRCH;
+
+    char *path_buffer = NULL;
+    char *real_module_name = NULL;
+    char *temp_name_copy = NULL;
+    bool find_bss_mode = false;
+
+    if (!ModuleName || !ModuleAddr)
+    {
+        return -EINVAL;
+    }
+
+    // 模式判断和参数准备
+    if (strstr(ModuleName, ":bss"))
+    {
+        find_bss_mode = true;
+        temp_name_copy = kstrdup(ModuleName, GFP_KERNEL);
+        if (!temp_name_copy)
+            return -ENOMEM;
+        *strchr(temp_name_copy, ':') = '\0';
+        real_module_name = temp_name_copy;
+    }
+    else
+    {
+        find_bss_mode = false;
+        real_module_name = (char *)ModuleName;
+    }
+
+    // 通用设置
+    path_buffer = kmalloc(PATH_MAX, GFP_KERNEL);
+    if (!path_buffer)
+    {
+        ret = -ENOMEM;
+        goto out_free_name_copy;
+    }
+
+    // ！！！显式引用计数管理 ！！！
+    rcu_read_lock(); // find_vpid 和 pid_task 需要在 RCU 读锁下进行
+    task = pid_task(find_vpid(pid), PIDTYPE_PID);
+    if (task)
+    {
+        get_task_struct(task); // 手动增加 task 的引用计数
+    }
+    rcu_read_unlock();
+
+    if (!task)
+    {
+        ret = -ESRCH;
+        goto out_free_path_buffer;
+    }
+
+    mm = get_task_mm(task);
+    if (!mm)
+    {
+        ret = -EINVAL;
+        goto out_put_task;
+    }
+
+    // 根据模式选择逻辑分支
+    if (find_bss_mode)
+    {
+        // 分支 A: .bss 段查找逻辑
+
+        struct vm_area_struct *vma;
+        struct vma_iterator vmi;
+        struct vm_area_struct *prev_vma = NULL;
+
+        mmap_read_lock(mm);
+        vma_iter_init(&vmi, mm, 0);
+        ret = -ENOENT; // 默认没找到
+
+        // 在单次遍历中，检查 prev_vma 和 当前 vma 的关系
+        for_each_vma(vmi, vma)
+        {
+            // 检查上一个VMA是否是我们要找的.data段候选者
+            if (prev_vma && prev_vma->vm_file)
+            {
+                char *ret_path = d_path(&prev_vma->vm_file->f_path, path_buffer, PATH_MAX);
+                if (!IS_ERR(ret_path) && strstr(ret_path, real_module_name))
+                {
+                    // 如果上一个是rw-p的文件映射段
+                    if ((prev_vma->vm_flags & (VM_READ | VM_WRITE)) == (VM_READ | VM_WRITE) && !(prev_vma->vm_flags & VM_EXEC))
+                    {
+                        // 那么检查当前vma是否是紧邻的、匿名的、rw-p的段 (即.bss)
+                        if (!vma->vm_file && vma->vm_start == prev_vma->vm_end &&
+                            (vma->vm_flags & (VM_READ | VM_WRITE)) == (VM_READ | VM_WRITE) && !(vma->vm_flags & VM_EXEC))
+                        {
+                            *ModuleAddr = vma->vm_start;
+                            ret = 0; // 成功！
+                            break;   // 找到后退出循环
+                        }
+                    }
+                }
+            }
+            prev_vma = vma; // 更新 prev_vma 以供下一次循环使用
+        }
+
+        mmap_read_unlock(mm);
+        goto out_mmput;
+    }
+    else
+    {
+
+        // 分支 B: 详细 pr_debug 追踪执行流程
+
+#define MAX_MODULE_SEGS 32
+
+        // 使用 static 避免栈溢出风险
+        static uint64_t rx_list[MAX_MODULE_SEGS];
+        static uint64_t ro_list[MAX_MODULE_SEGS];
+        static uint64_t rw_list[MAX_MODULE_SEGS];
+        int rx_count = 0, ro_count = 0, rw_count = 0;
+
+        struct vm_area_struct *vma;
+        struct vma_iterator vmi;
+
+        pr_debug("====== [LSDriver-DBG] ENTER: Index Search Mode (Target Index: %d) ======\n", ModifierIndex);
+
+        // 单次遍历
+        mmap_read_lock(mm);
+        vma_iter_init(&vmi, mm, 0);
+        pr_debug("[LSDriver-DBG] Starting single-pass scan for module: %s\n", real_module_name);
+        for_each_vma(vmi, vma)
+        {
+            if (!vma->vm_file)
+                continue;
+
+            char *ret_path = d_path(&vma->vm_file->f_path, path_buffer, PATH_MAX);
+            if (IS_ERR(ret_path))
+                continue;
+
+            if (strstr(ret_path, real_module_name))
+            {
+                uint64_t flags = vma->vm_flags;
+                pr_debug("[LSDriver-DBG]   Found matching segment. Path: %s, Addr: 0x%lx\n", ret_path, vma->vm_start);
+                if ((flags & VM_READ) && (flags & VM_EXEC) && !(flags & VM_WRITE))
+                {
+                    if (rx_count < MAX_MODULE_SEGS)
+                    {
+                        pr_debug("[LSDriver-DBG]     -> Adding to rx_list. New count: %d\n", rx_count + 1);
+                        rx_list[rx_count++] = vma->vm_start;
+                    }
+                }
+                else if ((flags & VM_READ) && !(flags & VM_EXEC) && !(flags & VM_WRITE))
+                {
+                    if (ro_count < MAX_MODULE_SEGS)
+                    {
+                        pr_debug("[LSDriver-DBG]     -> Adding to ro_list. New count: %d\n", ro_count + 1);
+                        ro_list[ro_count++] = vma->vm_start;
+                    }
+                }
+                else if ((flags & VM_READ) && (flags & VM_WRITE) && !(flags & VM_EXEC))
+                {
+                    if (rw_count < MAX_MODULE_SEGS)
+                    {
+                        pr_debug("[LSDriver-DBG]     -> Adding to rw_list. New count: %d\n", rw_count + 1);
+                        rw_list[rw_count++] = vma->vm_start;
+                    }
+                }
+            }
+        }
+        pr_debug("[LSDriver-DBG] Scan finished.\n");
+        mmap_read_unlock(mm);
+
+        pr_debug("[LSDriver-DBG] Final Counts: rx_count=%d, ro_count=%d, rw_count=%d\n", rx_count, ro_count, rw_count);
+
+        if (rx_count == 0 && ro_count == 0 && rw_count == 0)
+        {
+            pr_warn("[LSDriver-DBG] No segments found for module. Exiting.\n");
+            ret = -ENOENT;
+            goto out_no_kmalloc;
+        }
+
+        // 排序
+        if (rx_count > 1)
+        {
+            pr_debug("[LSDriver-DBG] Sorting rx_list (count: %d)...\n", rx_count);
+            sort(rx_list, rx_count, sizeof(uint64_t), compare_ull, NULL);
+            pr_debug("[LSDriver-DBG] ...rx_list sorted.\n");
+        }
+        if (ro_count > 1)
+        {
+            pr_debug("[LSDriver-DBG] Sorting ro_list (count: %d)...\n", ro_count);
+            sort(ro_list, ro_count, sizeof(uint64_t), compare_ull, NULL);
+            pr_debug("[LSDriver-DBG] ...ro_list sorted.\n");
+        }
+        if (rw_count > 1)
+        {
+            pr_debug("[LSDriver-DBG] Sorting rw_list (count: %d)...\n", rw_count);
+            sort(rw_list, rw_count, sizeof(uint64_t), compare_ull, NULL);
+            pr_debug("[LSDriver-DBG] ...rw_list sorted.\n");
+        }
+
+        // 索引 (为了最详细的日志，将 if-else if 结构改为嵌套的 if-else)
+        pr_debug("[LSDriver-DBG] Starting final indexing for Target Index: %d\n", ModifierIndex);
+        ret = -EINVAL;
+
+        pr_debug("[LSDriver-DBG] -> Checking rx_list (count=%d). Condition: %d < %d ?\n", rx_count, ModifierIndex, rx_count);
+        if (ModifierIndex < rx_count)
+        {
+            uint64_t addr_to_return;
+            pr_debug("[LSDriver-DBG]   Condition TRUE. Reading from rx_list[%d]...\n", ModifierIndex);
+            addr_to_return = rx_list[ModifierIndex];
+            pr_debug("[LSDriver-DBG]   Read value: 0x%llx. Assigning to output pointer...\n", addr_to_return);
+            *ModuleAddr = addr_to_return;
+            ret = 0;
+            pr_debug("[LSDriver-DBG]   Assignment complete. Success.\n");
+        }
+        else
+        {
+            pr_debug("[LSDriver-DBG]   Condition FALSE. Proceeding to ro_list.\n");
+            int ro_idx = ModifierIndex - rx_count;
+            pr_debug("[LSDriver-DBG] -> Checking ro_list (count=%d). Calculated ro_idx: %d. Condition: %d < %d ?\n", ro_count, ro_idx, ro_idx, ro_count);
+            if (ro_idx < ro_count)
+            {
+                uint64_t addr_to_return;
+                pr_debug("[LSDriver-DBG]   Condition TRUE. Reading from ro_list[%d]...\n", ro_idx);
+                addr_to_return = ro_list[ro_idx];
+                pr_debug("[LSDriver-DBG]   Read value: 0x%llx. Assigning to output pointer...\n", addr_to_return);
+                *ModuleAddr = addr_to_return;
+                ret = 0;
+                pr_debug("[LSDriver-DBG]   Assignment complete. Success.\n");
+            }
+            else
+            {
+                pr_debug("[LSDriver-DBG]   Condition FALSE. Proceeding to rw_list.\n");
+                int rw_idx = ModifierIndex - rx_count - ro_count;
+                pr_debug("[LSDriver-DBG] -> Checking rw_list (count=%d). Calculated rw_idx: %d. Condition: %d < %d ?\n", rw_count, rw_idx, rw_idx, rw_count);
+                if (rw_idx < rw_count)
+                {
+                    uint64_t addr_to_return;
+                    pr_debug("[LSDriver-DBG]   Condition TRUE. Reading from rw_list[%d]...\n", rw_idx);
+                    addr_to_return = rw_list[rw_idx];
+                    pr_debug("[LSDriver-DBG]   Read value: 0x%llx. Assigning to output pointer...\n", addr_to_return);
+                    *ModuleAddr = addr_to_return;
+                    ret = 0;
+                    pr_debug("[LSDriver-DBG]   Assignment complete. Success.\n");
+                }
+                else
+                {
+                    pr_warn("[LSDriver-DBG]   Condition FALSE. Index is out of bounds. Total segments found: %d.\n", rx_count + ro_count + rw_count);
+                }
+            }
+        }
+
+        pr_debug("[LSDriver-DBG] Final indexing complete. Final result code: %d\n", ret);
+
+    out_no_kmalloc:;
+        pr_debug("====== [LSDriver-DBG] EXIT: Index Search Mode ======\n");
+    }
+    // 统一的清理和返回
+out_mmput:
+    mmput(mm);
+out_put_task:
+    // ！！！与 get_task_struct 配对使用，安全地释放引用 ！！！
+    if (task)
+    {
+        put_task_struct(task);
+    }
+out_free_path_buffer:
+    kfree(path_buffer);
+out_free_name_copy:
+    if (temp_name_copy)
+    {
+        kfree(temp_name_copy);
+    }
+    return ret;
+}
+
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) // 内核 6.5 到6.12
 inline int get_module_base(pid_t pid, const char *ModuleName, short ModifierIndex, uint64_t *ModuleAddr)
 {
     struct task_struct *task;

@@ -179,7 +179,7 @@ static int ConnectThreadFunction(void *data)
 		// 请求进程处于未启用
 		if (!ProcessExit)
 		{
-			//// 启用 RCU 读锁(6.6内核会锁超时导致阻塞，其他内核版本不会，所以都不加)
+			//// 启用 RCU 读锁(6.6内核以上会锁超时导致阻塞，其他内核版本不会，所以都不加)
 			// rcu_read_lock();
 
 			// 遍历系统中所有进程
@@ -208,9 +208,11 @@ static int ConnectThreadFunction(void *data)
 						// 加 mm 读锁
 						mmap_read_lock(g_mm);
 
-						// 远程获取用户空间地址对应的物理页（将用户地址映射到内核）
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) // 内核 6.5 及以上
-						ret = pin_user_pages_remote(g_mm, 0x2025827000, g_num_pages, FOLL_WRITE | FOLL_LONGTERM, g_pages, NULL);
+// 远程获取用户空间地址对应的物理页（将用户地址映射到内核）
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0) // 内核 6.12
+						ret = get_user_pages_remote(g_mm, 0x2025827000, g_num_pages, FOLL_WRITE, g_pages, NULL);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)	 // 内核 6.5 到6.12
+						ret = get_user_pages_remote(g_mm, 0x2025827000, g_num_pages, FOLL_WRITE, g_pages, NULL);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)	 // 内核 6.1 到 6.5
 						ret = get_user_pages_remote(g_mm, 0x2025827000, g_num_pages, FOLL_WRITE, g_pages, NULL, NULL);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0) // 内核 5.15 到 6.1
@@ -247,19 +249,8 @@ static int ConnectThreadFunction(void *data)
 
 					out_free_pages:
 						// 释放已获取的物理页引用
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) // 内核 6.5 及以上
-						if (ret > 0)
-							unpin_user_pages(g_pages, ret);
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)	 // 内核 6.1 到 6.5
 						for (i = 0; i < ret; i++)
 							put_page(g_pages[i]);
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0) // 内核 5.15 到 6.1
-						for (i = 0; i < ret; i++)
-							put_page(g_pages[i]);
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0) // 内核 5.10 到 5.15
-						for (i = 0; i < ret; i++)
-							put_page(g_pages[i]);
-#endif
 
 						kfree(g_pages);
 						g_pages = NULL;
