@@ -1,6 +1,5 @@
 #!/bin/bash
 
-
 # 1. 配置：你的内核源码存放在哪个目录下 (比如 /root)
 KERNELS_ROOT="/root"
 
@@ -13,6 +12,12 @@ RED='\e[31m'
 YELLOW='\e[33m'
 BLUE='\e[34m'
 NC='\e[0m'
+
+# --- 新增：在程序开始时询问是否剥离符号 ---
+echo -e "${YELLOW}是否需要剥离(strip)符号？${NC}"
+echo -e "输入 ${GREEN}'y'${NC} 进行剥离 ()"
+echo -e "输入 ${GREEN}'n'${NC} 不剥离 (保留调试符号，创建一个副本)"
+read -p "请输入 (y/n): " STRIP_CHOICE
 
 build_kernel() {
     local VERSION=$1
@@ -79,12 +84,18 @@ build_kernel() {
         modules -j$(nproc)
 
     if [ $? -eq 0 ]; then
-        echo -e "${GREEN}编译成功! 正在精简符号...${NC}"
-        "$CLANG_PATH/bin/llvm-strip" --strip-debug \
-            -o "$DRIVER_SRC/${VERSION}lsdriver.ko" \
-            "$DRIVER_SRC/lsdriver.ko"
-        
-        echo -e "${GREEN}生成完成: ${VERSION}lsdriver.ko${NC}"
+        # --- 根据选择执行剥离或直接复制 ---
+        if [[ "$STRIP_CHOICE" == "y" || "$STRIP_CHOICE" == "Y" ]]; then
+            echo -e "${GREEN}编译成功! 正在剥离符号...${NC}"
+            "$CLANG_PATH/bin/llvm-strip" --strip-debug \
+                -o "$DRIVER_SRC/${VERSION}lsdriver.ko" \
+                "$DRIVER_SRC/lsdriver.ko"
+            echo -e "${GREEN}剥离完成: ${VERSION}lsdriver.ko${NC}"
+        else
+            echo -e "${GREEN}编译成功! 不剥离符号，正在创建副本...${NC}"
+            cp "$DRIVER_SRC/lsdriver.ko" "$DRIVER_SRC/${VERSION}lsdriver.ko"
+            echo -e "${GREEN}副本创建完成: ${VERSION}lsdriver.ko (含符号)${NC}"
+        fi
     else
         echo -e "${RED}编译 $VERSION 失败!${NC}"
     fi
