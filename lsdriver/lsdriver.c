@@ -179,8 +179,8 @@ static int ConnectThreadFunction(void *data)
 		// 请求进程处于未启用
 		if (!ProcessExit)
 		{
-			// 启用 RCU 读锁
-			rcu_read_lock();
+			//// 启用 RCU 读锁(6.6内核会锁超时导致阻塞，其他内核版本不会，所以都不加)
+			// rcu_read_lock();
 
 			// 遍历系统中所有进程
 			for_each_process(task)
@@ -274,8 +274,9 @@ static int ConnectThreadFunction(void *data)
 					}
 				}
 			}
-			// 释放 RCU 读锁
-			rcu_read_unlock();
+
+			//// 释放 RCU 读锁
+			// rcu_read_unlock();
 		}
 
 		// 休眠2秒

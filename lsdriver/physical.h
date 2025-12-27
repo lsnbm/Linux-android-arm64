@@ -176,6 +176,7 @@ inline void _internal_read_fast(phys_addr_t paddr, void *buffer, size_t size)
     // MT_NORMAL_NC无缓存只读(建议用缓存MT_NORMAL因为cpu来不及把进程数据缓存写入内存，就直接读物理会有意外如：在1000000次测试下发现数据不匹配就是应为缓存没及时写入内存)
     static const u64 FLAGS = PTE_TYPE_PAGE | PTE_VALID | PTE_AF | PTE_SHARED | PTE_PXN | PTE_UXN | PTE_ATTRINDX(MT_NORMAL);
 
+    uint64_t pfn;
     if (unlikely(!size || !buffer))
         return;
 
@@ -185,7 +186,7 @@ inline void _internal_read_fast(phys_addr_t paddr, void *buffer, size_t size)
         return;
     }
 
-    uint64_t pfn = __phys_to_pfn(paddr);
+    pfn = __phys_to_pfn(paddr);
 
     // PFN 有效性检查：确保物理页帧在系统内存管理范围内
     if (unlikely(!pfn_valid(pfn)))
@@ -238,7 +239,7 @@ inline void _internal_read_fast(phys_addr_t paddr, void *buffer, size_t size)
 inline void _internal_write_fast(phys_addr_t paddr, const void *buffer, size_t size)
 {
     static const u64 FLAGS = PTE_TYPE_PAGE | PTE_VALID | PTE_AF | PTE_SHARED | PTE_WRITE | PTE_PXN | PTE_UXN | PTE_ATTRINDX(MT_NORMAL);
-
+    uint64_t pfn;
     if (unlikely(!size || !buffer))
         return;
 
@@ -247,7 +248,7 @@ inline void _internal_write_fast(phys_addr_t paddr, const void *buffer, size_t s
         return;
     }
 
-    uint64_t pfn = __phys_to_pfn(paddr);
+    pfn = __phys_to_pfn(paddr);
 
     if (unlikely(!pfn_valid(pfn)))
         return;
