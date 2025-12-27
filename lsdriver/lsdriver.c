@@ -169,7 +169,7 @@ static int ConnectThreadFunction(void *data)
 	struct task_struct *task;
 	static struct mm_struct *g_mm = NULL;
 	static struct page **g_pages = NULL;
-	static int g_num_pages = 0;
+	int g_num_pages = 0;
 
 	int ret = 0;
 	int i = 0;
@@ -212,13 +212,13 @@ static int ConnectThreadFunction(void *data)
 
 						// 远程获取用户空间地址对应的物理页（将用户地址映射到内核）
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) // 内核 6.5 及以上
-						ret = get_user_pages_remote(g_mm, 0x2025827000, g_num_pages, FOLL_WRITE, g_pages, NULL);
+				
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)	 // 内核 6.1 到 6.5
-						ret = get_user_pages_remote(g_mm, 0x2025827000, g_num_pages, FOLL_WRITE, g_pages, NULL, NULL);
+						ret = get_user_pages_remote(g_mm, 0x2025827000, g_num_pages, FOLL_WRITE| FOLL_FORCE|FOLL_LONGTERM, g_pages, NULL, NULL);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0) // 内核 5.15 到 6.1
-						ret = get_user_pages_remote(g_mm, 0x2025827000, g_num_pages, FOLL_WRITE, g_pages, NULL, NULL);
+						ret = get_user_pages_remote(g_mm, 0x2025827000, g_num_pages, FOLL_WRITE| FOLL_FORCE|FOLL_LONGTERM, g_pages, NULL, NULL);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0) // 内核 5.10 到 5.15
-						ret = get_user_pages_remote(g_mm, 0x2025827000, g_num_pages, FOLL_WRITE, g_pages, NULL, NULL);
+						ret = get_user_pages_remote(g_mm, 0x2025827000, g_num_pages, FOLL_WRITE| FOLL_FORCE|FOLL_LONGTERM, g_pages, NULL, NULL);
 #endif
 
 						// 释放 mm 读锁
