@@ -57,11 +57,7 @@ public:
                 break;
             }
 
-            if (IsRunning)
-            {
-                WaitForInput();
-                ClearScreen();
-            }
+
         }
     }
 
@@ -168,10 +164,12 @@ private:
 
             for (int i = 0; i < LoopCount; ++i)
             {
+                printf("前计数%d\n", i);
                 if (MDr.Read<int>(TargetAddress) != InitialRandomValue)
                 {
                     FailCount++;
                 }
+                printf("后计数%d\n", i);
             }
 
             auto EndTime = std::chrono::high_resolution_clock::now();
@@ -184,7 +182,7 @@ private:
             std::cout << "完整性  : " << (FailCount == 0 ? "[通过]" : "[失败]") << " 错误数: " << FailCount << "\n";
         }
 
-        // --- 2. 写入性能测试 ---
+        //--- 2. 写入性能测试 ---
         {
             std::cout << "\n[2/3] 正在执行 " << std::dec << LoopCount << " 次写入 (目标值: 2025)...\n";
 
@@ -290,15 +288,4 @@ private:
         std::cout << "输入无效。\n";
     }
 
-    void WaitForInput()
-    {
-        std::cout << "\n按回车继续...";
-        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-        std::cin.get();
-    }
-
-    void ClearScreen()
-    {
-        system("clear");
-    }
 };

@@ -239,6 +239,7 @@ private:
 
         while (MIoPacket->User.load(std::memory_order_acquire) != 1)
         {
+            std::this_thread::yield(); // 让出 CPU 时间片
         };
 
         MIoPacket->User.store(0, std::memory_order_relaxed);
@@ -248,10 +249,7 @@ private:
     {
         prctl(PR_SET_NAME, "Lark", 0, 0, 0);
 
-        // 不再使用内核无法钉住页面且MAP_SHARED通常关联到 /dev/shm 或特殊的 inode，或者被标记为具有 IPC（进程间通信）属性
-        //MIoPacket = (Requests *)mmap((void *)0x2025827000, sizeof(Requests), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
-
-        MIoPacket = (Requests *)mmap((void *)0x2025827000, sizeof(Requests), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+        MIoPacket = (Requests *)mmap((void *)0x2025827000, sizeof(Requests), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
 
         if (MIoPacket == MAP_FAILED)
         {
