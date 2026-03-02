@@ -131,45 +131,58 @@ static inline void send_report(int x, int y, bool touching)
     // 寄存器缓存，避免多次访问全局结构体内存
     struct input_dev *dev = vt.dev;
     struct input_mt *mt = dev->mt;
+    int old_slot;
+    unsigned long flags;
 
-    // --- 瞬间开启 Slot 9 ---
-    // 物理驱动读到的是 9，平时不会碰 Slot 9。
-    // 我们现在把门打开，写入数据，然后立刻关上。
+    // 关闭本地硬中断
+    // 防止在执行虚拟触摸注入的这几微秒内，真实触摸屏硬件中断突然触发导致代码交错
+    local_irq_save(flags);
+
+    // 保存: 记住当前输入子系统正在操作的是哪个 Slot (极有可能是真实手指所在的 Slot)
+    old_slot = dev->absinfo[ABS_MT_SLOT].value;
+
+    //  瞬间开启 Slot 9
     mt->num_slots = TOTAL_SLOTS;
+
     // 选中 Slot 9
-    input_mt_slot(dev, TARGET_SLOT_IDX);
+    input_event(dev, EV_ABS, ABS_MT_SLOT, TARGET_SLOT_IDX);
+
     // 报告状态，注意了如果上报死亡：严禁对一个已经宣告死亡的 Slot 上报任何物理属性（ABS）。
     input_mt_report_slot_state(dev, MT_TOOL_FINGER, touching);
 
     if (likely(touching))
     {
-        input_report_abs(dev, ABS_MT_POSITION_X, x);
-        input_report_abs(dev, ABS_MT_POSITION_Y, y);
+        input_event(dev, EV_ABS, ABS_MT_POSITION_X, x);
+        input_event(dev, EV_ABS, ABS_MT_POSITION_Y, y);
 
-        // 伪造面积
+        // 伪造面积和压力
         if (vt.has_touch_major)
-            input_report_abs(dev, ABS_MT_TOUCH_MAJOR, 10);
+            input_event(dev, EV_ABS, ABS_MT_TOUCH_MAJOR, 10);
         if (vt.has_width_major)
-            input_report_abs(dev, ABS_MT_WIDTH_MAJOR, 10);
-        // 伪造压力
+            input_event(dev, EV_ABS, ABS_MT_WIDTH_MAJOR, 10);
         if (vt.has_pressure)
-            input_report_abs(dev, ABS_MT_PRESSURE, 60);
+            input_event(dev, EV_ABS, ABS_MT_PRESSURE, 60);
     }
 
-    // 同步 Slot 帧
-    // 这里因为 num_slots 暂时是 10，sync_frame 会扫描到 Slot 9 并生成事件
-    input_mt_sync_frame(dev);
+    // 删除 input_mt_sync_frame(dev);
+    // 手动精准控制了 Slot 9 的所有属性，且是 Type B 协议，
+    // 绝对不能调用 sync_frame，否则会强制刷新真实手指的残缺帧。导致真实手指也出现抖动
 
-    // --- 瞬间关闭 Slot 9 ---
-    // 恢复为 9，防止物理驱动下一次中断时清洗 Slot 9
+    // 瞬间关闭 Slot 9
     mt->num_slots = PHYSICAL_SLOTS;
 
-    // 手动控制按键 (因为禁用了 POINTER 标志)
-    // 智能计算并上报全局按键,不再盲目发送 0 或 1，而是根据当前所有手指状态决定
+    // 恢复: 这是解决“跳跃”最核心的一步！把接下来的写入权还给刚才被打断的真实坑位。
+    // 这样真实驱动即使醒来，它的坐标依然会安全地写进 old_slot，而不会污染我们的 Slot 9。
+    input_event(dev, EV_ABS, ABS_MT_SLOT, old_slot);
+
+    // 手动控制按键
     update_global_keys(touching);
 
     // 提交总帧
     input_sync(dev);
+
+    // 恢复中断
+    local_irq_restore(flags);
 }
 
 static inline int match_touchscreen(struct device *dev, void *data)

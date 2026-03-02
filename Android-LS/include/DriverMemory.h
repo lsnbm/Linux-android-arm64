@@ -71,6 +71,11 @@
 7.检查真实触摸进行虚拟触摸时非常频繁的真实点击抬起手指会应为掉帧、或者因为连击太快而漏发了 TouchUp 时会触发空心圆圈(触摸小白点为空心圆圈代表发生了:悬浮事件，或者触摸状态没有被完全清理干净)
 解决方案:最重要的是代码流程逻辑异常错误导致TouchUp()没有被调用，让内核自己去检测物理屏幕上没有真实手指了，强行杀死虚拟手指是解决办法，但是想保留独立触摸能力
 
+2006/3/2 17:15
+8.反作弊 VMA 碎裂与诱饵对抗
+解决方案:已经在内核层修复，下面有GetModuleAddress函数有注释解释
+
+
 */
 
 //__attribute__((noinline))                                               // 禁止该类所有成员函数成员变量内联
@@ -237,7 +242,8 @@ public:
 
     struct segment_info
     {
-        short index; // >=0: 普通段(RX→RO→RW连续编号), -1: BSS段
+        short index;  // >=0: 普通段(RX→RO→RW连续编号), -1: BSS段
+        uint8_t prot; // 区段权限: 1(R), 2(W), 4(X)。例如 RX 就是 5 (1+4)
         uint64_t start;
         uint64_t end;
     };
@@ -325,6 +331,73 @@ public:
                 return true;
             }
 
+            // 下面这个其实可以不管了!!!,不管了!!!，已经在内核层修复
+            // (这里讲解一下所有问题已经在内核层已经修复了!!!)
+
+            /*
+             * =========================================================================================
+             * 反作弊 VMA 碎裂与诱饵对抗机制
+             * =========================================================================================
+             *
+             * 【第一阶段：理想状态下的纯净内存布局 (原生 ELF 加载)】
+             * 当 Linux/Android 原生加载一个 libil2cpp.so 时，它在内存中的排布是非常连续且规律的：
+             * - 头部 (RO): 包含 ELF Header 和 Program Header，也就是真实的基址 (Base Address)。
+             * - 代码 (RX): .text 段，紧跟在头部之后。
+             * - 数据 (RW): .data / .bss 段，跟在代码之后。
+             * 事实上，现代 Android 系统（特别是 LLVM/Clang 编译的 64 位）出于安全考虑，
+             * 原生加载时至少会 4 到 6 个 VMA 碎片，小的so文件就 1 到 2 个VMA：
+             *   1. 头部 (RO): ELF Header 和 .rodata（真实的 Base Address 起点）。
+             *   2. 代码 (RX): .text 段，紧跟头部。
+             *   3. RELRO (RO): 系统安全机制，写完重定位表后强行锁死为只读，凭空多出一个 RO 碎片。
+             *   4. 数据 (RW): .data 全局变量段。
+             *   5. BSS  (RW): 尾部额外分配的无文件映射的匿名读写内存。
+             * 所以，即使没有反作弊，最纯净的环境也会产生 [RO -> RX -> RO -> RW -> RW] 的轻微碎裂。
+             * 此时驱动收集到的段非常完美：Index 0=RX(代码), Index 1=RO(头基址), Index 2=RW(数据)。
+             *
+             * 【第二阶段：反作弊系统的双重伪装攻击】
+             * 现代顶级反作弊（如 ACE）为了防止外部读取和内存 Dump，会做两件极其恶心的事情：
+             *
+             *   攻击手段 1：VMA 碎裂
+             *   反作弊为了 Hook 游戏内部函数，会高频调用 mprotect() 修改代码段的权限。
+             *   Linux 内核为了管理不同的物理页权限，被迫将原本 1 个巨大的 RX 代码段，
+             *   “劈碎”成了几十甚至上百个细碎的 VMA（虚拟内存区域），并且有些页被改成了 RWX 混合权限。
+             *   这导致我们原本排在第 2 位的 RO 段（真实基址），被前面几十个 RX 碎片硬生生挤到了
+             *   Index 8 甚至 Index 9 的位置，导致固定索引偏移失效。
+             *
+             *   攻击手段 2：远端假诱饵
+             *   反作弊会在距离真实模块上百 MB 远的极低地址（例如 0x6e32250000），
+             *   凭空 mmap() 申请一块虚假内存，并将其命名为 libil2cpp.so，权限设为 RO。
+             *   如果我们使用常规的合并算法，会误把这个极远的假地址当成模块的起始地址，
+             *   从而导致算出的 Base Address 完全错误（偏离真实基址几十上百MB），读取指针全部失效。
+             *
+             * 【第三阶段：我们的对抗算法】
+             * 为了获取绝对精准的真实基址 (Real Base)，我们采用“物理聚类 + 碎片缝合”的降维打击算法：
+             *
+             *   步骤 1：物理排序与聚类 (寻找生命主干)
+             *   无视所有的权限标签，直接把所有叫 libil2cpp.so 的内存块按物理地址 (start) 升序排列。
+             *   由于 ARM64 架构指令寻址的限制，真实的 .so 内存必须紧凑地挨在一起。
+             *   我们遍历这些内存块，一旦发现两个块之间的“缝隙”超过 16MB (0x1000000 阈值)，
+             *   就意味着碰到了“内存断层”。此时立刻判定：那个孤零零在远处的内存绝对是反作弊的假诱饵！
+             *
+             *   步骤 2：诱饵物理抹杀
+             *   算出体积最大的连续内存群落（即真正的 .so 主体），把不在这个范围内的假诱饵（碎片）
+             *   从数组中彻底剔除、物理抹杀。
+             *
+             *   步骤 3：包围盒缝合
+             *   将剩下的纯净真碎片，重新按照 RX -> RO -> RW 排序。
+             *   针对被反作弊劈碎的同类型碎片，使用“包围盒算法”：取这些碎片的最小 start 和最大 end，
+             *   =>>>这一步不仅缝合了被反作弊劈碎的几十个 RX 碎片，同时也顺手把 Android 系统原生的
+             *   “头部 RO”和“RELRO RO”抹平，强行揉成了一个巨大的、完美的虚拟段！
+             *
+             * 【最终战果】：
+             * 无论反作弊怎么切分、怎么放诱饵，跑完此算法后，产出的结果永远绝对固定：
+             * - 数组 Index 0：必定是缝合后的 RX 完整代码段。
+             * - 数组 Index 1：必定是剔除诱饵后的 RO 完整头数据，它的 start【绝对等于】dladdr 获取的真实基址！
+             * - 数组 Index 2：必定是缝合后的 RW 完整数据段。
+             *
+             * 外部辅助只需无脑调用：Read(段1_Start + Golden_RVA)，即可
+             * =========================================================================================
+             */
             std::println(stderr, " 模块 '{}' 中未找到区段索引 {}", moduleName, segmentIndex);
             return false;
         }
@@ -396,26 +469,27 @@ public:
         uint64_t minStart = ~0ULL;
         uint64_t maxEnd = 0;
 
-        // 计算整个模块在内存中的跨度（基址和最大结束地址）
         for (int i = 0; i < targetMod->seg_count; ++i)
         {
             const auto &seg = targetMod->segs[i];
+            if (seg.index < 0)
+                continue;
+
             if (seg.start < minStart)
                 minStart = seg.start;
             if (seg.end > maxEnd)
                 maxEnd = seg.end;
         }
 
-        if (minStart >= maxEnd)
+        if (minStart >= maxEnd || minStart == ~0ULL)
         {
-            std::println(stderr, "[-] Dump: 模块边界无效 ({:X} - {:X})", minStart, maxEnd);
+            std::println(stderr, "[-] Dump: 模块边界无效或仅包含BSS段 ({:X} - {:X})", minStart, maxEnd);
             return false;
         }
 
-        std::println(stdout, "[+] 准备 Dump 模块: {}, 基址: {:X}, 结束: {:X}, 总跨度: {:X}",
+        std::println(stdout, "[+] 准备 Dump 模块: {}, 基址: {:X}, 结束: {:X}, 物理跨度: {:X}",
                      moduleName, minStart, maxEnd, maxEnd - minStart);
 
-        // 输出目录和文件
         mkdir("/sdcard/dump", 0777);
 
         size_t slashPos = moduleName.find_last_of('/');
@@ -437,17 +511,25 @@ public:
         {
             const auto &seg = targetMod->segs[i];
 
-            if (seg.start >= seg.end)
+            // 只读取真正的文件段，跳过 BSS 和异常跨度
+            if (seg.index < 0 || seg.start >= seg.end)
                 continue;
 
-            long fileOffset = static_cast<long>(seg.start - minStart);
-            fseek(fp, fileOffset, SEEK_SET);
+            // 超出我们计算的最大物理跨度的部分不读
+            if (seg.start >= maxEnd)
+                continue;
+
+            // 使用 off_t 和 fseeko，防止在 32 位程序中处理 64 位内存偏移时溢出
+            off_t fileOffset = static_cast<off_t>(seg.start - minStart);
+            fseeko(fp, fileOffset, SEEK_SET);
+
+            // 修正结束地址，防止越界
+            uint64_t actualEnd = (seg.end > maxEnd) ? maxEnd : seg.end;
 
             // 仅在当前合法段的范围内读取内存
-            for (uint64_t addr = seg.start; addr < seg.end; addr += pageSize)
+            for (uint64_t addr = seg.start; addr < actualEnd; addr += pageSize)
             {
-                // 计算当前块应该读取的大小
-                size_t toRead = (seg.end - addr < pageSize) ? (seg.end - addr) : pageSize;
+                size_t toRead = (actualEnd - addr < pageSize) ? (actualEnd - addr) : pageSize;
 
                 if (KReadProcessMemory(addr, buffer.data(), toRead) == 0)
                 {
@@ -455,7 +537,7 @@ public:
                 }
                 else
                 {
-                    // 仅当合法段内部出现极个别不可读页时才补零，确保结构不乱
+                    // 补零处理（针对受保护或不可读的页）
                     memset(buffer.data(), 0, toRead);
                     fwrite(buffer.data(), 1, toRead, fp);
                 }
@@ -465,6 +547,9 @@ public:
 
         fclose(fp);
         std::println(stdout, "[+] Dump 完成! 保存路径: {} (共提取 {} 字节有效数据)", outPath, totalDumped);
+
+        // std::println(stdout, "    提示: 请使用 SoFixer 修复此文件后再使用！(SoFixer -m {:#x} -s {} -o {}_fix.so)",  minStart, outPath, outPath);
+
         return true;
     }
 
