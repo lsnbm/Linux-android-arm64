@@ -14,8 +14,9 @@
 
 #include "ExportFun.h"
 #include "physical.h"
+#include "hwbp.h"
 
-typedef enum _req_op
+enum sm_req_op
 {
 	op_o = 0, // 空调用
 	op_r = 1,
@@ -25,42 +26,50 @@ typedef enum _req_op
 	op_down = 4,
 	op_move = 5,
 	op_up = 6,
-	op_InitTouch = 50, // 初始化触摸
-	op_DelTouch = 60,  // 清理触摸触摸
+	op_init_touch = 50, // 初始化触摸
+	op_del_touch = 60,	// 清理触摸触摸
+
+	op_brps_weps_info = 7,		// 获取执行断点数量和访问断点数量
+	op_set_process_hwbp = 8,	// 设置硬件断点
+	op_remove_process_hwbp = 9, // 删除硬件断点
 
 	exit = 100,
 	kexit = 200
-} req_op;
+};
 
 #include "virtual_input.h" //在这里预处理展开，方便使用req_op
 
 // 将在队列中使用的请求实例结构体
-typedef struct _req_obj
+struct req_obj
 {
 
-	atomic_t Kernel; // 由用户模式设置 1 = 内核有待处理的请求, 0 = 请求已完成
-	atomic_t User;	 // 由内核模式设置 1 = 用户模式有待处理的请求, 0 = 请求已完成
+	atomic_t kernel; // 由用户模式设置 1 = 内核有待处理的请求, 0 = 请求已完成
+	atomic_t user;	 // 由内核模式设置 1 = 用户模式有待处理的请求, 0 = 请求已完成
 
-	req_op Op;	// 请求操作类型
-	int Status; // 操作状态
+	enum sm_req_op op;	 // shared memory请求操作类型
+	int status; // 操作状态
 
 	// 内存读取
-	int TargetProcessId;
-	uint64_t TargetAddress;
-	int TransferSize;
-	char UserBufferAddress[0x1000]; // 物理标准页大小
+	int pid;
+	uint64_t target_addr;
+	int size;
+	char user_buffer[0x1000]; // 物理标准页大小
 
 	// 进程内存信息
-	struct memory_info MemoryInfo;
+	struct memory_info mem_info;
+
+	enum bp_type bt;				  // 断点类型
+	enum bp_scope bs;			  // 断点作用线程范围
+	int len_bytes;			  // 断点长度字节
+	struct hwbp_info bp_info; // 断点信息
 
 	// 初始化触摸驱动返回屏幕维度
 	int POSITION_X, POSITION_Y;
 	// 触摸坐标
 	int x, y;
+};
 
-} Requests;
-
-static Requests *req = NULL;
+static struct req_obj *req = NULL;
 
 volatile static bool ProcessExit = 0; // 用户进程默认未启动
 
@@ -77,37 +86,46 @@ static int DispatchThreadFunction(void *data)
 		{
 			// 先“偷看”一眼有没有任务 (atomic_read 开销极小)
 			// 避免每次循环都执行 atomic_xchg (写操作，锁总线，慢)
-			if (req && atomic_read(&req->Kernel) == 1)
+			if (req && atomic_read(&req->kernel) == 1)
 			{
 				// 确实有任务，尝试获取锁
-				if (atomic_xchg(&req->Kernel, 0) == 1)
+				if (atomic_xchg(&req->kernel, 0) == 1)
 				{
 					// 有活干，重置计数器
 					spin_count = 0;
 
-					switch (req->Op)
+					switch (req->op)
 					{
 					case op_o:
 						break;
 					case op_r:
-						req->Status = read_process_memory(req->TargetProcessId, req->TargetAddress, req->UserBufferAddress, req->TransferSize);
+						req->status = read_process_memory(req->pid, req->target_addr, req->user_buffer, req->size);
 						break;
 					case op_w:
-						req->Status = write_process_memory(req->TargetProcessId, req->TargetAddress, req->UserBufferAddress, req->TransferSize);
+						req->status = write_process_memory(req->pid, req->target_addr, req->user_buffer, req->size);
 						break;
 					case op_m:
-						req->Status = enum_process_memory(req->TargetProcessId, &req->MemoryInfo);
+						req->status = enum_process_memory(req->pid, &req->mem_info);
 						break;
 					case op_down:
 					case op_move:
 					case op_up:
-						v_touch_event(req->Op, req->x, req->y);
+						v_touch_event(req->op, req->x, req->y);
 						break;
-					case op_InitTouch:
-						v_touch_init(&req->POSITION_X, &req->POSITION_Y);
+					case op_init_touch:
+						req->status = v_touch_init(&req->POSITION_X, &req->POSITION_Y);
 						break;
-					case op_DelTouch:
+					case op_del_touch:
 						v_touch_destroy();
+						break;
+					case op_brps_weps_info:
+						get_hw_breakpoint_info(&req->bp_info);
+						break;
+					case op_set_process_hwbp:
+						req->status = set_process_hwbp(req->pid, req->target_addr, req->bt, req->bs, req->len_bytes, &req->bp_info);
+						break;
+					case op_remove_process_hwbp:
+						remove_process_hwbp();
 						break;
 					case exit:
 						ProcessExit = 0;
@@ -120,7 +138,7 @@ static int DispatchThreadFunction(void *data)
 					}
 
 					// 通知用户层完成
-					atomic_set(&req->User, 1);
+					atomic_set(&req->user, 1);
 				}
 			}
 			else
@@ -179,7 +197,7 @@ static int ConnectThreadFunction(void *data)
 					continue;
 
 				// 计算页数
-				num_pages = (sizeof(Requests) + PAGE_SIZE - 1) / PAGE_SIZE;
+				num_pages = (sizeof(struct req_obj) + PAGE_SIZE - 1) / PAGE_SIZE;
 
 				// 分配页指针数组
 				pages = kmalloc_array(num_pages, sizeof(struct page *), GFP_KERNEL);
@@ -220,7 +238,7 @@ static int ConnectThreadFunction(void *data)
 
 				// 成功：vmap 持有页面引用，只需释放 mm
 				ProcessExit = 1;
-				atomic_xchg(&req->User, 1);
+				atomic_xchg(&req->user, 1);
 				mmput(mm);
 				break; // 找到目标进程，退出遍历
 

@@ -55,14 +55,14 @@
 #include <iterator>
 #define PAGE_SIZE 4096
 // 12月2日21:36开始记录修复问题:
-/*
+/* 变量统一使用下划线命名贴近内核，只有函数命名时驼峰命名
 1.修复多线程竞争驱动资源，无锁导致的多线程修改共享内存数据状态错误导致死机
 解决方案：加锁
 2.用户调用read读取字节大于1024导致溢出，内存越界，导致后面变量状态错误导致的死机
 解决方案：循环分片读写
 3.游戏退出不能再次开启
 解决方案: 析构函数主动通知驱动切换目标
-4.MIoPacket 是一个共享资源不能在IoCommitAndWait函数加锁
+4.req 是一个共享资源不能在IoCommitAndWait函数加锁
 解决方案: 在任何对MIoPacket有修改的地方都需要提前加锁，而不是在通知的时候才加锁
 5.读取大块内存的时候失败一次就导致整个返回失败
 解决方案：内核层修复为只要不是0字节就成功，大内存读取跳过失败区域继续往后读取
@@ -83,7 +83,7 @@
 
 class Driver
 {
-public:
+public:                // 外部初始化
     Driver(bool touch) // 为真开启触摸
     {
         InitCommunication();
@@ -102,14 +102,14 @@ public:
     void ExitKernelThread()
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
-        MIoPacket->Op = kexit;
+        req->op = kexit;
         IoCommitAndWait();
     }
 
     void NullIo()
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
-        MIoPacket->Op = op_o;
+        req->op = op_o;
         IoCommitAndWait();
     }
 
@@ -155,16 +155,14 @@ public:
 
     int GetGlobalPid()
     {
-        return GlobalPid;
+        return global_pid;
     }
     void SetGlobalPid(pid_t pid)
     {
-        // 修改全局PID建议也加锁，防止读写期间PID被突然改变
-        std::scoped_lock<SpinLock> lock(m_mutex);
-        GlobalPid = pid;
+        global_pid = pid;
     }
 
-    // 内核接口
+public: // 外部读写接口
     template <typename T>
     T Read(uint64_t address)
     {
@@ -221,19 +219,20 @@ public:
         return KWriteProcessMemory(address, buffer, size);
     }
 
+public: // 外部触摸接口
     void TouchDown(int x, int y, int screenW, int screenH)
     {
-        HandleTouchEvent(req_op::op_down, x, y, screenW, screenH);
+        HandleTouchEvent(sm_req_op::op_down, x, y, screenW, screenH);
     }
 
     void TouchMove(int x, int y, int screenW, int screenH)
     {
-        HandleTouchEvent(req_op::op_move, x, y, screenW, screenH);
+        HandleTouchEvent(sm_req_op::op_move, x, y, screenW, screenH);
     }
 
-    void TouchUp() { HandleTouchEvent(req_op::op_up, 1, 1, 1, 1); }
+    void TouchUp() { HandleTouchEvent(sm_req_op::op_up, 1, 1, 1, 1); }
 
-public:
+public: // 外部获取内存信息
 #define MAX_MODULES 512
 #define MAX_SCAN_REGIONS 4096
 
@@ -280,7 +279,7 @@ public:
     // 获取内部结构体实例 内部成员调用不需要显示使用this指针，隐式this
     const memory_info &GetMemoryInfoRef() const
     {
-        return MIoPacket->MemoryInfo;
+        return req->mem_info;
     }
 
     // 获取模块地址，true为起始地址，false为结束地址
@@ -419,13 +418,56 @@ public:
         }
 
         const auto &info = GetMemoryInfoRef();
-        regions.reserve(info.region_count);
+
+        // 预分配空间 (堆内存数量 + 模块数量 * 平均段数)
+        regions.reserve(info.region_count + info.module_count * 3);
+
+        //  压入所有匿名的堆内存区域
         for (int i = 0; i < info.region_count; ++i)
         {
             const auto &r = info.regions[i];
             if (r.end > r.start)
                 regions.emplace_back(r.start, r.end);
         }
+
+        // 压入所有模块的静态基址区域
+        for (int i = 0; i < info.module_count; ++i)
+        {
+            const auto &mod = info.modules[i];
+            for (int j = 0; j < mod.seg_count; ++j)
+            {
+                const auto &seg = mod.segs[j];
+
+                regions.emplace_back(seg.start, seg.end);
+            }
+        }
+
+        if (!regions.empty())
+        {
+            std::sort(regions.begin(), regions.end(), [](const auto &a, const auto &b)
+                      { return a.first < b.first; });
+
+            std::vector<std::pair<uintptr_t, uintptr_t>> merged;
+            merged.push_back(regions[0]);
+
+            for (size_t i = 1; i < regions.size(); ++i)
+            {
+                auto &last = merged.back();
+                if (regions[i].first <= last.second)
+                {
+
+                    if (regions[i].second > last.second)
+                        last.second = regions[i].second;
+                }
+                else
+                {
+                    merged.push_back(regions[i]);
+                }
+            }
+
+            regions = std::move(merged);
+        }
+
         return regions;
     }
 
@@ -472,8 +514,6 @@ public:
         for (int i = 0; i < targetMod->seg_count; ++i)
         {
             const auto &seg = targetMod->segs[i];
-            if (seg.index < 0)
-                continue;
 
             if (seg.start < minStart)
                 minStart = seg.start;
@@ -483,7 +523,7 @@ public:
 
         if (minStart >= maxEnd || minStart == ~0ULL)
         {
-            std::println(stderr, "[-] Dump: 模块边界无效或仅包含BSS段 ({:X} - {:X})", minStart, maxEnd);
+            std::println(stderr, "[-] Dump: 模块边界无效 ({:X} - {:X})", minStart, maxEnd);
             return false;
         }
 
@@ -511,25 +551,27 @@ public:
         {
             const auto &seg = targetMod->segs[i];
 
-            // 只读取真正的文件段，跳过 BSS 和异常跨度
-            if (seg.index < 0 || seg.start >= seg.end)
+            if (seg.start >= seg.end)
                 continue;
 
-            // 超出我们计算的最大物理跨度的部分不读
             if (seg.start >= maxEnd)
                 continue;
 
-            // 使用 off_t 和 fseeko，防止在 32 位程序中处理 64 位内存偏移时溢出
             off_t fileOffset = static_cast<off_t>(seg.start - minStart);
             fseeko(fp, fileOffset, SEEK_SET);
 
-            // 修正结束地址，防止越界
             uint64_t actualEnd = (seg.end > maxEnd) ? maxEnd : seg.end;
 
-            // 仅在当前合法段的范围内读取内存
-            for (uint64_t addr = seg.start; addr < actualEnd; addr += pageSize)
+            for (uint64_t addr = seg.start; addr < actualEnd;)
             {
-                size_t toRead = (actualEnd - addr < pageSize) ? (actualEnd - addr) : pageSize;
+
+                uint64_t next_page_boundary = (addr + pageSize) & ~(pageSize - 1ULL);
+                size_t toRead = next_page_boundary - addr;
+
+                if (toRead > (actualEnd - addr))
+                {
+                    toRead = actualEnd - addr;
+                }
 
                 if (KReadProcessMemory(addr, buffer.data(), toRead) == 0)
                 {
@@ -537,10 +579,12 @@ public:
                 }
                 else
                 {
-                    // 补零处理（针对受保护或不可读的页）
+
                     memset(buffer.data(), 0, toRead);
                     fwrite(buffer.data(), 1, toRead, fp);
                 }
+
+                addr += toRead;
                 totalDumped += toRead;
             }
         }
@@ -548,12 +592,59 @@ public:
         fclose(fp);
         std::println(stdout, "[+] Dump 完成! 保存路径: {} (共提取 {} 字节有效数据)", outPath, totalDumped);
 
-        // std::println(stdout, "    提示: 请使用 SoFixer 修复此文件后再使用！(SoFixer -m {:#x} -s {} -o {}_fix.so)",  minStart, outPath, outPath);
-
         return true;
     }
 
-private:
+public: // 外部硬件断点接口
+    // 断点类型
+    enum bp_type
+    {
+        BP_READ,       // 读
+        BP_WRITE,      // 写
+        BP_READ_WRITE, // 读写
+        BP_EXECUTE     // 执行
+    };
+
+    // 断点作用线程范围
+    enum bp_scope
+    {
+        SCOPE_MAIN_THREAD,   // 仅主线程
+        SCOPE_OTHER_THREADS, // 仅其他子线程
+        SCOPE_ALL_THREADS    // 全部线程
+    };
+
+    // 存储命中信息
+    struct hwbp_info
+    {
+        uint64_t num_brps;  // 执行断点的数量
+        uint64_t num_wrps;  // 访问断点的数量
+        uint64_t hit_addr;  // 监控地址
+        uint64_t hit_count; // 命中次数
+        uint64_t regs[30];  // X0 ~ X29 寄存器
+        uint64_t lr;        // X30 (Link Register)
+        uint64_t sp;        // Stack Pointer
+        uint64_t pc;        // 触发断点的汇编指令地址
+        uint64_t orig_x0;   // 原始 X0 (用于系统调用重启)
+        uint64_t syscallno; // 系统调用号
+        uint64_t pstate;    // 处理器状态 (CPSR/PSTATE)
+    };
+
+    // 间接调用引用
+    const hwbp_info &GetHwbpInfoRef()
+    {
+        GetHwbpInfo();
+        return req->bp_info;
+    }
+    int SetProcessHwbpRef(uint64_t target_addr, bp_type bt, bp_scope bs, int len_bytes)
+    {
+        return SetProcessHwbp(target_addr, bt, bs, len_bytes);
+    }
+    void RemoveProcessHwbpRef()
+    {
+        RemoveProcessHwbp();
+    }
+
+private: // 私有实现，外部无需关系
     // 轻量高性能自旋锁
     class SpinLock
     {
@@ -583,7 +674,7 @@ private:
     };
     SpinLock m_mutex;
 
-    typedef enum _req_op
+    enum sm_req_op
     {
         op_o = 0, // 空调用
         op_r = 1,
@@ -593,76 +684,85 @@ private:
         op_down = 4,
         op_move = 5,
         op_up = 6,
-        op_InitTouch = 50, // 初始化触摸
-        op_DelTouch = 60,  // 清理触摸触摸
+        op_init_touch = 50, // 初始化触摸
+        op_del_touch = 60,  // 清理触摸触摸
+
+        op_brps_weps_info = 7,      // 获取执行断点数量和访问断点数量
+        op_set_process_hwbp = 8,    // 设置硬件断点
+        op_remove_process_hwbp = 9, // 删除硬件断点
 
         exit = 100,
         kexit = 200
-    } req_op;
+    };
 
     // 将在队列中使用的请求实例结构体
-    typedef struct _req_obj
+    struct req_obj
     {
 
-        std::atomic<int> Kernel; // 由用户模式设置 1 = 内核有待处理的请求, 0 = 请求已完成
-        std::atomic<int> User;   // 由内核模式设置 1 = 用户模式有待处理的请求, 0 = 请求已完成
+        std::atomic<int> kernel; // 由用户模式设置 1 = 内核有待处理的请求, 0 = 请求已完成
+        std::atomic<int> user;   // 由内核模式设置 1 = 用户模式有待处理的请求, 0 = 请求已完成
 
-        req_op Op;  // 请求操作类型
-        int Status; // 操作状态
+        enum sm_req_op op; // shared memory请求操作类型
+        int status;        // 操作状态
 
         // 内存读取
-        int TargetProcessId;
-        uint64_t TargetAddress;
-        int TransferSize;
-        char UserBufferAddress[0x1000]; // 物理标准页大小
+        int pid;
+        uint64_t target_addr;
+        int size;
+        char user_buffer[0x1000]; // 物理标准页大小
 
         // 进程内存信息
-        struct memory_info MemoryInfo;
+        struct memory_info mem_info;
+
+        enum bp_type bt;          // 断点类型
+        enum bp_scope bs;         // 断点作用线程范围
+        int len_bytes;            // 断点长度字节
+        struct hwbp_info bp_info; // 断点信息
 
         // 初始化触摸驱动返回屏幕维度
         int POSITION_X, POSITION_Y;
         // 触摸坐标
         int x, y;
+    };
 
-    } Requests;
-
-    Requests *MIoPacket;
-    pid_t GlobalPid;
+    struct req_obj *req;
+    pid_t global_pid;
 
     inline void IoCommitAndWait()
     {
-        MIoPacket->Kernel.store(1, std::memory_order_release);
+        req->kernel.store(1, std::memory_order_release);
 
-        while (MIoPacket->User.load(std::memory_order_acquire) != 1)
+        while (req->user.load(std::memory_order_acquire) != 1)
         {
             // 让出 CPU 时间片,100%降低性能的，不过保留主动降低性能功耗
             std::this_thread::yield();
         };
 
-        MIoPacket->User.store(0, std::memory_order_relaxed);
+        req->user.store(0, std::memory_order_relaxed);
     }
 
+    // 初始化驱动连接断开
     void InitCommunication()
     {
         prctl(PR_SET_NAME, "Lark", 0, 0, 0);
 
-        MIoPacket = (Requests *)mmap((void *)0x2025827000, sizeof(Requests), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+        req = (req_obj *)mmap((void *)0x2025827000, sizeof(req_obj), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
 
-        if (MIoPacket == MAP_FAILED)
+        if (req == MAP_FAILED)
         {
             printf("[-] 分配共享内存失败，错误码: %d (%s)\n", errno, strerror(errno));
             return;
         }
-        memset(MIoPacket, 0, sizeof(Requests));
+        memset(req, 0, sizeof(req_obj));
 
-        printf("[+] 分配虚拟地址成功，地址: %p  大小: %lu\n", MIoPacket, sizeof(Requests));
+        printf("[+] 分配虚拟地址成功，地址: %p  大小: %lu\n", req, sizeof(req_obj));
         printf("当前进程 PID: %d\n", getpid());
         printf("等待驱动握手...\n");
 
-        while (MIoPacket->User.load(std::memory_order_acquire) != 1)
+        while (req->user.load(std::memory_order_acquire) != 1)
         {
         };
-        MIoPacket->User.store(0, std::memory_order_relaxed);
+        req->user.store(0, std::memory_order_relaxed);
 
         printf("驱动已经连接\n");
     }
@@ -681,21 +781,22 @@ private:
             printf("驱动已经断开连接(正常):%d\n", buffer);
         }
 
-        MIoPacket->Op = exit;
+        req->op = exit;
         IoCommitAndWait();
     }
-
+    // 初始化触摸连接断开
     void InitTouch()
     {
-        MIoPacket->Op = op_InitTouch;
+        req->op = op_init_touch;
         IoCommitAndWait();
     }
     void DelTouch()
     {
-        MIoPacket->Op = op_DelTouch;
+        req->op = op_del_touch;
         IoCommitAndWait();
     }
 
+    // 读写
     int KReadProcessMemory(uint64_t addr, void *buffer, size_t size)
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
@@ -707,53 +808,52 @@ private:
             while (processed < size)
             {
                 size_t chunk = (size - processed > 0x1000) ? 0x1000 : (size - processed);
-                MIoPacket->Op = op_r;
-                MIoPacket->TargetProcessId = GlobalPid;
-                MIoPacket->TargetAddress = addr + processed;
-                MIoPacket->TransferSize = chunk;
+                req->op = op_r;
+                req->pid = global_pid;
+                req->target_addr = addr + processed;
+                req->size = chunk;
                 IoCommitAndWait();
 
-                if (MIoPacket->Status != 0)
-                    return MIoPacket->Status;
-                memcpy((char *)buffer + processed, MIoPacket->UserBufferAddress, chunk);
+                if (req->status != 0)
+                    return req->status;
+                memcpy((char *)buffer + processed, req->user_buffer, chunk);
                 processed += chunk;
             }
-            return MIoPacket->Status;
+            return req->status;
         }
 
         //  小数据快速通道
-        MIoPacket->Op = op_r;
-        MIoPacket->TargetProcessId = GlobalPid;
-        MIoPacket->TargetAddress = addr;
-        MIoPacket->TransferSize = size;
+        req->op = op_r;
+        req->pid = global_pid;
+        req->target_addr = addr;
+        req->size = size;
 
         IoCommitAndWait();
         // 失败时清空并返回错误码
-        if (MIoPacket->Status != 0)
-            return MIoPacket->Status;
+        if (req->status != 0)
+            return req->status;
 
         switch (size)
         {
         case 4:
-            *reinterpret_cast<uint32_t *>(buffer) = *reinterpret_cast<uint32_t *>(MIoPacket->UserBufferAddress);
+            *reinterpret_cast<uint32_t *>(buffer) = *reinterpret_cast<uint32_t *>(req->user_buffer);
             break;
         case 8:
-            *reinterpret_cast<uint64_t *>(buffer) = *reinterpret_cast<uint64_t *>(MIoPacket->UserBufferAddress);
+            *reinterpret_cast<uint64_t *>(buffer) = *reinterpret_cast<uint64_t *>(req->user_buffer);
             break;
         case 1:
-            *reinterpret_cast<uint8_t *>(buffer) = *reinterpret_cast<uint8_t *>(MIoPacket->UserBufferAddress);
+            *reinterpret_cast<uint8_t *>(buffer) = *reinterpret_cast<uint8_t *>(req->user_buffer);
             break;
         case 2:
-            *reinterpret_cast<uint16_t *>(buffer) = *reinterpret_cast<uint16_t *>(MIoPacket->UserBufferAddress);
+            *reinterpret_cast<uint16_t *>(buffer) = *reinterpret_cast<uint16_t *>(req->user_buffer);
             break;
         default:
-            memcpy(buffer, MIoPacket->UserBufferAddress, size);
+            memcpy(buffer, req->user_buffer, size);
             break;
         }
 
-        return MIoPacket->Status;
+        return req->status;
     }
-
     int KWriteProcessMemory(uint64_t addr, void *buffer, size_t size)
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
@@ -765,93 +865,123 @@ private:
             while (processed < size)
             {
                 size_t chunk = (size - processed > 0x1000) ? 0x1000 : (size - processed);
-                MIoPacket->Op = op_w;
-                MIoPacket->TargetProcessId = GlobalPid;
-                MIoPacket->TargetAddress = addr + processed;
-                MIoPacket->TransferSize = chunk;
-                memcpy(MIoPacket->UserBufferAddress, (char *)buffer + processed, chunk);
+                req->op = op_w;
+                req->pid = global_pid;
+                req->target_addr = addr + processed;
+                req->size = chunk;
+                memcpy(req->user_buffer, (char *)buffer + processed, chunk);
                 IoCommitAndWait();
 
-                if (MIoPacket->Status != 0)
-                    return MIoPacket->Status;
+                if (req->status != 0)
+                    return req->status;
                 processed += chunk;
             }
-            return MIoPacket->Status;
+            return req->status;
         }
 
         //  小数据快速通道
-        MIoPacket->Op = op_w;
-        MIoPacket->TargetProcessId = GlobalPid;
-        MIoPacket->TargetAddress = addr;
-        MIoPacket->TransferSize = size;
+        req->op = op_w;
+        req->pid = global_pid;
+        req->target_addr = addr;
+        req->size = size;
 
         switch (size)
         {
         case 4:
-            *reinterpret_cast<uint32_t *>(MIoPacket->UserBufferAddress) = *reinterpret_cast<uint32_t *>(buffer);
+            *reinterpret_cast<uint32_t *>(req->user_buffer) = *reinterpret_cast<uint32_t *>(buffer);
             break;
         case 8:
-            *reinterpret_cast<uint64_t *>(MIoPacket->UserBufferAddress) = *reinterpret_cast<uint64_t *>(buffer);
+            *reinterpret_cast<uint64_t *>(req->user_buffer) = *reinterpret_cast<uint64_t *>(buffer);
             break;
         case 1:
-            *reinterpret_cast<uint8_t *>(MIoPacket->UserBufferAddress) = *reinterpret_cast<uint8_t *>(buffer);
+            *reinterpret_cast<uint8_t *>(req->user_buffer) = *reinterpret_cast<uint8_t *>(buffer);
             break;
         case 2:
-            *reinterpret_cast<uint16_t *>(MIoPacket->UserBufferAddress) = *reinterpret_cast<uint16_t *>(buffer);
+            *reinterpret_cast<uint16_t *>(req->user_buffer) = *reinterpret_cast<uint16_t *>(buffer);
             break;
         default:
-            memcpy(MIoPacket->UserBufferAddress, buffer, size);
+            memcpy(req->user_buffer, buffer, size);
             break;
         }
 
         IoCommitAndWait();
 
-        return MIoPacket->Status;
+        return req->status;
     }
 
     // 获取进程内存信息
     int GetMemoryInfo()
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
-        MIoPacket->Op = op_m;
-        MIoPacket->TargetProcessId = GlobalPid;
+        req->op = op_m;
+        req->pid = global_pid;
         IoCommitAndWait();
-        return MIoPacket->Status;
+        return req->status;
     }
 
     // 触摸事件
-    void HandleTouchEvent(req_op op, int x, int y, int screenW, int screenH)
+    void HandleTouchEvent(sm_req_op op, int x, int y, int screenW, int screenH)
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
 
         // 下面代码绝对不要使用整数除法
-        if (screenW <= 0 || screenH <= 0 || MIoPacket->POSITION_X <= 0 || MIoPacket->POSITION_Y <= 0)
+        if (screenW <= 0 || screenH <= 0 || req->POSITION_X <= 0 || req->POSITION_Y <= 0)
             return;
 
-        MIoPacket->Op = op;
+        req->op = op;
 
         // 浮点运算提到前面，保持清晰
         double normX = static_cast<double>(x) / screenW;
         double normY = static_cast<double>(y) / screenH;
 
         // 横竖屏映射逻辑
-        if (screenW > screenH && MIoPacket->POSITION_X < MIoPacket->POSITION_Y)
+        if (screenW > screenH && req->POSITION_X < req->POSITION_Y)
         {
             // 横屏游戏 -> 竖屏驱动 (右侧充电口模式)
-            MIoPacket->x = static_cast<int>((1.0 - normY) * MIoPacket->POSITION_X);
-            MIoPacket->y = static_cast<int>(normX * MIoPacket->POSITION_Y);
+            req->x = static_cast<int>((1.0 - normY) * req->POSITION_X);
+            req->y = static_cast<int>(normX * req->POSITION_Y);
 
             // 充电口在左边的情况处理横屏映射
-            // MIoPacket->x = static_cast<int>((double)y / screenH * MIoPacket->POSITION_X);
-            // MIoPacket->y = static_cast<int>((1.0 - (double)x / screenW) * MIoPacket->POSITION_Y);
+            // req->x = static_cast<int>((double)y / screenH * req->POSITION_X);
+            // req->y = static_cast<int>((1.0 - (double)x / screenW) * req->POSITION_Y);
         }
         else
         {
             // 正常映射
-            MIoPacket->x = static_cast<int>(normX * MIoPacket->POSITION_X);
-            MIoPacket->y = static_cast<int>(normY * MIoPacket->POSITION_Y);
+            req->x = static_cast<int>(normX * req->POSITION_X);
+            req->y = static_cast<int>(normY * req->POSITION_Y);
         }
 
+        IoCommitAndWait();
+    }
+
+    // 获取执行断点和访问断点信息
+    void GetHwbpInfo()
+    {
+        std::scoped_lock<SpinLock> lock(m_mutex);
+        req->op = op_brps_weps_info;
+        IoCommitAndWait();
+    }
+
+    // 设置进程断点(断点只要触发驱动就会向hwbp_info写值，外部获取引用循环读取就行)
+    int SetProcessHwbp(uint64_t target_addr, bp_type bt, bp_scope bs, int len_bytes = 4)
+    {
+        std::scoped_lock<SpinLock> lock(m_mutex);
+        req->op = op_set_process_hwbp;
+        req->pid = global_pid;
+        req->target_addr = target_addr;
+        req->bt = bt;
+        req->bs = bs;
+        req->len_bytes = len_bytes;
+        IoCommitAndWait();
+        return req->status;
+    }
+
+    // 删除进程断点
+    void RemoveProcessHwbp()
+    {
+        std::scoped_lock<SpinLock> lock(m_mutex);
+        req->op = op_remove_process_hwbp;
         IoCommitAndWait();
     }
 };

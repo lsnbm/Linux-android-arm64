@@ -314,20 +314,20 @@ static inline void v_touch_destroy(void)
     vt.tracking_id = -1;
 }
 
-static inline void v_touch_event(req_op Op, int x, int y)
+static inline void v_touch_event(enum sm_req_op op, int x, int y)
 {
 
     if (unlikely(!vt.initialized))
         return;
 
-    if (likely(Op == op_move))
+    if (likely(op == op_move))
     {
         if (likely(vt.tracking_id != -1))
         {
             send_report(x, y, true);
         }
     }
-    else if (Op == op_down)
+    else if (op == op_down)
     {
         if (vt.tracking_id == -1)
         {
@@ -343,7 +343,7 @@ static inline void v_touch_event(req_op Op, int x, int y)
             lock_global_keys(vt.dev);
         }
     }
-    else if (Op == op_up)
+    else if (op == op_up)
     {
         if (vt.tracking_id != -1)
         {
