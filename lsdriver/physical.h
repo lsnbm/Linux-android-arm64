@@ -259,8 +259,8 @@ static inline int _internal_read_fast_linear(phys_addr_t paddr, void *buffer, si
 
     /*
     这里去掉了 virt_addr_valid。在 ARM64 上，它由于要遍历内存节点，耗极高。
-    在查页表时统一拦截：把安全校验提前到了 manual_va_to_pa_arm_fast（查页表）阶段，利用 pfn_valid(pfn) 确认物理页是安全的普通内存
-    只要查页表时确认这个 PFN 是合法的物理内存就有对应的线性虚拟地址
+    在查页表时统一拦截：把安全校验提前到了 MMU 翻译阶段，
+    只要返回物理地址就是合理有效的
     */
 
     switch (size)
@@ -311,89 +311,82 @@ static inline int _internal_write_fast_linear(phys_addr_t paddr, void *buffer, s
     return 0;
 }
 
-// 只负责走页表（不再禁止中断，靠每级安全检查防护）
-static inline int manual_va_to_pa_arm_fast(struct mm_struct *mm, uint64_t vaddr, phys_addr_t *paddr)
+// 硬件mmu翻译
+int translate_user_va_to_pa(struct mm_struct *mm, u64 va, phys_addr_t *pa)
 {
-    pgd_t *pgd;
-    p4d_t *p4d;
-    pud_t *pud;
-    pmd_t *pmd;
-    pte_t *ptep, pte;
-    unsigned long pfn;
+    u64 pgd_phys;
+    int ret;
+    u64 phys_out;
 
-    if (unlikely(!mm || !paddr))
-        return -1;
+    // 替代硬编码 x10-x13寄存器
+    u64 tmp_daif, tmp_ttbr, tmp_par, tmp_offset;
 
-    // PGD Level
-    pgd = pgd_offset(mm, vaddr);
-    if (pgd_none(*pgd) || pgd_bad(*pgd))
-        return -1;
+    if (unlikely(!mm || !mm->pgd || !pa))
+        return -EINVAL;
 
-    // P4D Level
-    p4d = p4d_offset(pgd, vaddr);
-    if (p4d_none(*p4d) || p4d_bad(*p4d))
-        return -1;
+    pgd_phys = virt_to_phys(mm->pgd);
 
-    // PUD Level (可能遇到 1GB 大页)
-    pud = pud_offset(p4d, vaddr);
-    if (pud_none(*pud))
-        return -1;
+    asm volatile(
+        // 保存当前中断状态并关中断
+        "mrs    %[tmp_daif], daif\n"
+        "msr    daifset, #2\n"
 
-    // 检查是否是 1G 大页
-    if (pud_leaf(*pud))
+        // 替换目标进程页表
+        "mrs    %[tmp_ttbr], ttbr0_el1\n"
+        "msr    ttbr0_el1, %[pgd_phys]\n"
+        "isb\n"
+
+        // 硬件翻译指令
+        "at     s1e0r, %[va]\n"
+        "isb\n"
+        "mrs    %[tmp_par], par_el1\n"
+
+        // 恢复页表和中断
+        "msr    ttbr0_el1, %[tmp_ttbr]\n"
+        "isb\n"
+        "msr    daif, %[tmp_daif]\n"
+
+        // 检查翻译是否报错 (PAR_EL1 的 bit 0)
+        "tbnz   %[tmp_par], #0, .L_efault%=\n"
+
+        // 计算物理地址 (直接使用内联的逻辑立即数)
+        "and    %[tmp_par], %[tmp_par], #0xFFFFFFFFF000\n"
+        "and    %[tmp_offset], %[va], #0xFFF\n"
+        "orr    %[phys_out], %[tmp_par], %[tmp_offset]\n"
+
+        // 成功返回 0
+        "mov    %w[ret], #0\n"
+        "b      .L_end%=\n"
+
+        // 错误处理分支
+        ".L_efault%=:\n"
+        "mov    %w[ret], %w[efault_val]\n"
+
+        ".L_end%=:\n"
+
+        // 输出部分 (注意: 必须使用 =&r 早期破坏符，防止编译器将输入分配到同一个寄存器)
+        : [ret] "=&r"(ret),
+          [phys_out] "=&r"(phys_out),
+          [tmp_daif] "=&r"(tmp_daif),
+          [tmp_ttbr] "=&r"(tmp_ttbr),
+          [tmp_par] "=&r"(tmp_par),
+          [tmp_offset] "=&r"(tmp_offset)
+
+        // 输入部分
+        : [pgd_phys] "r"(pgd_phys),
+          [va] "r"(va),
+          [efault_val] "r"(-EFAULT)
+
+        // Clobber
+        : "cc", "memory");
+
+    // 把写入内存的工作交回给 C 语言，编译器会生成最优的 str 指令
+    if (ret == 0)
     {
-        // 检查pfn
-        pfn = pud_pfn(*pud);
-        if (unlikely(!pfn_valid(pfn)))
-            return -1;
-
-        *paddr = (pud_pfn(*pud) << PAGE_SHIFT) + (vaddr & ~PUD_MASK);
-        return 0;
-    }
-    if (pud_bad(*pud))
-        return -1;
-
-    //  PMD Level (可能遇到 2MB 大页)
-    pmd = pmd_offset(pud, vaddr);
-    if (pmd_none(*pmd))
-        return -1;
-
-    // 检查是否是 2M 大页
-    if (pmd_leaf(*pmd))
-    {
-        // 检查pfn
-        pfn = pmd_pfn(*pmd);
-        if (unlikely(!pfn_valid(pfn)))
-            return -1;
-
-        *paddr = (pmd_pfn(*pmd) << PAGE_SHIFT) + (vaddr & ~PMD_MASK);
-        return 0;
-    }
-    if (pmd_bad(*pmd))
-        return -1;
-
-    //  PTE Level (普通的 4KB 页)
-    ptep = pte_offset_map(pmd, vaddr);
-    if (unlikely(!ptep))
-        return -1;
-
-    pte = *ptep;     // 原子读取 PTE 内容到栈上
-    pte_unmap(ptep); // 立即释放映射
-
-    // 必须检查 pte_present，因为页可能被换出到 Swap 分区
-    // 如果 present 为 false，pfn 字段是无效的（存的是 swap offset）
-    if (pte_present(pte))
-    {
-        // 检查pfn
-        pfn = pte_pfn(pte);
-        if (unlikely(!pfn_valid(pfn)))
-            return -1;
-
-        *paddr = (pte_pfn(pte) << PAGE_SHIFT) + (vaddr & ~PAGE_MASK);
-        return 0;
+        *pa = phys_out;
     }
 
-    return -1;
+    return ret;
 }
 
 static inline int read_process_memory(pid_t pid, uint64_t vaddr, void *buffer, size_t size)
@@ -416,18 +409,11 @@ static inline int read_process_memory(pid_t pid, uint64_t vaddr, void *buffer, s
     if (unlikely(!buffer || size == 0))
         return -EINVAL;
 
-    // 检查 PID 是否改变，虽然目标进程退出了会不释放mm，不过没关系下次调用时会释放
+    // 检查 PID 是否改变
     if (unlikely(pid != s_last_pid || s_last_mm == NULL))
     {
         struct pid *pid_struct = NULL;
         struct task_struct *task = NULL;
-
-        // 释放旧的 mm
-        if (s_last_mm)
-        {
-            mmput(s_last_mm); // 引用计数 -1
-            s_last_mm = NULL;
-        }
 
         // 查找新进程
         pid_struct = find_get_pid(pid);
@@ -439,11 +425,13 @@ static inline int read_process_memory(pid_t pid, uint64_t vaddr, void *buffer, s
         if (!task)
             return -ESRCH;
 
+        // 直接把引用计数释放了，底层翻译确保不出问题
         s_last_mm = get_task_mm(task); // 引用计数 +1
         put_task_struct(task);
 
         if (!s_last_mm)
             return -EINVAL;
+        mmput(s_last_mm); // 引用计数 -1
 
         s_last_pid = pid;
 
@@ -467,11 +455,10 @@ static inline int read_process_memory(pid_t pid, uint64_t vaddr, void *buffer, s
         }
         else
         {
-            // 查找页表
-            status = manual_va_to_pa_arm_fast(s_last_mm, current_vpn, &paddr_of_page);
+            // MMU翻译地址
+            status = translate_user_va_to_pa(s_last_mm, current_vpn, &paddr_of_page);
             if (unlikely(status != 0))
             {
-                // 页表缺失或被 Swap，填0跳过这一段
                 memset((char *)buffer + bytes_copied, 0, bytes_to_read_this_page);
                 loop_last_vpage_base = -1;
                 goto next_chunk;
@@ -523,26 +510,17 @@ static inline int write_process_memory(pid_t pid, uint64_t vaddr, void *buffer, 
     uint64_t current_vaddr = vaddr;
     size_t bytes_remaining = size;
     size_t bytes_copied = 0;
-    size_t bytes_real_write = 0; // 实际成功写入的字节数
+    size_t bytes_real_write = 0;
     int status = 0;
 
     if (unlikely(!buffer || size == 0))
         return -EINVAL;
 
-    // 检查 PID 是否改变，虽然目标进程退出了会不释放mm，不过没关系下次调用时会释放
     if (unlikely(pid != s_last_pid || s_last_mm == NULL))
     {
         struct pid *pid_struct = NULL;
         struct task_struct *task = NULL;
 
-        // 释放旧的 mm
-        if (s_last_mm)
-        {
-            mmput(s_last_mm); // 引用计数 -1
-            s_last_mm = NULL;
-        }
-
-        // 查找新进程
         pid_struct = find_get_pid(pid);
         if (!pid_struct)
             return -ESRCH;
@@ -551,16 +529,14 @@ static inline int write_process_memory(pid_t pid, uint64_t vaddr, void *buffer, 
         put_pid(pid_struct);
         if (!task)
             return -ESRCH;
-
         s_last_mm = get_task_mm(task); // 引用计数 +1
         put_task_struct(task);
 
         if (!s_last_mm)
             return -EINVAL;
-
+        mmput(s_last_mm); // 引用计数 -1
         s_last_pid = pid;
 
-        //  切换进程后，必须作废上一个进程的地址缓存！
         loop_last_vpage_base = -1;
     }
 
@@ -573,37 +549,33 @@ static inline int write_process_memory(pid_t pid, uint64_t vaddr, void *buffer, 
         if (bytes_to_read_this_page > bytes_remaining)
             bytes_to_read_this_page = bytes_remaining;
 
-        // 软件 TLB 优化
         if (current_vpn == loop_last_vpage_base)
         {
             paddr_of_page = loop_last_ppage_base;
         }
         else
         {
-            // 查找页表
-            status = manual_va_to_pa_arm_fast(s_last_mm, current_vpn, &paddr_of_page);
+
+            status = translate_user_va_to_pa(s_last_mm, current_vpn, &paddr_of_page);
             if (unlikely(status != 0))
             {
-                // 页表缺失或被 Swap，跳过这一段
+
                 loop_last_vpage_base = -1;
                 goto next_chunk;
             }
 
-            // 更新缓存
             loop_last_vpage_base = current_vpn;
             loop_last_ppage_base = paddr_of_page;
         }
 
-        // 执行物理内存写入
         status = _internal_write_fast_linear(paddr_of_page + page_offset, (char *)buffer + bytes_copied, bytes_to_read_this_page);
         if (unlikely(status != 0))
         {
-            // 物理写入失败，跳过这一段
+
             loop_last_vpage_base = -1;
             goto next_chunk;
         }
 
-        // 只有成功才计入实际写入量
         bytes_real_write += bytes_to_read_this_page;
 
     next_chunk:
@@ -612,7 +584,6 @@ static inline int write_process_memory(pid_t pid, uint64_t vaddr, void *buffer, 
         current_vaddr += bytes_to_read_this_page;
     }
 
-    // 实际写入字节数为0才返回失败
     if (bytes_real_write == 0)
         return -EFAULT;
 

@@ -99,13 +99,6 @@ public:                // 外部初始化
         ExitCommunication();
     }
 
-    void ExitKernelThread()
-    {
-        std::scoped_lock<SpinLock> lock(m_mutex);
-        req->op = kexit;
-        IoCommitAndWait();
-    }
-
     void NullIo()
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
@@ -768,21 +761,13 @@ private: // 私有实现，外部无需关系
     }
     void ExitCommunication()
     {
-        // 必须保留，结束时让驱动切换目标(读写成功与否不重要主要是切换目标)
-
-        SetGlobalPid(GetPid("system_server"));
-        char buffer = 0;
-        if (KReadProcessMemory(0x000000000, &buffer, 1) != 0)
-        { // 主动读取错误
-            printf("驱动已经断开连接(正常):%d\n", buffer);
-        }
-        if (KWriteProcessMemory(0x000000000, &buffer, 1) != 0)
-        { // 主动写入错误
-            printf("驱动已经断开连接(正常):%d\n", buffer);
-        }
-
-        req->op = exit;
+        // 内核停止运行
+        req->op = kexit;
         IoCommitAndWait();
+
+        // // 普通断开
+        // req->op = exit;
+        // IoCommitAndWait();
     }
     // 初始化触摸连接断开
     void InitTouch()
@@ -964,7 +949,7 @@ private: // 私有实现，外部无需关系
     }
 
     // 设置进程断点(断点只要触发驱动就会向hwbp_info写值，外部获取引用循环读取就行)
-    int SetProcessHwbp(uint64_t target_addr, bp_type bt, bp_scope bs, int len_bytes = 4)
+    int SetProcessHwbp(uint64_t target_addr, bp_type bt, bp_scope bs, int len_bytes = 8)
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
         req->op = op_set_process_hwbp;

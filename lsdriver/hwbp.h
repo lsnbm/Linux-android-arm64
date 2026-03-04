@@ -1,4 +1,3 @@
-
 #ifndef HWBP_H
 #define HWBP_H
 #include <linux/kernel.h>
@@ -18,6 +17,119 @@ typedef void (*unregister_hw_breakpoint_t)(struct perf_event *bp);
 
 static register_user_hw_breakpoint_t fn_register_user_hw_breakpoint = NULL;
 static unregister_hw_breakpoint_t fn_unregister_hw_breakpoint = NULL;
+
+// 读取 Watchpoint Value Register (WVR) - 用于读写断点
+static uint64_t read_wvr(int n)
+{
+    uint64_t val = 0;
+    switch (n)
+    {
+    case 0:
+        asm volatile("mrs %0, dbgwvr0_el1" : "=r"(val));
+        break;
+    case 1:
+        asm volatile("mrs %0, dbgwvr1_el1" : "=r"(val));
+        break;
+    case 2:
+        asm volatile("mrs %0, dbgwvr2_el1" : "=r"(val));
+        break;
+    case 3:
+        asm volatile("mrs %0, dbgwvr3_el1" : "=r"(val));
+        break;
+    case 4:
+        asm volatile("mrs %0, dbgwvr4_el1" : "=r"(val));
+        break;
+    case 5:
+        asm volatile("mrs %0, dbgwvr5_el1" : "=r"(val));
+        break;
+    // 绝大多数手机只有 4~6 个 WRP，这里写到 5 足够覆盖99%的设备
+    default:
+        pr_err("读取未知的 WVR 槽位: %d\n", n);
+    }
+    return val;
+}
+
+// 写入 Watchpoint Value Register (WVR) - 用于读写断点
+static void write_wvr(int n, uint64_t val)
+{
+    switch (n)
+    {
+    case 0:
+        asm volatile("msr dbgwvr0_el1, %0" ::"r"(val));
+        break;
+    case 1:
+        asm volatile("msr dbgwvr1_el1, %0" ::"r"(val));
+        break;
+    case 2:
+        asm volatile("msr dbgwvr2_el1, %0" ::"r"(val));
+        break;
+    case 3:
+        asm volatile("msr dbgwvr3_el1, %0" ::"r"(val));
+        break;
+    case 4:
+        asm volatile("msr dbgwvr4_el1, %0" ::"r"(val));
+        break;
+    case 5:
+        asm volatile("msr dbgwvr5_el1, %0" ::"r"(val));
+        break;
+    }
+    isb(); // 必须加上指令同步屏障，确保硬件立刻生效
+}
+
+// 读取 Breakpoint Value Register (BVR) - 用于执行断点
+static uint64_t read_bvr(int n)
+{
+    uint64_t val = 0;
+    switch (n)
+    {
+    case 0:
+        asm volatile("mrs %0, dbgbvr0_el1" : "=r"(val));
+        break;
+    case 1:
+        asm volatile("mrs %0, dbgbvr1_el1" : "=r"(val));
+        break;
+    case 2:
+        asm volatile("mrs %0, dbgbvr2_el1" : "=r"(val));
+        break;
+    case 3:
+        asm volatile("mrs %0, dbgbvr3_el1" : "=r"(val));
+        break;
+    case 4:
+        asm volatile("mrs %0, dbgbvr4_el1" : "=r"(val));
+        break;
+    case 5:
+        asm volatile("mrs %0, dbgbvr5_el1" : "=r"(val));
+        break;
+    }
+    return val;
+}
+
+// 写入 Breakpoint Value Register (BVR) - 用于执行断点
+static void write_bvr(int n, uint64_t val)
+{
+    switch (n)
+    {
+    case 0:
+        asm volatile("msr dbgbvr0_el1, %0" ::"r"(val));
+        break;
+    case 1:
+        asm volatile("msr dbgbvr1_el1, %0" ::"r"(val));
+        break;
+    case 2:
+        asm volatile("msr dbgbvr2_el1, %0" ::"r"(val));
+        break;
+    case 3:
+        asm volatile("msr dbgbvr3_el1, %0" ::"r"(val));
+        break;
+    case 4:
+        asm volatile("msr dbgbvr4_el1, %0" ::"r"(val));
+        break;
+    case 5:
+        asm volatile("msr dbgbvr5_el1, %0" ::"r"(val));
+        break;
+    }
+    isb();
+}
 
 // 断点类型
 enum bp_type
@@ -44,12 +156,12 @@ struct hwbp_info
     uint64_t hit_addr;  // 监控地址
     uint64_t hit_count; // 命中次数
     uint64_t regs[30];  // X0 ~ X29 寄存器
-    uint64_t lr;        // X30 (Link Register)
+    uint64_t lr;        // X30
     uint64_t sp;        // Stack Pointer
     uint64_t pc;        // 触发断点的汇编指令地址
     uint64_t orig_x0;   // 原始 X0 (用于系统调用重启)
     uint64_t syscallno; // 系统调用号
-    uint64_t pstate;    // 处理器状态 (CPSR/PSTATE)
+    uint64_t pstate;    // 处理器状态
 };
 
 // 链表节点，用于保存注册的 perf_event 指针，方便后续删除
@@ -65,25 +177,82 @@ static DEFINE_MUTEX(bp_list_mutex); // 保护链表的互斥锁
 static void sample_hbp_handler(struct perf_event *bp, struct perf_sample_data *data, struct pt_regs *regs)
 {
 
+    static uint64_t static_orig_addr = 0;   // 原始监控的地址
+    static bool static_is_stepping = false; // 乒乓状态机标记
+    static int static_slot_idx = -1;        // 记录该断点被分配到了哪个硬件槽位
+
     // 从 perf_event 中提取注册时传入的 context 指针
     struct hwbp_info *info = (struct hwbp_info *)bp->overflow_handler_context;
+
+    int i;
+    int max_slots;
+    uint64_t current_hw_addr;
+    bool is_execute_bp;
+    uint64_t next_pc;
 
     if (!info)
         return;
 
-    info->hit_addr = bp->attr.bp_addr;
-    info->hit_count++;
+    // 初始化判断类型
+    is_execute_bp = (bp->attr.bp_type == HW_BREAKPOINT_X);
+    if (!static_is_stepping)
+    {
+        // 自动从内核属性中获取并记录原始地址
+        static_orig_addr = bp->attr.bp_addr;
 
-    //  X0 ~ X29
-    memcpy(info->regs, regs->regs, sizeof(u64) * 30);
+        info->hit_addr = bp->attr.bp_addr;
+        info->hit_count++;
 
-    // ARM64 pt_regs 中, regs[30] 是 LR
-    info->lr = regs->regs[30];
-    info->sp = regs->sp;
-    info->pc = regs->pc;
-    info->orig_x0 = regs->orig_x0;
-    info->syscallno = regs->syscallno;
-    info->pstate = regs->pstate;
+        //  X0 ~ X29
+        memcpy(info->regs, regs->regs, sizeof(u64) * 30);
+
+        // ARM64 pt_regs 中, regs[30] 是 LR
+        info->lr = regs->regs[30];
+        info->sp = regs->sp;
+        info->pc = regs->pc;
+        info->orig_x0 = regs->orig_x0;
+        info->syscallno = regs->syscallno;
+        info->pstate = regs->pstate;
+
+        pr_info("【命中记录】目标地址: 0x%llx, 当前PC: 0x%llx\n", static_orig_addr, regs->pc);
+
+        static_slot_idx = -1;
+        max_slots = 6;
+        for (i = 0; i < max_slots; i++)
+        {
+            current_hw_addr = is_execute_bp ? read_bvr(i) : read_wvr(i);
+            if ((current_hw_addr & ~0x7ULL) == (static_orig_addr & ~0x7ULL))
+            {
+                static_slot_idx = i;
+                break;
+            }
+        }
+
+        if (static_slot_idx != -1)
+        {
+
+            next_pc = regs->pc + 4;
+            if (is_execute_bp)
+                write_bvr(static_slot_idx, next_pc);
+            else
+                write_wvr(static_slot_idx, next_pc);
+
+            static_is_stepping = true;
+        }
+    }
+    else
+    {
+        if (static_slot_idx != -1)
+        {
+
+            if (is_execute_bp)
+                write_bvr(static_slot_idx, static_orig_addr);
+            else
+                write_wvr(static_slot_idx, static_orig_addr);
+        }
+
+        static_is_stepping = false;
+    }
 }
 
 // 设置进程断点
@@ -133,7 +302,7 @@ int set_process_hwbp(pid_t pid, uint64_t addr, enum bp_type type, enum bp_scope 
     // 映射断点长度 (ARM64 硬件限制)
     if (type == BP_EXECUTE)
     {
-        bp_len_kernel = HW_BREAKPOINT_LEN_4; // 执行断点必须是 4 字节 (指令长度)
+        bp_len_kernel = HW_BREAKPOINT_LEN_8; // 执行断点必须是  字节
     }
     else
     {
@@ -167,7 +336,7 @@ int set_process_hwbp(pid_t pid, uint64_t addr, enum bp_type type, enum bp_scope 
     attr.exclude_hv = 1;
 
     // 必须指定采样周期为 1 ，意思是每一次命中都要通知我
-    // 这会让 perf 子系统启用正确的硬件单步步过机制，防止死循环卡死！
+    // 这会让 perf 子系统启用正确的硬件单步步过机制
     attr.sample_period = 1;
 
     // 获取目标进程
