@@ -796,17 +796,6 @@ static void add_seg(struct module_info *m, short type_tag, uint8_t prot, uint64_
     m->seg_count++;
 }
 
-// 排序: RX(0) → RO(1) → RW(2) → BSS(-1→3), 同类型按地址升序,BSS实际值是-1，排序时当3处理
-static int cmp_seg(const void *a, const void *b)
-{
-    const struct segment_info *sa = a, *sb = b;
-    int ta = sa->index == -1 ? 3 : sa->index;
-    int tb = sb->index == -1 ? 3 : sb->index;
-    if (ta != tb)
-        return ta - tb;
-    return (sa->start > sb->start) - (sa->start < sb->start);
-}
-
 static int enum_process_memory(pid_t pid, struct memory_info *info)
 {
     struct task_struct *task = NULL;
@@ -877,8 +866,7 @@ static int enum_process_memory(pid_t pid, struct memory_info *info)
         /* ========== 模块收集 (仅白名单前缀) ========== */
 
         // BSS检测: 前段文件映射RW, 当前段匿名+地址连续+RW
-        if (prev && prev->vm_file && VMA_IS_RW(prev) &&
-            !vma->vm_file && vma->vm_start == prev->vm_end && VMA_IS_RW(vma))
+        if (prev && prev->vm_file && VMA_IS_RW(prev) && !vma->vm_file && vma->vm_start == prev->vm_end && VMA_IS_RW(vma))
         {
             prev_path = d_path(&prev->vm_file->f_path, path_buf, PATH_MAX);
             if (!IS_ERR(prev_path))
@@ -908,23 +896,29 @@ static int enum_process_memory(pid_t pid, struct memory_info *info)
             {
                 mod_accepted = false;
                 for (i = 0; mod_include_prefixes[i]; i++)
-                    if (strncmp(path, mod_include_prefixes[i],
-                                strlen(mod_include_prefixes[i])) == 0)
+                {
+                    if (strncmp(path, mod_include_prefixes[i], strlen(mod_include_prefixes[i])) == 0)
                     {
                         mod_accepted = true;
                         break;
                     }
+                }
                 if (mod_accepted)
                 {
                     idx = find_or_add_module(info->modules, &info->module_count, path);
                     if (idx >= 0)
                     {
-                        if (VMA_IS_RX(vma))
-                            add_seg(&info->modules[idx], 0, current_prot, vma->vm_start, vma->vm_end);
-                        else if (VMA_IS_RO(vma))
-                            add_seg(&info->modules[idx], 1, current_prot, vma->vm_start, vma->vm_end);
-                        else if (VMA_IS_RW(vma))
-                            add_seg(&info->modules[idx], 2, current_prot, vma->vm_start, vma->vm_end);
+                        // 无视具体权限，只要是该文件映射全部收录，绝不留空洞
+                        // 初步给个标签：有X=0(代码), 纯R=1(只读), 有W=2(数据)
+                        short init_tag = 1; // 默认 RO
+                        if (current_prot & 4)
+                            init_tag = 0; // 只要含 X，归为 RX
+                        else if (current_prot & 2)
+                            init_tag = 2; // 只要含 W，归为 RW
+                        else if (current_prot == 0)
+                            init_tag = 0; // PROT_NONE 通常是代码段暗桩
+
+                        add_seg(&info->modules[idx], init_tag, current_prot, vma->vm_start, vma->vm_end);
                     }
                 }
             }
@@ -991,7 +985,7 @@ static int enum_process_memory(pid_t pid, struct memory_info *info)
 
     /*
      * =========================================================================================
-     * 反作弊 VMA 碎裂与诱饵对抗机制 (还原完美天然布局版)
+     * 反作弊 VMA 碎裂与诱饵对抗机制
      * =========================================================================================
      *
      * 【第一阶段：理想状态下的纯净内存布局 (原生 ELF 加载)】
@@ -1021,38 +1015,36 @@ static int enum_process_memory(pid_t pid, struct memory_info *info)
      *   如果我们使用常规的合并算法，会误把这个极远的假地址当成模块的起始地址，
      *   从而导致算出的 Base Address 完全错误（偏离真实基址几十上百MB），读取指针全部失效。
      *
-     * 【第三阶段：我们的对抗算法 (物理聚类 + 拉链式精准缝合)】
-     * 为了获取绝对精准的真实基址 (Real Base) 并完美还原天然布局，我们采用以下降维打击：
+     * 【第三阶段：我们的对抗算法 (六步降维打击)】
+     * 为了获取绝对精准的真实基址并完美还原天然布局，我们采用以下物理与拓扑结合的算法：
      *
-     *   步骤 1：物理排序与聚类 (寻找生命主干)
-     *   无视所有的权限标签，直接把所有同名的内存块按物理地址 (start) 升序排列。
-     *   =========>>>>>>>由于 ARM64 架构指令寻址的限制，真实的 .so 内存必须紧凑地挨在一起。
-     *   我们遍历这些内存块，一旦发现两个块之间的“缝隙”超过 16MB (0x1000000 阈值)，
-     *   就意味着碰到了“内存断层”。此时立刻判定：那个孤零零在远处的内存绝对是反作弊的假诱饵！
+     *   步骤 1：纯物理排序
+     *   无视所有权限和假象，直接把同名内存块按物理起始地址 (start) 绝对升序排列。
      *
-     *   步骤 2：诱饵物理抹杀
-     *   算出体积最大的连续内存群落（即真正的 .so 主体），把不在这个范围内的假诱饵（碎片）
-     *   从数组中彻底剔除、物理抹杀。
+     *   步骤 2：改进版体积聚类 (寻找生命主干)
+     *   由于 ARM64 寻址限制，真实的 .so 内存必须紧凑地挨在一起。
+     *   我们遍历内存块，一旦发现相邻块“缝隙”超过 16MB (0x1000000)，即视为“内存断层”，划分出不同群落。
+     *   累加每个群落的真实映射体积，体积最大、最丰满的群落，绝对是真实的 .so 本体！
      *
-     *   步骤 3：拉链式精准缝合 (还原原生边界)
-     *   剔除诱饵后，【严禁】按权限类型重新排序，必须保持物理内存的天然升序排列！
-     *   遍历剩余碎片，只有当相邻两个碎片【首尾绝对相连 (prev->end == curr->start)】
-     *   并且【属于同一种初始映射类型 (prev->index == curr->index)】时，
-     *   才判定它们是被 mprotect 恶意劈碎的同一块区域，并进行无缝拉链式融合。
-     *   一旦遇到天然的段边界（例如从 头部RO 走到了 代码RX），哪怕首尾相连也停止缝合，作为独立区段保留。
+     *   步骤 3：物理抹杀假诱饵
+     *   锁定真实本体的 [best_base, best_end] 范围，将范围之外的所有假诱饵碎片从数组中彻底剔除。
+     *
+     *   步骤 4：严谨拓扑标记 (核心：破解权限篡改)
+     *   反作弊把代码段的权限改得乱七八糟，如何还原？我们寻找天然的“防波堤”！
+     *   先向后扫描找到第一个“纯原生数据段 (有W无X)”。在这个数据段之前的所有碎片（除了第0个Header），
+     *   无论它现在的权限是 RO 还是 RWX，它在物理拓扑上必定属于“核心代码段”！
+     *   强制将其内部拓扑标签重置为 0(RX)。跨过数据段后，则恢复原生判定，绝不越界吞噬。
+     *
+     *   步骤 5：拉链式精准缝合 (还原原生边界)
+     *   遍历洗白后的碎片，只有当相邻碎片【首尾绝对相连】且【拓扑标签一致】时，
+     *   才进行无缝拉链式融合。天然的段边界（如 RX 走到 RO）则会自然断开保留。
+     *
+     *   步骤 6：最终 Index 序列化
+     *   给缝合后的完美区段重新发放 0, 1, 2, 3... 的连续 Index（保留 BSS 的 -1）。
      *
      * 【最终战果】：
-     * 无论反作弊怎么切分代码段、怎么乱放假基址诱饵，跑完此算法后，
-     * 产出的结果与一台干净没开游戏的手机上看到的原生 ELF 映射 1:1 完全一致！
-     * 对于典型游戏引擎模块，它会完美恢复成 4~7 个自然段：
-     * - 数组 Index 0：必定是缝合后的 [头部 RO]，它的 start 【绝对等于】真实的 Base Address！
-     * - 数组 Index 1：必定是缝合了上百个 mprotect 碎片后的完整 [代码 RX] 段！
-     * - 数组 Index 2：必定是系统天然保留的 [数据 RO] (RELRO 段)。
-     * - 数组 Index 3/4：必定是 [数据 RW] / [匿名 RW]。
-     *
-     * 外部辅助只需无脑调用：Base = info->modules[X].segs[0].start，即可获取绝对真实的基址！
-     * =========================================================================================
-     */
+     * 无论反作弊怎么切分、怎么放诱饵，跑完此算法后，产出结果与干净手机上的原生 ELF 映射 1:1 完全一致！
+     * 外部辅助只需无脑调用：Base = info->modules[X].segs[0].start，即可获取绝对真实的基址！ */
 
     for (i = 0; i < info->module_count; i++)
     {
@@ -1060,60 +1052,65 @@ static int enum_process_memory(pid_t pid, struct memory_info *info)
 
         if (m->seg_count > 0)
         {
-            // 纯物理地址排序
-            for (int x = 0; x < m->seg_count - 1; x++)
+            /* --- 纯物理地址排序  --- */
+            for (int x = 1; x < m->seg_count; x++)
             {
-                for (int y = x + 1; y < m->seg_count; y++)
+                struct segment_info key = m->segs[x];
+                int y = x - 1;
+                // 按物理起始地址绝对升序排列
+                while (y >= 0 && m->segs[y].start > key.start)
                 {
-                    if (m->segs[x].start > m->segs[y].start)
-                    {
-                        struct segment_info temp = m->segs[x];
-                        m->segs[x] = m->segs[y];
-                        m->segs[y] = temp;
-                    }
+                    m->segs[y + 1] = m->segs[y];
+                    y--;
                 }
+                m->segs[y + 1] = key;
             }
 
-            // 聚类算法，寻找真实的模块主干
-            //  真实模块的各个段缝隙很小，假诱饵离得极远 (>16MB)
-            uint64_t temp_base = m->segs[0].start;
-            uint64_t temp_end = m->segs[0].end;
-            uint64_t max_chunk_size = 0;
-            uint64_t best_base = temp_base;
-            uint64_t best_end = temp_end;
+            /* --- 聚类算法 --- */
+            uint64_t current_base = m->segs[0].start;
+            uint64_t current_end = m->segs[0].end;
+            uint64_t current_volume = m->segs[0].end - m->segs[0].start;
+
+            uint64_t max_volume = 0;
+            uint64_t best_base = current_base;
+            uint64_t best_end = current_end;
 
             for (j = 1; j < m->seg_count; j++)
             {
-                // 跨度超过16MB，判定为内存断层
-                if (m->segs[j].start - temp_end > 0x1000000)
+                // 由于 ARM64 架构指令寻址的限制, 超过 16MB 断层视为不同群落
+                if (m->segs[j].start - current_end > 0x1000000)
                 {
-                    uint64_t chunk_size = temp_end - temp_base;
-                    if (chunk_size > max_chunk_size)
+                    // 结算上一个群落，看是不是体积最大的（真正的 so 本体）
+                    if (current_volume > max_volume)
                     {
-                        max_chunk_size = chunk_size;
-                        best_base = temp_base;
-                        best_end = temp_end;
+                        max_volume = current_volume;
+                        best_base = current_base;
+                        best_end = current_end;
                     }
-                    temp_base = m->segs[j].start;
-                    temp_end = m->segs[j].end;
+                    // 开启新群落
+                    current_base = m->segs[j].start;
+                    current_end = m->segs[j].end;
+                    current_volume = m->segs[j].end - m->segs[j].start;
                 }
                 else
                 {
-                    if (m->segs[j].end > temp_end)
-                        temp_end = m->segs[j].end;
+                    // 群落延续，拓展边界并累加真实体积
+                    if (m->segs[j].end > current_end)
+                        current_end = m->segs[j].end;
+                    current_volume += (m->segs[j].end - m->segs[j].start);
                 }
             }
-            if (temp_end - temp_base > max_chunk_size)
+            // 结算最后一个群落
+            if (current_volume > max_volume)
             {
-                best_base = temp_base;
-                best_end = temp_end;
+                best_base = current_base;
+                best_end = current_end;
             }
 
-            // 物理清洗，彻底抹杀假诱饵
+            /* ---物理抹杀假诱饵  --- */
             int valid_count = 0;
             for (j = 0; j < m->seg_count; j++)
             {
-                // 只有处于“真实主干”范围内的段才保留，剔除 0x6e32... 等假地址
                 if (m->segs[j].start >= best_base && m->segs[j].end <= best_end)
                 {
                     m->segs[valid_count++] = m->segs[j];
@@ -1121,41 +1118,96 @@ static int enum_process_memory(pid_t pid, struct memory_info *info)
             }
             m->seg_count = valid_count;
 
-            // 拉链式碎片缝合
+            /* ---  严谨拓扑标记 --- */
+            int first_data_idx = -1;
+
+            // 寻找天然的数据段边界 (纯 RW 段，防跨界吞噬)
+            for (j = 0; j < m->seg_count; j++)
+            {
+                if (m->segs[j].index == -1)
+                    continue; // 忽略 BSS
+
+                // 包含写权限(W=2) 且 不包含执行权限(X=4)，必定是原生的 .data 或 .bss 数据段
+                if ((m->segs[j].prot & 2) && !(m->segs[j].prot & 4))
+                {
+                    first_data_idx = j;
+                    break;
+                }
+            }
+
+            // 精细化拓扑打标
+            // 内部临时约定分类：1=RO(头部/只读), 0=RX(核心代码), 2=RW(数据)
+            for (j = 0; j < m->seg_count; j++)
+            {
+                if (m->segs[j].index == -1)
+                    continue; // 忽略 BSS
+
+                if (j == 0)
+                {
+                    // 第 0 段：如果是纯 RO (无X且无W)，必定是 ELF Header (PT_LOAD[0])
+                    if (!(m->segs[j].prot & 4) && !(m->segs[j].prot & 2))
+                    {
+                        m->segs[j].index = 1;
+                    }
+                    else if (m->segs[j].prot & 4)
+                    {
+                        m->segs[j].index = 0; // 异形 payload (无 Header，直接是代码)
+                    }
+                    else
+                    {
+                        m->segs[j].index = 2; // 极端罕见: 开头就是 RW
+                    }
+                }
+                else if (first_data_idx != -1 && j < first_data_idx)
+                {
+                    // 在 Header 和第一个 Data 段之间的所有碎片  全部强制判定为核心代码段
+                    m->segs[j].index = 0;
+                }
+                else
+                {
+                    // 跨过数据段边界后，恢复原生的权限分类，绝不吞噬后续段落
+                    if (m->segs[j].prot & 4)
+                    {
+                        m->segs[j].index = 0; // 尾部独立的 RX (如 PT_LOAD[4])
+                    }
+                    else if (m->segs[j].prot & 2)
+                    {
+                        m->segs[j].index = 2; // 原生数据段 RW (如 PT_LOAD[2] / PT_LOAD[3])
+                    }
+                    else
+                    {
+                        m->segs[j].index = 1; // 尾部的其他只读段 RO
+                    }
+                }
+            }
+
+            /* --- 拉链式精准缝合 --- */
             int out_idx = 0;
             for (j = 1; j < m->seg_count; j++)
             {
                 struct segment_info *prev = &m->segs[out_idx];
                 struct segment_info *curr = &m->segs[j];
 
-                /*
-                 * 缝合判定条件（必须同时满足）：
-                 * 1. prev->end == curr->start : 内存首尾绝对相接，中间没有一丝缝隙。
-                 * 2. prev->index == curr->index : 属于同一种原生映射类型 (例如最初都被判定为 RX)。
-                 *
-                 * 满足这两个条件，说明这绝对是被反作弊 mprotect 劈碎的同一个天然区段。
-                 */
                 if (prev->end == curr->start && prev->index == curr->index)
                 {
-                    // 完美缝合：延伸尾部边界，并融合可能被篡改的混合权限位
                     prev->end = curr->end;
                     prev->prot |= curr->prot;
                 }
                 else
                 {
-                    // 遇到了天然的段边界（如 RO 走到 RX，或内存不连续）
-                    // 停止缝合，将其作为独立的天然区段保留下来
                     out_idx++;
                     m->segs[out_idx] = *curr;
                 }
             }
             m->seg_count = out_idx + 1;
-
-            // 按物理内存排布重新分配天然 Index
-            //  此时模块已经恢复成纯净的 4~7 个自然段，直接按先后顺序编号即可
+            seq = 0;
+            /* --- 最终 Index 序列化  --- */
             for (j = 0; j < m->seg_count; j++)
             {
-                m->segs[j].index = j;
+                if (m->segs[j].index != -1) // 保持 BSS 的 -1 标识不变
+                {
+                    m->segs[j].index = seq++;
+                }
             }
         }
     }
