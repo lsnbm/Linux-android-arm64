@@ -797,7 +797,7 @@ private: // 私有实现，外部无需关系
 
                 if (req->status <= 0)
                     return req->status;
-                memcpy((uint8_t*)buffer + processed, req->user_buffer, chunk);
+                memcpy((uint8_t *)buffer + processed, req->user_buffer, chunk);
                 processed += chunk;
             }
             return req->status;
