@@ -945,11 +945,11 @@ private: // 私有实现，外部无需关系
         // 横竖屏映射逻辑
         if (screenW > screenH && req->POSITION_X < req->POSITION_Y)
         {
-            // 横屏游戏 -> 竖屏驱动 (右侧充电口模式)
+            // 右侧充电口模式
             req->x = static_cast<int>((1.0 - normY) * req->POSITION_X);
             req->y = static_cast<int>(normX * req->POSITION_Y);
 
-            // 充电口在左边的情况处理横屏映射
+            // 左侧充电口模式
             // req->x = static_cast<int>((double)y / screenH * req->POSITION_X);
             // req->y = static_cast<int>((1.0 - (double)x / screenW) * req->POSITION_Y);
         }
@@ -1122,7 +1122,7 @@ namespace SignatureScanner
         1. 找特征
         ScanAddressSignature(0x7A12345678, 100);
 
-        2. 过滤特征（多次调用，每次传入当前地址）
+        2. 过滤特征（多次调用，每次传入当前地址或者重启后的新地址）
         FilterSignature(0x7A12345678);
 
         3. 扫特征码

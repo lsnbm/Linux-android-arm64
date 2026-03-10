@@ -330,11 +330,12 @@ static inline int linear_read_physical(phys_addr_t paddr, void *buffer, size_t s
 {
     void *kernel_vaddr = phys_to_virt(paddr);
 
-    // 最后的安全底线：防算错物理地址/内存空洞导致死机
-    if (unlikely(!virt_addr_valid(kernel_vaddr)))
-    {
-        return -EFAULT;
-    }
+    // 下面这个先暂时不使用，靠翻译阶段得出绝对有效物理地址
+    //  // 最后的安全底线：防算错物理地址/内存空洞导致死机
+    //  if (unlikely(!virt_addr_valid(kernel_vaddr)))
+    //  {
+    //      return -EFAULT;
+    //  }
 
     // 极限性能且安全的内存拷贝 (防未对齐崩溃)
     switch (size)
@@ -364,10 +365,10 @@ static inline int linear_write_physical(phys_addr_t paddr, void *buffer, size_t 
 {
     void *kernel_vaddr = phys_to_virt(paddr);
 
-    if (unlikely(!virt_addr_valid(kernel_vaddr)))
-    {
-        return -EFAULT;
-    }
+    // if (unlikely(!virt_addr_valid(kernel_vaddr)))
+    // {
+    //     return -EFAULT;
+    // }
 
     // 极限性能且安全的内存拷贝 (防未对齐崩溃)
     switch (size)
@@ -754,10 +755,8 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
 
         /* ========== 模块收集 (仅白名单前缀) ========== */
 
-        // 优化后的 BSS 检测：放宽对 prev 权限的限制，并去掉了昂贵的 d_path 调用
         // 条件：有prev、当前匿名(无文件)、当前为RW、地址严格首尾相连、且 prev 属于我们追踪的模块
-        if (prev && !vma->vm_file && vma->vm_start == prev->vm_end &&
-            VMA_IS_RW(vma) && last_mod_idx >= 0)
+        if (prev && !vma->vm_file && vma->vm_start == prev->vm_end && VMA_IS_RW(vma) && last_mod_idx >= 0)
         {
             // 直接复用上一轮循环得到的 last_mod_idx，极大提升性能
             add_seg(&info->modules[last_mod_idx], -1, current_prot, vma->vm_start, vma->vm_end);
