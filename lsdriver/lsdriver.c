@@ -130,7 +130,7 @@ static int ConnectThreadFunction(void *data)
 			// 遍历系统中所有进程,//这里不加RCU锁，不然会导致6.6以上超时
 			for_each_process(task)
 			{
-				if (strcmp(task->comm, "Lark") != 0)
+				if (strcmp(task->comm, "LS") != 0)
 					continue;
 
 				// 获取进程的内存描述符
@@ -217,17 +217,17 @@ static int handler_pre(struct kprobe *p, struct pt_regs *regs)
 
 	// 匹配进程名
 	// Android 中 task->comm 最长只有 15 个字符，包名极可能被截断！
-	// 比如 "com.ss.android.lark" 可能会变成 "com.ss.android."
+	// 比如 "com.ss.android.LS" 可能会变成 "com.ss.android."
 	// 不是Android包名程序除外
-	if (strstr(task->comm, "Lark") != NULL || strstr(task->comm, "lark") != NULL)
+	if (strstr(task->comm, "ls") != NULL || strstr(task->comm, "LS") != NULL)
 	{
 
-		pr_debug("【进程监听】检测到 Lark 进程即将退出！PID: %d, 进程名(comm): %s\n", task->pid, task->comm);
+		pr_debug("【进程监听】检测到 LS 进程即将退出！PID: %d, 进程名(comm): %s\n", task->pid, task->comm);
 
 		// 相应处理
 		atomic_xchg(&ProcessExit, 0);	 // 标记用户进程已断开
 		read_process_memory(1, 0, 0, 0); // 主动调用一下释放缓存的mm
-		v_touch_destroy(); // 清理触摸
+		v_touch_destroy();				 // 清理触摸
 	}
 
 	return 0;
@@ -250,7 +250,7 @@ static int kprobe_do_exit_init(void)
 		return ret;
 	}
 
-	pr_debug("成功：Kprobe(do_exit) 已注册，开始监听 Lark 退出。\n");
+	pr_debug("成功：Kprobe(do_exit) 已注册，开始监听 LS 退出。\n");
 	return 0;
 }
 

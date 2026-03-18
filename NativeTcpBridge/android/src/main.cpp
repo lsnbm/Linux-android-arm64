@@ -21,9 +21,12 @@
 #include <atomic>
 
 #include "DriverMemory.h"
+#include "json.hpp"
 
 namespace
 {
+    using nlohmann::json;
+
     constexpr std::uint16_t kServerPort = 9494;
     constexpr int kListenBacklog = 4;
     std::atomic_bool gRunning{true};
@@ -194,6 +197,103 @@ namespace
         return std::format("err {}", message);
     }
 
+    json buildMemoryInfoJson(int status, const auto &info)
+    {
+        json root;
+        int moduleCount = info.module_count;
+        if (moduleCount < 0)
+        {
+            moduleCount = 0;
+        }
+        else if (moduleCount > MAX_MODULES)
+        {
+            moduleCount = MAX_MODULES;
+        }
+
+        int regionCount = info.region_count;
+        if (regionCount < 0)
+        {
+            regionCount = 0;
+        }
+        else if (regionCount > MAX_SCAN_REGIONS)
+        {
+            regionCount = MAX_SCAN_REGIONS;
+        }
+
+        root["status"] = status;
+        root["module_count"] = moduleCount;
+        root["region_count"] = regionCount;
+        root["modules"] = json::array();
+        root["regions"] = json::array();
+
+        for (int i = 0; i < moduleCount; ++i)
+        {
+            const auto &mod = info.modules[i];
+            int segCount = mod.seg_count;
+            if (segCount < 0)
+            {
+                segCount = 0;
+            }
+            else if (segCount > MAX_SEGS_PER_MODULE)
+            {
+                segCount = MAX_SEGS_PER_MODULE;
+            }
+
+            json moduleItem;
+            moduleItem["name"] = std::string(mod.name);
+            moduleItem["seg_count"] = segCount;
+            moduleItem["segs"] = json::array();
+
+            for (int j = 0; j < segCount; ++j)
+            {
+                const auto &seg = mod.segs[j];
+                moduleItem["segs"].push_back({
+                    {"index", seg.index},
+                    {"prot", static_cast<int>(seg.prot)},
+                    {"start", seg.start},
+                    {"end", seg.end},
+                });
+            }
+
+            root["modules"].push_back(moduleItem);
+        }
+
+        for (int i = 0; i < regionCount; ++i)
+        {
+            const auto &region = info.regions[i];
+            root["regions"].push_back({
+                {"start", region.start},
+                {"end", region.end},
+            });
+        }
+
+        return root;
+    }
+
+    bool sendAll(int fd, std::string_view data)
+    {
+        std::size_t sentTotal = 0;
+        while (sentTotal < data.size())
+        {
+            const ssize_t sent = send(fd, data.data() + sentTotal, data.size() - sentTotal, 0);
+            if (sent < 0)
+            {
+                if (errno == EINTR)
+                {
+                    continue;
+                }
+                return false;
+            }
+
+            if (sent == 0)
+            {
+                return false;
+            }
+            sentTotal += static_cast<std::size_t>(sent);
+        }
+        return true;
+    }
+
     std::string executeCommand(const std::string &request)
     {
         const auto tokens = splitTokens(request);
@@ -206,7 +306,7 @@ namespace
 
         if (command == "help")
         {
-            return ok("支持命令: ping, pid.get, pid.set, pid.current, pid.attach, mem.read, mem.write, mem.read_u8/u16/u32/u64/f32/f64, mem.write_u8/u16/u32/u64/f32/f64, mem.read_str, mem.read_wstr, memory.refresh, memory.summary, module.addr, touch.down, touch.move, touch.up");
+            return ok("支持命令: ping, pid.get, pid.set, pid.current, pid.attach, mem.read, mem.write, mem.read_u8/u16/u32/u64/f32/f64, mem.write_u8/u16/u32/u64/f32/f64, mem.read_str, mem.read_wstr, memory.refresh, memory.summary, memory.info.full, module.addr, touch.down, touch.move, touch.up");
         }
 
         if (command == "ping")
@@ -313,6 +413,19 @@ namespace
                 payload.append(std::format(";{}#{}", sanitizeLine(mod.name), mod.seg_count));
             }
             return ok(payload);
+        }
+
+        if (command == "memory.info.full")
+        {
+            const int status = dr.GetMemoryInformation();
+            if (status != 0)
+            {
+                return err(std::format("刷新失败 status={}", status));
+            }
+
+            const auto &info = dr.GetMemoryInfoRef();
+            const std::string jsonText = buildMemoryInfoJson(status, info).dump();
+            return std::format("ok memory.info.full size={}\n{}", jsonText.size(), jsonText);
         }
 
         if (command == "module.addr")
@@ -722,7 +835,7 @@ int main(int argc, char **)
             std::println("收到命令：{}", message);
             const std::string response = executeCommand(message) + "\n";
 
-            if (send(clientFd, response.data(), response.size(), 0) < 0)
+            if (!sendAll(clientFd, response))
             {
                 printErrno("发送回复失败");
                 break;

@@ -933,7 +933,7 @@ private: // 私有实现，外部无需关系
     // 初始化驱动
     void InitCommunication()
     {
-        prctl(PR_SET_NAME, "Lark", 0, 0, 0);
+        prctl(PR_SET_NAME, "LS", 0, 0, 0);
 
         req = (req_obj *)mmap((void *)0x2025827000, sizeof(req_obj), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
 

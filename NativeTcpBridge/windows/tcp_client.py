@@ -1,6 +1,7 @@
 ﻿#!/usr/bin/env python3
 import concurrent.futures
 import ipaddress
+import json
 import re
 import socket
 import subprocess
@@ -31,9 +32,7 @@ class TcpTestWindow(QWidget):
         self.device_sock: socket.socket | None = None
         self.rx_buffer = b""
         self.is_scanning = False
-        self.module_cache: list[tuple[str, str]] = []
-        self.module_refresh_status = "--"
-        self.module_total_count = 0
+        self.memory_info_data: dict | None = None
         self.setWindowTitle("TCP 连通性测试工具")
         self.resize(760, 460)
         self._setup_ui()
@@ -61,19 +60,19 @@ class TcpTestWindow(QWidget):
         self.tabs = QTabWidget()
         root.addWidget(self.tabs)
 
-        self.module_page = QWidget()
+        self.memory_page = QWidget()
         self.search_page = QWidget()
         self.save_page = QWidget()
         self.log_page = QWidget()
         self.settings_page = QWidget()
 
-        self.tabs.addTab(self.module_page, "模块页")
+        self.tabs.addTab(self.memory_page, "内存信息页")
         self.tabs.addTab(self.search_page, "搜索页")
         self.tabs.addTab(self.save_page, "保存页")
         self.tabs.addTab(self.log_page, "日志页")
         self.tabs.addTab(self.settings_page, "设置页")
 
-        self._build_module_page()
+        self._build_memory_page()
         self.search_page.setLayout(QVBoxLayout())
         self.save_page.setLayout(QVBoxLayout())
         self._build_log_page()
@@ -81,28 +80,20 @@ class TcpTestWindow(QWidget):
         self._build_settings_page()
         self._log("客户端已启动。")
 
-    def _build_module_page(self) -> None:
-        layout = QVBoxLayout(self.module_page)
+    def _build_memory_page(self) -> None:
+        layout = QVBoxLayout(self.memory_page)
 
         row = QHBoxLayout()
-        self.refresh_module_button = QPushButton("刷新模块")
-        self.refresh_module_button.clicked.connect(self.on_refresh_modules)
-        row.addWidget(self.refresh_module_button)
-        row.addWidget(QLabel("模块名搜索:"))
-        self.module_filter_input = QLineEdit()
-        self.module_filter_input.setPlaceholderText("输入模块名关键字，例如 libil2cpp.so")
-        self.module_filter_input.returnPressed.connect(self.on_filter_modules)
-        row.addWidget(self.module_filter_input, 1)
-        self.filter_module_button = QPushButton("筛选")
-        self.filter_module_button.clicked.connect(self.on_filter_modules)
-        row.addWidget(self.filter_module_button)
+        self.refresh_memory_button = QPushButton("刷新内存信息")
+        self.refresh_memory_button.clicked.connect(self.on_refresh_memory_info)
+        row.addWidget(self.refresh_memory_button)
         row.addStretch(1)
         layout.addLayout(row)
 
-        self.module_view = QTextEdit()
-        self.module_view.setReadOnly(True)
-        self.module_view.setPlaceholderText("点击“刷新模块”后显示内存模块信息。")
-        layout.addWidget(self.module_view, 1)
+        self.memory_view = QTextEdit()
+        self.memory_view.setReadOnly(True)
+        self.memory_view.setPlaceholderText("点击“刷新内存信息”后显示可读的 memory_info 结构数据。")
+        layout.addWidget(self.memory_view, 1)
 
     def _build_settings_page(self) -> None:
         layout = QVBoxLayout(self.settings_page)
@@ -374,7 +365,10 @@ class TcpTestWindow(QWidget):
             if split_idx != -1:
                 line = self.rx_buffer[:split_idx]
                 self.rx_buffer = self.rx_buffer[split_idx + 1 :]
-                return line.decode("utf-8", errors="replace").strip()
+                text = line.decode("utf-8", errors="replace").strip()
+                if not text:
+                    continue
+                return text
 
             try:
                 data = self.device_sock.recv(4096)
@@ -397,6 +391,35 @@ class TcpTestWindow(QWidget):
                 self._disconnect_device("连接已断开：响应数据异常")
                 return None
 
+    def _read_exact_bytes(self, size: int) -> bytes | None:
+        if self.device_sock is None:
+            return None
+        if size < 0 or size > 32 * 1024 * 1024:
+            self._disconnect_device("连接已断开：响应数据大小异常")
+            return None
+
+        while len(self.rx_buffer) < size:
+            try:
+                data = self.device_sock.recv(4096)
+            except socket.timeout:
+                self._disconnect_device("连接已断开：等待数据超时")
+                return None
+            except OSError as exc:
+                if exc.errno is not None:
+                    self._disconnect_device(f"连接已断开：网络异常（错误码 {exc.errno}）")
+                else:
+                    self._disconnect_device("连接已断开：网络异常")
+                return None
+
+            if not data:
+                self._disconnect_device("连接已断开：服务端关闭连接")
+                return None
+            self.rx_buffer += data
+
+        payload = self.rx_buffer[:size]
+        self.rx_buffer = self.rx_buffer[size:]
+        return payload
+
     def _send_tcp_command(self, command: str) -> str | None:
         self._log(f"发送命令: {command}")
         if self.device_sock is None:
@@ -418,6 +441,47 @@ class TcpTestWindow(QWidget):
         self._log(f"收到响应: {text}")
         return text
 
+    def _send_memory_info_command(self) -> str | None:
+        self._log("发送命令: memory.info.full")
+        if self.device_sock is None:
+            self._set_status("未连接设备，请先点击“连接到设备”")
+            return None
+
+        try:
+            self.device_sock.sendall(b"memory.info.full\n")
+        except OSError as exc:
+            if exc.errno is not None:
+                self._disconnect_device(f"连接已断开：发送失败（错误码 {exc.errno}）")
+            else:
+                self._disconnect_device("连接已断开：发送失败")
+            return None
+
+        header = self._read_response_line()
+        if header is None:
+            return None
+        self._log(f"收到响应头: {header}")
+
+        if header.startswith("err "):
+            return header
+
+        prefix = "ok memory.info.full size="
+        if not header.startswith(prefix):
+            return f"err 响应头格式异常: {header}"
+
+        size_text = header[len(prefix) :].strip()
+        try:
+            payload_size = int(size_text, 10)
+        except ValueError:
+            return f"err 响应头大小无效: {size_text}"
+
+        payload_bytes = self._read_exact_bytes(payload_size)
+        if payload_bytes is None:
+            return None
+
+        self._log(f"收到内存信息数据: {payload_size} 字节")
+        payload_text = payload_bytes.decode("utf-8", errors="replace")
+        return f"ok {payload_text}"
+
     @staticmethod
     def _extract_pid(response: str | None) -> int | None:
         if not response or "pid=" not in response:
@@ -428,6 +492,99 @@ class TcpTestWindow(QWidget):
         except (ValueError, IndexError):
             return None
         return pid if pid > 0 else None
+
+    @staticmethod
+    def _safe_int(value: object, default: int = 0) -> int:
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return default
+            try:
+                return int(text, 0)
+            except ValueError:
+                return default
+        return default
+
+    @staticmethod
+    def _format_addr(value: object) -> str:
+        addr = TcpTestWindow._safe_int(value, 0)
+        return f"0x{addr:016X}"
+
+    @staticmethod
+    def _format_prot(prot_value: object) -> str:
+        prot = TcpTestWindow._safe_int(prot_value, 0)
+        return f"{'r' if (prot & 1) else '-'}{'w' if (prot & 2) else '-'}{'x' if (prot & 4) else '-'}({prot})"
+
+    def _format_memory_info_text(self, info: dict) -> str:
+        status = self._safe_int(info.get("status"), 0)
+        module_count = self._safe_int(info.get("module_count"), 0)
+        region_count = self._safe_int(info.get("region_count"), 0)
+
+        modules_raw = info.get("modules")
+        regions_raw = info.get("regions")
+        modules = modules_raw if isinstance(modules_raw, list) else []
+        regions = regions_raw if isinstance(regions_raw, list) else []
+
+        lines: list[str] = []
+        lines.append("【内存信息概要】")
+        lines.append(f"状态: {status}")
+        lines.append(f"模块数量(头部): {module_count}")
+        lines.append(f"内存区域数量(头部): {region_count}")
+        lines.append(f"模块数量(实际): {len(modules)}")
+        lines.append(f"内存区域数量(实际): {len(regions)}")
+        lines.append("")
+
+        lines.append("【模块信息】")
+        if not modules:
+            lines.append("无模块数据。")
+        else:
+            for idx, module in enumerate(modules, start=1):
+                if isinstance(module, dict):
+                    name = str(module.get("name", ""))
+                    segs_raw = module.get("segs")
+                    segs = segs_raw if isinstance(segs_raw, list) else []
+                    seg_count = self._safe_int(module.get("seg_count"), len(segs))
+                else:
+                    name = str(module)
+                    segs = []
+                    seg_count = 0
+
+                lines.append(f"{idx}. 模块: {name if name else '(空名称)'}")
+                lines.append(f"   段数量: {seg_count}")
+                if not segs:
+                    lines.append("   段列表: (空)")
+                    continue
+
+                for seg_idx, seg in enumerate(segs, start=1):
+                    if not isinstance(seg, dict):
+                        lines.append(f"   - 段{seg_idx}: 非法数据")
+                        continue
+                    seg_index = self._safe_int(seg.get("index"), -999)
+                    prot_text = self._format_prot(seg.get("prot"))
+                    start_text = self._format_addr(seg.get("start"))
+                    end_text = self._format_addr(seg.get("end"))
+                    lines.append(
+                        f"   - 段{seg_idx}: index={seg_index} prot={prot_text} start={start_text} end={end_text}"
+                    )
+        lines.append("")
+
+        lines.append("【可扫描内存区域】")
+        if not regions:
+            lines.append("无区域数据。")
+        else:
+            for idx, region in enumerate(regions, start=1):
+                if not isinstance(region, dict):
+                    lines.append(f"{idx}. 非法数据")
+                    continue
+                start_text = self._format_addr(region.get("start"))
+                end_text = self._format_addr(region.get("end"))
+                lines.append(f"{idx}. start={start_text} end={end_text}")
+
+        return "\n".join(lines)
 
     def on_toggle_connection(self) -> None:
         if self._is_connected():
@@ -471,79 +628,31 @@ class TcpTestWindow(QWidget):
         self.global_pid_label.setText(str(current_pid))
         self._set_status(f"同步成功：全局PID={current_pid}")
 
-    def on_refresh_modules(self) -> None:
-        response = self._send_tcp_command("module.list")
+    def on_refresh_memory_info(self) -> None:
+        response = self._send_memory_info_command()
         if response is None:
             return
 
         if not response.startswith("ok "):
-            self.module_view.setPlainText(f"刷新失败：\n{response}")
-            self._set_status("刷新模块失败")
-            QMessageBox.warning(self, "刷新失败", f"模块刷新失败：{response}")
+            self.memory_view.setPlainText(f"刷新失败：\n{response}")
+            self._set_status("刷新内存信息失败")
+            QMessageBox.warning(self, "刷新失败", f"内存信息刷新失败：{response}")
             return
 
-        payload = response[3:].strip()
-        parts = payload.split(";")
-        header = parts[0] if parts else ""
-        modules = parts[1:] if len(parts) > 1 else []
-
-        status_value = "未知"
-        count_value = "未知"
-        for token in header.split():
-            if token.startswith("status="):
-                status_value = token.split("=", 1)[1]
-            elif token.startswith("count="):
-                count_value = token.split("=", 1)[1]
-
-        self.module_refresh_status = status_value
+        payload = response[3:]
         try:
-            self.module_total_count = int(count_value, 10)
-        except ValueError:
-            self.module_total_count = len(modules)
-
-        parsed_modules: list[tuple[str, str]] = []
-        for module_item in modules:
-            if not module_item:
-                continue
-            if "#" in module_item:
-                name, seg_count = module_item.split("#", 1)
-            else:
-                name, seg_count = module_item, "未知"
-            parsed_modules.append((name.strip(), seg_count.strip()))
-
-        self.module_cache = parsed_modules
-        self._render_modules(self.module_filter_input.text().strip())
-        self._set_status(f"模块刷新成功：共 {len(self.module_cache)} 个模块")
-
-    def on_filter_modules(self) -> None:
-        self._render_modules(self.module_filter_input.text().strip())
-
-    def _render_modules(self, keyword: str) -> None:
-        if not self.module_cache:
-            self.module_view.setPlainText("暂无模块数据，请先点击“刷新模块”。")
+            info = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            self.memory_view.setPlainText(f"JSON 解析失败：{exc}\n\n原始内容：\n{payload[:4000]}")
+            self._set_status("刷新内存信息失败：JSON解析失败")
             return
 
-        filter_key = keyword.strip().lower()
-        if filter_key:
-            filtered = [(name, seg) for name, seg in self.module_cache if filter_key in name.lower()]
-        else:
-            filtered = list(self.module_cache)
+        self.memory_info_data = info
+        self.memory_view.setPlainText(self._format_memory_info_text(info))
 
-        lines = [
-            f"刷新状态: {self.module_refresh_status}",
-            f"模块总数: {self.module_total_count}",
-            f"当前显示: {len(filtered)}",
-            "",
-        ]
-
-        if not filtered:
-            lines.append("没有匹配的模块。")
-        else:
-            lines.append("模块列表:")
-            for idx, (name, seg_count) in enumerate(filtered, start=1):
-                lines.append(f"{idx}. {name} (段数量: {seg_count})")
-
-        self.module_view.setPlainText("\n".join(lines))
+        module_count = info.get("module_count", "未知")
+        region_count = info.get("region_count", "未知")
+        self._set_status(f"内存信息刷新成功：模块={module_count}，区域={region_count}")
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
         self._disconnect_device()
