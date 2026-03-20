@@ -967,9 +967,6 @@ private: // 私有实现，外部无需关系
     int KReadProcessMemory(uint64_t addr, void *buffer, size_t size)
     {
 
-        // access_process_vm 会触发缺页，强制分配物理页
-        // access_process_vm(task, addr, buf, len, FOLL_FORCE | FOLL_REMOTE);
-
         std::scoped_lock<SpinLock> lock(m_mutex);
 
         // 大数据自动分片，防止缓冲区溢出覆盖触摸数据

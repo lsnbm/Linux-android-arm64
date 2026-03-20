@@ -1,6 +1,8 @@
 #!/bin/bash
 # Android 驱动打包器 
-OUTPUT_FILE="install_driver.sh"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+KO_DIR="$SCRIPT_DIR/lsdriver"
+OUTPUT_FILE="$SCRIPT_DIR/install_driver.sh"
 
 echo "正在生成脚本: $OUTPUT_FILE ..."
 
@@ -43,13 +45,13 @@ embed_file() {
     fi
 }
 
-# === 新文件名格式 ===
-embed_file "android14-6.1lsdriver.ko"  "payload_6_1"
-embed_file "android15-6.6lsdriver.ko"  "payload_6_6"
-embed_file "android16-6.12lsdriver.ko" "payload_6_12"
-embed_file "android13-5.15lsdriver.ko" "payload_5_15"
-embed_file "android12-5.10lsdriver.ko" "payload_android12"
-embed_file "android13-5.10lsdriver.ko" "payload_android13"
+
+embed_file "$KO_DIR/android14-6.1lsdriver.ko"  "payload_6_1"
+embed_file "$KO_DIR/android15-6.6lsdriver.ko"  "payload_6_6"
+embed_file "$KO_DIR/android16-6.12lsdriver.ko" "payload_6_12"
+embed_file "$KO_DIR/android13-5.15lsdriver.ko" "payload_5_15"
+embed_file "$KO_DIR/android12-5.10lsdriver.ko" "payload_android12"
+embed_file "$KO_DIR/android13-5.10lsdriver.ko" "payload_android13"
 
 # -------------------------------------------------------
 # 3. 核心逻辑 (根据内核字符串匹配)

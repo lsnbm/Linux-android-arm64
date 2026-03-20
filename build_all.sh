@@ -15,6 +15,7 @@
 
 set -euo pipefail
 
+BUILD_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 # 内核源码根目录 (各版本源码存放在此目录下的子文件夹)
 KERNELS_ROOT="/root"
@@ -41,15 +42,38 @@ log_warn()  { echo -e "${YELLOW}$*${NC}"; }
 log_error() { echo -e "${RED}$*${NC}"; }
 log_title() { echo -e "${BLUE}====================================================${NC}"; }
 
-# 清理驱动源码目录下的编译产物
+package_driver() {
+    local packer="$BUILD_ROOT/packer.sh"
+
+    if [[ ! -x "$packer" ]]; then
+        log_warn "packer.sh 不可执行，尝试直接调用 bash ..."
+    fi
+
+    log_warn "开始自动打包 install_driver.sh ..."
+    bash "$packer"
+}
+
+# 清理驱动源码目录下的编译缓存，保留源码和所有 .ko
 clean_driver_build() {
-    rm -f "$DRIVER_SRC"/lsdriver.ko
-    rm -f "$DRIVER_SRC"/*.o \
-          "$DRIVER_SRC"/*.mod.c \
-          "$DRIVER_SRC"/*.order \
-          "$DRIVER_SRC"/*.symvers \
-          "$DRIVER_SRC"/*.mod \
-          "$DRIVER_SRC"/*.lto.o
+    if [[ ! -d "$DRIVER_SRC" ]]; then
+        log_error "driver source directory not found: $DRIVER_SRC"
+        return 1
+    fi
+
+    # 保留源码/构建定义文件和所有已生成的 .ko，其余全部视为生成物清理掉
+    find "$DRIVER_SRC" -mindepth 1 \( \
+        -type f ! \( \
+            -name 'Makefile' -o \
+            -name 'Kconfig' -o \
+            -name '*.c' -o \
+            -name '*.h' -o \
+            -name '*.lds' -o \
+            -name '*.S' -o \
+            -name '*.s' -o \
+            -name '*.ko' \
+        \) -o \
+        -type d -empty \
+    \) -delete
 }
 
 # 处理编译产物: 剥离符号 / 复制 / 重命名
@@ -323,10 +347,18 @@ main() {
     echo -e "${BLUE}----------------------------------------------------${NC}"
     echo ""
 
+    clean_driver_build
+
+    package_driver
+
     echo -e "${BLUE}产物列表:${NC}"
     # shellcheck disable=SC2086
     ls -lh "$DRIVER_SRC"/*lsdriver.ko 2>/dev/null || \
         log_error "未找到任何 .ko 文件"
+
+    if [[ -f "$BUILD_ROOT/install_driver.sh" ]]; then
+        ls -lh "$BUILD_ROOT/install_driver.sh"
+    fi
 
     log_title
 }

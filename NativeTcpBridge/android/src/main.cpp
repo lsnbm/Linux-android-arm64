@@ -3325,7 +3325,7 @@ namespace
         return true;
     }
 
-    // 内部文本命令派发：保留原有命令处理逻辑。
+    // 内部文本命令派发
     std::string DispatchTextCommand(const std::string &request)
     {
         const auto tokens = splitTokens(request);
