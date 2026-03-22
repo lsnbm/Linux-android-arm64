@@ -1,4 +1,4 @@
-﻿#include <arpa/inet.h>
+#include <arpa/inet.h>
 #include <csignal>
 #include <cstdint>
 #include <cctype>

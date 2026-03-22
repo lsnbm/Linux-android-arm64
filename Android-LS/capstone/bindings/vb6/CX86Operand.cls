@@ -62,9 +62,9 @@ Option Explicit
 '    _asm int 3
 '
 '
-'0x0012FF34  01 00 00 00 cc cc cc cc 02 00 00 00 cc cc cc cc  ....лллл....лллл
-'0x0012FF44  cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc  лллллллллллллллл
-'0x0012FF54  aa cc cc cc 03 00 00 00 01 cc cc cc cc cc cc cc  ╙ллл.....ллллллл
+'0x0012FF34  01 00 00 00 cc cc cc cc 02 00 00 00 cc cc cc cc  ....ц▄ц▄ц▄ц▄....ц▄ц▄ц▄ц▄
+'0x0012FF44  cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc cc  ц▄ц▄ц▄ц▄ц▄ц▄ц▄ц▄ц▄ц▄ц▄ц▄ц▄ц▄ц▄ц▄
+'0x0012FF54  aa cc cc cc 03 00 00 00 01 cc cc cc cc cc cc cc  б╙ц▄ц▄ц▄.....ц▄ц▄ц▄ц▄ц▄ц▄ц▄
 
 Public optype As x86_op_type
 Public size As Byte

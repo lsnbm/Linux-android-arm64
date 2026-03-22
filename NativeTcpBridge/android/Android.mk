@@ -1,4 +1,4 @@
-﻿LOCAL_PATH := $(call my-dir)
+LOCAL_PATH := $(call my-dir)
 
 # 复用 Android-LS 里的 Capstone 源码目录
 CAPSTONE_REL_PATH := ../../Android-LS/capstone

@@ -141,4 +141,4 @@ struct req_obj
     int x, y;
 } __attribute__((packed));
 
-#endif // IO_STRUCT_H   ← 文件在这里就"结束"了
+#endif // IO_STRUCT_H  
