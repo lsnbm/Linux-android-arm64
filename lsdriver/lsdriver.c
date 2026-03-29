@@ -258,6 +258,9 @@ static int kprobe_do_exit_init(void)
 // 隐藏内核模块
 static void hide_myself(void)
 {
+
+ // 小于内核 6.12才能隐藏vmap_area_list和_vmap_area_root，高版本移除了这个数据结构，由https://github.com/wenyounb，发现
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
 	struct vmap_area *va, *vtmp;
 	struct module_use *use, *tmp;
 	struct list_head *_vmap_area_list;
@@ -276,6 +279,8 @@ static void hide_myself(void)
 			rb_erase(&va->rb_node, _vmap_area_root);
 		}
 	}
+
+#endif
 
 	// 摘除链表，/proc/modules 中不可见。
 	list_del_init(&THIS_MODULE->list);
@@ -306,7 +311,7 @@ static int __init lsdriver_init(void)
 
 	hide_myself(); // 隐藏内核模块本身
 
-	//allocate_physical_page_info(); // pte读写需要，线性读写不需要 // 初始化物理页地址和页表项
+	allocate_physical_page_info(); // pte读写需要，线性读写不需要 // 初始化物理页地址和页表项
 
 	chf = kthread_run(ConnectThreadFunction, NULL, "C_thread");
 	if (IS_ERR(chf))

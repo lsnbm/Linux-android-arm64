@@ -545,8 +545,8 @@ static inline int _process_memory_rw(enum sm_req_op op, pid_t pid, uint64_t vadd
         else
         {
             // 翻译地址
-            // status = mmu_translate_va_to_pa(s_last_mm, current_vpn, &paddr_of_page);
-            status = walk_translate_va_to_pa(s_last_mm, current_vpn, &paddr_of_page);
+            status = mmu_translate_va_to_pa(s_last_mm, current_vpn, &paddr_of_page);
+            // status = walk_translate_va_to_pa(s_last_mm, current_vpn, &paddr_of_page);
 
             if (unlikely(status != 0))
             {
@@ -563,14 +563,14 @@ static inline int _process_memory_rw(enum sm_req_op op, pid_t pid, uint64_t vadd
         if (op == op_r)
         {
 
-            // status = pte_read_physical(paddr_of_page + page_offset, (uint8_t *)buffer + bytes_copied, bytes_this_page);
-            status = linear_read_physical(paddr_of_page + page_offset, (uint8_t *)buffer + bytes_copied, bytes_this_page);
+            status = pte_read_physical(paddr_of_page + page_offset, (uint8_t *)buffer + bytes_copied, bytes_this_page);
+            // status = linear_read_physical(paddr_of_page + page_offset, (uint8_t *)buffer + bytes_copied, bytes_this_page);
         }
         else
         {
 
-            // status = pte_write_physical(paddr_of_page + page_offset, (const uint8_t *)buffer + bytes_copied, bytes_this_page);
-            status = linear_write_physical(paddr_of_page + page_offset, (uint8_t *)buffer + bytes_copied, bytes_this_page);
+            status = pte_write_physical(paddr_of_page + page_offset, (const uint8_t *)buffer + bytes_copied, bytes_this_page);
+            // status = linear_write_physical(paddr_of_page + page_offset, (uint8_t *)buffer + bytes_copied, bytes_this_page);
         }
 
         if (unlikely(status != 0))
