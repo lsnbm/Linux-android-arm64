@@ -427,6 +427,20 @@ def android_breakpoint_record_update(index: int, field: str, value: int | str) -
 
 
 @mcp.tool()
+def android_breakpoint_record_set_float(index: int, register_name: str, float_value: float, precision: str = "f32") -> dict[str, Any]:
+    """Set a SIMD/float register (V0~V31) in a breakpoint record to a float value. Enables register modification on next breakpoint hit."""
+    reg = str(register_name).strip().lower()
+    if not reg.startswith("v"):
+        raise ValueError("register_name must be v0~v31")
+    return _call_bridge_operation("breakpoint.record.set_float", {
+        "index": index,
+        "field": reg,
+        "value": str(float_value),
+        "precision": precision,
+    })
+
+
+@mcp.tool()
 def android_help(topic: str = "all") -> dict[str, Any]:
     """Return minimal tool docs for AI clients. topic can be all/<tool_name>."""
     topic_token = str(topic).strip().lower() or "all"

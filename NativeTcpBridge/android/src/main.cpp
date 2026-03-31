@@ -3265,12 +3265,36 @@ namespace
             record.syscallno = value;
             return true;
         }
+        if (token == "fpsr")
+        {
+            record.fpsr = static_cast<std::uint32_t>(value);
+            return true;
+        }
+        if (token == "fpcr")
+        {
+            record.fpcr = static_cast<std::uint32_t>(value);
+            return true;
+        }
+        if (token == "rw")
+        {
+            record.rw = value != 0;
+            return true;
+        }
         if (token.size() >= 2 && token[0] == 'x')
         {
             const auto regIndex = parseInt(token.substr(1));
             if (regIndex.has_value() && *regIndex >= 0 && *regIndex < 30)
             {
                 record.regs[*regIndex] = value;
+                return true;
+            }
+        }
+        if (token.size() >= 2 && token[0] == 'v')
+        {
+            auto regIndex = parseInt(token.substr(1));
+            if (regIndex.has_value() && *regIndex >= 0 && *regIndex < 32)
+            {
+                record.vregs[*regIndex] = static_cast<__uint128_t>(value);
                 return true;
             }
         }
@@ -3526,6 +3550,16 @@ namespace
             {
                 item["regs"].push_back(reg);
             }
+            item["vregs"] = json::array();
+            for (const auto &vreg : rec.vregs)
+            {
+                item["vregs"].push_back({
+                    {"lo", static_cast<std::uint64_t>(vreg)},
+                    {"hi", static_cast<std::uint64_t>(vreg >> 64)}
+                });
+            }
+            item["fpsr"] = rec.fpsr;
+            item["fpcr"] = rec.fpcr;
             root["records"].push_back(std::move(item));
         }
 
@@ -3752,12 +3786,114 @@ namespace
             auto copy = info.records[*index];
             if (!assignHwbpRecordField(copy, tokens[2], *value))
             {
-                return err("字段无效，支持: pc/lr/sp/pstate/orig_x0/syscallno/x0~x29");
+                return err("字段无效，支持: pc/lr/sp/pstate/orig_x0/syscallno/fpsr/fpcr/rw/x0~x29/v0~v31");
             }
 
             copy.rw = true;
             const_cast<Driver::hwbp_record &>(dr.GetHwbpInfoRef().records[*index]) = copy;
             return ok(std::format("index={} field={} value=0x{:X}", *index, tokens[2], *value));
+        }
+
+        if (command == "hwbp.record.set.f32")
+        {
+            if (tokens.size() != 4)
+            {
+                return err("用法: hwbp.record.set.f32 <索引> <v0~v31> <浮点值>");
+            }
+
+            const auto index = parseInt(tokens[1]);
+            if (!index.has_value() || *index < 0)
+            {
+                return err("索引无效");
+            }
+
+            const std::string field = toLowerAscii(tokens[2]);
+            if (field.size() < 2 || field[0] != 'v')
+            {
+                return err("字段必须是 v0~v31");
+            }
+
+            auto regIndex = parseInt(field.substr(1));
+            if (!regIndex.has_value() || *regIndex < 0 || *regIndex >= 32)
+            {
+                return err("字段必须是 v0~v31");
+            }
+
+            float fval = 0.0f;
+            try
+            {
+                size_t pos = 0;
+                fval = std::stof(std::string(tokens[3]), &pos);
+            }
+            catch (...)
+            {
+                return err("浮点值无效");
+            }
+
+            const auto &info = dr.GetHwbpInfoRef();
+            if (*index >= info.record_count)
+            {
+                return err("索引越界");
+            }
+
+            auto copy = info.records[*index];
+            uint32_t bits;
+            std::memcpy(&bits, &fval, sizeof(bits));
+            copy.vregs[*regIndex] = static_cast<__uint128_t>(bits);
+            copy.rw = true;
+            const_cast<Driver::hwbp_record &>(dr.GetHwbpInfoRef().records[*index]) = copy;
+            return ok(std::format("index={} v{}={} (0x{:08X})", *index, *regIndex, fval, bits));
+        }
+
+        if (command == "hwbp.record.set.f64")
+        {
+            if (tokens.size() != 4)
+            {
+                return err("用法: hwbp.record.set.f64 <索引> <v0~v31> <浮点值>");
+            }
+
+            const auto index = parseInt(tokens[1]);
+            if (!index.has_value() || *index < 0)
+            {
+                return err("索引无效");
+            }
+
+            const std::string field = toLowerAscii(tokens[2]);
+            if (field.size() < 2 || field[0] != 'v')
+            {
+                return err("字段必须是 v0~v31");
+            }
+
+            auto regIndex = parseInt(field.substr(1));
+            if (!regIndex.has_value() || *regIndex < 0 || *regIndex >= 32)
+            {
+                return err("字段必须是 v0~v31");
+            }
+
+            double fval = 0.0;
+            try
+            {
+                size_t pos = 0;
+                fval = std::stod(std::string(tokens[3]), &pos);
+            }
+            catch (...)
+            {
+                return err("浮点值无效");
+            }
+
+            const auto &info = dr.GetHwbpInfoRef();
+            if (*index >= info.record_count)
+            {
+                return err("索引越界");
+            }
+
+            auto copy = info.records[*index];
+            uint64_t bits;
+            std::memcpy(&bits, &fval, sizeof(bits));
+            copy.vregs[*regIndex] = static_cast<__uint128_t>(bits);
+            copy.rw = true;
+            const_cast<Driver::hwbp_record &>(dr.GetHwbpInfoRef().records[*index]) = copy;
+            return ok(std::format("index={} v{}={} (0x{:016X})", *index, *regIndex, fval, bits));
         }
 
         if (command == "sig.scan.addr")
@@ -5166,6 +5302,30 @@ namespace
             if (std::holds_alternative<json>(value))
                 return std::get<json>(value);
             textCommand = "hwbp.record.set";
+            appendCommandToken(textCommand, std::get<std::string>(index));
+            appendCommandToken(textCommand, std::get<std::string>(field));
+            appendCommandToken(textCommand, std::get<std::string>(value));
+        }
+        else if (operation == "breakpoint.record.set_float")
+        {
+            const auto index = requireString("index", "index");
+            const auto field = requireString("field", "field");
+            const auto value = requireString("value", "value");
+            const auto precision = optionalString("precision");
+            if (std::holds_alternative<json>(index))
+                return std::get<json>(index);
+            if (std::holds_alternative<json>(field))
+                return std::get<json>(field);
+            if (std::holds_alternative<json>(value))
+                return std::get<json>(value);
+            std::string prec = "f32";
+            if (!precision.empty())
+            {
+                prec = precision;
+                if (prec != "f32" && prec != "f64")
+                    prec = "f32";
+            }
+            textCommand = "hwbp.record.set." + prec;
             appendCommandToken(textCommand, std::get<std::string>(index));
             appendCommandToken(textCommand, std::get<std::string>(field));
             appendCommandToken(textCommand, std::get<std::string>(value));

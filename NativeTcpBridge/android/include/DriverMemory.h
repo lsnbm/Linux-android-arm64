@@ -1,4 +1,3 @@
-
 #pragma once
 #include <cstdio>
 #include <sys/mman.h>
@@ -165,7 +164,9 @@ public: // 共有结构体和锁
     // 记录单个 PC（触发指令地址）的命中状态
     struct hwbp_record
     {
-        bool rw;            // 是读取，还是写入
+        bool rw; // 是读取，还是写入
+
+        // 通用寄存器
         uint64_t pc;        // 触发断点的汇编指令地址
         uint64_t hit_count; // 该 PC 命中的次数
         uint64_t regs[30];  // 最新的 X0 ~ X29 寄存器
@@ -174,6 +175,11 @@ public: // 共有结构体和锁
         uint64_t orig_x0;   // 原始 X0
         uint64_t syscallno; // 系统调用号
         uint64_t pstate;    // 处理器状态
+
+        // 浮点/SIMD 寄存器
+        __uint128_t vregs[32]; // V0 ~ V31 (每个128位)
+        uint32_t fpsr;         // 浮点状态寄存器
+        uint32_t fpcr;         // 浮点控制寄存器
 
     } __attribute__((packed));
 
@@ -839,7 +845,6 @@ public: // 外部获取内存信息
                 std::println(stderr, "[-] 警告: ELF Magic 校验失败，可能是头部被反Dump抹除，保存原始数据");
             }
         }
-
 
         mkdir("/sdcard/dump", 0777); // 忽略已存在错误
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <condition_variable>
 #include <functional>
 #include <future>
@@ -24,13 +25,13 @@ namespace Utils
 
     class ThreadPool
     {
-        std::vector<std::jthread> workers_;
+        std::vector<std::thread> workers_;
         std::queue<std::function<void()>> tasks_;
         std::mutex mtx_;
         std::condition_variable_any cv_;
         std::condition_variable done_cv_;
         size_t active_{0};
-        bool stopping_{false};
+        std::atomic<bool> stopping_{false};
 
     public:
         explicit ThreadPool(size_t n = GetThreadCount())
@@ -39,14 +40,14 @@ namespace Utils
                 n = 4;
             for (size_t i = 0; i < n; ++i)
             {
-                workers_.emplace_back([this](std::stop_token st)
+                workers_.emplace_back([this]
                                       {
-                    while (!st.stop_requested()) {
+                    while (!stopping_.load(std::memory_order_relaxed)) {
                         std::function<void()> task;
                         {
                             std::unique_lock lk(mtx_);
-                            cv_.wait(lk, st, [&]{ return stopping_ || !tasks_.empty(); });
-                            if ((st.stop_requested() || stopping_) && tasks_.empty()) return;
+                            cv_.wait(lk, [&]{ return stopping_.load(std::memory_order_relaxed) || !tasks_.empty(); });
+                            if (stopping_.load(std::memory_order_relaxed) && tasks_.empty()) return;
                             if (tasks_.empty()) continue;
                             task = std::move(tasks_.front());
                             tasks_.pop();
@@ -55,7 +56,6 @@ namespace Utils
                         try {
                             task();
                         } catch (...) {
-                            // 防止任务异常导致工作线程退出。
                         }
                         {
                             std::lock_guard lk(mtx_);
@@ -84,7 +84,7 @@ namespace Utils
             auto fut = task->get_future();
             {
                 std::lock_guard lk(mtx_);
-                if (stopping_)
+                if (stopping_.load(std::memory_order_relaxed))
                     throw std::runtime_error("ThreadPool is stopping");
                 tasks_.emplace([task]
                                { (*task)(); });
@@ -100,7 +100,7 @@ namespace Utils
                 std::forward<F>(f), std::forward<Args>(args)...);
             {
                 std::lock_guard lk(mtx_);
-                if (stopping_)
+                if (stopping_.load(std::memory_order_relaxed))
                     return false;
                 tasks_.emplace([thunk]() mutable
                                {
@@ -123,19 +123,20 @@ namespace Utils
         {
             {
                 std::lock_guard lk(mtx_);
-                if (stopping_)
+                if (stopping_.load(std::memory_order_relaxed))
                     return;
-                stopping_ = true;
+                stopping_.store(true, std::memory_order_relaxed);
                 if (drop_pending)
                 {
                     while (!tasks_.empty())
                         tasks_.pop();
                 }
             }
-            for (auto &w : workers_)
-                w.request_stop();
             cv_.notify_all();
             done_cv_.notify_all();
+            for (auto &w : workers_)
+                if (w.joinable())
+                    w.join();
             workers_.clear();
         }
 

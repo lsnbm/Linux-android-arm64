@@ -31,7 +31,7 @@ LOCAL_SRC_FILES := src/main.cpp
 LOCAL_C_INCLUDES := $(LOCAL_PATH)/include $(CAPSTONE_ROOT)/include
 LOCAL_CPPFLAGS := -std=c++2c -Wall -Wextra -Wno-ignored-attributes -Wno-packed-non-pod -fexceptions
 LOCAL_STATIC_LIBRARIES := libcapstone
-LOCAL_LDLIBS := -llog
+LOCAL_LDLIBS := -llog -lc++
 include $(BUILD_EXECUTABLE)
 
 # ------------------------------------------------------------------

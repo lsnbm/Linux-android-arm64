@@ -10,7 +10,7 @@ set -euo pipefail
 BUILD_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 CLANG_ROOT="/opt/ddk/clang"
 KERNELS_ROOT="/opt/ddk/kdir"
-DRIVER_SRC="/mnt/c/Users/Administrator/Desktop/Linux-android-arm64/lsdriver"
+DRIVER_SRC="/mnt/c/home/wen/Linux-android-arm64/lsdriver"
 NO_STRIP_VERSIONS=("android16-6.12" "android15-6.6")
 
 # -------------------------- 颜色定义 --------------------------
