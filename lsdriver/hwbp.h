@@ -311,7 +311,7 @@ static inline int set_process_hwbp(pid_t pid, uint64_t addr, enum bp_type type, 
         if (should_install)
         {
             // 注册用户态硬件断点，并传入info
-            bp = fn_register_user_hw_breakpoint(&attr, sample_hbp_handler, (void *)info, t);
+            bp = KCALL_4(fn_register_user_hw_breakpoint, struct perf_event *, &attr, sample_hbp_handler, (void *)info, t);
             if (IS_ERR(bp))
             {
                 pr_debug("无法为线程 %d 设置硬件断点: %ld\n", t->pid, PTR_ERR(bp));
@@ -327,7 +327,7 @@ static inline int set_process_hwbp(pid_t pid, uint64_t addr, enum bp_type type, 
             }
             else
             {
-                fn_unregister_hw_breakpoint(bp);
+                KCALL_1(fn_unregister_hw_breakpoint, void, bp);
             }
         }
     }
@@ -350,7 +350,7 @@ static inline void remove_process_hwbp(void)
     {
         if (node->bp)
         {
-            fn_unregister_hw_breakpoint(node->bp); // 注销断点
+            KCALL_1(fn_unregister_hw_breakpoint, void, node->bp); // 注销断点
         }
         list_del(&node->list);
         kfree(node);

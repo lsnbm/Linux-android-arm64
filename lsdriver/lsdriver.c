@@ -334,21 +334,21 @@ static int __init lsdriver_init(void)
 	hide_kthread(chf);
 	hide_kthread(dhf);
 
-	// // 下面隐藏没问题，但是线程运行起来没身份会立马死机，现在无法解决
-	// typedef void (*detach_pid_t)(struct task_struct *task, enum pid_type type);
-	// detach_pid_t detach_pid_func;
-	// detach_pid_func = (detach_pid_t)generic_kallsyms_lookup_name("detach_pid");
-	// if (detach_pid_func)
-	// {
+	// 下面detach_pid_func隐藏没问题，但是线程运行起来没身份会立马死机，现在无法解决
+	typedef void (*detach_pid_t)(struct task_struct *task, enum pid_type type);
+	detach_pid_t detach_pid_func;
+	detach_pid_func = (detach_pid_t)generic_kallsyms_lookup_name("detach_pid");
+	if (detach_pid_func)
+	{
 
-	// 	detach_pid_func(chf, PIDTYPE_PID);
-	// 	detach_pid_func(dhf, PIDTYPE_PID);
-	// 	pr_debug("隐藏内核线程成功。\n");
-	// }
-	// else
-	// {
-	// 	pr_debug("严重错误！无法找到 detach_pid 函数地址。将不做隐藏运行\n");
-	// }
+		// detach_pid_func(chf, PIDTYPE_PID);
+		// detach_pid_func(dhf, PIDTYPE_PID);
+		pr_debug("隐藏内核线程成功。\n");
+	}
+	else
+	{
+		pr_debug("严重错误！无法找到 detach_pid 函数地址。将不做隐藏运行\n");
+	}
 
 	return 0;
 }

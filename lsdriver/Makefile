@@ -1,8 +1,7 @@
-# 用于编译进内核boot
-#obj-$(CONFIG_LSDRIVER) += lsdriver.o
 
 
 obj-m += lsdriver.o
+
 
 # 注释这行为release编译，不会有pr_debug输出
 #ccflags-y += -DDEBUG
@@ -23,9 +22,6 @@ ccflags-y += -fomit-frame-pointer
 ccflags-y += -funroll-loops
 
 
-# # 强制内联: 消除函数调用 (call/ret) 和参数压栈的开销
-# ccflags-y += -finline-functions
-
 
 # 严格别名优化: 允许编译器假设不同类型的指针指向不同内存，从而进行更激进的指令重排
 ccflags-y += -fstrict-aliasing
@@ -36,7 +32,14 @@ ccflags-y += -fstrict-aliasing
 ccflags-y += -ffunction-sections -fdata-sections
 
 
+
+
+
 #下面编译配置如果使用会出现意外，请注释!!!
+
+
+# # 强制内联: 消除函数调用 (call/ret) 和参数压栈的开销
+# ccflags-y += -finline-functions
 
 
 # # 彻底关闭针对该模块的内存杀毒软件 (KASAN) 和未定义行为检查 (UBSAN)
@@ -94,4 +97,5 @@ ccflags-y += -ffunction-sections -fdata-sections
 
 
 # 后面不写了，有多个 .c 文件可以使用内部 LTO
+
 
