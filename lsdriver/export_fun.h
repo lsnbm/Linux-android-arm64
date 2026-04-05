@@ -4,6 +4,82 @@
 #include <linux/version.h>
 #include <linux/kprobes.h>
 #include <linux/types.h>
+#include <linux/kprobes.h>
+
+// 屏蔽 CFI 检查，利用 kprobe 获取 kallsyms_lookup_name 地址
+__attribute__((no_sanitize("cfi"))) static unsigned long generic_kallsyms_lookup_name(const char *name)
+{
+        typedef unsigned long (*kallsyms_lookup_name_t)(const char *name);
+        static unsigned long kallsyms_addr = 0;
+        struct kprobe kp = {0};
+
+        if (!kallsyms_addr)
+        {
+                kp.symbol_name = "kallsyms_lookup_name";
+                if (register_kprobe(&kp) < 0)
+                        return 0;
+                kallsyms_addr = (unsigned long)kp.addr;
+                unregister_kprobe(&kp);
+        }
+
+        if (!kallsyms_addr)
+                return 0;
+
+        kallsyms_lookup_name_t fn = (kallsyms_lookup_name_t)kallsyms_addr;
+        return fn(name);
+}
+
+/*
+下面代码 由https://github.com/wangchuan2009提供
+旧版 CFI ( GKI 5.10 / 5.15):
+        编译器会在间接调用前插入跳转，跳到一个集中的验证函数（就是 __cfi_slowpath）。
+        你把它 patch 成 RET，相当于让验证永远通过
+新版 KCFI (Kernel 6.1+):
+         编译器去掉了集中验证函数。KCFI 会在每一个间接跳转（BLR）指令的前面，内联插入几条汇编指令，
+         直接比较 hash 值。如果不对，直接触发 BRK 指令宕机。
+ 如果是 6.1+ 内核，不存在 __cfi_slowpath，
+
+ */
+__attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
+{
+        // AArch64 RET 指令机器码
+#define AARCH64_RET_INSTR 0xD65F03C0
+        // 内部状态，记录是否已经热更新成功
+        static bool is_cfi_bypassed = false;
+        uint64_t cfi_addr = 0;
+
+        int (*x_aarch64_insn_patch_text_nosync)(void *, u32);
+
+        if (is_cfi_bypassed)
+                return true;
+
+        // 获取 patch 函数
+        x_aarch64_insn_patch_text_nosync =
+            (void *)generic_kallsyms_lookup_name("aarch64_insn_patch_text_nosync");
+
+        if (!x_aarch64_insn_patch_text_nosync)
+                return false;
+
+        //  依次查找各个版本的 CFI slowpath 函数
+        cfi_addr = generic_kallsyms_lookup_name("__cfi_slowpath"); // 5.10
+        if (!cfi_addr)
+                cfi_addr = generic_kallsyms_lookup_name("__cfi_slowpath_diag"); // 5.15
+        if (!cfi_addr)
+                cfi_addr = generic_kallsyms_lookup_name("_cfi_slowpath"); // 5.4
+
+        if (!cfi_addr)
+                return false;
+
+        // 强行 Patch 成 RET 指令 (直接返回，使得所有 CFI 校验默认通过)
+        if (x_aarch64_insn_patch_text_nosync((void *)cfi_addr, AARCH64_RET_INSTR) != 0)
+                return false;
+
+        // x_aarch64_insn_patch_text_nosync内部一般已经处理了 缓存，
+        // flush_icache_range(cfi_addr, cfi_addr + 4);
+
+        is_cfi_bypassed = true;
+        return true;
+}
 
 /*
  6系内核就不用这个宏了，可以直接拿着函数指针调用
@@ -99,60 +175,4 @@
         (ret_type) _x0;                                                                                                                                       \
 })
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
-
-// 必须使用 unsigned long，与内核原生定义保持一致
-typedef unsigned long (*kallsyms_lookup_name_t)(const char *name);
-
-/*
-Android 5.15+ GKI 开启了 CFI
-即使拿到了函数地址，直接强转调用也会触发 CFI Panic。
-必须使用 no_sanitize("cfi") 禁止编译器对该 wrapper 函数进行检查。
-*/
-__attribute__((no_sanitize("cfi")))  // 屏蔽cfi
-__attribute__((no_sanitize("kcfi"))) // 屏蔽kcfi
-static unsigned long generic_kallsyms_lookup_name(const char *name)
-{
-        static unsigned long kallsyms_addr = 0;
-        struct kprobe kp = {0};
-        int ret;
-
-        if (!kallsyms_addr)
-        {
-                kp.symbol_name = "kallsyms_lookup_name";
-
-                ret = register_kprobe(&kp);
-                if (ret < 0)
-                        return 0;
-
-                kallsyms_addr = (unsigned long)kp.addr;
-                unregister_kprobe(&kp);
-
-                if (!kallsyms_addr)
-                        return 0;
-        }
-
-        // 不使用这种方式调用函数会有cfi校验，或其他问题
-        // kallsyms_lookup_name_t fn = (kallsyms_lookup_name_t)kallsyms_addr;
-        // return fn(name);
-
-        /*
-          KCALL_1
-          参数1:函数指针地址
-          参数2:函数返回类型(强转的话直接填要转的参数就行)
-          参数3:函数参数列表
-          */
-        return KCALL_1(kallsyms_addr, unsigned long, name);
-}
-
-#else
-
-// < 5.7.0
-static unsigned long generic_kallsyms_lookup_name(const char *name)
-{
-        return kallsyms_lookup_name(name);
-}
-
-#endif
-
-#endif
+#endif /* _EXPORT_FUN_H_ */
