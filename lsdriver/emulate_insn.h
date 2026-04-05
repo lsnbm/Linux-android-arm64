@@ -13,7 +13,7 @@
 //      - LDRSB/LDRSH/LDRSW（符号扩展 load）
 //      - LDUR/STUR（无符号偏移，unscaled）
 //
-// ⚠️ 警告：
+// 警告：
 // 如果硬件断点下在了普通的 ALU（如 add, sub）或 SIMD 指令上，
 // 本模拟器不支持这些指令的计算，会直接跳过（PC+4）
 // 因此，此模拟器强烈建议仅用于【数据观察点】或【跳转指令断点】。
@@ -106,7 +106,7 @@ static inline int user_write_u64(u64 addr, u64 val) { return put_user(val, (u64 
 static inline int read_user_insn(u64 pc, u32 *insn) { return get_user(*insn, (u32 __user *)(uintptr_t)pc); }
 
 // ============================================================
-// 模拟执行 ARM64 指令 (修复解码 BUG)
+// 模拟执行 ARM64 指令
 // ============================================================
 static bool emulate_insn(struct pt_regs *regs)
 {
