@@ -109,11 +109,8 @@ Android 5.15+ GKI 开启了 CFI
 即使拿到了函数地址，直接强转调用也会触发 CFI Panic。
 必须使用 no_sanitize("cfi") 禁止编译器对该 wrapper 函数进行检查。
 */
-#ifdef __clang__
 __attribute__((no_sanitize("cfi")))  // 屏蔽cfi
 __attribute__((no_sanitize("kcfi"))) // 屏蔽kcfi
-#endif
-
 static unsigned long generic_kallsyms_lookup_name(const char *name)
 {
         static unsigned long kallsyms_addr = 0;
