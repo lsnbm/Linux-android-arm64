@@ -155,9 +155,14 @@ static inline void free_physical_page_info(void)
 // 验证参数并直接操作PTE建立物理页映射
 static inline void *pte_map_page(phys_addr_t paddr, size_t size, const void *buffer)
 {
+    // 普通内存页表配置
+    //  static const uint64_t FLAGS = PTE_TYPE_PAGE | PTE_VALID | PTE_AF |
+    //                                PTE_SHARED | PTE_PXN | PTE_UXN |
+    //                                PTE_ATTRINDX(MT_NORMAL);
+    // 硬件设备寄存器专用页表配置（用硬件的配置去读普通内存页）
     static const uint64_t FLAGS = PTE_TYPE_PAGE | PTE_VALID | PTE_AF |
-                                  PTE_SHARED | PTE_PXN | PTE_UXN |
-                                  PTE_ATTRINDX(MT_NORMAL);
+                                  PTE_PXN | PTE_UXN |
+                                  PTE_ATTRINDX(MT_DEVICE_nGnRnE);
     uint64_t pfn = __phys_to_pfn(paddr);
 
     // 参数检查
