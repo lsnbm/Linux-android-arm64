@@ -35,7 +35,7 @@ ccflags-y += -ffunction-sections -fdata-sections
 
 
 
-#下面编译配置如果使用会出现意外，请注释!!!
+#下面编译配置如果使用会出现意外，按需注释
 
 
 # # 强制内联: 消除函数调用 (call/ret) 和参数压栈的开销
@@ -66,6 +66,9 @@ ccflags-y += -ffunction-sections -fdata-sections
 # ccflags-y += -mllvm -inline-threshold=10000
 # ccflags-y += -mllvm -unroll-threshold=10000
 
+
+
+#下面编译配置使用会90%会出现意外，请注释!!!
 
 
 # # 关闭影子调用栈 
