@@ -6,7 +6,7 @@
 #include <linux/types.h>
 #include <linux/kprobes.h>
 
-// 屏蔽 CFI 检查，利用 kprobe 获取 kallsyms_lookup_name 地址
+// 屏蔽 CFI 检查，统一利用 kprobe 获取 kallsyms_lookup_name 地址
 __attribute__((no_sanitize("cfi"))) static unsigned long generic_kallsyms_lookup_name(const char *name)
 {
         typedef unsigned long (*kallsyms_lookup_name_t)(const char *name);
