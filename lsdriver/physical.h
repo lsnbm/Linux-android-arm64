@@ -253,55 +253,93 @@ static inline int pte_write_physical(phys_addr_t paddr, const void *buffer, size
 // 硬件mmu翻译
 static inline int mmu_translate_va_to_pa(struct mm_struct *mm, u64 va, phys_addr_t *pa)
 {
+
     u64 pgd_phys;
     int ret;
     u64 phys_out;
-    u64 tmp_daif, tmp_ttbr, tmp_par, tmp_offset;
+    u64 tmp_ttbr, tmp_par, tmp_offset;
+    unsigned long flags;
 
     if (unlikely(!mm || !mm->pgd || !pa))
         return -EINVAL;
 
     pgd_phys = virt_to_phys(mm->pgd);
 
-    asm volatile(
-        // 关中断，防止抢占和中断嵌套
-        "mrs    %[tmp_daif], daif\n"
-        "msr    daifset, #0xf\n" /* 关闭所有中断(D/A/I/F) */
-        "isb\n"
+    /*
+    在 6.12 内核引入 Pseudo-NMI 后，中断控制体系发生了变化
+    以前：通过汇编 msr daifset, #0xf 就能屏蔽所有中断。
+    现在：伪 NMI 绕过了 DAIF 标志。要想在底层真正屏蔽中断，必须去写 GICv3 中断控制器的系统寄存器 ICC_PMR_EL1。
+          GICv2 芯片上，会直接触发未定义指令异常导致内核崩溃。
+    所以使用内核提供的宏，内核宏会自动选择正确的屏蔽方式，兼容所有版本。
+     */
+    local_irq_save(flags); // 保存中断状态 + 关闭中断（这个宏比local_irq_disable安全）
 
-        // 切换 TTBR0，ASID 域清零 (bits[63:48]=0)
+    asm volatile(
+
+        /*
+        作用：保存原有TTBR0并切换 TTBR0 (ASID 清零)
+        为什么这么写：
+        TLB（页表缓存）里会同时缓存多个进程的地址。为了区分这个虚拟地址是哪个进程的，硬件引入了 ASID。
+        当执行 msr ttbr0_el1, %[pgd_phys] 时，因为传入的 pgd_phys 仅仅是一个纯粹的物理地址（高 16 位全是 0），
+        这就相当于你把当前 TTBR0_EL1 的 ASID 强制设置为了 0。
+        */
         "mrs    %[tmp_ttbr], ttbr0_el1\n"
         "msr    ttbr0_el1, %[pgd_phys]\n"
         "isb\n"
 
-        // 硬件地址翻译
+        // 原理: 硬件 MMU 会顺着刚刚设置的 TTBR0_EL1，去内存里帮你遍历 PGD -> PUD -> PMD -> PTE。
         "at     s1e0r, %[va]\n"
         "isb\n"
         "mrs    %[tmp_par], par_el1\n"
 
-        // 清除 ASID=0 的 TLB 污染
-        //  vaae1is: VA+所有ASID, EL1, Inner Shareable (广播所有核)
+        /*
+        作用：只强制无效化当前 CPU 核心的 TLB 中与该虚拟地址相关的条目
+        为何这么写：
+        at 硬件指令引发的页表漫游和 TLB 缓存，只会在执行该指令的当前 CPU 核心上发生。
+            其他 CPU 核心根本不知道你修改了 ttbr0_el1，它们既没有执行 at 指令，也没有去访问你临时映射的地址，
+            因此其他 CPU 的 TLB 是干净的，没有污染。
+        tlbi vaae1is 中的 is (Inner Shareable) 表示向所有 CPU 核心发送 IPI 广播，
+            而随后的 dsb ish 会死等所有核心回应 ACK。
+            但在 6.12 内核中，由于极其复杂的 NMI 和 RCU 机制，如果你在关中断的情况下死等其他核心，
+            极其容易遇到别的核心刚好持锁或正在处理高优先级中断，从而无法回应你，导致整个系统的 SMP 瞬间死锁彻底冻结。
+         */
         "lsr    %[tmp_offset], %[va], #12\n"
-        "tlbi   vaae1is, %[tmp_offset]\n" // 广播所有CPU，所有ASID
-        "dsb    ish\n"
+        "tlbi   vaae1, %[tmp_offset]\n"
+        "dsb    nsh\n"
         "isb\n"
 
         // 恢复 TTBR0
         "msr    ttbr0_el1, %[tmp_ttbr]\n"
         "isb\n"
 
-        // 恢复中断（最后恢复，缩小窗口）
-        "msr    daif, %[tmp_daif]\n"
-        "isb\n"
+        /*
+        作用: 检查翻译是否成功 (PAR_EL1.F bit 0)
+        为什么这么写：
+        遍历的结果无论成功还是失败，硬件都会将其写入到另一个系统寄存器PAR_EL1中
+        PAR_EL1 的最低位（Bit 0）：F 位 -F = 0成功，F = 1失败
+        */
 
-        // 检查 PAR_EL1.F (bit 0)，1 表示翻译失败
         "tbnz   %[tmp_par], #0, .L_efault%=\n"
 
-        // 提取物理地址
-        // PAR_EL1[47:12] = PA[47:12]，保留低12位页内偏移
-        "ubfx   %[tmp_par], %[tmp_par], #12, #36\n"
-        "lsl    %[tmp_par], %[tmp_par], #12\n"
-        "and    %[tmp_offset], %[va], #0xFFF\n"
+        /*
+        作用：从 PAR_EL1 寄存器中提取物理地址并计算最终物理地址
+        为什么这么写：
+        6.12 内核：全面完善并默认启用了 LPA2 特性（支持 4K/16K 页面的 52 位物理地址）。
+        如果系统开启了 LPA2，PAR_EL1 寄存器的格式会发生变化，物理地址可以长达 52 位。
+        所以代码中的 ubfx %[tmp_par], %[tmp_par], #12, #36 强行将物理地址截断在了 48 位（提取 36 位 + 偏移 12 位 = 48 位）。
+        就不能这么写了
+        后续当你用这个被截断的错误物理地址去读写内存时，会触发同步外部中止 (Synchronous External Abort / SError)，引发极其底层的硬件级死机。
+
+        PAR_EL1 成功时的格式:
+        Bits [63:56] 是内存属性 (必须清除)
+        Bits [51:12] 是物理地址 (旧版最高到47，新版LPA2最高到51)
+        提取从第12位开始的 40 bit长度 (52-12=40)，然后左移12位归位
+
+        */
+
+        "ubfx   %[tmp_par], %[tmp_par], #12, #40\n" // 提取 PA[51:12]
+        "lsl    %[tmp_par], %[tmp_par], #12\n"      // 还原到 [51:12]
+        "and    %[tmp_offset], %[va], #0xFFF\n"     // 提取页内偏移
         "orr    %[phys_out], %[tmp_par], %[tmp_offset]\n"
         "mov    %w[ret], #0\n"
         "b      .L_end%=\n"
@@ -314,7 +352,6 @@ static inline int mmu_translate_va_to_pa(struct mm_struct *mm, u64 va, phys_addr
 
         : [ret] "=&r"(ret),
           [phys_out] "=&r"(phys_out),
-          [tmp_daif] "=&r"(tmp_daif),
           [tmp_ttbr] "=&r"(tmp_ttbr),
           [tmp_par] "=&r"(tmp_par),
           [tmp_offset] "=&r"(tmp_offset)
@@ -322,6 +359,9 @@ static inline int mmu_translate_va_to_pa(struct mm_struct *mm, u64 va, phys_addr
           [va] "r"(va),
           [efault_val] "r"(-EFAULT)
         : "cc", "memory");
+
+    // 恢复中断和 NMI 状态
+    local_irq_restore(flags);
 
     if (ret == 0)
         *pa = phys_out;
