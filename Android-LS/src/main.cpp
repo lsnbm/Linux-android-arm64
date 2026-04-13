@@ -378,14 +378,24 @@ namespace MemUtils
                 return false;
         }
 
-        // 辅助：获取 epsilon 和 double 转换值
+        // 获取 epsilon 和 double 转换值
         constexpr bool isFloat = std::is_floating_point_v<T>;
-        constexpr double eps = isFloat ? Constants::FLOAT_EPSILON : 0.0;
+        // 动态 Epsilon: 对于较大的数，使用相对误差；对于较小的数，使用固定误差。
+        // 搜索 12.340 但内存中是 12.340000003 时因 epsilon 过小而匹配失败的问题。
+        auto get_eps = [&](auto val)
+        {
+            if constexpr (!isFloat) return 0.0;
+            double v = std::abs(static_cast<double>(val));
+            // 默认 1e-4 对于 12.34 这种量级的数来说，要求精度太高（需匹配到 12.3400x）
+            // 调整为: max(Constants::FLOAT_EPSILON, v * 1e-5)
+            // 如果用户搜 12.34，v*1e-5 是 0.0001234，这样 12.340000003 就能被搜到了。
+            return std::max(Constants::FLOAT_EPSILON, v * 1e-5);
+        };
 
         auto eq = [&](auto a, auto b)
         {
             if constexpr (isFloat)
-                return std::abs(static_cast<double>(a) - static_cast<double>(b)) < eps;
+                return std::abs(static_cast<double>(a) - static_cast<double>(b)) < get_eps(b);
             else
                 return a == b;
         };
@@ -415,7 +425,7 @@ namespace MemUtils
                 double lo = static_cast<double>(target), hi = rangeMax;
                 if (lo > hi)
                     std::swap(lo, hi);
-                return static_cast<double>(value) >= lo - eps && static_cast<double>(value) <= hi + eps;
+                return static_cast<double>(value) >= lo - get_eps(lo) && static_cast<double>(value) <= hi + get_eps(hi);
             }
             else
             {
@@ -4246,6 +4256,135 @@ private:
                     if (bpParams_.editingField == i && !ImGuiFloatingKeyboard::IsVisible() && bpParams_.regEditBuf[0])
                     {
                         bpParams_.editCopy.regs[i] = strtoull(bpParams_.regEditBuf, nullptr, 16);
+                        bpParams_.editingField = -1;
+                        bpParams_.regEditBuf[0] = 0;
+                    }
+                }
+                ImGui::PopID();
+            }
+            ImGui::EndTable();
+        }
+        ImGui::PopStyleVar();
+
+        // ━━ 浮点/SIMD 寄存器 ━━
+        UI::Space(S(6));
+        UI::Text(Colors::TITLE, "━━ 浮点/SIMD 寄存器 ━━");
+        UI::Space(S(4));
+
+        // FPSR / FPCR 显示与编辑
+        auto fpCtrlLine = [&](const char *name, uint32_t val, int fieldId, uint32_t *target)
+        {
+            UI::Text({0.7f, 0.85f, 1, 1}, "%s: ", name);
+            ImGui::SameLine();
+            UI::Text(Colors::ADDR_GREEN, "0x%X", (unsigned int)val);
+            ImGui::SameLine();
+
+            char id[32];
+            snprintf(id, sizeof(id), "复制##%s%d", name, r);
+            if (UI::Btn(id, {S(50), S(28)}, Colors::BTN_COPY))
+            {
+                char tmp[32];
+                snprintf(tmp, sizeof(tmp), "%X", (unsigned int)val);
+                ImGui::SetClipboardText(tmp);
+            }
+
+            if (isEditing)
+            {
+                ImGui::SameLine();
+                snprintf(id, sizeof(id), "改##%s%d", name, r);
+                if (UI::Btn(id, {S(40), S(28)}, {0.4f, 0.3f, 0.15f, 1}))
+                {
+                    bpParams_.editingField = fieldId;
+                    snprintf(bpParams_.regEditBuf, sizeof(bpParams_.regEditBuf),
+                             "%X", (unsigned int)val);
+                    char title[48];
+                    snprintf(title, sizeof(title), "修改 %s (Hex)", name);
+                    ImGuiFloatingKeyboard::Open(bpParams_.regEditBuf, 63, title);
+                }
+                if (bpParams_.editingField == fieldId && !ImGuiFloatingKeyboard::IsVisible() && bpParams_.regEditBuf[0])
+                {
+                    *target = strtoul(bpParams_.regEditBuf, nullptr, 16);
+                    bpParams_.editingField = -1;
+                    bpParams_.regEditBuf[0] = 0;
+                }
+            }
+        };
+
+        fpCtrlLine("FPSR", show.fpsr, 36, &bpParams_.editCopy.fpsr);
+        fpCtrlLine("FPCR", show.fpcr, 37, &bpParams_.editCopy.fpcr);
+        UI::Space(S(4));
+
+        // V0~V31 表格
+        char vtblId[32];
+        snprintf(vtblId, sizeof(vtblId), "VRegs##%d", r);
+        int vcols = isEditing ? 4 : 3;
+        ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, {S(4), S(4)});
+        if (ImGui::BeginTable(vtblId, vcols, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
+        {
+            ImGui::TableSetupColumn("寄存器", ImGuiTableColumnFlags_WidthFixed, S(55));
+            ImGui::TableSetupColumn("值", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("复制", ImGuiTableColumnFlags_WidthFixed, S(50));
+            if (isEditing)
+                ImGui::TableSetupColumn("改", ImGuiTableColumnFlags_WidthFixed, S(50));
+            ImGui::TableHeadersRow();
+
+            for (int i = 0; i < 32; ++i)
+            {
+                ImGui::TableNextRow();
+                ImGui::PushID(i + 32); // offset to avoid ID clash with X regs
+
+                ImGui::TableSetColumnIndex(0);
+                UI::Text({0.7f, 0.85f, 1, 1}, "V%d", i);
+
+                // Vn 寄存器是 128 位，拆成 高64位:低64位 显示
+                const uint64_t *v64 = reinterpret_cast<const uint64_t *>(&show.vregs[i]);
+                ImGui::TableSetColumnIndex(1);
+                UI::Text(Colors::ADDR_GREEN, "%016llX_%016llX", (unsigned long long)v64[1], (unsigned long long)v64[0]);
+
+                ImGui::TableSetColumnIndex(2);
+                if (UI::Btn("复制", {S(42), S(28)}, Colors::BTN_COPY))
+                {
+                    char tmp[64];
+                    snprintf(tmp, sizeof(tmp), "%016llX%016llX", (unsigned long long)v64[1], (unsigned long long)v64[0]);
+                    ImGui::SetClipboardText(tmp);
+                }
+
+                if (isEditing)
+                {
+                    ImGui::TableSetColumnIndex(3);
+                    char bid[16];
+                    snprintf(bid, sizeof(bid), "改##v%d", i);
+                    if (UI::Btn(bid, {S(42), S(28)}, {0.4f, 0.3f, 0.15f, 1}))
+                    {
+                        bpParams_.editingField = i + 32; // fieldId >= 34 for V regs
+                        snprintf(bpParams_.regEditBuf, sizeof(bpParams_.regEditBuf),
+                                 "%016llX%016llX", (unsigned long long)v64[1], (unsigned long long)v64[0]);
+                        char title[32];
+                        snprintf(title, sizeof(title), "修改 V%d (Hex)", i);
+                        ImGuiFloatingKeyboard::Open(bpParams_.regEditBuf, 63, title);
+                    }
+                    if (bpParams_.editingField == i + 32 && !ImGuiFloatingKeyboard::IsVisible() && bpParams_.regEditBuf[0])
+                    {
+                        // 解析128位hex回写 (高16位_低16位 或 低16位)
+                        int len = static_cast<int>(strlen(bpParams_.regEditBuf));
+                        char hiBuf[17] = {}, loBuf[17] = {};
+                        if (len > 16)
+                        {
+                            strncpy(hiBuf, bpParams_.regEditBuf, len - 16);
+                            hiBuf[len - 16] = '\0';
+                            strncpy(loBuf, bpParams_.regEditBuf + len - 16, 16);
+                            loBuf[16] = '\0';
+                        }
+                        else
+                        {
+                            strncpy(loBuf, bpParams_.regEditBuf, 16);
+                            loBuf[16] = '\0';
+                        }
+                        uint64_t hi = strtoull(hiBuf, nullptr, 16);
+                        uint64_t lo = strtoull(loBuf, nullptr, 16);
+                        uint64_t *p = (uint64_t *)&bpParams_.editCopy.vregs[i];
+                        p[1] = hi;
+                        p[0] = lo;
                         bpParams_.editingField = -1;
                         bpParams_.regEditBuf[0] = 0;
                     }
