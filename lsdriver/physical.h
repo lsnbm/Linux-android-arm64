@@ -264,9 +264,9 @@ static inline int mmu_translate_va_to_pa(struct mm_struct *mm, u64 va, phys_addr
     pgd_phys = virt_to_phys(mm->pgd);
 
     asm volatile(
-        // 关中断，防止抢占和中断嵌套
+        // 关闭所有中断和异常中断
         "mrs    %[tmp_daif], daif\n"
-        "msr    daifset, #0xf\n" /* 关闭所有中断(D/A/I/F) */
+        "msr    daifset, #0xf\n" // 关闭所有中断(D/A/I/F)
         "isb\n"
 
         // 切换 TTBR0，ASID 域清零 (bits[63:48]=0)
@@ -280,7 +280,7 @@ static inline int mmu_translate_va_to_pa(struct mm_struct *mm, u64 va, phys_addr
         "mrs    %[tmp_par], par_el1\n"
 
         // 清除 ASID=0 的 TLB 污染
-        //  vaae1is: VA+所有ASID, EL1, Inner Shareable (广播所有核)
+        //  vaae1is: VA+所有ASID, EL1, 广播所有核
         // 虽然 AT 是本地触发，但在复杂的 SMP 环境下，使用 ish 是硬件流水线一致性的最稳妥做法。
         "lsr    %[tmp_offset], %[va], #12\n"
         "tlbi   vaae1is, %[tmp_offset]\n" // 广播所有CPU，所有ASID
@@ -298,7 +298,13 @@ static inline int mmu_translate_va_to_pa(struct mm_struct *mm, u64 va, phys_addr
         // 检查 PAR_EL1.F (bit 0)，1 表示翻译失败
         "tbnz   %[tmp_par], #0, .L_efault%=\n"
 
-        // 提取物理地址
+        /*
+        6.12 内核：全面完善并默认启用了 LPA2 特性（支持 4K/16K 页面的 52 位物理地址）。
+        如果系统开启了 LPA2，PAR_EL1 寄存器的格式会发生变化，物理地址可以长达 52 位。
+        原有代码中的 ubfx %[tmp_par], %[tmp_par], #12, #36 强行将物理地址截断在了 48 位（提取 36 位 + 偏移 12 位 = 48 位）。
+        就不能这么写了
+        后续当你用这个被截断的错误物理地址去读写内存时，会触发同步外部中止 (Synchronous External Abort / SError)，引发极其底层的硬件级死机。
+        */
         "and    %[tmp_par], %[tmp_par], #0x0000fffffffff000\n"
         "and    %[tmp_offset], %[va], #0xFFF\n"
         "orr    %[phys_out], %[tmp_par], %[tmp_offset]\n"
