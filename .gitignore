@@ -19,6 +19,10 @@ Android-LS/obj/
 Android-LS/libs/
 Android-LS/libomp.a
 Android-LS/libomp.so
+obj/
+libs/
+windows/__pycache__/
+*.pyc
 
 # Build dependency files
 *.o.d
