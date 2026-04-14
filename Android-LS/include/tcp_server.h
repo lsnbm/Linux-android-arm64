@@ -2063,6 +2063,7 @@ namespace
             "breakpoint.clear",
             "breakpoint.record.remove",
             "breakpoint.record.update",
+            "breakpoint.record.set_float",
             "signature.scan_address",
             "signature.scan_file",
             "signature.scan_pattern",

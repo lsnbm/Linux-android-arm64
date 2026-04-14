@@ -628,7 +628,7 @@ TOOL_META: dict[str, dict[str, Any]] = {
         "example": {"address": "0x12345678", "view_format": "disasm"},
         "parameter_notes": {
             "address": "Integer or hex string.",
-            "view_format": "hex/hex16/hex64/i8/i16/i32/i64/f32/f64/disasm.",
+            "view_format": "hex/hex64/i8/i16/i32/i64/f32/f64/disasm.",
         },
         "result_notes": "Initializes viewer base and mode.",
     },
