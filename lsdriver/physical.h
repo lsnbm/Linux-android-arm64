@@ -7,6 +7,9 @@
 底层原理都是映射
     2.是用内核线性地址读写，只能操作系统内存
 
+
+(翻译和读写可以混搭)
+
 */
 
 #ifndef PHYSICAL_H
@@ -27,7 +30,7 @@
 #include "export_fun.h"
 #include "io_struct.h"
 
-//============方案1:PTE读写+MMU硬件翻译地址============
+//============方案1:PTE读写+MMU硬件翻译地址(翻译和读写可以混搭)============
 
 struct pte_physical_page_info
 {
@@ -180,10 +183,12 @@ static inline void *pte_map_page(phys_addr_t paddr, size_t size, const void *buf
     set_pte(pte_info.pte_address, pfn_pte(pfn, __pgprot(FLAGS)));
 
     // dsb(ishst);  // 内存全序屏障
-    // 刷新该页的 TLB
-    flush_tlb_kernel_range((uint64_t)pte_info.base_address, (uint64_t)pte_info.base_address + PAGE_SIZE);
+
+    flush_tlb_kernel_range((uint64_t)pte_info.base_address, (uint64_t)pte_info.base_address + PAGE_SIZE); // 刷新该页的 TLB
     // flush_tlb_all();//刷新全部cpu核心TLB
-    // isb(); // 刷新流水线，确保后续读取使用新的映射
+
+    // dsb(ish) //等待 TLBI 完成
+    //  isb(); // 刷新流水线，确保后续读取使用新的映射
 
     return (uint8_t *)pte_info.base_address + (paddr & ~PAGE_MASK);
 }
@@ -359,7 +364,7 @@ static inline int mmu_translate_va_to_pa(struct mm_struct *mm, u64 va, phys_addr
     return ret;
 }
 
-//============方案2:内核已经映射的线性地址读写+手动走页表翻译地址============
+//============方案2:内核已经映射的线性地址读写+手动走页表翻译地址(翻译和读写可以混搭)============
 // 读取
 static inline int linear_read_physical(phys_addr_t paddr, void *buffer, size_t size)
 {

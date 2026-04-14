@@ -936,10 +936,7 @@ private: // 私有实现，外部无需关系
         printf("当前进程 PID: %d\n", getpid());
         printf("等待驱动握手...\n");
 
-        while (req->user.load(std::memory_order_acquire) != 1)
-        {
-        };
-        req->user.store(0, std::memory_order_relaxed);
+        IoCommitAndWait();
 
         printf("驱动已经连接\n");
     }
