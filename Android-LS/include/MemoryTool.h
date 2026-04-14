@@ -305,7 +305,7 @@ namespace MemUtils
             return false;
 
         std::string temp(str);
-        return dr.Write(addr, temp.data(), temp.size()) > 0;
+        return dr.Write(addr, temp.data(), temp.size() + 1) > 0;
     }
 
     inline std::string ReadAsPointerString(uintptr_t addr)
@@ -521,7 +521,8 @@ public:
     // 读取指定位当前是否为 1。
     bool get(size_t i) const noexcept
     {
-        return (data()[i / 8] >> (i % 8)) & 1;
+        uint8_t byte = __atomic_load_n(&data()[i / 8], __ATOMIC_RELAXED);
+        return (byte >> (i % 8)) & 1;
     }
 
     // 把指定位设置为 1。

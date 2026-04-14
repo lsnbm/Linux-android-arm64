@@ -4,6 +4,8 @@
 #include <cstdarg>
 #include <cstring>
 #include <functional>
+#include <future>
+#include <mutex>
 #include <vector>
 #include <span>
 
@@ -270,6 +272,8 @@ private:
     std::vector<int> offsetValues_;
     int selectedOffsetIdx_ = 1;
     UIStyle style_;
+    std::vector<std::future<void>> backgroundTasks_;
+    std::mutex backgroundTasksMutex_;
 
     struct Buf
     {
@@ -293,6 +297,48 @@ private:
 
     float S(float v) const { return style_.S(v); }
 
+    void collectFinishedTasks()
+    {
+        std::lock_guard lock(backgroundTasksMutex_);
+        auto it = backgroundTasks_.begin();
+        while (it != backgroundTasks_.end())
+        {
+            if (it->valid() &&
+                it->wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
+            {
+                it->wait();
+                it = backgroundTasks_.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+    }
+
+    template <typename F>
+    void enqueueBackgroundTask(F &&task)
+    {
+        collectFinishedTasks();
+        auto fut = Utils::GlobalPool.push(std::forward<F>(task));
+        std::lock_guard lock(backgroundTasksMutex_);
+        backgroundTasks_.push_back(std::move(fut));
+    }
+
+    void waitForBackgroundTasks()
+    {
+        std::vector<std::future<void>> tasks;
+        {
+            std::lock_guard lock(backgroundTasksMutex_);
+            tasks.swap(backgroundTasks_);
+        }
+        for (auto &task : tasks)
+        {
+            if (task.valid())
+                task.wait();
+        }
+    }
+
     // ---- 扫描逻辑 ----
     void startScan(std::string_view valueStr, bool isFirst)
     {
@@ -306,8 +352,8 @@ private:
         if (mode == Types::FuzzyMode::Pointer)
         {
             type = Types::DataType::I64;
-            Utils::GlobalPool.push([=, this]
-                                   {
+            enqueueBackgroundTask([=, this]
+                                  {
                 try {
                     auto addr = MemUtils::Normalize(std::strtoull(valCopy.c_str(), nullptr, 16));
                     scanner_.scan<int64_t>(pid, static_cast<int64_t>(addr), mode, isFirst, 0.0);
@@ -319,8 +365,8 @@ private:
             if (valCopy.empty())
                 return;
             scanParams_.lastStringPattern = valCopy;
-            Utils::GlobalPool.push([=, this]
-                                   { scanner_.scanString(pid, valCopy, isFirst); });
+            enqueueBackgroundTask([=, this]
+                                  { scanner_.scanString(pid, valCopy, isFirst); });
             return;
         }
         if (mode == Types::FuzzyMode::Range)
@@ -338,8 +384,8 @@ private:
                 return;
             }
         }
-        Utils::GlobalPool.push([=, this]
-                               {
+        enqueueBackgroundTask([=, this]
+                              {
             try {
                 MemUtils::DispatchType(type, [&]<typename T>() {
                     T val;
@@ -356,10 +402,10 @@ private:
         auto p = ptrParams_;
         p.maxOffset = offsetValues_[selectedOffsetIdx_];
         auto pid = dr.GetGlobalPid();
-        Utils::GlobalPool.push([=, this]
-                               { ptrManager_.scan(pid, p.target, p.depth, p.maxOffset, p.useManual,
-                                                  p.manualBase, p.maxOffset, p.useArray, p.arrayBase,
-                                                  p.arrayCount, p.filterModule); });
+        enqueueBackgroundTask([=, this]
+                              { ptrManager_.scan(pid, p.target, p.depth, p.maxOffset, p.useManual,
+                                                 p.manualBase, p.maxOffset, p.useArray, p.arrayBase,
+                                                 p.arrayCount, p.filterModule); });
     }
 
     void copyAddress(uintptr_t addr)
@@ -376,11 +422,20 @@ public:
             offsetValues_.push_back(i);
         }
         snprintf(buf_.page, sizeof(buf_.page), "%d", Config::g_ItemsPerPage.load());
+        if (int pid = dr.GetGlobalPid(); pid > 0)
+            snprintf(buf_.pid, sizeof(buf_.pid), "%d", pid);
         SetInputBlocking(true);
+    }
+
+    ~MainUI()
+    {
+        Config::g_Running = false;
+        waitForBackgroundTasks();
     }
 
     void draw()
     {
+        collectFinishedTasks();
         style_.apply();
         if (state_.floating)
             drawFloatButton();
@@ -476,7 +531,11 @@ private:
             ImGui::SameLine();
             UI::KbBtn(buf_.pid, "PID", {S(85), bh}, buf_.pid, 31, "PID");
             ImGui::SameLine();
-            if (!ImGuiFloatingKeyboard::IsVisible()) dr.SetGlobalPid(atoi(buf_.pid));
+            if (!ImGuiFloatingKeyboard::IsVisible() && buf_.pid[0]) {
+                int pid = atoi(buf_.pid);
+                if (pid > 0 && pid != dr.GetGlobalPid())
+                    dr.SetGlobalPid(pid);
+            }
             ImGui::SameLine();
             if (UI::Btn("退出", {S(50), bh}, Colors::BTN_EXIT)) Config::g_Running = false; }, ImGuiWindowFlags_NoScrollbar);
     }
@@ -701,7 +760,9 @@ private:
         else
         {
             if (UI::Btn("锁定页", {S(70), S(36)}, {0.42f, 0.28f, 0.1f, 1}))
-                lockManager_.lockBatch(data, scanParams_.dataType);
+                lockManager_.lockBatch(data, scanParams_.fuzzyMode == Types::FuzzyMode::Pointer
+                                                 ? Types::DataType::I64
+                                                 : scanParams_.dataType);
         }
         ImGui::SameLine();
 
@@ -871,9 +932,9 @@ private:
         if (ImGui::BeginChild("MemArrows", {aW, cH}, false, ImGuiWindowFlags_NoScrollbar))
         {
             ImGui::PushStyleColor(ImGuiCol_Button, {0.2f, 0.3f, 0.4f, 1});
-            if (ImGui::Button("▲##view", {aW, cH / 2 - S(3)}))
+            if (ImGui::Button("▲##view_up", {aW, cH / 2 - S(3)}))
                 memViewer_.move(-1, step);
-            if (ImGui::Button("▼##view", {aW, cH / 2 - S(3)}))
+            if (ImGui::Button("▼##view_down", {aW, cH / 2 - S(3)}))
                 memViewer_.move(1, step);
             ImGui::PopStyleColor();
         }
@@ -1515,14 +1576,14 @@ private:
                     snprintf(bid, sizeof(bid), "改##v%d", i);
                     if (UI::Btn(bid, {S(42), S(28)}, {0.4f, 0.3f, 0.15f, 1}))
                     {
-                        bpParams_.editingField = i + 32; // fieldId >= 34 for V regs
+                        bpParams_.editingField = 100 + i;
                         snprintf(bpParams_.regEditBuf, sizeof(bpParams_.regEditBuf),
                                  "%016llX%016llX", (unsigned long long)v64[1], (unsigned long long)v64[0]);
                         char title[32];
                         snprintf(title, sizeof(title), "修改 V%d (Hex)", i);
                         ImGuiFloatingKeyboard::Open(bpParams_.regEditBuf, 63, title);
                     }
-                    if (bpParams_.editingField == i + 32 && !ImGuiFloatingKeyboard::IsVisible() && bpParams_.regEditBuf[0])
+                    if (bpParams_.editingField == 100 + i && !ImGuiFloatingKeyboard::IsVisible() && bpParams_.regEditBuf[0])
                     {
                         // 解析128位hex回写 (高16位_低16位 或 低16位)
                         int len = static_cast<int>(strlen(bpParams_.regEditBuf));
@@ -1618,9 +1679,11 @@ private:
         if (state_.showFormat)
         {
             auto fmt = memViewer_.format();
+            auto oldFmt = fmt;
             doSelector("格式", &state_.showFormat, Types::Labels::VIEW_FORMAT.data(),
                        (int)Types::ViewFormat::Count, &fmt);
-            memViewer_.setFormat(fmt);
+            if (fmt != oldFmt)
+                memViewer_.setFormat(fmt);
         }
         if (state_.showBpType)
         {
@@ -1963,36 +2026,50 @@ private:
 // ============================================================================
 int RunMemoryTool()
 {
+    Config::g_Running = true;
 
-    if (RenderVK::init())
-    {
-        if (!Touch_Init())
-        {
-            std::println(stderr, "[错误] 初始化触摸失败。");
-            return 1;
-        }
-    }
-    else
+    if (!RenderVK::init())
     {
         std::println(stderr, "[错误] 初始化图形引擎失败。");
         return 1;
     }
 
-    MainUI ui;
-    while (Config::g_Running)
+    if (!Touch_Init())
     {
-        Touch_UpdateImGui();
-        RenderVK::drawBegin();
-        ui.draw();
-        RenderVK::drawEnd();
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        std::println(stderr, "[错误] 初始化触摸失败。");
+        RenderVK::shutdown();
+        return 1;
+    }
+
+    int rc = 0;
+    try
+    {
+        MainUI ui;
+        while (Config::g_Running)
+        {
+            Touch_UpdateImGui();
+            RenderVK::drawBegin();
+            ui.draw();
+            RenderVK::drawEnd();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+    catch (const std::exception &ex)
+    {
+        std::println(stderr, "[错误] 模式2运行异常: {}", ex.what());
+        rc = 1;
+    }
+    catch (...)
+    {
+        std::println(stderr, "[错误] 模式2运行异常: unknown exception");
+        rc = 1;
     }
 
     Touch_Shutdown();
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     RenderVK::shutdown();
 
-    return 0;
+    return rc;
 }
 
 int main()
