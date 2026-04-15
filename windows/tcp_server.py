@@ -638,11 +638,14 @@ class AndroidBridgeClient:
         precision_token = str(precision).strip().lower() or "f32"
         if precision_token not in {"f32", "f64"}:
             raise ValueError("precision must be one of: f32, f64")
+        field_token = field.strip().lower()
+        if len(field_token) < 2 or field_token[0] not in {"q", "v"}:
+            raise ValueError("field must be q0~q31 or v0~v31")
         return self.call_operation(
             "breakpoint.record.set_float",
             {
                 "index": index,
-                "field": field.strip(),
+                "field": field_token,
                 "value": str(value),
                 "precision": precision_token,
             },

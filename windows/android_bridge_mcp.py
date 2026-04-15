@@ -484,17 +484,17 @@ def android_breakpoint_record_remove(index: int) -> dict[str, Any]:
 
 @mcp.tool()
 def android_breakpoint_record_update(index: int, field: str, value: int | str) -> dict[str, Any]:
-    """Patch one field inside a saved hardware breakpoint record."""
+    """Patch one saved hardware breakpoint register field; backend sets the write mask before writing the field."""
     normalized = f"0x{value:X}" if isinstance(value, int) else str(value).strip()
     return _call_bridge_operation("breakpoint.record.update", {"index": index, "field": field, "value": normalized})
 
 
 @mcp.tool()
 def android_breakpoint_record_set_float(index: int, register_name: str, float_value: float, precision: str = "f32") -> dict[str, Any]:
-    """Set a SIMD/float register (V0~V31) in a breakpoint record to a float value. Enables register modification on next breakpoint hit."""
+    """Set a SIMD/float register (Q0/V0~Q31/V31) in a breakpoint record. Backend sets the write mask before writing."""
     reg = str(register_name).strip().lower()
-    if not reg.startswith("v"):
-        raise ValueError("register_name must be v0~v31")
+    if len(reg) < 2 or reg[0] not in {"q", "v"}:
+        raise ValueError("register_name must be q0~q31 or v0~v31")
     return _call_bridge_operation("breakpoint.record.set_float", {
         "index": index,
         "field": reg,
@@ -798,12 +798,12 @@ TOOL_META: dict[str, dict[str, Any]] = {
     },
     "android_breakpoint_record_update": {
         "group": "Breakpoints",
-        "use_when": "Patch one field in saved breakpoint record.",
-        "example": {"index": 0, "field": "addr", "value": "0x12345678"},
+        "use_when": "Patch one register field in a saved breakpoint record; this enables the write mask for that register.",
+        "example": {"index": 0, "field": "x0", "value": "0x12345678"},
         "parameter_notes": {
             "index": "Valid existing record index.",
-            "field": "Backend-supported record field name.",
-            "value": "Number or hex string depending on field.",
+            "field": "pc/hit_count/lr/sp/pstate/orig_x0/syscallno/fpsr/fpcr/x0~x29/q0~q31, or op.<field>/mask0~mask17 for advanced mask control.",
+            "value": "Number or hex string. Register writes set HWBP_OP_WRITE before updating the struct field.",
         },
         "result_notes": "Requires non-empty records; otherwise index out of range.",
     },

@@ -101,9 +101,6 @@ public:                // 外部初始化
 
 public: // 共有结构体和锁
         // 轻量高性能自旋锁
-#if !defined(__clang__) || !defined(__ANDROID__) || !defined(__aarch64__)
-#error "Driver::SpinLock only supports Clang on Android arm64."
-#endif
     class SpinLock
     {
         std::atomic_flag locked = ATOMIC_FLAG_INIT;
@@ -161,25 +158,130 @@ public: // 共有结构体和锁
         SCOPE_ALL_THREADS    // 全部线程
     } __attribute__((packed));
 
+    // 寄存器索引枚举 (每个索引占用 2 bits)
+    enum hwbp_reg_idx
+    {
+        IDX_PC = 0,
+        IDX_HIT_COUNT,
+        IDX_LR,
+        IDX_SP,
+        IDX_ORIG_X0,
+        IDX_SYSCALLNO,
+        IDX_PSTATE,
+        IDX_X0,
+        IDX_X1,
+        IDX_X2,
+        IDX_X3,
+        IDX_X4,
+        IDX_X5,
+        IDX_X6,
+        IDX_X7,
+        IDX_X8,
+        IDX_X9,
+        IDX_X10,
+        IDX_X11,
+        IDX_X12,
+        IDX_X13,
+        IDX_X14,
+        IDX_X15,
+        IDX_X16,
+        IDX_X17,
+        IDX_X18,
+        IDX_X19,
+        IDX_X20,
+        IDX_X21,
+        IDX_X22,
+        IDX_X23,
+        IDX_X24,
+        IDX_X25,
+        IDX_X26,
+        IDX_X27,
+        IDX_X28,
+        IDX_X29,
+        IDX_FPSR,
+        IDX_FPCR,
+        IDX_Q0,
+        IDX_Q1,
+        IDX_Q2,
+        IDX_Q3,
+        IDX_Q4,
+        IDX_Q5,
+        IDX_Q6,
+        IDX_Q7,
+        IDX_Q8,
+        IDX_Q9,
+        IDX_Q10,
+        IDX_Q11,
+        IDX_Q12,
+        IDX_Q13,
+        IDX_Q14,
+        IDX_Q15,
+        IDX_Q16,
+        IDX_Q17,
+        IDX_Q18,
+        IDX_Q19,
+        IDX_Q20,
+        IDX_Q21,
+        IDX_Q22,
+        IDX_Q23,
+        IDX_Q24,
+        IDX_Q25,
+        IDX_Q26,
+        IDX_Q27,
+        IDX_Q28,
+        IDX_Q29,
+        IDX_Q30,
+        IDX_Q31,
+        MAX_REG_COUNT
+    };
+
+// 寄存器操作类型定义
+#define HWBP_OP_NONE 0x0  // 00: 不操作
+#define HWBP_OP_READ 0x1  // 01: 读
+#define HWBP_OP_WRITE 0x2 // 10: 写
+
+// 设置掩码位的宏，参数1:结构体指针，参数2:寄存器索引，参数3:操作类型
+#define HWBP_SET_MASK(record, reg, op)                          \
+    do                                                          \
+    {                                                           \
+        int byte_idx = (reg) >> 2;                              \
+        int bit_offset = ((reg) & 0x3) << 1;                    \
+        (record)->mask[byte_idx] &= ~(0x3 << bit_offset);       \
+        (record)->mask[byte_idx] |= ((op) & 0x3) << bit_offset; \
+    } while (0)
+
+// 获取掩码位的宏，参数1:结构体指针，参数2:寄存器索引
+#define HWBP_GET_MASK(record, reg) \
+    (((record)->mask[(reg) >> 2] >> (((reg) & 0x3) << 1)) & 0x3)
+
     // 记录单个 PC（触发指令地址）的命中状态
     struct hwbp_record
     {
-        bool rw; // 是读取，还是写入
+        /*
+        一个掩码位，控制所有寄存器的读写行为
+        为了方便掩码位控制对应寄存器，不使用数组存储寄存器了， 方便了：阅读，理解，写代码时不再做 regs[i] / vregs[i] 的索引换算
+        */
+        uint8_t mask[18];
 
         // 通用寄存器
         uint64_t pc;        // 触发断点的汇编指令地址
         uint64_t hit_count; // 该 PC 命中的次数
-        uint64_t regs[30];  // 最新的 X0 ~ X29 寄存器
         uint64_t lr;        // X30
         uint64_t sp;        // Stack Pointer
         uint64_t orig_x0;   // 原始 X0
         uint64_t syscallno; // 系统调用号
         uint64_t pstate;    // 处理器状态
+        uint64_t x0, x1, x2, x3, x4, x5, x6, x7, x8, x9;
+        uint64_t x10, x11, x12, x13, x14, x15, x16, x17, x18, x19;
+        uint64_t x20, x21, x22, x23, x24, x25, x26, x27, x28, x29;
 
         // 浮点/SIMD 寄存器
-        __uint128_t vregs[32]; // V0 ~ V31 (每个128位)
-        uint32_t fpsr;         // 浮点状态寄存器
-        uint32_t fpcr;         // 浮点控制寄存器
+        uint32_t fpsr; // 浮点状态寄存器
+        uint32_t fpcr; // 浮点控制寄存器
+        __uint128_t q0, q1, q2, q3, q4, q5, q6, q7, q8, q9;
+        __uint128_t q10, q11, q12, q13, q14, q15, q16, q17, q18, q19;
+        __uint128_t q20, q21, q22, q23, q24, q25, q26, q27, q28, q29;
+        __uint128_t q30, q31;
 
     } __attribute__((packed));
 
@@ -744,7 +846,7 @@ public: // 外部获取内存信息
             uint64_t segOffset = seg.start - baseAddr;
             uint64_t segSize = seg.end - seg.start;
 
-            // 【优化】尝试一次性读取整个内存段，大幅提高速度
+            // 尝试一次性读取整个内存段，大幅提高速度
             if (KReadProcessMemory(seg.start, image.data() + segOffset, segSize) > 0)
             {
                 totalRead += segSize;
@@ -777,12 +879,12 @@ public: // 外部获取内存信息
             {
                 std::println(stdout, "[*] ELF 虚拟基址: 0x0 (1:1 内存映射展开)");
 
-                // 1. 抹除无效的 Section Headers
+                // 抹除无效的 Section Headers
                 ehdr->e_shoff = 0;
                 ehdr->e_shnum = 0;
                 ehdr->e_shstrndx = SHN_UNDEF;
 
-                // 【安全检查】验证 Phdr 偏移是否在安全范围内
+                // 验证 Phdr 偏移是否在安全范围内
                 if (ehdr->e_phoff + (ehdr->e_phnum * sizeof(Elf64_Phdr)) <= imageSize)
                 {
                     Elf64_Phdr *phdrs = reinterpret_cast<Elf64_Phdr *>(image.data() + ehdr->e_phoff);
@@ -790,7 +892,7 @@ public: // 外部获取内存信息
 
                     std::println(stdout, "[*] 修复 ELF Program Headers ({} 个)...", ehdr->e_phnum);
 
-                    // 2. 修复 Program Headers 映射
+                    // 修复 Program Headers 映射
                     int load_idx = 1;
                     for (int i = 0; i < ehdr->e_phnum; ++i)
                     {

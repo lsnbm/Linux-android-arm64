@@ -321,74 +321,436 @@ namespace
         }
     }
 
-    // 按字段名写入硬件断点记录中的寄存器或元数据。
-    bool assignHwbpRecordField(Driver::hwbp_record &record, std::string_view fieldToken, std::uint64_t value)
+    std::string hwbpRegName(int reg)
     {
-        const std::string token = toLowerAscii(fieldToken);
-        if (token == "pc")
+        if (reg >= Driver::IDX_X0 && reg <= Driver::IDX_X29)
         {
+            return std::format("x{}", reg - Driver::IDX_X0);
+        }
+        if (reg >= Driver::IDX_Q0 && reg <= Driver::IDX_Q31)
+        {
+            return std::format("q{}", reg - Driver::IDX_Q0);
+        }
+        switch (reg)
+        {
+        case Driver::IDX_PC:
+            return "pc";
+        case Driver::IDX_HIT_COUNT:
+            return "hit_count";
+        case Driver::IDX_LR:
+            return "lr";
+        case Driver::IDX_SP:
+            return "sp";
+        case Driver::IDX_ORIG_X0:
+            return "orig_x0";
+        case Driver::IDX_SYSCALLNO:
+            return "syscallno";
+        case Driver::IDX_PSTATE:
+            return "pstate";
+        case Driver::IDX_FPSR:
+            return "fpsr";
+        case Driver::IDX_FPCR:
+            return "fpcr";
+        default:
+            return std::format("idx{}", reg);
+        }
+    }
+
+    const char *hwbpOpName(std::uint8_t op)
+    {
+        switch (op)
+        {
+        case HWBP_OP_READ:
+            return "read";
+        case HWBP_OP_WRITE:
+            return "write";
+        case HWBP_OP_NONE:
+        default:
+            return "none";
+        }
+    }
+
+    void hwbpRequestRead(Driver::hwbp_record &record, int reg)
+    {
+        if (HWBP_GET_MASK(&record, reg) != HWBP_OP_WRITE)
+        {
+            HWBP_SET_MASK(&record, reg, HWBP_OP_READ);
+        }
+    }
+
+    std::uint64_t hwbpGetXField(const Driver::hwbp_record &record, int index)
+    {
+        switch (index)
+        {
+        case 0: return record.x0;
+        case 1: return record.x1;
+        case 2: return record.x2;
+        case 3: return record.x3;
+        case 4: return record.x4;
+        case 5: return record.x5;
+        case 6: return record.x6;
+        case 7: return record.x7;
+        case 8: return record.x8;
+        case 9: return record.x9;
+        case 10: return record.x10;
+        case 11: return record.x11;
+        case 12: return record.x12;
+        case 13: return record.x13;
+        case 14: return record.x14;
+        case 15: return record.x15;
+        case 16: return record.x16;
+        case 17: return record.x17;
+        case 18: return record.x18;
+        case 19: return record.x19;
+        case 20: return record.x20;
+        case 21: return record.x21;
+        case 22: return record.x22;
+        case 23: return record.x23;
+        case 24: return record.x24;
+        case 25: return record.x25;
+        case 26: return record.x26;
+        case 27: return record.x27;
+        case 28: return record.x28;
+        case 29: return record.x29;
+        default: return 0;
+        }
+    }
+
+    void hwbpSetXField(Driver::hwbp_record &record, int index, std::uint64_t value)
+    {
+        switch (index)
+        {
+        case 0: record.x0 = value; break;
+        case 1: record.x1 = value; break;
+        case 2: record.x2 = value; break;
+        case 3: record.x3 = value; break;
+        case 4: record.x4 = value; break;
+        case 5: record.x5 = value; break;
+        case 6: record.x6 = value; break;
+        case 7: record.x7 = value; break;
+        case 8: record.x8 = value; break;
+        case 9: record.x9 = value; break;
+        case 10: record.x10 = value; break;
+        case 11: record.x11 = value; break;
+        case 12: record.x12 = value; break;
+        case 13: record.x13 = value; break;
+        case 14: record.x14 = value; break;
+        case 15: record.x15 = value; break;
+        case 16: record.x16 = value; break;
+        case 17: record.x17 = value; break;
+        case 18: record.x18 = value; break;
+        case 19: record.x19 = value; break;
+        case 20: record.x20 = value; break;
+        case 21: record.x21 = value; break;
+        case 22: record.x22 = value; break;
+        case 23: record.x23 = value; break;
+        case 24: record.x24 = value; break;
+        case 25: record.x25 = value; break;
+        case 26: record.x26 = value; break;
+        case 27: record.x27 = value; break;
+        case 28: record.x28 = value; break;
+        case 29: record.x29 = value; break;
+        default: break;
+        }
+    }
+
+    __uint128_t hwbpGetQField(const Driver::hwbp_record &record, int index)
+    {
+        switch (index)
+        {
+        case 0: return record.q0;
+        case 1: return record.q1;
+        case 2: return record.q2;
+        case 3: return record.q3;
+        case 4: return record.q4;
+        case 5: return record.q5;
+        case 6: return record.q6;
+        case 7: return record.q7;
+        case 8: return record.q8;
+        case 9: return record.q9;
+        case 10: return record.q10;
+        case 11: return record.q11;
+        case 12: return record.q12;
+        case 13: return record.q13;
+        case 14: return record.q14;
+        case 15: return record.q15;
+        case 16: return record.q16;
+        case 17: return record.q17;
+        case 18: return record.q18;
+        case 19: return record.q19;
+        case 20: return record.q20;
+        case 21: return record.q21;
+        case 22: return record.q22;
+        case 23: return record.q23;
+        case 24: return record.q24;
+        case 25: return record.q25;
+        case 26: return record.q26;
+        case 27: return record.q27;
+        case 28: return record.q28;
+        case 29: return record.q29;
+        case 30: return record.q30;
+        case 31: return record.q31;
+        default: return 0;
+        }
+    }
+
+    void hwbpSetQField(Driver::hwbp_record &record, int index, __uint128_t value)
+    {
+        switch (index)
+        {
+        case 0: record.q0 = value; break;
+        case 1: record.q1 = value; break;
+        case 2: record.q2 = value; break;
+        case 3: record.q3 = value; break;
+        case 4: record.q4 = value; break;
+        case 5: record.q5 = value; break;
+        case 6: record.q6 = value; break;
+        case 7: record.q7 = value; break;
+        case 8: record.q8 = value; break;
+        case 9: record.q9 = value; break;
+        case 10: record.q10 = value; break;
+        case 11: record.q11 = value; break;
+        case 12: record.q12 = value; break;
+        case 13: record.q13 = value; break;
+        case 14: record.q14 = value; break;
+        case 15: record.q15 = value; break;
+        case 16: record.q16 = value; break;
+        case 17: record.q17 = value; break;
+        case 18: record.q18 = value; break;
+        case 19: record.q19 = value; break;
+        case 20: record.q20 = value; break;
+        case 21: record.q21 = value; break;
+        case 22: record.q22 = value; break;
+        case 23: record.q23 = value; break;
+        case 24: record.q24 = value; break;
+        case 25: record.q25 = value; break;
+        case 26: record.q26 = value; break;
+        case 27: record.q27 = value; break;
+        case 28: record.q28 = value; break;
+        case 29: record.q29 = value; break;
+        case 30: record.q30 = value; break;
+        case 31: record.q31 = value; break;
+        default: break;
+        }
+    }
+
+    std::uint64_t hwbpReadRegisterValue(Driver::hwbp_record &record, int reg)
+    {
+        hwbpRequestRead(record, reg);
+        switch (reg)
+        {
+        case Driver::IDX_PC:
+            return record.pc;
+        case Driver::IDX_HIT_COUNT:
+            return record.hit_count;
+        case Driver::IDX_LR:
+            return record.lr;
+        case Driver::IDX_SP:
+            return record.sp;
+        case Driver::IDX_ORIG_X0:
+            return record.orig_x0;
+        case Driver::IDX_SYSCALLNO:
+            return record.syscallno;
+        case Driver::IDX_PSTATE:
+            return record.pstate;
+        case Driver::IDX_FPSR:
+            return record.fpsr;
+        case Driver::IDX_FPCR:
+            return record.fpcr;
+        default:
+            if (reg >= Driver::IDX_X0 && reg <= Driver::IDX_X29)
+            {
+                return hwbpGetXField(record, reg - Driver::IDX_X0);
+            }
+            return 0;
+        }
+    }
+
+    bool hwbpWriteRegisterValue(Driver::hwbp_record &record, int reg, std::uint64_t value)
+    {
+        HWBP_SET_MASK(&record, reg, HWBP_OP_WRITE);
+        switch (reg)
+        {
+        case Driver::IDX_PC:
             record.pc = value;
             return true;
+        case Driver::IDX_HIT_COUNT:
+            record.hit_count = value;
+            return true;
+        case Driver::IDX_LR:
+            record.lr = value;
+            return true;
+        case Driver::IDX_SP:
+            record.sp = value;
+            return true;
+        case Driver::IDX_ORIG_X0:
+            record.orig_x0 = value;
+            return true;
+        case Driver::IDX_SYSCALLNO:
+            record.syscallno = value;
+            return true;
+        case Driver::IDX_PSTATE:
+            record.pstate = value;
+            return true;
+        case Driver::IDX_FPSR:
+            record.fpsr = static_cast<std::uint32_t>(value);
+            return true;
+        case Driver::IDX_FPCR:
+            record.fpcr = static_cast<std::uint32_t>(value);
+            return true;
+        default:
+            if (reg >= Driver::IDX_X0 && reg <= Driver::IDX_X29)
+            {
+                hwbpSetXField(record, reg - Driver::IDX_X0, value);
+                return true;
+            }
+            if (reg >= Driver::IDX_Q0 && reg <= Driver::IDX_Q31)
+            {
+                hwbpSetQField(record, reg - Driver::IDX_Q0, static_cast<__uint128_t>(value));
+                return true;
+            }
+            return false;
+        }
+    }
+
+    std::uint64_t hwbpReadXField(Driver::hwbp_record &record, int index)
+    {
+        hwbpRequestRead(record, Driver::IDX_X0 + index);
+        return hwbpGetXField(record, index);
+    }
+
+    __uint128_t hwbpReadQField(Driver::hwbp_record &record, int index)
+    {
+        hwbpRequestRead(record, Driver::IDX_Q0 + index);
+        return hwbpGetQField(record, index);
+    }
+
+    void hwbpWriteQField(Driver::hwbp_record &record, int index, __uint128_t value)
+    {
+        HWBP_SET_MASK(&record, Driver::IDX_Q0 + index, HWBP_OP_WRITE);
+        hwbpSetQField(record, index, value);
+    }
+
+    std::optional<int> hwbpRegIndexFromToken(std::string_view fieldToken)
+    {
+        std::string token = toLowerAscii(fieldToken);
+        if (token.starts_with("op."))
+        {
+            token.erase(0, 3);
+        }
+        else if (token.starts_with("mask."))
+        {
+            token.erase(0, 5);
+        }
+
+        if (token == "pc")
+        {
+            return Driver::IDX_PC;
+        }
+        if (token == "hit_count")
+        {
+            return Driver::IDX_HIT_COUNT;
         }
         if (token == "lr")
         {
-            record.lr = value;
-            return true;
+            return Driver::IDX_LR;
         }
         if (token == "sp")
         {
-            record.sp = value;
-            return true;
+            return Driver::IDX_SP;
         }
         if (token == "pstate")
         {
-            record.pstate = value;
-            return true;
+            return Driver::IDX_PSTATE;
         }
         if (token == "orig_x0")
         {
-            record.orig_x0 = value;
-            return true;
+            return Driver::IDX_ORIG_X0;
         }
         if (token == "syscallno")
         {
-            record.syscallno = value;
-            return true;
+            return Driver::IDX_SYSCALLNO;
         }
         if (token == "fpsr")
         {
-            record.fpsr = static_cast<std::uint32_t>(value);
-            return true;
+            return Driver::IDX_FPSR;
         }
         if (token == "fpcr")
         {
-            record.fpcr = static_cast<std::uint32_t>(value);
-            return true;
-        }
-        if (token == "rw")
-        {
-            record.rw = value != 0;
-            return true;
+            return Driver::IDX_FPCR;
         }
         if (token.size() >= 2 && token[0] == 'x')
         {
             const auto regIndex = parseInt(token.substr(1));
             if (regIndex.has_value() && *regIndex >= 0 && *regIndex < 30)
             {
-                record.regs[*regIndex] = value;
-                return true;
+                return Driver::IDX_X0 + *regIndex;
             }
         }
-        if (token.size() >= 2 && token[0] == 'v')
+        if (token.size() >= 2 && (token[0] == 'v' || token[0] == 'q'))
         {
             auto regIndex = parseInt(token.substr(1));
             if (regIndex.has_value() && *regIndex >= 0 && *regIndex < 32)
             {
-                record.vregs[*regIndex] = static_cast<__uint128_t>(value);
-                return true;
+                return Driver::IDX_Q0 + *regIndex;
             }
         }
-        return false;
+        return std::nullopt;
+    }
+
+    std::optional<int> hwbpMaskByteIndexFromToken(std::string_view fieldToken)
+    {
+        std::string token = toLowerAscii(fieldToken);
+        if (!token.starts_with("mask"))
+        {
+            return std::nullopt;
+        }
+
+        token.erase(0, 4);
+        if (!token.empty() && (token.front() == '.' || token.front() == '_' || token.front() == '['))
+        {
+            token.erase(0, 1);
+        }
+        if (!token.empty() && token.back() == ']')
+        {
+            token.pop_back();
+        }
+
+        const auto index = parseInt(token);
+        if (!index.has_value() || *index < 0 || *index >= 18)
+        {
+            return std::nullopt;
+        }
+        return *index;
+    }
+
+    bool assignHwbpRecordField(Driver::hwbp_record &record, std::string_view fieldToken, std::uint64_t value)
+    {
+        const std::string token = toLowerAscii(fieldToken);
+        if (const auto maskIndex = hwbpMaskByteIndexFromToken(token); maskIndex.has_value())
+        {
+            record.mask[*maskIndex] = static_cast<std::uint8_t>(value & 0xFF);
+            return true;
+        }
+
+        if (token.starts_with("op.") || token.starts_with("mask."))
+        {
+            const auto regIndex = hwbpRegIndexFromToken(token);
+            if (!regIndex.has_value() || value > HWBP_OP_WRITE)
+            {
+                return false;
+            }
+            HWBP_SET_MASK(&record, *regIndex, static_cast<std::uint8_t>(value));
+            return true;
+        }
+
+        const auto regIndex = hwbpRegIndexFromToken(token);
+        if (!regIndex.has_value())
+        {
+            return false;
+        }
+
+        return hwbpWriteRegisterValue(record, *regIndex, value);
     }
 
     // 按模板类型解析扫描输入值。
@@ -623,31 +985,74 @@ namespace
 
         for (int i = 0; i < recordCount; ++i)
         {
-            const auto &rec = info.records[i];
+            auto &rec = const_cast<Driver::hwbp_record &>(info.records[i]);
             json item;
             item["index"] = i;
-            item["rw"] = rec.rw ? "write" : "read";
-            item["pc"] = rec.pc;
-            item["pc_hex"] = std::format("0x{:X}", static_cast<std::uint64_t>(rec.pc));
-            item["hit_count"] = rec.hit_count;
-            item["lr"] = rec.lr;
-            item["sp"] = rec.sp;
-            item["orig_x0"] = rec.orig_x0;
-            item["syscallno"] = rec.syscallno;
-            item["pstate"] = rec.pstate;
-            item["regs"] = json::array();
-            for (const auto reg : rec.regs)
+            for (int reg = Driver::IDX_PC; reg < Driver::MAX_REG_COUNT; ++reg)
             {
-                item["regs"].push_back(reg);
+                hwbpRequestRead(rec, reg);
+            }
+            const auto pc = hwbpReadRegisterValue(rec, Driver::IDX_PC);
+            const auto hitCount = hwbpReadRegisterValue(rec, Driver::IDX_HIT_COUNT);
+            const auto lr = hwbpReadRegisterValue(rec, Driver::IDX_LR);
+            const auto sp = hwbpReadRegisterValue(rec, Driver::IDX_SP);
+            const auto origX0 = hwbpReadRegisterValue(rec, Driver::IDX_ORIG_X0);
+            const auto syscallNo = hwbpReadRegisterValue(rec, Driver::IDX_SYSCALLNO);
+            const auto pstate = hwbpReadRegisterValue(rec, Driver::IDX_PSTATE);
+            const auto fpsr = hwbpReadRegisterValue(rec, Driver::IDX_FPSR);
+            const auto fpcr = hwbpReadRegisterValue(rec, Driver::IDX_FPCR);
+            item["mask"] = json::array();
+            for (int m = 0; m < 18; ++m)
+            {
+                item["mask"].push_back(rec.mask[m]);
+            }
+            item["ops"] = json::object();
+            item["op_values"] = json::object();
+            int readOps = 0;
+            int writeOps = 0;
+            for (int reg = Driver::IDX_PC; reg < Driver::MAX_REG_COUNT; ++reg)
+            {
+                const auto op = static_cast<std::uint8_t>(HWBP_GET_MASK(&rec, reg));
+                const auto name = hwbpRegName(reg);
+                item["ops"][name] = hwbpOpName(op);
+                item["op_values"][name] = op;
+                if (op == HWBP_OP_READ)
+                {
+                    ++readOps;
+                }
+                else if (op == HWBP_OP_WRITE)
+                {
+                    ++writeOps;
+                }
+            }
+            item["read_op_count"] = readOps;
+            item["write_op_count"] = writeOps;
+            item["rw"] = writeOps > 0 ? "write" : (readOps > 0 ? "read" : "none");
+            item["pc"] = pc;
+            item["pc_hex"] = std::format("0x{:X}", static_cast<std::uint64_t>(pc));
+            item["hit_count"] = hitCount;
+            item["lr"] = lr;
+            item["sp"] = sp;
+            item["orig_x0"] = origX0;
+            item["syscallno"] = syscallNo;
+            item["pstate"] = pstate;
+            item["regs"] = json::array();
+            for (int reg = 0; reg < 30; ++reg)
+            {
+                item["regs"].push_back(hwbpReadXField(rec, reg));
             }
             item["vregs"] = json::array();
-            for (const auto &vreg : rec.vregs)
+            item["qregs"] = json::array();
+            for (int reg = 0; reg < 32; ++reg)
             {
-                item["vregs"].push_back({{"lo", static_cast<std::uint64_t>(vreg)},
-                                         {"hi", static_cast<std::uint64_t>(vreg >> 64)}});
+                const auto qreg = hwbpReadQField(rec, reg);
+                json qitem = {{"lo", static_cast<std::uint64_t>(qreg)},
+                              {"hi", static_cast<std::uint64_t>(qreg >> 64)}};
+                item["vregs"].push_back(qitem);
+                item["qregs"].push_back(std::move(qitem));
             }
-            item["fpsr"] = rec.fpsr;
-            item["fpcr"] = rec.fpcr;
+            item["fpsr"] = fpsr;
+            item["fpcr"] = fpcr;
             root["records"].push_back(std::move(item));
         }
 
@@ -874,11 +1279,10 @@ namespace
             auto copy = info.records[*index];
             if (!assignHwbpRecordField(copy, tokens[2], *value))
             {
-                return err("字段无效，支持: pc/lr/sp/pstate/orig_x0/syscallno/fpsr/fpcr/rw/x0~x29/v0~v31");
+                return err("字段无效，支持: pc/hit_count/lr/sp/pstate/orig_x0/syscallno/fpsr/fpcr/x0~x29/q0~q31/op.<field>/mask0~mask17");
             }
 
-            copy.rw = true;
-            const_cast<Driver::hwbp_record &>(dr.GetHwbpInfoRef().records[*index]) = copy;
+            const_cast<Driver::hwbp_record &>(info.records[*index]) = copy;
             return ok(std::format("index={} field={} value=0x{:X}", *index, tokens[2], *value));
         }
 
@@ -896,15 +1300,15 @@ namespace
             }
 
             const std::string field = toLowerAscii(tokens[2]);
-            if (field.size() < 2 || field[0] != 'v')
+            if (field.size() < 2 || (field[0] != 'v' && field[0] != 'q'))
             {
-                return err("字段必须是 v0~v31");
+                return err("字段必须是 q0~q31");
             }
 
             auto regIndex = parseInt(field.substr(1));
             if (!regIndex.has_value() || *regIndex < 0 || *regIndex >= 32)
             {
-                return err("字段必须是 v0~v31");
+                return err("字段必须是 q0~q31");
             }
 
             float fval = 0.0f;
@@ -927,10 +1331,9 @@ namespace
             auto copy = info.records[*index];
             uint32_t bits;
             std::memcpy(&bits, &fval, sizeof(bits));
-            copy.vregs[*regIndex] = static_cast<__uint128_t>(bits);
-            copy.rw = true;
-            const_cast<Driver::hwbp_record &>(dr.GetHwbpInfoRef().records[*index]) = copy;
-            return ok(std::format("index={} v{}={} (0x{:08X})", *index, *regIndex, fval, bits));
+            hwbpWriteQField(copy, *regIndex, static_cast<__uint128_t>(bits));
+            const_cast<Driver::hwbp_record &>(info.records[*index]) = copy;
+            return ok(std::format("index={} q{}={} (0x{:08X})", *index, *regIndex, fval, bits));
         }
 
         if (command == "hwbp.record.set.f64")
@@ -947,15 +1350,15 @@ namespace
             }
 
             const std::string field = toLowerAscii(tokens[2]);
-            if (field.size() < 2 || field[0] != 'v')
+            if (field.size() < 2 || (field[0] != 'v' && field[0] != 'q'))
             {
-                return err("字段必须是 v0~v31");
+                return err("字段必须是 q0~q31");
             }
 
             auto regIndex = parseInt(field.substr(1));
             if (!regIndex.has_value() || *regIndex < 0 || *regIndex >= 32)
             {
-                return err("字段必须是 v0~v31");
+                return err("字段必须是 q0~q31");
             }
 
             double fval = 0.0;
@@ -978,10 +1381,9 @@ namespace
             auto copy = info.records[*index];
             uint64_t bits;
             std::memcpy(&bits, &fval, sizeof(bits));
-            copy.vregs[*regIndex] = static_cast<__uint128_t>(bits);
-            copy.rw = true;
-            const_cast<Driver::hwbp_record &>(dr.GetHwbpInfoRef().records[*index]) = copy;
-            return ok(std::format("index={} v{}={} (0x{:016X})", *index, *regIndex, fval, bits));
+            hwbpWriteQField(copy, *regIndex, static_cast<__uint128_t>(bits));
+            const_cast<Driver::hwbp_record &>(info.records[*index]) = copy;
+            return ok(std::format("index={} q{}={} (0x{:016X})", *index, *regIndex, fval, bits));
         }
 
         if (command == "sig.scan.addr")
