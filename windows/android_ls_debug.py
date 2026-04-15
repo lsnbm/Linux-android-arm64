@@ -906,11 +906,6 @@ class TcpTestWindow(QWidget):
         self.pointer_manual_base_input = QLineEdit("0x0")
         self.pointer_manual_base_input.setMaximumWidth(160)
         row3.addWidget(self.pointer_manual_base_input)
-        row3.addWidget(QLabel("手动范围"))
-        self.pointer_manual_offset_input = QLineEdit("8192")
-        self.pointer_manual_offset_input.setMaximumWidth(100)
-        row3.addWidget(self.pointer_manual_offset_input)
-
         row3.addWidget(QLabel("数组基址"))
         self.pointer_array_base_input = QLineEdit("0x0")
         self.pointer_array_base_input.setMaximumWidth(160)
@@ -2755,18 +2750,15 @@ class TcpTestWindow(QWidget):
 
         if mode == "manual":
             manual_base_text = self.pointer_manual_base_input.text().strip()
-            manual_offset_text = self.pointer_manual_offset_input.text().strip()
             try:
                 manual_base = int(manual_base_text, 0)
-                manual_offset = int(manual_offset_text, 10)
             except ValueError:
-                QMessageBox.warning(self, "输入提示", "手动基址或手动范围格式无效。")
+                QMessageBox.warning(self, "输入提示", "手动基址格式无效。")
                 return None
-            if manual_base <= 0 or manual_offset <= 0:
-                QMessageBox.warning(self, "输入提示", "手动基址和手动范围必须大于 0。")
+            if manual_base <= 0:
+                QMessageBox.warning(self, "输入提示", "手动基址必须大于 0。")
                 return None
             params["manual_base"] = f"0x{manual_base:X}"
-            params["manual_max_offset"] = str(manual_offset)
         elif mode == "array":
             array_base_text = self.pointer_array_base_input.text().strip()
             array_count_text = self.pointer_array_count_input.text().strip()

@@ -659,7 +659,6 @@ class AndroidBridgeClient:
         *,
         mode: str = "module",
         manual_base: int | str | None = None,
-        manual_max_offset: int | None = None,
         array_base: int | str | None = None,
         array_count: int | None = None,
         module_filter: str = "",

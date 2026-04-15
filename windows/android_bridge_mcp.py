@@ -352,6 +352,69 @@ def android_memory_scan_results(start: int = 0, count: int = 100, value_type: st
 
 
 @mcp.tool()
+def android_pointer_status() -> dict[str, Any]:
+    """Read current pointer scan task state and preserved result count."""
+    return _call_bridge_operation("pointer.status")
+
+
+@mcp.tool()
+def android_pointer_scan(
+    target: int | str,
+    depth: int,
+    max_offset: int,
+    mode: str = "module",
+    manual_base: int | str | None = None,
+    array_base: int | str | None = None,
+    array_count: int | None = None,
+    module_filter: str = "",
+) -> dict[str, Any]:
+    """Start a pointer scan using module/manual/array base mode."""
+    mode_token = str(mode).strip().lower() or "module"
+    if mode_token not in {"module", "manual", "array"}:
+        raise ValueError("mode must be one of: module, manual, array")
+    if depth <= 0 or depth > 16:
+        raise ValueError("depth must be in 1..16")
+    if max_offset <= 0:
+        raise ValueError("max_offset must be greater than 0")
+
+    params: dict[str, Any] = {
+        "target": format_address(target),
+        "depth": depth,
+        "max_offset": max_offset,
+    }
+    if mode_token != "module":
+        params["mode"] = mode_token
+    if module_filter.strip():
+        params["module_filter"] = module_filter
+
+    if mode_token == "manual":
+        if manual_base is None:
+            raise ValueError("manual mode requires manual_base")
+        params["manual_base"] = format_address(manual_base)
+    elif mode_token == "array":
+        if array_base is None or array_count is None:
+            raise ValueError("array mode requires array_base and array_count")
+        if array_count <= 0:
+            raise ValueError("array_count must be greater than 0")
+        params["array_base"] = format_address(array_base)
+        params["array_count"] = array_count
+
+    return _call_bridge_operation("pointer.scan", params)
+
+
+@mcp.tool()
+def android_pointer_merge() -> dict[str, Any]:
+    """Merge all saved pointer bin files by keeping chains with matching offset structure."""
+    return _call_bridge_operation("pointer.merge")
+
+
+@mcp.tool()
+def android_pointer_export() -> dict[str, Any]:
+    """Export the merged pointer bin data into a human-readable text file."""
+    return _call_bridge_operation("pointer.export")
+
+
+@mcp.tool()
 def android_memory_view_open(address: int | str, view_format: str = "hex") -> dict[str, Any]:
     """Open the memory viewer at an address. Use view_format='disasm' to request disassembly instead of raw hex bytes."""
     return _call_bridge_operation(
@@ -621,6 +684,43 @@ TOOL_META: dict[str, dict[str, Any]] = {
             "value_type": "How to render values in output.",
         },
         "result_notes": "Returns page items and total_count.",
+    },
+    "android_pointer_status": {
+        "group": "Pointer Scan",
+        "use_when": "Check whether a pointer scan is running and how many chains are currently preserved.",
+        "example": {},
+        "parameter_notes": {},
+        "result_notes": "Returns scanning/progress/count in pairs.",
+    },
+    "android_pointer_scan": {
+        "group": "Pointer Scan",
+        "use_when": "Start pointer-chain scan in module/manual/array mode using shared depth and max_offset.",
+        "example": {"target": "0x12345678", "depth": 5, "max_offset": 4096, "mode": "module"},
+        "parameter_notes": {
+            "target": "Target address to backtrace pointers from.",
+            "depth": "Pointer depth in 1..16.",
+            "max_offset": "Shared maximum offset for all three pointer scan modes.",
+            "mode": "module/manual/array.",
+            "manual_base": "Required only when mode=manual.",
+            "array_base": "Required only when mode=array.",
+            "array_count": "Required only when mode=array; must be > 0.",
+            "module_filter": "Optional module substring filter. Effective for module mode.",
+        },
+        "result_notes": "Starts the pointer scan and stores results into Pointer.bin / Pointer_N.bin.",
+    },
+    "android_pointer_merge": {
+        "group": "Pointer Scan",
+        "use_when": "Intersect multiple Pointer*.bin files and keep only chains with matching offset structure.",
+        "example": {},
+        "parameter_notes": {},
+        "result_notes": "Produces merged Pointer.bin on success.",
+    },
+    "android_pointer_export": {
+        "group": "Pointer Scan",
+        "use_when": "Render saved pointer bin results into human-readable text after scan or merge.",
+        "example": {},
+        "parameter_notes": {},
+        "result_notes": "Exports pointer text output from the current bin data.",
     },
     "android_memory_view_open": {
         "group": "Memory View",
