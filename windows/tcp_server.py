@@ -679,10 +679,9 @@ class AndroidBridgeClient:
             params["module_filter"] = module_filter
 
         if mode_token == "manual":
-            if manual_base is None or manual_max_offset is None:
-                raise ValueError("manual mode requires manual_base and manual_max_offset")
+            if manual_base is None:
+                raise ValueError("manual mode requires manual_base")
             params["manual_base"] = format_address(manual_base)
-            params["manual_max_offset"] = manual_max_offset
         elif mode_token == "array":
             if array_base is None or array_count is None:
                 raise ValueError("array mode requires array_base and array_count")
