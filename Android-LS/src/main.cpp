@@ -404,7 +404,7 @@ private:
         auto pid = dr.GetGlobalPid();
         enqueueBackgroundTask([=, this]
                               { ptrManager_.scan(pid, p.target, p.depth, p.maxOffset, p.useManual,
-                                                 p.manualBase, p.maxOffset, p.useArray, p.arrayBase,
+                                                 p.manualBase, p.useArray, p.arrayBase,
                                                  p.arrayCount, p.filterModule); });
     }
 

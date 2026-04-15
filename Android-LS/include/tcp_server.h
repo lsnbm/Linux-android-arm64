@@ -1465,11 +1465,11 @@ namespace
             const bool useManual = (command == "pointer.scan.manual");
             const bool useArray = (command == "pointer.scan.array");
 
-            const std::size_t minTokenCount = useManual || useArray ? 6 : 4;
+            const std::size_t minTokenCount = useManual ? 5 : (useArray ? 6 : 4);
             if (tokens.size() < minTokenCount)
             {
                 if (useManual)
-                    return err("用法: pointer.scan.manual <target> <depth> <maxOffset> <manualBase> <manualMaxOffset> [模块过滤]");
+                    return err("用法: pointer.scan.manual <target> <depth> <maxOffset> <manualBase> [模块过滤]");
                 if (useArray)
                     return err("用法: pointer.scan.array <target> <depth> <maxOffset> <arrayBase> <arrayCount> [模块过滤]");
                 return err("用法: pointer.scan <target> <depth> <maxOffset> [模块过滤]");
@@ -1498,7 +1498,6 @@ namespace
             }
 
             std::uint64_t manualBase = 0;
-            int manualMaxOffset = 0;
             std::uint64_t arrayBase = 0;
             std::size_t arrayCount = 0;
             std::size_t filterStart = 4;
@@ -1506,14 +1505,19 @@ namespace
             if (useManual)
             {
                 const auto manualBaseParsed = parseUInt64(tokens[4]);
-                const auto manualMaxOffsetParsed = parseInt(tokens[5]);
-                if (!manualBaseParsed.has_value() || !manualMaxOffsetParsed.has_value() || *manualMaxOffsetParsed <= 0)
+                const auto legacyManualMaxOffset = (tokens.size() > 5) ? parseInt(tokens[5]) : std::optional<int>{};
+                if (!manualBaseParsed.has_value())
                 {
-                    return err("manualBase/manualMaxOffset 参数无效");
+                    return err("manualBase 参数无效");
                 }
                 manualBase = *manualBaseParsed;
-                manualMaxOffset = *manualMaxOffsetParsed;
-                filterStart = 6;
+                filterStart = 5;
+                if (legacyManualMaxOffset.has_value())
+                {
+                    if (*legacyManualMaxOffset <= 0)
+                        return err("manualMaxOffset invalid");
+                    filterStart = 6;
+                }
             }
             else if (useArray)
             {
@@ -1543,7 +1547,6 @@ namespace
                 *maxOffset,
                 useManual,
                 static_cast<uintptr_t>(manualBase),
-                manualMaxOffset,
                 useArray,
                 static_cast<uintptr_t>(arrayBase),
                 arrayCount,
@@ -2294,17 +2297,13 @@ namespace
             if (mode == "manual")
             {
                 const auto manualBase = requireString("manual_base", "manual_base");
-                const auto manualMaxOffset = requireString("manual_max_offset", "manual_max_offset");
                 if (std::holds_alternative<json>(manualBase))
                     return std::get<json>(manualBase);
-                if (std::holds_alternative<json>(manualMaxOffset))
-                    return std::get<json>(manualMaxOffset);
                 textCommand = "pointer.scan.manual";
                 appendCommandToken(textCommand, std::get<std::string>(target));
                 appendCommandToken(textCommand, std::get<std::string>(depth));
                 appendCommandToken(textCommand, std::get<std::string>(maxOffset));
                 appendCommandToken(textCommand, std::get<std::string>(manualBase));
-                appendCommandToken(textCommand, std::get<std::string>(manualMaxOffset));
             }
             else if (mode == "array")
             {

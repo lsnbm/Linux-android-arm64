@@ -36,6 +36,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <errno.h>
 #include <numeric>
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -1678,19 +1679,32 @@ private:
     size_t chainCount_ = 0;
 
     // 生成可用的指针结果文件名。
-    static std::string NextBinName()
+    static FILE *CreateUniqueBinFile(std::string &path)
     {
-        char path[256];
-        snprintf(path, sizeof(path), "Pointer.bin");
-        if (access(path, F_OK) != 0)
-            return path;
-        for (int i = 1; i < 9999; i++)
+        char candidate[256];
+        for (int i = 0; i < 9999; ++i)
         {
-            snprintf(path, sizeof(path), "Pointer_%d.bin", i);
-            if (access(path, F_OK) != 0)
-                return path;
+            if (i == 0)
+                snprintf(candidate, sizeof(candidate), "Pointer.bin");
+            else
+                snprintf(candidate, sizeof(candidate), "Pointer_%d.bin", i);
+
+            int fd = open(candidate, O_CREAT | O_EXCL | O_RDWR, 0644);
+            if (fd >= 0)
+            {
+                path = candidate;
+                FILE *file = fdopen(fd, "w+b");
+                if (file)
+                    return file;
+                close(fd);
+                remove(candidate);
+                return nullptr;
+            }
+
+            if (errno != EEXIST)
+                return nullptr;
         }
-        return "Pointer.bin";
+        return nullptr;
     }
 
     template <typename F>
@@ -1870,69 +1884,39 @@ private:
     }
 
     // 按组合基址策略过滤并归档指针。
-    void filter_to_ranges_combined(std::vector<std::vector<PtrDir>> &dirs, std::vector<PtrRange> &ranges, std::vector<PtrData *> &curr, int level, BaseMode scanMode, const std::string &filterModule, uintptr_t manualBase, size_t manualMaxOffset, uintptr_t arrayBase, const std::vector<std::pair<size_t, uintptr_t>> &arrayEntries, size_t maxOffset)
+    void filter_to_ranges_combined(std::vector<std::vector<PtrDir>> &dirs, std::vector<PtrRange> &ranges, std::vector<PtrData *> &curr, int level, BaseMode scanMode, const std::string &filterModule, uintptr_t manualBase, uintptr_t arrayBase, const std::vector<std::pair<size_t, uintptr_t>> &arrayEntries, size_t maxOffset)
     {
         std::unordered_set<PtrData *> matched;
-        const auto &info = dr.GetMemoryInfoRef();
-
         struct FlatSeg
         {
             uintptr_t start, end;
             int modIdx, segIdx;
         };
+
         std::vector<FlatSeg> flatSegs;
-        for (int mi = 0; mi < info.module_count; ++mi)
+        if (scanMode == BaseMode::Module)
         {
-            const auto &mod = info.modules[mi];
-            std::string_view fullPath(mod.name);
-            if (auto slash = fullPath.rfind('/'); slash != std::string_view::npos)
-                fullPath = fullPath.substr(slash + 1);
-
-            if (!filterModule.empty() && fullPath.find(filterModule) == std::string_view::npos)
-                continue;
-
-            for (int si = 0; si < mod.seg_count; ++si)
+            const auto &info = dr.GetMemoryInfoRef();
+            for (int mi = 0; mi < info.module_count; ++mi)
             {
+                const auto &mod = info.modules[mi];
+                std::string_view fullPath(mod.name);
+                if (auto slash = fullPath.rfind('/'); slash != std::string_view::npos)
+                    fullPath = fullPath.substr(slash + 1);
 
-                flatSegs.push_back({MemUtils::Normalize(mod.segs[si].start),
-                                    MemUtils::Normalize(mod.segs[si].end),
-                                    mi, si});
-            }
-        }
-        std::sort(flatSegs.begin(), flatSegs.end(), [](const auto &a, const auto &b)
-                  { return a.start < b.start; });
+                if (!filterModule.empty() && fullPath.find(filterModule) == std::string_view::npos)
+                    continue;
 
-        std::map<std::pair<int, int>, PtrRange> modRangeMap;
-
-        for (auto *p : curr)
-        {
-            uintptr_t addr = MemUtils::Normalize(p->address);
-            auto it = std::upper_bound(flatSegs.begin(), flatSegs.end(), addr, [](uintptr_t a, const FlatSeg &b)
-                                       { return a < b.start; });
-            if (it != flatSegs.begin())
-            {
-                auto prev = std::prev(it);
-                if (addr >= prev->start && addr < prev->end)
+                for (int si = 0; si < mod.seg_count; ++si)
                 {
-                    if (matched.insert(p).second)
-                    {
-                        auto &pr = modRangeMap[{prev->modIdx, prev->segIdx}];
-                        if (pr.results.empty())
-                        {
-                            pr.level = level;
-                            pr.moduleIdx = prev->modIdx;
-                            pr.segIdx = prev->segIdx;
-                            pr.isManual = false;
-                            pr.isArray = false;
-                        }
-                        pr.results.emplace_back(addr, MemUtils::Normalize(p->value), 0u, 1u);
-                    }
+                    flatSegs.push_back({MemUtils::Normalize(mod.segs[si].start),
+                                        MemUtils::Normalize(mod.segs[si].end),
+                                        mi, si});
                 }
             }
+            std::sort(flatSegs.begin(), flatSegs.end(), [](const auto &a, const auto &b)
+                      { return a.start < b.start; });
         }
-
-        for (auto &[k, v] : modRangeMap)
-            ranges.push_back(std::move(v));
 
         if (scanMode == BaseMode::Manual && manualBase)
         {
@@ -1947,7 +1931,7 @@ private:
             for (auto *p : curr)
             {
                 uintptr_t addr = MemUtils::Normalize(p->address);
-                if (addr >= normManualBase && (addr - normManualBase) <= manualMaxOffset)
+                if (addr >= normManualBase && (addr - normManualBase) <= maxOffset)
                 {
                     if (matched.insert(p).second)
                         pr.results.emplace_back(addr, MemUtils::Normalize(p->value), 0u, 1u);
@@ -1957,11 +1941,10 @@ private:
                 ranges.push_back(std::move(pr));
         }
 
-        if (scanMode == BaseMode::Array && !arrayEntries.empty())
+        if (scanMode == BaseMode::Array)
         {
             for (const auto &[idx, objAddr] : arrayEntries)
             {
-
                 PtrRange pr;
                 pr.level = level;
                 pr.moduleIdx = -1;
@@ -1982,6 +1965,40 @@ private:
                 if (!pr.results.empty())
                     ranges.push_back(std::move(pr));
             }
+        }
+
+        if (scanMode == BaseMode::Module)
+        {
+            std::map<std::pair<int, int>, PtrRange> modRangeMap;
+            for (auto *p : curr)
+            {
+                uintptr_t addr = MemUtils::Normalize(p->address);
+                auto it = std::upper_bound(flatSegs.begin(), flatSegs.end(), addr, [](uintptr_t a, const FlatSeg &b)
+                                           { return a < b.start; });
+                if (it == flatSegs.begin())
+                    continue;
+
+                auto prev = std::prev(it);
+                if (addr < prev->start || addr >= prev->end)
+                    continue;
+
+                if (!matched.insert(p).second)
+                    continue;
+
+                auto &pr = modRangeMap[{prev->modIdx, prev->segIdx}];
+                if (pr.results.empty())
+                {
+                    pr.level = level;
+                    pr.moduleIdx = prev->modIdx;
+                    pr.segIdx = prev->segIdx;
+                    pr.isManual = false;
+                    pr.isArray = false;
+                }
+                pr.results.emplace_back(addr, MemUtils::Normalize(p->value), 0u, 1u);
+            }
+
+            for (auto &[k, v] : modRangeMap)
+                ranges.push_back(std::move(v));
         }
 
         push_unmatched(dirs, matched, curr, level);
@@ -2215,7 +2232,7 @@ public:
     size_t CollectPointers(int buf_count = 10, int buf_size = 1 << 20)
     {
         pointers_.clear();
-        if (regions_.empty())
+        if (regions_.empty() || buf_count <= 0 || buf_size <= 0)
             return 0;
         int idx = buf_count - 1;
         std::vector<char *> bufs(buf_count);
@@ -2247,6 +2264,15 @@ public:
             f.get();
 
         FILE *merged = tmpfile();
+        if (!merged)
+        {
+            for (auto *tf : tmp_files)
+                fclose(tf);
+            for (int i = 0; i < buf_count; i++)
+                delete[] bufs[i];
+            std::println(stderr, "CollectPointers: failed to create merge temp file");
+            return 0;
+        }
         auto *mbuf = new char[1 << 20];
         for (auto *tf : tmp_files)
         {
@@ -2260,13 +2286,19 @@ public:
         fflush(merged);
 
         struct stat st;
-        fstat(fileno(merged), &st);
-        size_t total = st.st_size / sizeof(PtrData);
-        if (total > 0)
+        if (fstat(fileno(merged), &st) == 0)
         {
-            pointers_.resize(total);
-            rewind(merged);
-            fread(pointers_.data(), sizeof(PtrData), total, merged);
+            size_t total = st.st_size / sizeof(PtrData);
+            if (total > 0)
+            {
+                pointers_.resize(total);
+                rewind(merged);
+                fread(pointers_.data(), sizeof(PtrData), total, merged);
+            }
+        }
+        else
+        {
+            std::println(stderr, "CollectPointers: failed to stat merge temp file");
         }
         fclose(merged);
 
@@ -2277,7 +2309,7 @@ public:
     }
 
     // 执行指针链扫描主流程。
-    void scan(pid_t /*pid*/, uintptr_t target, int depth, int maxOffset, bool useManual, uintptr_t manualBase, int manualMaxOffset, bool useArray, uintptr_t arrayBase, size_t arrayCount, const std::string &filterModule)
+    void scan(pid_t /*pid*/, uintptr_t target, int depth, int maxOffset, bool useManual, uintptr_t manualBase, bool useArray, uintptr_t arrayBase, size_t arrayCount, const std::string &filterModule)
     {
         if (scanning_.exchange(true))
             return;
@@ -2332,6 +2364,7 @@ public:
         std::vector<std::vector<PtrDir>> dirs(depth + 1);
         size_t fidx = 0;
         uint64_t totalChains = 0;
+        bool wroteResults = false;
 
         std::vector<std::pair<size_t, uintptr_t>> arrayEntries;
         if (scanMode == BaseMode::Array && arrayBase && arrayCount > 0)
@@ -2371,7 +2404,7 @@ public:
             std::sort(curr.begin(), curr.end(), [](auto a, auto b)
                       { return a->address < b->address; });
 
-            filter_to_ranges_combined(dirs, ranges, curr, level, scanMode, filterModule, manualBase, static_cast<size_t>(manualMaxOffset), arrayBase, arrayEntries, static_cast<size_t>(maxOffset));
+            filter_to_ranges_combined(dirs, ranges, curr, level, scanMode, filterModule, manualBase, arrayBase, arrayEntries, static_cast<size_t>(maxOffset));
 
             for (auto &f : create_assoc_index(dirs[level - 1], dirs[level], static_cast<size_t>(maxOffset)))
                 allFutures.push_back(std::move(f));
@@ -2414,6 +2447,7 @@ public:
 
                 std::println("开始写入文件，正在保存 {} 条链条...", totalChains);
                 write_bin_file(tree.contents, ranges, outfile, scanMode, target, manualBase, arrayBase, arrayCount);
+                wroteResults = true;
                 std::println("文件写入完成，总链数: {}", totalChains);
             }
         }
@@ -2422,8 +2456,15 @@ public:
             std::println("结果为空: ranges vector is empty");
         }
 
-        std::string autoName = NextBinName();
-        if (FILE *saveFile = fopen(autoName.c_str(), "w+b"))
+        if (!wroteResults)
+        {
+            fclose(outfile);
+            chainCount_ = static_cast<size_t>(totalChains);
+            return;
+        }
+
+        std::string autoName;
+        if (FILE *saveFile = CreateUniqueBinFile(autoName))
         {
             rewind(outfile);
             char buf[1 << 16];
@@ -2551,6 +2592,11 @@ public:
         }
     };
 
+    static uint64_t ChainBaseAddr(const BinSym &sym)
+    {
+        return (sym.sourceMode == 1) ? sym.manualBase : sym.start;
+    }
+
     // 递归校验并裁剪无效指针分支。
     static bool prune_dfs(const PtrDir &nodeA, const PtrDir &nodeB, int current_level, const MemoryGraph &GA, const MemoryGraph &GB, std::vector<std::vector<uint8_t>> &memo)
     {
@@ -2628,32 +2674,35 @@ public:
                     memo_levels[i].resize(GA.levels[i].size(), 0);
 
                 std::vector<std::vector<uint8_t>> memo_roots(GA.blocks.size());
+                std::map<std::pair<int64_t, int>, std::vector<const PtrDir *>> rootIndex;
+
+                for (const auto &blkB : GB.blocks) {
+                    int levelB = blkB.sym.level;
+                    int64_t baseB = static_cast<int64_t>(ChainBaseAddr(blkB.sym));
+                    for (const auto &rootB : blkB.roots) {
+                        int64_t rootOffsetB = static_cast<int64_t>(rootB.address) - baseB;
+                        rootIndex[{rootOffsetB, levelB}].push_back(&rootB);
+                    }
+                }
 
                 for (size_t b = 0; b < GA.blocks.size(); ++b) {
                     memo_roots[b].resize(GA.blocks[b].roots.size(), 0); // 默认为0即可
 
-                    int match_b = -1;
-                    for (size_t j = 0; j < GB.blocks.size(); ++j) {
-                        if (GA.blocks[b].sym.sourceMode == GB.blocks[j].sym.sourceMode &&
-                            GA.blocks[b].sym.segment == GB.blocks[j].sym.segment &&
-                            strcmp(GA.blocks[b].sym.name, GB.blocks[j].sym.name) == 0) {
-                            match_b = j; break;
-                        }
-                    }
-                    if (match_b == -1) continue;
-
-                    uint64_t baseA = (GA.blocks[b].sym.sourceMode == 1) ? GA.blocks[b].sym.manualBase : GA.blocks[b].sym.start;
-                    uint64_t baseB = (GB.blocks[match_b].sym.sourceMode == 1) ? GB.blocks[match_b].sym.manualBase : GB.blocks[match_b].sym.start;
+                    int levelA = GA.blocks[b].sym.level;
+                    int64_t baseA = static_cast<int64_t>(ChainBaseAddr(GA.blocks[b].sym));
 
                     for (size_t r = 0; r < GA.blocks[b].roots.size(); ++r) {
-                        auto it = std::lower_bound(GB.blocks[match_b].roots.begin(), GB.blocks[match_b].roots.end(),
-                            baseB + (GA.blocks[b].roots[r].address - baseA),
-                            [](const PtrDir& n, uint64_t val) { return n.address < val; });
+                        int64_t rootOffsetA = static_cast<int64_t>(GA.blocks[b].roots[r].address) - baseA;
+                        auto candidates = rootIndex.find({rootOffsetA, levelA});
+                        if (candidates == rootIndex.end())
+                            continue;
 
-                        if (it != GB.blocks[match_b].roots.end() && it->address == baseB + (GA.blocks[b].roots[r].address - baseA)) {
+                        for (const PtrDir *candidateRoot : candidates->second) {
                             // 修复：从 sym.level - 1 向下遍历
-                            if (prune_dfs(GA.blocks[b].roots[r], *it, GA.blocks[b].sym.level - 1, GA, GB, memo_levels))
+                            if (prune_dfs(GA.blocks[b].roots[r], *candidateRoot, levelA - 1, GA, GB, memo_levels)) {
                                 memo_roots[b][r] = 1;
+                                break;
+                            }
                         }
                     }
                 }
@@ -2721,9 +2770,19 @@ public:
                 if (GA.blocks.empty()) break;
             }
 
-            GA.save("Pointer_Merged.tmp");
-            for (const auto& fn : files) remove(fn.c_str());
-            rename("Pointer_Merged.tmp", "Pointer.bin");
+            if (!GA.save("Pointer_Merged.tmp")) {
+                std::println(stderr, "MergeBins: failed to write Pointer_Merged.tmp");
+                return;
+            }
+            if (rename("Pointer_Merged.tmp", "Pointer.bin") != 0) {
+                std::println(stderr, "MergeBins: failed to replace Pointer.bin");
+                remove("Pointer_Merged.tmp");
+                return;
+            }
+            for (const auto& fn : files) {
+                if (fn != "Pointer.bin")
+                    remove(fn.c_str());
+            }
 
             std::println("图层合并结束！已成功剔除失效的指针树分支并生成 Pointer.bin"); });
     }
