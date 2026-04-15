@@ -3146,8 +3146,6 @@ int tcp_server()
         gServerFd = -1;
     }
 
-    Utils::GlobalPool.force_stop();
-
     std::println("服务端已退出。");
     return 0;
 }

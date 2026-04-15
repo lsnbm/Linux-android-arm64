@@ -847,7 +847,7 @@ private:
         if (isPtrMode || isStringMode)
         {
             ImGui::BeginDisabled();
-            ImGui::Button(isPtrMode ? "Int64 (pointer mode)" : "String mode ignores type", {w, S(45)});
+            ImGui::Button(isPtrMode ? "Int64（指针模式）" : "字符串模式忽略类型", {w, S(45)});
             ImGui::EndDisabled();
         }
         else
@@ -1254,7 +1254,7 @@ private:
                             seg.index == -1
                                 ? UI::Text({0.9f,0.6f,0.3f,1}, "Segment: BSS")
                                 : UI::Text(Colors::ADDR_GREEN, "Segment: %d", seg.index);
-                            UI::Text(Colors::HINT, "Range: "); ImGui::SameLine();
+                            UI::Text(Colors::HINT, "范围: "); ImGui::SameLine();
                             UI::Text({0.4f,1,0.4f,1}, "%llX - ", (unsigned long long)seg.start);
                             ImGui::SameLine();
                             UI::Text({1,0.6f,0.4f,1}, "%llX", (unsigned long long)seg.end); }, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_AlwaysAutoResize);

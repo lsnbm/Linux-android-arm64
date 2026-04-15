@@ -165,8 +165,8 @@ namespace Types
             "I8", "I16", "I32", "I64", "Float", "Double"};
 
         inline constexpr std::array<const char *, static_cast<size_t>(FuzzyMode::Count)> FUZZY = {
-            "Unknown", "Equal", "Greater", "Less", "Increased", "Decreased",
-            "Changed", "Unchanged", "Range", "Pointer", "String"};
+            "未知", "等于", "大于", "小于", "增大", "减小",
+            "已改变", "未改变", "范围", "指针", "字符串"};
 
         inline constexpr std::array<const char *, static_cast<size_t>(ViewFormat::Count)> VIEW_FORMAT = {
             "Hex", "Hex64", "I8", "I16", "I32", "I64", "Float", "Double", "Disasm"};
