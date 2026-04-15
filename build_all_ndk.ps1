@@ -27,8 +27,8 @@ if (-not (Test-Path -LiteralPath $NdkBuild)) {
     throw ((Zh '\u672a\u627e\u5230 ndk-build: {0}') -f $NdkBuild)
 }
 
-$mkFiles = Get-ChildItem -Path $Root -Recurse -File -Filter $MkFileName |
-    Sort-Object -Property FullName
+$mkFiles = @(Get-ChildItem -Path $Root -Recurse -File -Filter $MkFileName |
+    Sort-Object -Property FullName)
 
 if (-not $mkFiles) {
     Write-Host ((Zh '\u5728 Root={0} \u4e0b\u672a\u627e\u5230 {1}') -f $Root, $MkFileName)
