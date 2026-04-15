@@ -1281,11 +1281,14 @@ private:
             UI::Text(Colors::HINT, "暂无命中记录");
     }
 
-    void drawBpRecords(const auto &info, float w)
+    void drawBpRecords(const Driver::hwbp_info &info, float w)
     {
         uint64_t totalHits = 0;
         for (int r = 0; r < info.record_count; ++r)
-            totalHits += info.records[r].hit_count;
+        {
+            auto &rec = const_cast<Driver::hwbp_record &>(info.records[r]);
+            totalHits += hwbpReadRegisterValue(rec, Driver::IDX_HIT_COUNT);
+        }
         UI::Text(Colors::WARN, "不同PC数: %d  总命中: %llu", info.record_count, (unsigned long long)totalHits);
         UI::Space(S(6));
 
@@ -1294,16 +1297,18 @@ private:
 
         for (int r = 0; r < info.record_count; ++r)
         {
-            const auto &rec = info.records[r];
+            auto &rec = const_cast<Driver::hwbp_record &>(info.records[r]);
+            const auto pc = hwbpReadRegisterValue(rec, Driver::IDX_PC);
+            const auto hitCount = hwbpReadRegisterValue(rec, Driver::IDX_HIT_COUNT);
             ImGui::PushID(r);
             float btnW = S(55), expandW = S(45);
 
             // 摘要行
             UI::Text({0.7f, 0.85f, 1, 1}, "[%d]", r);
             ImGui::SameLine();
-            UI::Text(Colors::ADDR_GREEN, "PC:0x%llX", (unsigned long long)rec.pc);
+            UI::Text(Colors::ADDR_GREEN, "PC:0x%llX", (unsigned long long)pc);
             ImGui::SameLine();
-            UI::Text(Colors::WARN, "x%llu", (unsigned long long)rec.hit_count);
+            UI::Text(Colors::WARN, "x%llu", (unsigned long long)hitCount);
 
             ImGui::SameLine(w - btnW);
             if (UI::Btn("删除", {btnW, S(32)}, {0.6f, 0.15f, 0.15f, 1}))
@@ -1328,11 +1333,11 @@ private:
             dr.RemoveHwbpRecord(deleteIdx);
     }
 
-    void drawBpRecordDetail(const auto &rec, int r)
+    void drawBpRecordDetail(const Driver::hwbp_record &rec, int r)
     {
         bool isEditing = (bpParams_.editingRecordIdx == r);
         // 编辑模式下显示副本，否则显示原始
-        const auto &show = isEditing ? bpParams_.editCopy : rec;
+        auto &show = isEditing ? bpParams_.editCopy : const_cast<Driver::hwbp_record &>(rec);
 
         // 编辑/应用/取消
         if (!isEditing)
@@ -1355,8 +1360,9 @@ private:
 
         // 通用：显示一行寄存器，编辑模式下多一个"改"按钮
         // fieldId: 0~29=X0~X29, 30=LR, 31=SP, 32=PC, 33=PSTATE, 34=ORIG_X0, 35=SYSCALLNO
-        auto regLine = [&](const char *name, uint64_t val, int fieldId, uint64_t *target)
+        auto regLine = [&](const char *name, int regIndex)
         {
+            const auto val = hwbpReadRegisterValue(show, regIndex);
             UI::Text({0.7f, 0.85f, 1, 1}, "%s: ", name);
             ImGui::SameLine();
             UI::Text(Colors::ADDR_GREEN, "0x%llX", (unsigned long long)val);
@@ -1377,7 +1383,7 @@ private:
                 snprintf(id, sizeof(id), "改##%s%d", name, r);
                 if (UI::Btn(id, {S(40), S(28)}, {0.4f, 0.3f, 0.15f, 1}))
                 {
-                    bpParams_.editingField = fieldId;
+                    bpParams_.editingField = regIndex;
                     snprintf(bpParams_.regEditBuf, sizeof(bpParams_.regEditBuf),
                              "%llX", (unsigned long long)val);
                     char title[48];
@@ -1385,43 +1391,47 @@ private:
                     ImGuiFloatingKeyboard::Open(bpParams_.regEditBuf, 63, title);
                 }
                 // 键盘关闭，写入副本
-                if (bpParams_.editingField == fieldId && !ImGuiFloatingKeyboard::IsVisible() && bpParams_.regEditBuf[0])
+                if (bpParams_.editingField == regIndex && !ImGuiFloatingKeyboard::IsVisible() && bpParams_.regEditBuf[0])
                 {
-                    *target = strtoull(bpParams_.regEditBuf, nullptr, 16);
+                    hwbpWriteRegisterValue(bpParams_.editCopy, regIndex, strtoull(bpParams_.regEditBuf, nullptr, 16));
                     bpParams_.editingField = -1;
                     bpParams_.regEditBuf[0] = 0;
                 }
             }
         };
 
-        regLine("PC", show.pc, 32, &bpParams_.editCopy.pc);
-        regLine("LR", show.lr, 30, &bpParams_.editCopy.lr);
-        regLine("SP", show.sp, 31, &bpParams_.editCopy.sp);
+        regLine("PC", Driver::IDX_PC);
+        regLine("LR", Driver::IDX_LR);
+        regLine("SP", Driver::IDX_SP);
         UI::Space(S(4));
 
         // PSTATE / SYSCALL / ORIG_X0 同理
-        UI::Text(Colors::LABEL, "PSTATE:  0x%llX", (unsigned long long)show.pstate);
+        const auto pstate = hwbpReadRegisterValue(show, Driver::IDX_PSTATE);
+        const auto syscallno = hwbpReadRegisterValue(show, Driver::IDX_SYSCALLNO);
+        const auto origX0 = hwbpReadRegisterValue(show, Driver::IDX_ORIG_X0);
+        const auto hitCount = hwbpReadRegisterValue(show, Driver::IDX_HIT_COUNT);
+        UI::Text(Colors::LABEL, "PSTATE:  0x%llX", (unsigned long long)pstate);
         if (isEditing)
         {
             ImGui::SameLine();
             if (UI::Btn("改##pst", {S(40), S(28)}, {0.4f, 0.3f, 0.15f, 1}))
             {
-                bpParams_.editingField = 33;
+                bpParams_.editingField = Driver::IDX_PSTATE;
                 snprintf(bpParams_.regEditBuf, sizeof(bpParams_.regEditBuf),
-                         "%llX", (unsigned long long)show.pstate);
+                         "%llX", (unsigned long long)pstate);
                 ImGuiFloatingKeyboard::Open(bpParams_.regEditBuf, 63, "修改 PSTATE (Hex)");
             }
-            if (bpParams_.editingField == 33 && !ImGuiFloatingKeyboard::IsVisible() && bpParams_.regEditBuf[0])
+            if (bpParams_.editingField == Driver::IDX_PSTATE && !ImGuiFloatingKeyboard::IsVisible() && bpParams_.regEditBuf[0])
             {
-                bpParams_.editCopy.pstate = strtoull(bpParams_.regEditBuf, nullptr, 16);
+                hwbpWriteRegisterValue(bpParams_.editCopy, Driver::IDX_PSTATE, strtoull(bpParams_.regEditBuf, nullptr, 16));
                 bpParams_.editingField = -1;
                 bpParams_.regEditBuf[0] = 0;
             }
         }
 
-        UI::Text(Colors::LABEL, "SYSCALL: %llu", (unsigned long long)show.syscallno);
-        UI::Text(Colors::LABEL, "ORIG_X0: 0x%llX", (unsigned long long)show.orig_x0);
-        UI::Text(Colors::WARN, "命中次数: %llu", (unsigned long long)show.hit_count);
+        UI::Text(Colors::LABEL, "SYSCALL: %llu", (unsigned long long)syscallno);
+        UI::Text(Colors::LABEL, "ORIG_X0: 0x%llX", (unsigned long long)origX0);
+        UI::Text(Colors::WARN, "命中次数: %llu", (unsigned long long)hitCount);
         UI::Space(S(6));
 
         // ━━ 通用寄存器表格 ━━
@@ -1442,6 +1452,8 @@ private:
 
             for (int i = 0; i < 30; ++i)
             {
+                const int regIndex = Driver::IDX_X0 + i;
+                const auto regValue = hwbpReadXField(show, i);
                 ImGui::TableNextRow();
                 ImGui::PushID(i);
 
@@ -1449,13 +1461,13 @@ private:
                 UI::Text({0.7f, 0.85f, 1, 1}, "X%d", i);
 
                 ImGui::TableSetColumnIndex(1);
-                UI::Text(Colors::ADDR_GREEN, "0x%llX", (unsigned long long)show.regs[i]);
+                UI::Text(Colors::ADDR_GREEN, "0x%llX", (unsigned long long)regValue);
 
                 ImGui::TableSetColumnIndex(2);
                 if (UI::Btn("复制", {S(42), S(28)}, Colors::BTN_COPY))
                 {
                     char tmp[32];
-                    snprintf(tmp, sizeof(tmp), "%llX", (unsigned long long)show.regs[i]);
+                    snprintf(tmp, sizeof(tmp), "%llX", (unsigned long long)regValue);
                     ImGui::SetClipboardText(tmp);
                 }
 
@@ -1466,16 +1478,16 @@ private:
                     snprintf(bid, sizeof(bid), "改##x%d", i);
                     if (UI::Btn(bid, {S(42), S(28)}, {0.4f, 0.3f, 0.15f, 1}))
                     {
-                        bpParams_.editingField = i;
+                        bpParams_.editingField = regIndex;
                         snprintf(bpParams_.regEditBuf, sizeof(bpParams_.regEditBuf),
-                                 "%llX", (unsigned long long)show.regs[i]);
+                                 "%llX", (unsigned long long)regValue);
                         char title[32];
                         snprintf(title, sizeof(title), "修改 X%d (Hex)", i);
                         ImGuiFloatingKeyboard::Open(bpParams_.regEditBuf, 63, title);
                     }
-                    if (bpParams_.editingField == i && !ImGuiFloatingKeyboard::IsVisible() && bpParams_.regEditBuf[0])
+                    if (bpParams_.editingField == regIndex && !ImGuiFloatingKeyboard::IsVisible() && bpParams_.regEditBuf[0])
                     {
-                        bpParams_.editCopy.regs[i] = strtoull(bpParams_.regEditBuf, nullptr, 16);
+                        hwbpWriteRegisterValue(bpParams_.editCopy, regIndex, strtoull(bpParams_.regEditBuf, nullptr, 16));
                         bpParams_.editingField = -1;
                         bpParams_.regEditBuf[0] = 0;
                     }
@@ -1492,8 +1504,9 @@ private:
         UI::Space(S(4));
 
         // FPSR / FPCR 显示与编辑
-        auto fpCtrlLine = [&](const char *name, uint32_t val, int fieldId, uint32_t *target)
+        auto fpCtrlLine = [&](const char *name, int regIndex)
         {
+            const auto val = static_cast<uint32_t>(hwbpReadRegisterValue(show, regIndex));
             UI::Text({0.7f, 0.85f, 1, 1}, "%s: ", name);
             ImGui::SameLine();
             UI::Text(Colors::ADDR_GREEN, "0x%X", (unsigned int)val);
@@ -1514,24 +1527,24 @@ private:
                 snprintf(id, sizeof(id), "改##%s%d", name, r);
                 if (UI::Btn(id, {S(40), S(28)}, {0.4f, 0.3f, 0.15f, 1}))
                 {
-                    bpParams_.editingField = fieldId;
+                    bpParams_.editingField = regIndex;
                     snprintf(bpParams_.regEditBuf, sizeof(bpParams_.regEditBuf),
                              "%X", (unsigned int)val);
                     char title[48];
                     snprintf(title, sizeof(title), "修改 %s (Hex)", name);
                     ImGuiFloatingKeyboard::Open(bpParams_.regEditBuf, 63, title);
                 }
-                if (bpParams_.editingField == fieldId && !ImGuiFloatingKeyboard::IsVisible() && bpParams_.regEditBuf[0])
+                if (bpParams_.editingField == regIndex && !ImGuiFloatingKeyboard::IsVisible() && bpParams_.regEditBuf[0])
                 {
-                    *target = strtoul(bpParams_.regEditBuf, nullptr, 16);
+                    hwbpWriteRegisterValue(bpParams_.editCopy, regIndex, strtoul(bpParams_.regEditBuf, nullptr, 16));
                     bpParams_.editingField = -1;
                     bpParams_.regEditBuf[0] = 0;
                 }
             }
         };
 
-        fpCtrlLine("FPSR", show.fpsr, 36, &bpParams_.editCopy.fpsr);
-        fpCtrlLine("FPCR", show.fpcr, 37, &bpParams_.editCopy.fpcr);
+        fpCtrlLine("FPSR", Driver::IDX_FPSR);
+        fpCtrlLine("FPCR", Driver::IDX_FPCR);
         UI::Space(S(4));
 
         // V0~V31 表格
@@ -1550,6 +1563,10 @@ private:
 
             for (int i = 0; i < 32; ++i)
             {
+                const int regIndex = Driver::IDX_Q0 + i;
+                const auto qValue = hwbpReadQField(show, i);
+                const auto qLo = static_cast<uint64_t>(qValue);
+                const auto qHi = static_cast<uint64_t>(qValue >> 64);
                 ImGui::TableNextRow();
                 ImGui::PushID(i + 32); // offset to avoid ID clash with X regs
 
@@ -1557,15 +1574,14 @@ private:
                 UI::Text({0.7f, 0.85f, 1, 1}, "V%d", i);
 
                 // Vn 寄存器是 128 位，拆成 高64位:低64位 显示
-                const uint64_t *v64 = reinterpret_cast<const uint64_t *>(&show.vregs[i]);
                 ImGui::TableSetColumnIndex(1);
-                UI::Text(Colors::ADDR_GREEN, "%016llX_%016llX", (unsigned long long)v64[1], (unsigned long long)v64[0]);
+                UI::Text(Colors::ADDR_GREEN, "%016llX_%016llX", (unsigned long long)qHi, (unsigned long long)qLo);
 
                 ImGui::TableSetColumnIndex(2);
                 if (UI::Btn("复制", {S(42), S(28)}, Colors::BTN_COPY))
                 {
                     char tmp[64];
-                    snprintf(tmp, sizeof(tmp), "%016llX%016llX", (unsigned long long)v64[1], (unsigned long long)v64[0]);
+                    snprintf(tmp, sizeof(tmp), "%016llX%016llX", (unsigned long long)qHi, (unsigned long long)qLo);
                     ImGui::SetClipboardText(tmp);
                 }
 
@@ -1576,14 +1592,14 @@ private:
                     snprintf(bid, sizeof(bid), "改##v%d", i);
                     if (UI::Btn(bid, {S(42), S(28)}, {0.4f, 0.3f, 0.15f, 1}))
                     {
-                        bpParams_.editingField = 100 + i;
+                        bpParams_.editingField = regIndex;
                         snprintf(bpParams_.regEditBuf, sizeof(bpParams_.regEditBuf),
-                                 "%016llX%016llX", (unsigned long long)v64[1], (unsigned long long)v64[0]);
+                                 "%016llX%016llX", (unsigned long long)qHi, (unsigned long long)qLo);
                         char title[32];
                         snprintf(title, sizeof(title), "修改 V%d (Hex)", i);
                         ImGuiFloatingKeyboard::Open(bpParams_.regEditBuf, 63, title);
                     }
-                    if (bpParams_.editingField == 100 + i && !ImGuiFloatingKeyboard::IsVisible() && bpParams_.regEditBuf[0])
+                    if (bpParams_.editingField == regIndex && !ImGuiFloatingKeyboard::IsVisible() && bpParams_.regEditBuf[0])
                     {
                         // 解析128位hex回写 (高16位_低16位 或 低16位)
                         int len = static_cast<int>(strlen(bpParams_.regEditBuf));
@@ -1602,9 +1618,7 @@ private:
                         }
                         uint64_t hi = strtoull(hiBuf, nullptr, 16);
                         uint64_t lo = strtoull(loBuf, nullptr, 16);
-                        uint64_t *p = (uint64_t *)&bpParams_.editCopy.vregs[i];
-                        p[1] = hi;
-                        p[0] = lo;
+                        hwbpWriteQField(bpParams_.editCopy, i, (static_cast<__uint128_t>(hi) << 64) | lo);
                         bpParams_.editingField = -1;
                         bpParams_.regEditBuf[0] = 0;
                     }
@@ -1619,19 +1633,20 @@ private:
     // 拷贝副本
     void beginEditRecord(int idx)
     {
-        if (idx < 0 || idx >= dr.GetHwbpInfoRef().record_count)
+        const auto &info = dr.GetHwbpInfoRef();
+        if (idx < 0 || idx >= info.record_count)
             return;
         bpParams_.editingRecordIdx = idx;
-        bpParams_.editCopy = dr.GetHwbpInfoRef().records[idx]; // 完整拷贝
+        bpParams_.editCopy = info.records[idx]; // 完整拷贝
         bpParams_.editingField = -1;
     }
     // 写回副本
     void applyRecordEdits(int idx)
     {
-        if (idx < 0 || idx >= dr.GetHwbpInfoRef().record_count)
+        const auto &info = dr.GetHwbpInfoRef();
+        if (idx < 0 || idx >= info.record_count)
             return;
-        bpParams_.editCopy.rw = true; // 标记为写入模式
-        const_cast<Driver::hwbp_record &>(dr.GetHwbpInfoRef().records[idx]) = bpParams_.editCopy;
+        const_cast<Driver::hwbp_record &>(info.records[idx]) = bpParams_.editCopy;
         bpParams_.editingRecordIdx = -1;
         bpParams_.editingField = -1;
     }

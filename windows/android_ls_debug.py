@@ -51,6 +51,15 @@ VALUE_TYPE_OPTIONS = (
     ("Float", "Float"),
     ("Double", "Double"),
 )
+HWBP_BASE_FIELDS = ("pc", "hit_count", "lr", "sp", "pstate", "orig_x0", "syscallno", "fpsr", "fpcr")
+HWBP_OP_LABELS = {
+    "none": "未设置",
+    "read": "读取",
+    "write": "写入",
+    "0": "未设置",
+    "1": "读取",
+    "2": "写入",
+}
 
 
 class BrowserTextEdit(QTextEdit):
@@ -1017,10 +1026,13 @@ class TcpTestWindow(QWidget):
         edit_row.setSpacing(10)
         edit_row.addWidget(QLabel("写入字段"))
         self.hwbp_field_combo = QComboBox()
-        for field_name in ["pc", "lr", "sp", "pstate", "orig_x0", "syscallno"]:
+        for field_name in HWBP_BASE_FIELDS:
             self.hwbp_field_combo.addItem(field_name, field_name)
         for reg_idx in range(30):
             field_name = f"x{reg_idx}"
+            self.hwbp_field_combo.addItem(field_name, field_name)
+        for reg_idx in range(32):
+            field_name = f"q{reg_idx}"
             self.hwbp_field_combo.addItem(field_name, field_name)
         edit_row.addWidget(self.hwbp_field_combo)
 
@@ -1689,7 +1701,51 @@ class TcpTestWindow(QWidget):
     def _get_selected_hwbp_index(self) -> int | None:
         return self._extract_hwbp_index_from_tree_item(self.hwbp_tree.currentItem())
 
+    def _hwbp_reg_op(self, rec: dict, field_name: str) -> str:
+        op_values = rec.get("op_values")
+        if isinstance(op_values, dict) and field_name in op_values:
+            return HWBP_OP_LABELS.get(str(op_values.get(field_name)).lower(), str(op_values.get(field_name)))
+        ops = rec.get("ops")
+        if isinstance(ops, dict) and field_name in ops:
+            return HWBP_OP_LABELS.get(str(ops.get(field_name)).lower(), str(ops.get(field_name)))
+        return "未设置"
+
+    def _hwbp_ops_summary(self, rec: dict) -> str:
+        write_count = self._safe_int(rec.get("write_op_count"), 0)
+        read_count = self._safe_int(rec.get("read_op_count"), 0)
+        if write_count or read_count:
+            return f"读 {read_count} / 写 {write_count}"
+        rw_text = str(rec.get("rw", "")).lower()
+        if rw_text == "write":
+            return "写入"
+        if rw_text == "read":
+            return "读取"
+        return "未设置"
+
+    @staticmethod
+    def _hwbp_qreg_parts(qreg: object) -> tuple[int, int]:
+        if isinstance(qreg, dict):
+            return (
+                TcpTestWindow._safe_int(qreg.get("hi"), 0),
+                TcpTestWindow._safe_int(qreg.get("lo"), 0),
+            )
+        value = TcpTestWindow._safe_int(qreg, 0)
+        return ((value >> 64) & ((1 << 64) - 1), value & ((1 << 64) - 1))
+
+    @staticmethod
+    def _hwbp_qreg_value(qreg: object) -> int:
+        hi, lo = TcpTestWindow._hwbp_qreg_parts(qreg)
+        return (hi << 64) | lo
+
     def _decode_hwbp_rw_text(self, rec: dict) -> str:
+        write_count = self._safe_int(rec.get("write_op_count"), 0)
+        read_count = self._safe_int(rec.get("read_op_count"), 0)
+        if write_count and read_count:
+            return "读/写"
+        if write_count:
+            return "写入"
+        if read_count:
+            return "读取"
         rw_text = str(rec.get("rw", "")).lower()
         if rw_text == "write":
             return "写入"
@@ -1735,7 +1791,8 @@ class TcpTestWindow(QWidget):
                 idx = self._safe_int(rec.get("index"), -1)
                 hit_count = self._safe_int(rec.get("hit_count"), 0)
                 rw_text = self._decode_hwbp_rw_text(rec)
-                summary_item = QTreeWidgetItem([f"[{idx}] 命中 {hit_count} 次  |  类型 {rw_text}"])
+                ops_summary = self._hwbp_ops_summary(rec)
+                summary_item = QTreeWidgetItem([f"[{idx}] 命中 {hit_count} 次  |  类型 {rw_text}  |  掩码 {ops_summary}"])
                 summary_item.setData(0, Qt.UserRole, idx)
                 top.addChild(summary_item)
 
@@ -1744,12 +1801,23 @@ class TcpTestWindow(QWidget):
                 orig_x0 = self._safe_int(rec.get("orig_x0"), 0)
                 syscallno = self._safe_int(rec.get("syscallno"), 0)
                 pstate = self._safe_int(rec.get("pstate"), 0)
-                top.addChild(self._make_hwbp_field_item(idx, "pc", pc, f"  PC: 0x{pc:X}"))
-                top.addChild(self._make_hwbp_field_item(idx, "lr", lr, f"  LR: 0x{lr:X}"))
-                top.addChild(self._make_hwbp_field_item(idx, "sp", sp, f"  SP: 0x{sp:X}"))
-                top.addChild(self._make_hwbp_field_item(idx, "orig_x0", orig_x0, f"  ORIG_X0: 0x{orig_x0:X}"))
-                top.addChild(self._make_hwbp_field_item(idx, "syscallno", syscallno, f"  SYSCALLNO: {syscallno}"))
-                top.addChild(self._make_hwbp_field_item(idx, "pstate", pstate, f"  PSTATE: 0x{pstate:X}"))
+                fpsr = self._safe_int(rec.get("fpsr"), 0)
+                fpcr = self._safe_int(rec.get("fpcr"), 0)
+                top.addChild(self._make_hwbp_field_item(idx, "pc", pc, f"  PC: 0x{pc:X}  [{self._hwbp_reg_op(rec, 'pc')}]"))
+                top.addChild(self._make_hwbp_field_item(idx, "lr", lr, f"  LR: 0x{lr:X}  [{self._hwbp_reg_op(rec, 'lr')}]"))
+                top.addChild(self._make_hwbp_field_item(idx, "sp", sp, f"  SP: 0x{sp:X}  [{self._hwbp_reg_op(rec, 'sp')}]"))
+                top.addChild(self._make_hwbp_field_item(idx, "orig_x0", orig_x0, f"  ORIG_X0: 0x{orig_x0:X}  [{self._hwbp_reg_op(rec, 'orig_x0')}]"))
+                top.addChild(self._make_hwbp_field_item(idx, "syscallno", syscallno, f"  SYSCALLNO: {syscallno}  [{self._hwbp_reg_op(rec, 'syscallno')}]"))
+                top.addChild(self._make_hwbp_field_item(idx, "pstate", pstate, f"  PSTATE: 0x{pstate:X}  [{self._hwbp_reg_op(rec, 'pstate')}]"))
+                top.addChild(self._make_hwbp_field_item(idx, "fpsr", fpsr, f"  FPSR: 0x{fpsr:X}  [{self._hwbp_reg_op(rec, 'fpsr')}]"))
+                top.addChild(self._make_hwbp_field_item(idx, "fpcr", fpcr, f"  FPCR: 0x{fpcr:X}  [{self._hwbp_reg_op(rec, 'fpcr')}]"))
+
+                mask_raw = rec.get("mask")
+                if isinstance(mask_raw, list) and mask_raw:
+                    mask_text = " ".join(f"{self._safe_int(byte, 0) & 0xFF:02X}" for byte in mask_raw[:18])
+                    mask_item = QTreeWidgetItem([f"  MASK: {mask_text}"])
+                    mask_item.setData(0, Qt.UserRole, idx)
+                    top.addChild(mask_item)
 
                 regs_raw = rec.get("regs")
                 regs = regs_raw if isinstance(regs_raw, list) else []
@@ -1758,9 +1826,23 @@ class TcpTestWindow(QWidget):
                 top.addChild(regs_title)
                 for reg_idx, reg_val in enumerate(regs):
                     reg_hex = self._safe_int(reg_val, 0)
-                    top.addChild(self._make_hwbp_field_item(idx, f"x{reg_idx}", reg_hex, f"    X{reg_idx}: 0x{reg_hex:X}"))
+                    field_name = f"x{reg_idx}"
+                    top.addChild(self._make_hwbp_field_item(idx, field_name, reg_hex, f"    X{reg_idx}: 0x{reg_hex:X}  [{self._hwbp_reg_op(rec, field_name)}]"))
 
-                if rw_text == "写入":
+                qregs_raw = rec.get("qregs")
+                if not isinstance(qregs_raw, list):
+                    qregs_raw = rec.get("vregs")
+                qregs = qregs_raw if isinstance(qregs_raw, list) else []
+                if qregs:
+                    qregs_title = QTreeWidgetItem(["  SIMD 寄存器快照 Q0~Q31"])
+                    qregs_title.setData(0, Qt.UserRole, idx)
+                    top.addChild(qregs_title)
+                    for reg_idx, qreg_val in enumerate(qregs):
+                        hi, lo = self._hwbp_qreg_parts(qreg_val)
+                        field_name = f"q{reg_idx}"
+                        top.addChild(self._make_hwbp_field_item(idx, field_name, lo, f"    Q{reg_idx}: 0x{hi:016X}_{lo:016X}  [{self._hwbp_reg_op(rec, field_name)}]"))
+
+                if self._safe_int(rec.get("write_op_count"), 0) > 0 or rw_text == "写入":
                     write_title = QTreeWidgetItem(["  写入寄存器候选"])
                     write_title.setData(0, Qt.UserRole, idx)
                     top.addChild(write_title)
