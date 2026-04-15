@@ -105,6 +105,8 @@ static inline void sample_hbp_handler(struct perf_event *bp, struct perf_sample_
     // 用空间换时间，用循环+if或者switch方式都增加复杂度，要处理每个寄存器枚举索引的不同方式，直接平铺易于理解和轻微性能提升
     if (rec)
     {
+
+        rec->hit_count++; // 命中计数
         uint8_t op;
 
         // PC
@@ -113,15 +115,6 @@ static inline void sample_hbp_handler(struct perf_event *bp, struct perf_sample_
             rec->pc = regs->pc;
         else if (op == HWBP_OP_WRITE)
             regs->pc = rec->pc;
-
-        // HIT_COUNT
-        op = HWBP_GET_MASK(rec, IDX_HIT_COUNT);
-        if (op == HWBP_OP_READ)
-        {
-        }
-        else if (op == HWBP_OP_WRITE)
-        {
-        }
 
         // LR (X30)
         op = HWBP_GET_MASK(rec, IDX_LR);

@@ -413,6 +413,267 @@ private:
         ImGui::SetClipboardText(std::format("{:X}", addr).c_str());
     }
 
+    static void uiHwbpRequestRead(Driver::hwbp_record &record, int reg)
+    {
+        if (HWBP_GET_MASK(&record, reg) != HWBP_OP_WRITE)
+        {
+            HWBP_SET_MASK(&record, reg, HWBP_OP_READ);
+        }
+    }
+
+    static std::uint64_t uiHwbpGetXField(const Driver::hwbp_record &record, int index)
+    {
+        switch (index)
+        {
+        case 0: return record.x0;
+        case 1: return record.x1;
+        case 2: return record.x2;
+        case 3: return record.x3;
+        case 4: return record.x4;
+        case 5: return record.x5;
+        case 6: return record.x6;
+        case 7: return record.x7;
+        case 8: return record.x8;
+        case 9: return record.x9;
+        case 10: return record.x10;
+        case 11: return record.x11;
+        case 12: return record.x12;
+        case 13: return record.x13;
+        case 14: return record.x14;
+        case 15: return record.x15;
+        case 16: return record.x16;
+        case 17: return record.x17;
+        case 18: return record.x18;
+        case 19: return record.x19;
+        case 20: return record.x20;
+        case 21: return record.x21;
+        case 22: return record.x22;
+        case 23: return record.x23;
+        case 24: return record.x24;
+        case 25: return record.x25;
+        case 26: return record.x26;
+        case 27: return record.x27;
+        case 28: return record.x28;
+        case 29: return record.x29;
+        default: return 0;
+        }
+    }
+
+    static void uiHwbpSetXField(Driver::hwbp_record &record, int index, std::uint64_t value)
+    {
+        switch (index)
+        {
+        case 0: record.x0 = value; break;
+        case 1: record.x1 = value; break;
+        case 2: record.x2 = value; break;
+        case 3: record.x3 = value; break;
+        case 4: record.x4 = value; break;
+        case 5: record.x5 = value; break;
+        case 6: record.x6 = value; break;
+        case 7: record.x7 = value; break;
+        case 8: record.x8 = value; break;
+        case 9: record.x9 = value; break;
+        case 10: record.x10 = value; break;
+        case 11: record.x11 = value; break;
+        case 12: record.x12 = value; break;
+        case 13: record.x13 = value; break;
+        case 14: record.x14 = value; break;
+        case 15: record.x15 = value; break;
+        case 16: record.x16 = value; break;
+        case 17: record.x17 = value; break;
+        case 18: record.x18 = value; break;
+        case 19: record.x19 = value; break;
+        case 20: record.x20 = value; break;
+        case 21: record.x21 = value; break;
+        case 22: record.x22 = value; break;
+        case 23: record.x23 = value; break;
+        case 24: record.x24 = value; break;
+        case 25: record.x25 = value; break;
+        case 26: record.x26 = value; break;
+        case 27: record.x27 = value; break;
+        case 28: record.x28 = value; break;
+        case 29: record.x29 = value; break;
+        default: break;
+        }
+    }
+
+    static __uint128_t uiHwbpGetQField(const Driver::hwbp_record &record, int index)
+    {
+        switch (index)
+        {
+        case 0: return record.q0;
+        case 1: return record.q1;
+        case 2: return record.q2;
+        case 3: return record.q3;
+        case 4: return record.q4;
+        case 5: return record.q5;
+        case 6: return record.q6;
+        case 7: return record.q7;
+        case 8: return record.q8;
+        case 9: return record.q9;
+        case 10: return record.q10;
+        case 11: return record.q11;
+        case 12: return record.q12;
+        case 13: return record.q13;
+        case 14: return record.q14;
+        case 15: return record.q15;
+        case 16: return record.q16;
+        case 17: return record.q17;
+        case 18: return record.q18;
+        case 19: return record.q19;
+        case 20: return record.q20;
+        case 21: return record.q21;
+        case 22: return record.q22;
+        case 23: return record.q23;
+        case 24: return record.q24;
+        case 25: return record.q25;
+        case 26: return record.q26;
+        case 27: return record.q27;
+        case 28: return record.q28;
+        case 29: return record.q29;
+        case 30: return record.q30;
+        case 31: return record.q31;
+        default: return 0;
+        }
+    }
+
+    static void uiHwbpSetQField(Driver::hwbp_record &record, int index, __uint128_t value)
+    {
+        switch (index)
+        {
+        case 0: record.q0 = value; break;
+        case 1: record.q1 = value; break;
+        case 2: record.q2 = value; break;
+        case 3: record.q3 = value; break;
+        case 4: record.q4 = value; break;
+        case 5: record.q5 = value; break;
+        case 6: record.q6 = value; break;
+        case 7: record.q7 = value; break;
+        case 8: record.q8 = value; break;
+        case 9: record.q9 = value; break;
+        case 10: record.q10 = value; break;
+        case 11: record.q11 = value; break;
+        case 12: record.q12 = value; break;
+        case 13: record.q13 = value; break;
+        case 14: record.q14 = value; break;
+        case 15: record.q15 = value; break;
+        case 16: record.q16 = value; break;
+        case 17: record.q17 = value; break;
+        case 18: record.q18 = value; break;
+        case 19: record.q19 = value; break;
+        case 20: record.q20 = value; break;
+        case 21: record.q21 = value; break;
+        case 22: record.q22 = value; break;
+        case 23: record.q23 = value; break;
+        case 24: record.q24 = value; break;
+        case 25: record.q25 = value; break;
+        case 26: record.q26 = value; break;
+        case 27: record.q27 = value; break;
+        case 28: record.q28 = value; break;
+        case 29: record.q29 = value; break;
+        case 30: record.q30 = value; break;
+        case 31: record.q31 = value; break;
+        default: break;
+        }
+    }
+
+    static std::uint64_t uiHwbpReadRegisterValue(Driver::hwbp_record &record, int reg)
+    {
+        uiHwbpRequestRead(record, reg);
+        switch (reg)
+        {
+        case Driver::IDX_PC:
+            return record.pc;
+        case Driver::IDX_HIT_COUNT:
+            return record.hit_count;
+        case Driver::IDX_LR:
+            return record.lr;
+        case Driver::IDX_SP:
+            return record.sp;
+        case Driver::IDX_ORIG_X0:
+            return record.orig_x0;
+        case Driver::IDX_SYSCALLNO:
+            return record.syscallno;
+        case Driver::IDX_PSTATE:
+            return record.pstate;
+        case Driver::IDX_FPSR:
+            return record.fpsr;
+        case Driver::IDX_FPCR:
+            return record.fpcr;
+        default:
+            if (reg >= Driver::IDX_X0 && reg <= Driver::IDX_X29)
+            {
+                return uiHwbpGetXField(record, reg - Driver::IDX_X0);
+            }
+            return 0;
+        }
+    }
+
+    static bool uiHwbpWriteRegisterValue(Driver::hwbp_record &record, int reg, std::uint64_t value)
+    {
+        HWBP_SET_MASK(&record, reg, HWBP_OP_WRITE);
+        switch (reg)
+        {
+        case Driver::IDX_PC:
+            record.pc = value;
+            return true;
+        case Driver::IDX_HIT_COUNT:
+            record.hit_count = value;
+            return true;
+        case Driver::IDX_LR:
+            record.lr = value;
+            return true;
+        case Driver::IDX_SP:
+            record.sp = value;
+            return true;
+        case Driver::IDX_ORIG_X0:
+            record.orig_x0 = value;
+            return true;
+        case Driver::IDX_SYSCALLNO:
+            record.syscallno = value;
+            return true;
+        case Driver::IDX_PSTATE:
+            record.pstate = value;
+            return true;
+        case Driver::IDX_FPSR:
+            record.fpsr = static_cast<std::uint32_t>(value);
+            return true;
+        case Driver::IDX_FPCR:
+            record.fpcr = static_cast<std::uint32_t>(value);
+            return true;
+        default:
+            if (reg >= Driver::IDX_X0 && reg <= Driver::IDX_X29)
+            {
+                uiHwbpSetXField(record, reg - Driver::IDX_X0, value);
+                return true;
+            }
+            if (reg >= Driver::IDX_Q0 && reg <= Driver::IDX_Q31)
+            {
+                uiHwbpSetQField(record, reg - Driver::IDX_Q0, static_cast<__uint128_t>(value));
+                return true;
+            }
+            return false;
+        }
+    }
+
+    static std::uint64_t uiHwbpReadXField(Driver::hwbp_record &record, int index)
+    {
+        uiHwbpRequestRead(record, Driver::IDX_X0 + index);
+        return uiHwbpGetXField(record, index);
+    }
+
+    static __uint128_t uiHwbpReadQField(Driver::hwbp_record &record, int index)
+    {
+        uiHwbpRequestRead(record, Driver::IDX_Q0 + index);
+        return uiHwbpGetQField(record, index);
+    }
+
+    static void uiHwbpWriteQField(Driver::hwbp_record &record, int index, __uint128_t value)
+    {
+        HWBP_SET_MASK(&record, Driver::IDX_Q0 + index, HWBP_OP_WRITE);
+        uiHwbpSetQField(record, index, value);
+    }
+
 public:
     MainUI()
     {
@@ -1287,7 +1548,7 @@ private:
         for (int r = 0; r < info.record_count; ++r)
         {
             auto &rec = const_cast<Driver::hwbp_record &>(info.records[r]);
-            totalHits += hwbpReadRegisterValue(rec, Driver::IDX_HIT_COUNT);
+            totalHits += uiHwbpReadRegisterValue(rec, Driver::IDX_HIT_COUNT);
         }
         UI::Text(Colors::WARN, "不同PC数: %d  总命中: %llu", info.record_count, (unsigned long long)totalHits);
         UI::Space(S(6));
@@ -1298,8 +1559,8 @@ private:
         for (int r = 0; r < info.record_count; ++r)
         {
             auto &rec = const_cast<Driver::hwbp_record &>(info.records[r]);
-            const auto pc = hwbpReadRegisterValue(rec, Driver::IDX_PC);
-            const auto hitCount = hwbpReadRegisterValue(rec, Driver::IDX_HIT_COUNT);
+            const auto pc = uiHwbpReadRegisterValue(rec, Driver::IDX_PC);
+            const auto hitCount = uiHwbpReadRegisterValue(rec, Driver::IDX_HIT_COUNT);
             ImGui::PushID(r);
             float btnW = S(55), expandW = S(45);
 
@@ -1362,7 +1623,7 @@ private:
         // fieldId: 0~29=X0~X29, 30=LR, 31=SP, 32=PC, 33=PSTATE, 34=ORIG_X0, 35=SYSCALLNO
         auto regLine = [&](const char *name, int regIndex)
         {
-            const auto val = hwbpReadRegisterValue(show, regIndex);
+            const auto val = uiHwbpReadRegisterValue(show, regIndex);
             UI::Text({0.7f, 0.85f, 1, 1}, "%s: ", name);
             ImGui::SameLine();
             UI::Text(Colors::ADDR_GREEN, "0x%llX", (unsigned long long)val);
@@ -1393,7 +1654,7 @@ private:
                 // 键盘关闭，写入副本
                 if (bpParams_.editingField == regIndex && !ImGuiFloatingKeyboard::IsVisible() && bpParams_.regEditBuf[0])
                 {
-                    hwbpWriteRegisterValue(bpParams_.editCopy, regIndex, strtoull(bpParams_.regEditBuf, nullptr, 16));
+                    uiHwbpWriteRegisterValue(bpParams_.editCopy, regIndex, strtoull(bpParams_.regEditBuf, nullptr, 16));
                     bpParams_.editingField = -1;
                     bpParams_.regEditBuf[0] = 0;
                 }
@@ -1406,10 +1667,10 @@ private:
         UI::Space(S(4));
 
         // PSTATE / SYSCALL / ORIG_X0 同理
-        const auto pstate = hwbpReadRegisterValue(show, Driver::IDX_PSTATE);
-        const auto syscallno = hwbpReadRegisterValue(show, Driver::IDX_SYSCALLNO);
-        const auto origX0 = hwbpReadRegisterValue(show, Driver::IDX_ORIG_X0);
-        const auto hitCount = hwbpReadRegisterValue(show, Driver::IDX_HIT_COUNT);
+        const auto pstate = uiHwbpReadRegisterValue(show, Driver::IDX_PSTATE);
+        const auto syscallno = uiHwbpReadRegisterValue(show, Driver::IDX_SYSCALLNO);
+        const auto origX0 = uiHwbpReadRegisterValue(show, Driver::IDX_ORIG_X0);
+        const auto hitCount = uiHwbpReadRegisterValue(show, Driver::IDX_HIT_COUNT);
         UI::Text(Colors::LABEL, "PSTATE:  0x%llX", (unsigned long long)pstate);
         if (isEditing)
         {
@@ -1423,7 +1684,7 @@ private:
             }
             if (bpParams_.editingField == Driver::IDX_PSTATE && !ImGuiFloatingKeyboard::IsVisible() && bpParams_.regEditBuf[0])
             {
-                hwbpWriteRegisterValue(bpParams_.editCopy, Driver::IDX_PSTATE, strtoull(bpParams_.regEditBuf, nullptr, 16));
+                uiHwbpWriteRegisterValue(bpParams_.editCopy, Driver::IDX_PSTATE, strtoull(bpParams_.regEditBuf, nullptr, 16));
                 bpParams_.editingField = -1;
                 bpParams_.regEditBuf[0] = 0;
             }
@@ -1453,7 +1714,7 @@ private:
             for (int i = 0; i < 30; ++i)
             {
                 const int regIndex = Driver::IDX_X0 + i;
-                const auto regValue = hwbpReadXField(show, i);
+                const auto regValue = uiHwbpReadXField(show, i);
                 ImGui::TableNextRow();
                 ImGui::PushID(i);
 
@@ -1487,7 +1748,7 @@ private:
                     }
                     if (bpParams_.editingField == regIndex && !ImGuiFloatingKeyboard::IsVisible() && bpParams_.regEditBuf[0])
                     {
-                        hwbpWriteRegisterValue(bpParams_.editCopy, regIndex, strtoull(bpParams_.regEditBuf, nullptr, 16));
+                        uiHwbpWriteRegisterValue(bpParams_.editCopy, regIndex, strtoull(bpParams_.regEditBuf, nullptr, 16));
                         bpParams_.editingField = -1;
                         bpParams_.regEditBuf[0] = 0;
                     }
@@ -1506,7 +1767,7 @@ private:
         // FPSR / FPCR 显示与编辑
         auto fpCtrlLine = [&](const char *name, int regIndex)
         {
-            const auto val = static_cast<uint32_t>(hwbpReadRegisterValue(show, regIndex));
+            const auto val = static_cast<uint32_t>(uiHwbpReadRegisterValue(show, regIndex));
             UI::Text({0.7f, 0.85f, 1, 1}, "%s: ", name);
             ImGui::SameLine();
             UI::Text(Colors::ADDR_GREEN, "0x%X", (unsigned int)val);
@@ -1536,7 +1797,7 @@ private:
                 }
                 if (bpParams_.editingField == regIndex && !ImGuiFloatingKeyboard::IsVisible() && bpParams_.regEditBuf[0])
                 {
-                    hwbpWriteRegisterValue(bpParams_.editCopy, regIndex, strtoul(bpParams_.regEditBuf, nullptr, 16));
+                    uiHwbpWriteRegisterValue(bpParams_.editCopy, regIndex, strtoul(bpParams_.regEditBuf, nullptr, 16));
                     bpParams_.editingField = -1;
                     bpParams_.regEditBuf[0] = 0;
                 }
@@ -1564,7 +1825,7 @@ private:
             for (int i = 0; i < 32; ++i)
             {
                 const int regIndex = Driver::IDX_Q0 + i;
-                const auto qValue = hwbpReadQField(show, i);
+                const auto qValue = uiHwbpReadQField(show, i);
                 const auto qLo = static_cast<uint64_t>(qValue);
                 const auto qHi = static_cast<uint64_t>(qValue >> 64);
                 ImGui::TableNextRow();
@@ -1618,7 +1879,7 @@ private:
                         }
                         uint64_t hi = strtoull(hiBuf, nullptr, 16);
                         uint64_t lo = strtoull(loBuf, nullptr, 16);
-                        hwbpWriteQField(bpParams_.editCopy, i, (static_cast<__uint128_t>(hi) << 64) | lo);
+                        uiHwbpWriteQField(bpParams_.editCopy, i, (static_cast<__uint128_t>(hi) << 64) | lo);
                         bpParams_.editingField = -1;
                         bpParams_.regEditBuf[0] = 0;
                     }

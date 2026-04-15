@@ -138,8 +138,8 @@ struct hwbp_record
     uint8_t mask[18];
 
     // 通用寄存器
-    uint64_t pc;        // 触发断点的汇编指令地址
     uint64_t hit_count; // 该 PC 命中的次数
+    uint64_t pc;        // 触发断点的汇编指令地址
     uint64_t lr;        // X30
     uint64_t sp;        // Stack Pointer
     uint64_t orig_x0;   // 原始 X0
