@@ -42,7 +42,7 @@ namespace Disasm
                 return;
             }
 
-            cs_option(m_handle, CS_OPT_DETAIL, CS_OPT_ON);
+            cs_option(m_handle, CS_OPT_DETAIL, CS_OPT_OFF);
 
             m_valid = true;
             printf("[+] 反汇编器初始化成功: ARM64\n");
@@ -69,7 +69,8 @@ namespace Disasm
         }
 
         std::vector<DisasmLine> Disassemble(uint64_t address, const uint8_t *buffer,
-                                            size_t size, size_t maxCount = 0)
+                                            size_t size, size_t maxCount = 0,
+                                            bool logInstructions = false)
         {
             std::vector<DisasmLine> results;
 
@@ -95,9 +96,12 @@ namespace Disasm
             }
 
             // 输出反汇编结果
-            printf("[*] 反汇编 %zu 条指令:\n", count);
+            if (logInstructions)
+                printf("[*] 反汇编 %zu 条指令:\n", count);
             for (size_t i = 0; i < count; i++)
             {
+                if (!logInstructions)
+                    continue;
                 // 原始字节
                 char bytesStr[48] = {0};
                 int pos = 0;

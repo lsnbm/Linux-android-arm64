@@ -1454,8 +1454,9 @@ private:
     std::vector<uint8_t> buffer_;
     bool visible_ = false;
     bool readSuccess_ = false;
-    Disasm::Disassembler disasm_;
     std::vector<Disasm::DisasmLine> disasmCache_;
+    std::future<std::vector<Disasm::DisasmLine>> disasmFuture_;
+    bool disasmBusy_ = false;
     int disasmScrollIdx_ = 0;
 
 public:
@@ -1473,8 +1474,29 @@ public:
     uintptr_t base() const noexcept { return base_; }
     const std::vector<uint8_t> &buffer() const noexcept { return buffer_; }
     const std::vector<Disasm::DisasmLine> &getDisasm() const noexcept { return disasmCache_; }
+    bool disasmBusy() const noexcept { return disasmBusy_; }
     // 返回当前反汇编滚动索引。
     int disasmScrollIdx() const noexcept { return disasmScrollIdx_; }
+
+    void pollDisasm()
+    {
+        if (!disasmFuture_.valid() ||
+            disasmFuture_.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready)
+        {
+            return;
+        }
+
+        try
+        {
+            disasmCache_ = disasmFuture_.get();
+        }
+        catch (...)
+        {
+            disasmCache_.clear();
+        }
+        disasmBusy_ = false;
+        disasmScrollIdx_ = 0;
+    }
 
     // 切换浏览格式并触发刷新。
     void setFormat(Types::ViewFormat fmt)
@@ -1519,6 +1541,7 @@ public:
         if (base_ > Config::Constants::ADDR_MAX)
         {
             readSuccess_ = false;
+            disasmBusy_ = false;
             disasmCache_.clear();
             return;
         }
@@ -1526,6 +1549,7 @@ public:
         readSuccess_ = (dr.Read(base_, buffer_.data(), buffer_.size()));
         if (!readSuccess_)
         {
+            disasmBusy_ = false;
             disasmCache_.clear();
             return;
         }
@@ -1533,10 +1557,25 @@ public:
         {
             disasmCache_.clear();
             disasmScrollIdx_ = 0;
-            if (disasm_.IsValid() && !buffer_.empty())
+            disasmBusy_ = false;
+            if (!buffer_.empty())
             {
-                // 安全限制：哪怕 buffer_ 特别大，最多只让 Capstone 一次解 1000 条指令
-                disasmCache_ = disasm_.Disassemble(base_, buffer_.data(), buffer_.size(), 1000);
+                auto base = base_;
+                auto bytes = buffer_;
+                try
+                {
+                    disasmFuture_ = Utils::GlobalPool.push([base, bytes = std::move(bytes)]() mutable
+                                                           {
+                        Disasm::Disassembler disasm;
+                        if (!disasm.IsValid())
+                            return std::vector<Disasm::DisasmLine>{};
+                        return disasm.Disassemble(base, bytes.data(), bytes.size(), 1000, true); });
+                    disasmBusy_ = true;
+                }
+                catch (...)
+                {
+                    disasmCache_.clear();
+                }
             }
         }
     }

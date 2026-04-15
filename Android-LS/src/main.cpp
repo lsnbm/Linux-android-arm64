@@ -1102,6 +1102,8 @@ private:
     // ================================================================
     void drawViewerTab()
     {
+        memViewer_.pollDisasm();
+
         float w = ImGui::GetContentRegionAvail().x, bh = S(42);
         float goW = S(55), ofsW = S(55), fmtW = S(85), refW = S(55);
         float inputW = w - goW - ofsW - fmtW - refW - S(24);
@@ -1181,7 +1183,12 @@ private:
         if (ImGui::BeginChild("MemContent", {cW, cH}, false, ImGuiWindowFlags_NoScrollbar))
         {
             if (fmt == Types::ViewFormat::Disasm)
-                drawDisasmView(memViewer_.base(), memViewer_.getDisasm(), rows, memViewer_.disasmScrollIdx());
+            {
+                if (memViewer_.disasmBusy())
+                    UI::Text(Colors::HINT, "反汇编中...");
+                else
+                    drawDisasmView(memViewer_.base(), memViewer_.getDisasm(), rows, memViewer_.disasmScrollIdx());
+            }
             else if (fmt == Types::ViewFormat::Hex)
                 drawHexDump(memViewer_.base(), memViewer_.buffer(), rows);
             else
@@ -1193,10 +1200,15 @@ private:
         if (ImGui::BeginChild("MemArrows", {aW, cH}, false, ImGuiWindowFlags_NoScrollbar))
         {
             ImGui::PushStyleColor(ImGuiCol_Button, {0.2f, 0.3f, 0.4f, 1});
+            bool disableDisasmMove = fmt == Types::ViewFormat::Disasm && memViewer_.disasmBusy();
+            if (disableDisasmMove)
+                ImGui::BeginDisabled();
             if (ImGui::Button("▲##view_up", {aW, cH / 2 - S(3)}))
                 memViewer_.move(-1, step);
             if (ImGui::Button("▼##view_down", {aW, cH / 2 - S(3)}))
                 memViewer_.move(1, step);
+            if (disableDisasmMove)
+                ImGui::EndDisabled();
             ImGui::PopStyleColor();
         }
         ImGui::EndChild();
