@@ -425,37 +425,68 @@ private:
     {
         switch (index)
         {
-        case 0: return record.x0;
-        case 1: return record.x1;
-        case 2: return record.x2;
-        case 3: return record.x3;
-        case 4: return record.x4;
-        case 5: return record.x5;
-        case 6: return record.x6;
-        case 7: return record.x7;
-        case 8: return record.x8;
-        case 9: return record.x9;
-        case 10: return record.x10;
-        case 11: return record.x11;
-        case 12: return record.x12;
-        case 13: return record.x13;
-        case 14: return record.x14;
-        case 15: return record.x15;
-        case 16: return record.x16;
-        case 17: return record.x17;
-        case 18: return record.x18;
-        case 19: return record.x19;
-        case 20: return record.x20;
-        case 21: return record.x21;
-        case 22: return record.x22;
-        case 23: return record.x23;
-        case 24: return record.x24;
-        case 25: return record.x25;
-        case 26: return record.x26;
-        case 27: return record.x27;
-        case 28: return record.x28;
-        case 29: return record.x29;
-        default: return 0;
+        case 0:
+            return record.x0;
+        case 1:
+            return record.x1;
+        case 2:
+            return record.x2;
+        case 3:
+            return record.x3;
+        case 4:
+            return record.x4;
+        case 5:
+            return record.x5;
+        case 6:
+            return record.x6;
+        case 7:
+            return record.x7;
+        case 8:
+            return record.x8;
+        case 9:
+            return record.x9;
+        case 10:
+            return record.x10;
+        case 11:
+            return record.x11;
+        case 12:
+            return record.x12;
+        case 13:
+            return record.x13;
+        case 14:
+            return record.x14;
+        case 15:
+            return record.x15;
+        case 16:
+            return record.x16;
+        case 17:
+            return record.x17;
+        case 18:
+            return record.x18;
+        case 19:
+            return record.x19;
+        case 20:
+            return record.x20;
+        case 21:
+            return record.x21;
+        case 22:
+            return record.x22;
+        case 23:
+            return record.x23;
+        case 24:
+            return record.x24;
+        case 25:
+            return record.x25;
+        case 26:
+            return record.x26;
+        case 27:
+            return record.x27;
+        case 28:
+            return record.x28;
+        case 29:
+            return record.x29;
+        default:
+            return 0;
         }
     }
 
@@ -463,37 +494,98 @@ private:
     {
         switch (index)
         {
-        case 0: record.x0 = value; break;
-        case 1: record.x1 = value; break;
-        case 2: record.x2 = value; break;
-        case 3: record.x3 = value; break;
-        case 4: record.x4 = value; break;
-        case 5: record.x5 = value; break;
-        case 6: record.x6 = value; break;
-        case 7: record.x7 = value; break;
-        case 8: record.x8 = value; break;
-        case 9: record.x9 = value; break;
-        case 10: record.x10 = value; break;
-        case 11: record.x11 = value; break;
-        case 12: record.x12 = value; break;
-        case 13: record.x13 = value; break;
-        case 14: record.x14 = value; break;
-        case 15: record.x15 = value; break;
-        case 16: record.x16 = value; break;
-        case 17: record.x17 = value; break;
-        case 18: record.x18 = value; break;
-        case 19: record.x19 = value; break;
-        case 20: record.x20 = value; break;
-        case 21: record.x21 = value; break;
-        case 22: record.x22 = value; break;
-        case 23: record.x23 = value; break;
-        case 24: record.x24 = value; break;
-        case 25: record.x25 = value; break;
-        case 26: record.x26 = value; break;
-        case 27: record.x27 = value; break;
-        case 28: record.x28 = value; break;
-        case 29: record.x29 = value; break;
-        default: break;
+        case 0:
+            record.x0 = value;
+            break;
+        case 1:
+            record.x1 = value;
+            break;
+        case 2:
+            record.x2 = value;
+            break;
+        case 3:
+            record.x3 = value;
+            break;
+        case 4:
+            record.x4 = value;
+            break;
+        case 5:
+            record.x5 = value;
+            break;
+        case 6:
+            record.x6 = value;
+            break;
+        case 7:
+            record.x7 = value;
+            break;
+        case 8:
+            record.x8 = value;
+            break;
+        case 9:
+            record.x9 = value;
+            break;
+        case 10:
+            record.x10 = value;
+            break;
+        case 11:
+            record.x11 = value;
+            break;
+        case 12:
+            record.x12 = value;
+            break;
+        case 13:
+            record.x13 = value;
+            break;
+        case 14:
+            record.x14 = value;
+            break;
+        case 15:
+            record.x15 = value;
+            break;
+        case 16:
+            record.x16 = value;
+            break;
+        case 17:
+            record.x17 = value;
+            break;
+        case 18:
+            record.x18 = value;
+            break;
+        case 19:
+            record.x19 = value;
+            break;
+        case 20:
+            record.x20 = value;
+            break;
+        case 21:
+            record.x21 = value;
+            break;
+        case 22:
+            record.x22 = value;
+            break;
+        case 23:
+            record.x23 = value;
+            break;
+        case 24:
+            record.x24 = value;
+            break;
+        case 25:
+            record.x25 = value;
+            break;
+        case 26:
+            record.x26 = value;
+            break;
+        case 27:
+            record.x27 = value;
+            break;
+        case 28:
+            record.x28 = value;
+            break;
+        case 29:
+            record.x29 = value;
+            break;
+        default:
+            break;
         }
     }
 
@@ -501,39 +593,72 @@ private:
     {
         switch (index)
         {
-        case 0: return record.q0;
-        case 1: return record.q1;
-        case 2: return record.q2;
-        case 3: return record.q3;
-        case 4: return record.q4;
-        case 5: return record.q5;
-        case 6: return record.q6;
-        case 7: return record.q7;
-        case 8: return record.q8;
-        case 9: return record.q9;
-        case 10: return record.q10;
-        case 11: return record.q11;
-        case 12: return record.q12;
-        case 13: return record.q13;
-        case 14: return record.q14;
-        case 15: return record.q15;
-        case 16: return record.q16;
-        case 17: return record.q17;
-        case 18: return record.q18;
-        case 19: return record.q19;
-        case 20: return record.q20;
-        case 21: return record.q21;
-        case 22: return record.q22;
-        case 23: return record.q23;
-        case 24: return record.q24;
-        case 25: return record.q25;
-        case 26: return record.q26;
-        case 27: return record.q27;
-        case 28: return record.q28;
-        case 29: return record.q29;
-        case 30: return record.q30;
-        case 31: return record.q31;
-        default: return 0;
+        case 0:
+            return record.q0;
+        case 1:
+            return record.q1;
+        case 2:
+            return record.q2;
+        case 3:
+            return record.q3;
+        case 4:
+            return record.q4;
+        case 5:
+            return record.q5;
+        case 6:
+            return record.q6;
+        case 7:
+            return record.q7;
+        case 8:
+            return record.q8;
+        case 9:
+            return record.q9;
+        case 10:
+            return record.q10;
+        case 11:
+            return record.q11;
+        case 12:
+            return record.q12;
+        case 13:
+            return record.q13;
+        case 14:
+            return record.q14;
+        case 15:
+            return record.q15;
+        case 16:
+            return record.q16;
+        case 17:
+            return record.q17;
+        case 18:
+            return record.q18;
+        case 19:
+            return record.q19;
+        case 20:
+            return record.q20;
+        case 21:
+            return record.q21;
+        case 22:
+            return record.q22;
+        case 23:
+            return record.q23;
+        case 24:
+            return record.q24;
+        case 25:
+            return record.q25;
+        case 26:
+            return record.q26;
+        case 27:
+            return record.q27;
+        case 28:
+            return record.q28;
+        case 29:
+            return record.q29;
+        case 30:
+            return record.q30;
+        case 31:
+            return record.q31;
+        default:
+            return 0;
         }
     }
 
@@ -541,39 +666,104 @@ private:
     {
         switch (index)
         {
-        case 0: record.q0 = value; break;
-        case 1: record.q1 = value; break;
-        case 2: record.q2 = value; break;
-        case 3: record.q3 = value; break;
-        case 4: record.q4 = value; break;
-        case 5: record.q5 = value; break;
-        case 6: record.q6 = value; break;
-        case 7: record.q7 = value; break;
-        case 8: record.q8 = value; break;
-        case 9: record.q9 = value; break;
-        case 10: record.q10 = value; break;
-        case 11: record.q11 = value; break;
-        case 12: record.q12 = value; break;
-        case 13: record.q13 = value; break;
-        case 14: record.q14 = value; break;
-        case 15: record.q15 = value; break;
-        case 16: record.q16 = value; break;
-        case 17: record.q17 = value; break;
-        case 18: record.q18 = value; break;
-        case 19: record.q19 = value; break;
-        case 20: record.q20 = value; break;
-        case 21: record.q21 = value; break;
-        case 22: record.q22 = value; break;
-        case 23: record.q23 = value; break;
-        case 24: record.q24 = value; break;
-        case 25: record.q25 = value; break;
-        case 26: record.q26 = value; break;
-        case 27: record.q27 = value; break;
-        case 28: record.q28 = value; break;
-        case 29: record.q29 = value; break;
-        case 30: record.q30 = value; break;
-        case 31: record.q31 = value; break;
-        default: break;
+        case 0:
+            record.q0 = value;
+            break;
+        case 1:
+            record.q1 = value;
+            break;
+        case 2:
+            record.q2 = value;
+            break;
+        case 3:
+            record.q3 = value;
+            break;
+        case 4:
+            record.q4 = value;
+            break;
+        case 5:
+            record.q5 = value;
+            break;
+        case 6:
+            record.q6 = value;
+            break;
+        case 7:
+            record.q7 = value;
+            break;
+        case 8:
+            record.q8 = value;
+            break;
+        case 9:
+            record.q9 = value;
+            break;
+        case 10:
+            record.q10 = value;
+            break;
+        case 11:
+            record.q11 = value;
+            break;
+        case 12:
+            record.q12 = value;
+            break;
+        case 13:
+            record.q13 = value;
+            break;
+        case 14:
+            record.q14 = value;
+            break;
+        case 15:
+            record.q15 = value;
+            break;
+        case 16:
+            record.q16 = value;
+            break;
+        case 17:
+            record.q17 = value;
+            break;
+        case 18:
+            record.q18 = value;
+            break;
+        case 19:
+            record.q19 = value;
+            break;
+        case 20:
+            record.q20 = value;
+            break;
+        case 21:
+            record.q21 = value;
+            break;
+        case 22:
+            record.q22 = value;
+            break;
+        case 23:
+            record.q23 = value;
+            break;
+        case 24:
+            record.q24 = value;
+            break;
+        case 25:
+            record.q25 = value;
+            break;
+        case 26:
+            record.q26 = value;
+            break;
+        case 27:
+            record.q27 = value;
+            break;
+        case 28:
+            record.q28 = value;
+            break;
+        case 29:
+            record.q29 = value;
+            break;
+        case 30:
+            record.q30 = value;
+            break;
+        case 31:
+            record.q31 = value;
+            break;
+        default:
+            break;
         }
     }
 

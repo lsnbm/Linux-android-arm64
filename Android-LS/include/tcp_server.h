@@ -1850,6 +1850,8 @@ namespace
 
         if (command == "viewer.get")
         {
+            if (session->memViewer.format() == Types::ViewFormat::Disasm)
+                session->memViewer.waitDisasm();
             const std::string jsonText = buildViewerSnapshotJson(session->memViewer).dump();
             return std::format("ok viewer.get size={}\n{}", jsonText.size(), jsonText);
         }

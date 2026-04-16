@@ -1499,6 +1499,23 @@ public:
     }
 
     // 切换浏览格式并触发刷新。
+    void waitDisasm()
+    {
+        if (!disasmFuture_.valid())
+            return;
+
+        try
+        {
+            disasmCache_ = disasmFuture_.get();
+        }
+        catch (...)
+        {
+            disasmCache_.clear();
+        }
+        disasmBusy_ = false;
+        disasmScrollIdx_ = 0;
+    }
+
     void setFormat(Types::ViewFormat fmt)
     {
         format_ = fmt;
