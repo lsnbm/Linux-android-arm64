@@ -11,41 +11,19 @@
   当触发硬件数据断点 或指令断点 时，
   用于在软件层面直接计算出下一条 PC 或模拟内存读写，从而无需依赖
 
-
-  =========================================================================
-断点方式1：常规 ptrace 与 BRK 软断点
-实现方式： 调试器通过 ptrace 附加，向内存写入 0xD4200000 (BRK指令)。
-可能被检测点：
-特征文件： /proc/self/status 里的 TracerPid 不为 0。
-内存完整性： 任何最基本的 CRC/Hash 内存校验都会发现代码段被篡改。
-信号拦截： 进程可以注册 SIGTRAP 信号处理器，发现异常。
-隐蔽性：0 / 10
-断点方式2： 硬件断点 (BRP/WRP) + 硬件单步 (SPSR.SS)
-这是目前大部分所谓“无痕调试器”或内核 Hook 采用的方法。
-实现方式：
-x86 的实现： 设置 EFLAGS 寄存器的 TF (Trap Flag) 标志位。CPU 执行一条指令后，触发 INT 1 (#DB) 异常。
-ARM64 的实现：设置 MDSCR_EL1.SS (Single Step 开启) 和 SPSR_EL1.SS (PSTATE 的单步状态位)。CPU 执行完下一条指令后，硬件会主动触发异常（ESR_EL1 的 Exception Class 为 0x32）。
-可能被检测点：
-调试寄存器暴露： 是用户态程序，通过调用特定的系统 API（如 ptrace 获取自己的 NT_ARM_HW_BREAK 寄存器集）也能发现，如果反作弊引擎在内核有驱动，它可以直接读取 MDSCR_EL1 或 DBGBVR 寄存器，瞬间发现有断点。
-线程上下文暴露： 当程序被硬件单步时，反作弊线程如果刚好获取目标线程的上下文，会发现其 PSTATE 中的 SS 标志位被莫名其妙置起（或者发现某些用于暂存断点的内核变量被修改）。
-隐蔽性：4 / 10
-  =========================================================================
-
   支持的指令范围 (全寄存器 + 全位宽支持)：
   - 分支跳转：B, BL, BR, BLR, RET, B.cond, CBZ, CBNZ, TBZ, TBNZ
   - 地址计算：ADR, ADRP
   - 整数访存 (W/X 寄存器，8 ~ 64 位)：
-      * LDR/STR, LDP/STP, LDRB/H/SW (支持无符号、Pre/Post-index 及寄存器偏移)
+      * LDR/STR, LDP/STP, LDRB/H/SW 
   - 浮点/SIMD访存 (B/H/S/D/Q 寄存器，8 ~ 128 位)：
       * LDR/STR (SIMD), LDP/STP (SIMD), LDR (Literal, SIMD)
       * 突破内核限制，直接读取物理 CPU 的 Q0-Q31 寄存器，支持 128-bit 模拟。
 
   不支持的指令 (遇到会跳过该指令, PC = PC + 4)：
-  - ALU 计算指令：ADD, SUB, AND, LSL 等 (无副作用，跳过即可)。
-  - 原子/独占指令：LDXR, STXR, CAS, SWP 等 (强行模拟会破坏硬件独占监视器，必须拒绝)。
+  - ALU 计算指令：ADD, SUB, AND, LSL 等 
+  - 原子/独占指令：LDXR, STXR, CAS, SWP 等
   ========================================================================= */
-
-// 浮点与 SIMD 寄存器物理层读写(应该没有惰性机制)
 
 // 读取当前物理 CPU 的浮点/SIMD 寄存器 (Q0 - Q31)
 static __always_inline void get_user_fp_regs(__uint128_t *vregs, uint32_t *fpsr, uint32_t *fpcr)
