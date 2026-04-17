@@ -166,199 +166,12 @@ class TcpTestWindow(QWidget):
         self.live_refresh_timer.start()
 
     def _apply_window_style(self) -> None:
-        self.setObjectName("mainWindow")
-        self.setStyleSheet(
-            """
-            QWidget#mainWindow {
-                background: #f3f3f3;
-                color: #1f1f1f;
-                font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
-                font-size: 12px;
-            }
-            QDialog {
-                background: #f3f3f3;
-                color: #1f1f1f;
-                font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
-                font-size: 12px;
-            }
-            QFrame#heroCard {
-                background: #ffffff;
-                border: 1px solid #c8c8c8;
-                border-radius: 2px;
-            }
-            QFrame#panelCard, QFrame#metricCard {
-                background: #ffffff;
-                border: 1px solid #c8c8c8;
-                border-radius: 2px;
-            }
-            QLabel#heroEyebrow {
-                color: #666666;
-                font-size: 11px;
-                font-weight: 600;
-            }
-            QLabel#heroTitle {
-                color: #111111;
-                font-size: 18px;
-                font-weight: 600;
-            }
-            QLabel#heroSubtitle, QLabel#sectionHint {
-                color: #5a5a5a;
-            }
-            QLabel#sectionTitle {
-                color: #111111;
-                font-size: 13px;
-                font-weight: 600;
-            }
-            QLabel#metricTitle {
-                color: #666666;
-                font-size: 11px;
-                font-weight: 600;
-            }
-            QLabel#metricValue {
-                color: #111111;
-                font-size: 13px;
-                font-weight: 600;
-            }
-            QLabel#metricValueStrong {
-                color: #0f62a8;
-                font-size: 18px;
-                font-weight: 700;
-            }
-            QLabel#statusText {
-                color: #1f1f1f;
-                font-size: 12px;
-                font-weight: 600;
-            }
-            QLabel#connectionBadge {
-                padding: 3px 8px;
-                border-radius: 2px;
-                font-weight: 600;
-            }
-            QLabel#connectionBadge[state="connected"] {
-                color: #0a5a0a;
-                background: #eaf6ea;
-                border: 1px solid #8fbc8f;
-            }
-            QLabel#connectionBadge[state="disconnected"] {
-                color: #7a1d1d;
-                background: #fbeaea;
-                border: 1px solid #d5a6a6;
-            }
-            QTabWidget::pane {
-                background: #ffffff;
-                border: 1px solid #c8c8c8;
-                border-radius: 0px;
-                top: -1px;
-            }
-            QTabBar::tab {
-                color: #2c2c2c;
-                background: #ededed;
-                border: 1px solid #c8c8c8;
-                border-bottom: none;
-                border-top-left-radius: 2px;
-                border-top-right-radius: 2px;
-                padding: 7px 12px;
-                margin-right: 2px;
-                min-width: 72px;
-                font-weight: 600;
-            }
-            QTabBar::tab:selected {
-                color: #111111;
-                background: #ffffff;
-            }
-            QTabBar::tab:!selected:hover {
-                color: #111111;
-                background: #f5f5f5;
-            }
-            QSplitter::handle {
-                background: #d9d9d9;
-            }
-            QSplitter::handle:horizontal {
-                width: 5px;
-            }
-            QSplitter::handle:vertical {
-                height: 5px;
-            }
-            QLineEdit, QComboBox, QTextEdit, QTreeWidget {
-                background: #ffffff;
-                border: 1px solid #bdbdbd;
-                border-radius: 1px;
-                padding: 4px 6px;
-                selection-background-color: #cde6ff;
-            }
-            QTextEdit, QTreeWidget {
-                padding: 6px;
-            }
-            QLineEdit:focus, QComboBox:focus, QTextEdit:focus, QTreeWidget:focus {
-                border: 1px solid #0f62a8;
-            }
-            QComboBox::drop-down {
-                width: 18px;
-                border: none;
-            }
-            QPushButton {
-                color: #1f1f1f;
-                background: #efefef;
-                border: 1px solid #bdbdbd;
-                border-radius: 2px;
-                padding: 4px 10px;
-                font-weight: 600;
-            }
-            QPushButton:hover {
-                background: #f5f5f5;
-            }
-            QPushButton:pressed {
-                background: #e5e5e5;
-            }
-            QPushButton[variant="primary"] {
-                color: #ffffff;
-                background: #0f62a8;
-                border: 1px solid #0b4f86;
-            }
-            QPushButton[variant="primary"]:hover {
-                background: #0d5a99;
-            }
-            QPushButton[variant="primary"]:pressed {
-                background: #0b4f86;
-            }
-            QPushButton[variant="secondary"] {
-                color: #1f1f1f;
-                background: #f6f6f6;
-                border: 1px solid #bdbdbd;
-            }
-            QPushButton[variant="secondary"]:hover {
-                background: #f0f0f0;
-            }
-            QPushButton:disabled {
-                color: #8a8a8a;
-                background: #f3f3f3;
-                border-color: #d0d0d0;
-            }
-            QMenu {
-                background: #ffffff;
-                border: 1px solid #bdbdbd;
-                padding: 2px;
-            }
-            QMenu::item {
-                padding: 5px 12px;
-                border-radius: 0px;
-            }
-            QMenu::item:selected {
-                background: #dcecff;
-            }
-            """
-        )
+        return
 
     def _create_card(self, object_name: str) -> QFrame:
         card = QFrame(self)
         card.setObjectName(object_name)
         return card
-
-    def _set_button_variant(self, button: QPushButton, variant: str) -> None:
-        button.setProperty("variant", variant)
-        button.style().unpolish(button)
-        button.style().polish(button)
-        button.update()
 
     def _create_page_layout(self, page: QWidget, title_text: str, hint_text: str) -> QVBoxLayout:
         layout = QVBoxLayout(page)
@@ -400,10 +213,6 @@ class TcpTestWindow(QWidget):
         if not hasattr(self, "connection_badge"):
             return
         self.connection_badge.setText("已连接" if connected else "未连接")
-        self.connection_badge.setProperty("state", "connected" if connected else "disconnected")
-        self.connection_badge.style().unpolish(self.connection_badge)
-        self.connection_badge.style().polish(self.connection_badge)
-        self.connection_badge.update()
 
     def _build_header_panel(self, root: QVBoxLayout) -> None:
         hero_card = self._create_card("heroCard")
@@ -523,7 +332,6 @@ class TcpTestWindow(QWidget):
         heading_row.addStretch(1)
 
         self.scan_device_button = QPushButton("扫描设备")
-        self._set_button_variant(self.scan_device_button, "secondary")
         self.scan_device_button.clicked.connect(self.on_scan_lan_devices)
         heading_row.addWidget(self.scan_device_button)
         layout.addLayout(heading_row)
@@ -543,7 +351,6 @@ class TcpTestWindow(QWidget):
         device_row.addWidget(self.port_input)
 
         self.test_button = QPushButton("连接到设备")
-        self._set_button_variant(self.test_button, "primary")
         self.test_button.clicked.connect(self.on_toggle_connection)
         device_row.addWidget(self.test_button)
         layout.addLayout(device_row)
@@ -574,7 +381,6 @@ class TcpTestWindow(QWidget):
         device_combo.addItem("请点击“扫描设备”获取列表", "")
         device_row.addWidget(device_combo, 1)
         scan_button = QPushButton("扫描设备")
-        self._set_button_variant(scan_button, "secondary")
         device_row.addWidget(scan_button)
         card_layout.addLayout(device_row)
 
@@ -594,7 +400,6 @@ class TcpTestWindow(QWidget):
         btn_row.addStretch(1)
         cancel_btn = QPushButton("取消")
         connect_btn = QPushButton("连接并进入")
-        self._set_button_variant(connect_btn, "primary")
         btn_row.addWidget(cancel_btn)
         btn_row.addWidget(connect_btn)
         layout.addLayout(btn_row)
@@ -622,24 +427,11 @@ class TcpTestWindow(QWidget):
         def on_connect() -> None:
             host_data = device_combo.currentData()
             host = str(host_data).strip() if host_data is not None else ""
-            if not host:
-                QMessageBox.warning(dialog, "输入提示", "请先扫描并选择局域网设备。")
-                return
-            port_text = port_input.text().strip()
-            try:
-                port = int(port_text, 10)
-            except ValueError:
-                QMessageBox.warning(dialog, "输入提示", "端口必须是整数。")
-                return
-            if not (1 <= port <= 65535):
-                QMessageBox.warning(dialog, "输入提示", "端口范围必须在 1 到 65535 之间。")
-                return
-
-            # 同步到主窗口连接控件后复用原有连接流程。
             self.device_combo.clear()
-            self.device_combo.addItem(host, host)
-            self.device_combo.setCurrentIndex(0)
-            self.port_input.setText(str(port))
+            if host:
+                self.device_combo.addItem(host, host)
+                self.device_combo.setCurrentIndex(0)
+            self.port_input.setText(port_input.text().strip())
             self._connect_device()
             if self._is_connected():
                 dialog.accept()
@@ -679,7 +471,6 @@ class TcpTestWindow(QWidget):
         row = QHBoxLayout()
         row.setSpacing(10)
         self.refresh_memory_button = QPushButton("刷新内存信息")
-        self._set_button_variant(self.refresh_memory_button, "primary")
         self.refresh_memory_button.clicked.connect(self.on_refresh_memory_info)
         row.addWidget(self.refresh_memory_button)
         row.addWidget(QLabel("搜索"))
@@ -770,7 +561,6 @@ class TcpTestWindow(QWidget):
         row2 = QHBoxLayout()
         row2.setSpacing(10)
         self.scan_first_button = QPushButton("首次扫描")
-        self._set_button_variant(self.scan_first_button, "primary")
         self.scan_first_button.clicked.connect(self.on_scan_first)
         row2.addWidget(self.scan_first_button)
 
@@ -848,7 +638,6 @@ class TcpTestWindow(QWidget):
         self.browser_view_combo.addItem("Disasm", "disasm")
         row1.addWidget(self.browser_view_combo)
         self.browser_read_button = QPushButton("读取")
-        self._set_button_variant(self.browser_read_button, "primary")
         self.browser_read_button.clicked.connect(self.on_browser_read)
         row1.addWidget(self.browser_read_button)
         row1.addStretch(1)
@@ -928,7 +717,6 @@ class TcpTestWindow(QWidget):
         row4 = QHBoxLayout()
         row4.setSpacing(8)
         self.pointer_scan_button = QPushButton("开始扫描")
-        self._set_button_variant(self.pointer_scan_button, "primary")
         self.pointer_scan_button.clicked.connect(self.on_pointer_scan)
         row4.addWidget(self.pointer_scan_button)
 
@@ -1012,7 +800,6 @@ class TcpTestWindow(QWidget):
         action_row.addWidget(self.hwbp_refresh_button)
 
         self.hwbp_set_button = QPushButton("设置断点")
-        self._set_button_variant(self.hwbp_set_button, "primary")
         self.hwbp_set_button.clicked.connect(self.on_hwbp_set)
         action_row.addWidget(self.hwbp_set_button)
 
@@ -1082,7 +869,6 @@ class TcpTestWindow(QWidget):
         self.sig_file_input = QLineEdit("Signature.txt")
         scan_row.addWidget(self.sig_file_input, 1)
         self.sig_scan_addr_button = QPushButton("找特征")
-        self._set_button_variant(self.sig_scan_addr_button, "primary")
         self.sig_scan_addr_button.clicked.connect(self.on_sig_scan_address)
         scan_row.addWidget(self.sig_scan_addr_button)
         action_layout.addLayout(scan_row)
@@ -1151,7 +937,6 @@ class TcpTestWindow(QWidget):
         self._populate_value_type_combo(self.saved_manual_type_combo)
         manual_row.addWidget(self.saved_manual_type_combo)
         self.saved_manual_add_button = QPushButton("添加地址")
-        self._set_button_variant(self.saved_manual_add_button, "primary")
         self.saved_manual_add_button.clicked.connect(self.on_add_saved_item)
         manual_row.addWidget(self.saved_manual_add_button)
         card_layout.addLayout(manual_row)
@@ -1292,7 +1077,6 @@ class TcpTestWindow(QWidget):
 
     def _set_connection_ui(self, connected: bool) -> None:
         self.test_button.setText("断开连接" if connected else "连接到设备")
-        self._set_button_variant(self.test_button, "secondary" if connected else "primary")
         self.device_combo.setEnabled(not connected)
         self.scan_device_button.setEnabled(not connected)
         self.port_input.setEnabled(not connected)
