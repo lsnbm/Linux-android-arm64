@@ -23,6 +23,7 @@ static struct req_obj *req = NULL;
 
 static atomic_t ProcessExit = ATOMIC_INIT(0); // 用户进程默认未启动
 static atomic_t KThreadExit = ATOMIC_INIT(1); // 内核线程默认启用
+
 // 避免模块内联 put_page() 把 Android 的 page_pinner 静态键依赖拉进来。
 static void release_gup_pages(struct page **pages, int nr)
 {
@@ -140,7 +141,6 @@ static int ConnectThreadFunction(void *data)
 	struct page **pages = NULL;
 	int num_pages;
 	int ret;
-	int i;
 
 	// 和内核线程在运行
 	while (atomic_read(&KThreadExit))
@@ -208,7 +208,7 @@ static int ConnectThreadFunction(void *data)
 				mm = NULL;
 				break; // 找到目标进程，退出遍历
 
-			    out_put_pages:
+			out_put_pages:
 				release_gup_pages(pages, ret);
 				kfree(pages);
 				pages = NULL;
