@@ -537,19 +537,16 @@ namespace
             auto &rec = const_cast<Driver::hwbp_record &>(info.records[i]);
             json item;
             item["index"] = i;
-            for (int reg = Driver::IDX_PC; reg < Driver::MAX_REG_COUNT; ++reg)
-            {
-                MemUtils::HwbpRequestRead(rec, reg);
-            }
-            const auto pc = MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_PC);
-            const auto hitCount = MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_HIT_COUNT);
-            const auto lr = MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_LR);
-            const auto sp = MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_SP);
-            const auto origX0 = MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_ORIG_X0);
-            const auto syscallNo = MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_SYSCALLNO);
-            const auto pstate = MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_PSTATE);
-            const auto fpsr = MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_FPSR);
-            const auto fpcr = MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_FPCR);
+            MemUtils::HwbpRequestAll(rec);
+            const auto pc = MemUtils::HwbpGetRegisterValue(rec, Driver::IDX_PC);
+            const auto hitCount = MemUtils::HwbpGetRegisterValue(rec, Driver::IDX_HIT_COUNT);
+            const auto lr = MemUtils::HwbpGetRegisterValue(rec, Driver::IDX_LR);
+            const auto sp = MemUtils::HwbpGetRegisterValue(rec, Driver::IDX_SP);
+            const auto origX0 = MemUtils::HwbpGetRegisterValue(rec, Driver::IDX_ORIG_X0);
+            const auto syscallNo = MemUtils::HwbpGetRegisterValue(rec, Driver::IDX_SYSCALLNO);
+            const auto pstate = MemUtils::HwbpGetRegisterValue(rec, Driver::IDX_PSTATE);
+            const auto fpsr = MemUtils::HwbpGetRegisterValue(rec, Driver::IDX_FPSR);
+            const auto fpcr = MemUtils::HwbpGetRegisterValue(rec, Driver::IDX_FPCR);
             item["mask"] = json::array();
             for (int m = 0; m < 18; ++m)
             {
@@ -588,13 +585,13 @@ namespace
             item["regs"] = json::array();
             for (int reg = 0; reg < 30; ++reg)
             {
-                item["regs"].push_back(MemUtils::HwbpReadXField(rec, reg));
+                item["regs"].push_back(MemUtils::HwbpGetXField(rec, reg));
             }
             item["vregs"] = json::array();
             item["qregs"] = json::array();
             for (int reg = 0; reg < 32; ++reg)
             {
-                const auto qreg = MemUtils::HwbpReadQField(rec, reg);
+                const auto qreg = MemUtils::HwbpGetQField(rec, reg);
                 json qitem = {{"lo", static_cast<std::uint64_t>(qreg)},
                               {"hi", static_cast<std::uint64_t>(qreg >> 64)}};
                 item["vregs"].push_back(qitem);
@@ -663,17 +660,12 @@ namespace
 
     // 将文本协议响应包装为统一 JSON 响应。
 
-    json makeProtocolError(std::string_view message, std::string_view operation = {})
+    json makeProtocolError(std::string_view message)
     {
-        json out = {
+        return json{
             {"ok", false},
             {"error", std::string(message)},
         };
-        if (!operation.empty())
-        {
-            out["operation"] = std::string(operation);
-        }
-        return out;
     }
 
     std::optional<std::string> getRequiredStringParam(const json &params, std::string_view key)
@@ -708,57 +700,61 @@ namespace
     }
 
 
-    json buildBridgeDescribePayload()
+    const json &bridgeDescribePayload()
     {
-        json payload;
-        payload["protocol"] = "native-tcp-bridge";
-        payload["request_shapes"] = json::array({
-            {
-                {"name", "structured"},
-                {"fields", json::array({"operation", "params"})},
-            },
-        });
-        payload["operations"] = json::array({
-            "bridge.describe",
-            "bridge.ping",
-            "target.pid.get",
-            "target.pid.set",
-            "target.pid.current",
-            "target.attach.package",
-            "memory.info.full",
-            "module.resolve",
-            "scan.start",
-            "scan.refine",
-            "scan.status",
-            "scan.clear",
-            "scan.page",
-            "viewer.open",
-            "viewer.move",
-            "viewer.offset",
-            "viewer.set_format",
-            "viewer.snapshot",
-            "pointer.status",
-            "pointer.scan",
-            "pointer.merge",
-            "pointer.export",
-            "breakpoint.info",
-            "breakpoint.set",
-            "breakpoint.clear",
-            "breakpoint.record.remove",
-            "breakpoint.record.update",
-            "breakpoint.record.set_float",
-            "signature.scan_address",
-            "signature.scan_file",
-            "signature.scan_pattern",
-            "signature.filter",
-            "lock.set",
-            "lock.unset",
-            "lock.status",
-            "lock.clear",
-            "memory.read_block",
-            "memory.read_value",
-            "memory.write_block",
-        });
+        static const json payload = []()
+        {
+            json out;
+            out["protocol"] = "native-tcp-bridge";
+            out["request_shapes"] = json::array({
+                {
+                    {"name", "structured"},
+                    {"fields", json::array({"operation", "params"})},
+                },
+            });
+            out["operations"] = json::array({
+                "bridge.describe",
+                "bridge.ping",
+                "target.pid.get",
+                "target.pid.set",
+                "target.pid.current",
+                "target.attach.package",
+                "memory.info.full",
+                "module.resolve",
+                "scan.start",
+                "scan.refine",
+                "scan.status",
+                "scan.clear",
+                "scan.page",
+                "viewer.open",
+                "viewer.move",
+                "viewer.offset",
+                "viewer.set_format",
+                "viewer.snapshot",
+                "pointer.status",
+                "pointer.scan",
+                "pointer.merge",
+                "pointer.export",
+                "breakpoint.info",
+                "breakpoint.set",
+                "breakpoint.clear",
+                "breakpoint.record.remove",
+                "breakpoint.record.update",
+                "breakpoint.record.set_float",
+                "signature.scan_address",
+                "signature.scan_file",
+                "signature.scan_pattern",
+                "signature.filter",
+                "lock.set",
+                "lock.unset",
+                "lock.status",
+                "lock.clear",
+                "memory.read_block",
+                "memory.read_value",
+                "memory.write_block",
+            });
+            return out;
+        }();
         return payload;
     }
 
@@ -775,20 +771,17 @@ namespace
 
         auto fail = [&](std::string_view message) -> json
         {
-            return finalize(makeProtocolError(message, op));
+            return finalize(makeProtocolError(message));
         };
 
-        auto ok = [&](std::string_view message) -> json
+        auto ok = [&]() -> json
         {
-            json out = {{"ok", true}};
-            if (!message.empty())
-                out["message"] = std::string(message);
-            return finalize(std::move(out));
+            return finalize(json{{"ok", true}});
         };
 
-        auto okData = [&](std::string_view message, json data) -> json
+        auto okData = [&](json data) -> json
         {
-            json out = ok(message);
+            json out = ok();
             out["data"] = std::move(data);
             return out;
         };
@@ -870,10 +863,10 @@ namespace
         };
 
         if (op == "bridge.describe")
-            return okData("bridge.describe", buildBridgeDescribePayload());
+            return okData(bridgeDescribePayload());
 
         if (op == "bridge.ping")
-            return ok("pong");
+            return ok();
 
         std::lock_guard<std::mutex> driverLock(gDriverCommandMutex);
 
@@ -885,7 +878,7 @@ namespace
             const int pid = dr.GetPid(std::get<std::string>(package));
             if (pid <= 0)
                 return fail("未找到进程");
-            return okData("target.pid.get", {{"pid", pid}});
+            return okData({{"pid", pid}});
         }
 
         if (op == "target.pid.set")
@@ -896,11 +889,11 @@ namespace
             if (std::get<int>(pid) <= 0)
                 return fail("pid 参数无效");
             dr.SetGlobalPid(std::get<int>(pid));
-            return okData("target.pid.set", {{"pid", dr.GetGlobalPid()}});
+            return okData({{"pid", dr.GetGlobalPid()}});
         }
 
         if (op == "target.pid.current")
-            return okData("target.pid.current", {{"pid", dr.GetGlobalPid()}});
+            return okData({{"pid", dr.GetGlobalPid()}});
 
         if (op == "target.attach.package")
         {
@@ -911,7 +904,7 @@ namespace
             if (pid <= 0)
                 return fail("未找到进程");
             dr.SetGlobalPid(pid);
-            return okData("target.attach.package", {{"pid", pid}});
+            return okData({{"pid", pid}});
         }
 
         if (op == "memory.info.full")
@@ -919,7 +912,7 @@ namespace
             const int status = dr.GetMemoryInformation();
             if (status != 0)
                 return fail(std::format("刷新失败 status={}", status));
-            return okData("memory.info.full", buildMemoryInfoJson(status, dr.GetMemoryInfoRef()));
+            return okData(buildMemoryInfoJson(status, dr.GetMemoryInfoRef()));
         }
 
         if (op == "module.resolve")
@@ -943,7 +936,7 @@ namespace
             std::uint64_t address = 0;
             if (!dr.GetModuleAddress(std::get<std::string>(moduleName), static_cast<short>(std::get<int>(segmentIndex)), &address, isStart))
                 return fail("未找到目标模块或段");
-            return okData("module.resolve", {{"address", address}, {"address_hex", std::format("0x{:X}", address)}});
+            return okData({{"address", address}, {"address_hex", std::format("0x{:X}", address)}});
         }
 
         if (op == "scan.start" || op == "scan.refine")
@@ -973,7 +966,7 @@ namespace
                 if (valueToken.empty())
                     return fail("string 模式需要 value 参数");
                 session->memScanner.scanString(pid, valueToken, isFirst);
-                return okData("scan", scannerStateJson());
+                return okData(scannerStateJson());
             }
 
             const bool needValue = (*fuzzyMode != Types::FuzzyMode::Unknown);
@@ -1012,16 +1005,16 @@ namespace
                     target = *parsedValue;
                 }
                 session->memScanner.scan<T>(pid, target, *fuzzyMode, isFirst, rangeMax);
-                return okData("scan", scannerStateJson()); });
+                return okData(scannerStateJson()); });
         }
 
         if (op == "scan.status")
-            return okData("scan.status", scannerStateJson());
+            return okData(scannerStateJson());
 
         if (op == "scan.clear")
         {
             session->memScanner.clear();
-            return okData("scan.clear", scannerStateJson());
+            return okData(scannerStateJson());
         }
 
         if (op == "scan.page")
@@ -1060,7 +1053,7 @@ namespace
                     {"value", stringType ? MemUtils::ReadAsText(addr) : MemUtils::ReadAsString(addr, *dataType)},
                 });
             }
-            return okData("scan.page", std::move(payload));
+            return okData(std::move(payload));
         }
 
         if (op == "viewer.open")
@@ -1077,7 +1070,7 @@ namespace
                 session->memViewer.setFormat(*format);
             }
             session->memViewer.open(static_cast<uintptr_t>(std::get<std::uint64_t>(address)));
-            return okData("viewer.open", {{"base", static_cast<std::uint64_t>(session->memViewer.base())}, {"format", viewFormatToToken(session->memViewer.format())}, {"read", session->memViewer.readSuccess()}});
+            return okData({{"base", static_cast<std::uint64_t>(session->memViewer.base())}, {"format", viewFormatToToken(session->memViewer.format())}, {"read", session->memViewer.readSuccess()}});
         }
 
         if (op == "viewer.move")
@@ -1095,7 +1088,7 @@ namespace
                 step = static_cast<std::size_t>(*parsedStep);
             }
             session->memViewer.move(std::get<int>(lines), step);
-            return okData("viewer.move", {{"base", static_cast<std::uint64_t>(session->memViewer.base())}, {"read", session->memViewer.readSuccess()}});
+            return okData({{"base", static_cast<std::uint64_t>(session->memViewer.base())}, {"read", session->memViewer.readSuccess()}});
         }
 
         if (op == "viewer.offset")
@@ -1105,7 +1098,7 @@ namespace
                 return std::get<json>(offset);
             if (!session->memViewer.applyOffset(std::get<std::string>(offset)))
                 return fail("offset 参数无效");
-            return okData("viewer.offset", {{"base", static_cast<std::uint64_t>(session->memViewer.base())}, {"read", session->memViewer.readSuccess()}});
+            return okData({{"base", static_cast<std::uint64_t>(session->memViewer.base())}, {"read", session->memViewer.readSuccess()}});
         }
 
         if (op == "viewer.set_format")
@@ -1117,22 +1110,23 @@ namespace
             if (!format.has_value())
                 return fail("view_format 无效，支持: hex/hex64/i8/i16/i32/i64/f32/f64/disasm");
             session->memViewer.setFormat(*format);
-            return okData("viewer.set_format", {{"format", viewFormatToToken(session->memViewer.format())}});
+            return okData({{"format", viewFormatToToken(session->memViewer.format())}});
         }
 
         if (op == "viewer.snapshot")
         {
             if (session->memViewer.format() == Types::ViewFormat::Disasm)
                 session->memViewer.waitDisasm();
-            return okData("viewer.snapshot", buildViewerSnapshotJson(session->memViewer));
+            return okData(buildViewerSnapshotJson(session->memViewer));
         }
 
         if (op == "pointer.status")
-            return okData("pointer.status", pointerStateJson());
+            return okData(pointerStateJson());
 
         if (op == "pointer.scan")
         {
-            const std::string mode = toLowerAscii(optionalString("mode").empty() ? "module" : optionalString("mode"));
+            const std::string modeToken = optionalString("mode");
+            const std::string mode = toLowerAscii(modeToken.empty() ? "module" : modeToken);
             const auto target = requiredUInt64("target", "target");
             const auto depth = requiredInt("depth", "depth");
             const auto maxOffset = requiredInt("max_offset", "max_offset");
@@ -1183,24 +1177,28 @@ namespace
             if (session->pointerManager.isScanning())
                 return fail("当前已有指针扫描任务在运行");
 
-            session->pointerManager.scan(pid, static_cast<uintptr_t>(std::get<std::uint64_t>(target)), std::get<int>(depth), std::get<int>(maxOffset), useManual, static_cast<uintptr_t>(manualBase), useArray, static_cast<uintptr_t>(arrayBase), arrayCount, optionalString("module_filter"));
-            return okData("pointer.scan", pointerStateJson());
+            const std::string moduleFilter = optionalString("module_filter");
+            session->pointerManager.scan(pid, static_cast<uintptr_t>(std::get<std::uint64_t>(target)), std::get<int>(depth), std::get<int>(maxOffset), useManual, static_cast<uintptr_t>(manualBase), useArray, static_cast<uintptr_t>(arrayBase), arrayCount, moduleFilter);
+            return okData(pointerStateJson());
         }
 
         if (op == "pointer.merge")
         {
             session->pointerManager.MergeBins();
-            return okData("pointer.merge", pointerStateJson());
+            return okData(pointerStateJson());
         }
 
         if (op == "pointer.export")
         {
             session->pointerManager.ExportToTxt();
-            return okData("pointer.export", pointerStateJson());
+            return okData(pointerStateJson());
         }
 
         if (op == "breakpoint.info")
-            return okData("breakpoint.info", buildHwbpInfoJson(dr.GetHwbpInfoRef()));
+        {
+            const auto &info = dr.GetHwbpInfoRef();
+            return okData(buildHwbpInfoJson(info));
+        }
 
         if (op == "breakpoint.set")
         {
@@ -1227,13 +1225,13 @@ namespace
             const int status = dr.SetProcessHwbpRef(std::get<std::uint64_t>(address), *bpType, *bpScope, std::get<int>(length));
             if (status != 0)
                 return fail(std::format("设置断点失败 status={}", status));
-            return okData("breakpoint.set", {{"status", status}, {"type", std::string(bpTypeToToken(*bpType))}, {"scope", std::string(bpScopeToToken(*bpScope))}, {"length", std::get<int>(length)}});
+            return okData({{"status", status}, {"type", std::string(bpTypeToToken(*bpType))}, {"scope", std::string(bpScopeToToken(*bpScope))}, {"length", std::get<int>(length)}});
         }
 
         if (op == "breakpoint.clear")
         {
             dr.RemoveProcessHwbpRef();
-            return ok("breakpoint.clear");
+            return ok();
         }
 
         if (op == "breakpoint.record.remove")
@@ -1243,9 +1241,9 @@ namespace
                 return std::get<json>(index);
             if (std::get<int>(index) < 0)
                 return fail("index 无效");
-            (void)dr.GetHwbpInfoRef();
+            const auto &info = dr.GetHwbpInfoRef();
             dr.RemoveHwbpRecord(std::get<int>(index));
-            return okData("breakpoint.record.remove", {{"record_count", dr.GetHwbpInfoRef().record_count}});
+            return okData({{"record_count", info.record_count}});
         }
 
         if (op == "breakpoint.record.update")
@@ -1266,7 +1264,7 @@ namespace
             if (!MemUtils::AssignHwbpRecordField(copy, std::get<std::string>(field), std::get<std::uint64_t>(value)))
                 return fail("field 无效");
             const_cast<Driver::hwbp_record &>(info.records[std::get<int>(index)]) = copy;
-            return okData("breakpoint.record.update", {{"index", std::get<int>(index)}, {"field", std::get<std::string>(field)}, {"value", std::get<std::uint64_t>(value)}});
+            return okData({{"index", std::get<int>(index)}, {"field", std::get<std::string>(field)}, {"value", std::get<std::uint64_t>(value)}});
         }
 
         if (op == "breakpoint.record.set_float")
@@ -1292,7 +1290,8 @@ namespace
             if (std::get<int>(index) < 0 || std::get<int>(index) >= info.record_count)
                 return fail("index 越界");
 
-            const std::string precision = optionalString("precision").empty() ? "f32" : toLowerAscii(optionalString("precision"));
+            const std::string precisionToken = optionalString("precision");
+            const std::string precision = precisionToken.empty() ? "f32" : toLowerAscii(precisionToken);
             auto copy = info.records[std::get<int>(index)];
             if (precision == "f64")
             {
@@ -1301,7 +1300,7 @@ namespace
                 std::memcpy(&bits, &fval, sizeof(bits));
                 MemUtils::HwbpWriteQField(copy, *regIndex, static_cast<__uint128_t>(bits));
                 const_cast<Driver::hwbp_record &>(info.records[std::get<int>(index)]) = copy;
-                return okData("breakpoint.record.set_float", {{"index", std::get<int>(index)}, {"reg", *regIndex}, {"precision", "f64"}, {"bits", bits}});
+                return okData({{"index", std::get<int>(index)}, {"reg", *regIndex}, {"precision", "f64"}, {"bits", bits}});
             }
             if (precision != "f32")
                 return fail("precision 仅支持 f32/f64");
@@ -1310,7 +1309,7 @@ namespace
             std::memcpy(&bits, &fval, sizeof(bits));
             MemUtils::HwbpWriteQField(copy, *regIndex, static_cast<__uint128_t>(bits));
             const_cast<Driver::hwbp_record &>(info.records[std::get<int>(index)]) = copy;
-            return okData("breakpoint.record.set_float", {{"index", std::get<int>(index)}, {"reg", *regIndex}, {"precision", "f32"}, {"bits", bits}});
+            return okData({{"index", std::get<int>(index)}, {"reg", *regIndex}, {"precision", "f32"}, {"bits", bits}});
         }
 
         if (op == "signature.scan_address")
@@ -1321,18 +1320,20 @@ namespace
                 return std::get<json>(address);
             if (std::holds_alternative<json>(range))
                 return std::get<json>(range);
-            const std::string fileName = optionalString("file_name").empty() ? std::string(SignatureScanner::SIG_DEFAULT_FILE) : optionalString("file_name");
+            const std::string requestedFile = optionalString("file_name");
+            const std::string fileName = requestedFile.empty() ? std::string(SignatureScanner::SIG_DEFAULT_FILE) : requestedFile;
             if (!SignatureScanner::ScanAddressSignature(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), std::get<int>(range), fileName.c_str()))
                 return fail("特征码保存失败");
-            return okData("signature.scan_address", {{"saved", true}, {"file", fileName}});
+            return okData({{"saved", true}, {"file", fileName}});
         }
 
         if (op == "signature.scan_file")
         {
-            const std::string fileName = optionalString("file_name").empty() ? std::string(SignatureScanner::SIG_DEFAULT_FILE) : optionalString("file_name");
+            const std::string requestedFile = optionalString("file_name");
+            const std::string fileName = requestedFile.empty() ? std::string(SignatureScanner::SIG_DEFAULT_FILE) : requestedFile;
             json payload = buildSignatureMatchesJson(SignatureScanner::ScanSignatureFromFile(fileName.c_str()), 0, "");
             payload["file"] = fileName;
-            return okData("signature.scan_file", std::move(payload));
+            return okData(std::move(payload));
         }
 
         if (op == "signature.scan_pattern")
@@ -1346,7 +1347,7 @@ namespace
             if (std::get<std::int64_t>(rangeOffset) < static_cast<std::int64_t>(std::numeric_limits<int>::min()) || std::get<std::int64_t>(rangeOffset) > static_cast<std::int64_t>(std::numeric_limits<int>::max()))
                 return fail("range_offset 无效");
             const auto matches = SignatureScanner::ScanSignature(std::get<std::string>(pattern).c_str(), static_cast<int>(std::get<std::int64_t>(rangeOffset)));
-            return okData("signature.scan_pattern", buildSignatureMatchesJson(matches, std::get<std::int64_t>(rangeOffset), std::get<std::string>(pattern)));
+            return okData(buildSignatureMatchesJson(matches, std::get<std::int64_t>(rangeOffset), std::get<std::string>(pattern)));
         }
 
         if (op == "signature.filter")
@@ -1354,9 +1355,10 @@ namespace
             const auto address = requiredUInt64("address", "address");
             if (std::holds_alternative<json>(address))
                 return std::get<json>(address);
-            const std::string fileName = optionalString("file_name").empty() ? std::string(SignatureScanner::SIG_DEFAULT_FILE) : optionalString("file_name");
+            const std::string requestedFile = optionalString("file_name");
+            const std::string fileName = requestedFile.empty() ? std::string(SignatureScanner::SIG_DEFAULT_FILE) : requestedFile;
             const auto result = SignatureScanner::FilterSignature(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), fileName.c_str());
-            return okData("signature.filter", {{"success", result.success}, {"changed_count", result.changedCount}, {"total_count", result.totalCount}, {"old_signature", result.oldSignature}, {"new_signature", result.newSignature}, {"file", fileName}});
+            return okData({{"success", result.success}, {"changed_count", result.changedCount}, {"total_count", result.totalCount}, {"old_signature", result.oldSignature}, {"new_signature", result.newSignature}, {"file", fileName}});
         }
 
         if (op == "lock.set")
@@ -1374,7 +1376,7 @@ namespace
             if (!dataType.has_value())
                 return fail("value_type 无效");
             gLockManager.lock(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), *dataType, std::get<std::string>(value));
-            return okData("lock.set", {{"locked", gLockManager.isLocked(static_cast<uintptr_t>(std::get<std::uint64_t>(address)))}});
+            return okData({{"locked", gLockManager.isLocked(static_cast<uintptr_t>(std::get<std::uint64_t>(address)))}});
         }
 
         if (op == "lock.unset" || op == "lock.status")
@@ -1384,13 +1386,13 @@ namespace
                 return std::get<json>(address);
             if (op == "lock.unset")
                 gLockManager.unlock(static_cast<uintptr_t>(std::get<std::uint64_t>(address)));
-            return okData(op, {{"locked", gLockManager.isLocked(static_cast<uintptr_t>(std::get<std::uint64_t>(address)))}});
+            return okData({{"locked", gLockManager.isLocked(static_cast<uintptr_t>(std::get<std::uint64_t>(address)))}});
         }
 
         if (op == "lock.clear")
         {
             gLockManager.clear();
-            return ok("lock.clear");
+            return ok();
         }
 
         if (op == "memory.read_block")
@@ -1407,7 +1409,7 @@ namespace
             const int readBytes = dr.Read(std::get<std::uint64_t>(address), buffer.data(), buffer.size());
             if (readBytes <= 0)
                 return fail(std::format("读取失败 status={}", readBytes));
-            return okData("memory.read_block", {{"requested_size", std::get<std::uint64_t>(size)}, {"read_size", readBytes}, {"data_hex", bytesToHex(buffer.data(), static_cast<std::size_t>(readBytes))}});
+            return okData({{"requested_size", std::get<std::uint64_t>(size)}, {"read_size", readBytes}, {"data_hex", bytesToHex(buffer.data(), static_cast<std::size_t>(readBytes))}});
         }
 
         if (op == "memory.read_value")
@@ -1424,32 +1426,32 @@ namespace
             if (type == "u8")
             {
                 const auto value = readScalarValue<std::uint8_t>(addr);
-                return value ? okData("memory.read_value", {{"value", *value}}) : fail("读取失败");
+                return value ? okData({{"value", *value}}) : fail("读取失败");
             }
             if (type == "u16")
             {
                 const auto value = readScalarValue<std::uint16_t>(addr);
-                return value ? okData("memory.read_value", {{"value", *value}}) : fail("读取失败");
+                return value ? okData({{"value", *value}}) : fail("读取失败");
             }
             if (type == "u32")
             {
                 const auto value = readScalarValue<std::uint32_t>(addr);
-                return value ? okData("memory.read_value", {{"value", *value}}) : fail("读取失败");
+                return value ? okData({{"value", *value}}) : fail("读取失败");
             }
             if (type == "u64")
             {
                 const auto value = readScalarValue<std::uint64_t>(addr);
-                return value ? okData("memory.read_value", {{"value", *value}}) : fail("读取失败");
+                return value ? okData({{"value", *value}}) : fail("读取失败");
             }
             if (type == "f32")
             {
                 const auto value = readScalarValue<float>(addr);
-                return value ? okData("memory.read_value", {{"value", *value}}) : fail("读取失败");
+                return value ? okData({{"value", *value}}) : fail("读取失败");
             }
             if (type == "f64")
             {
                 const auto value = readScalarValue<double>(addr);
-                return value ? okData("memory.read_value", {{"value", *value}}) : fail("读取失败");
+                return value ? okData({{"value", *value}}) : fail("读取失败");
             }
             return fail("memory.read_value 的 value_type 仅支持 u8/u16/u32/u64/f32/f64");
         }
@@ -1468,7 +1470,7 @@ namespace
             const int writeBytes = dr.Write(std::get<std::uint64_t>(address), bytes->data(), bytes->size());
             if (writeBytes != static_cast<int>(bytes->size()))
                 return fail(std::format("写入失败 status={}", writeBytes));
-            return okData("memory.write_block", {{"size", bytes->size()}});
+            return okData({{"size", bytes->size()}});
         }
 
         return fail(std::format("未知 operation: {}", op));
@@ -1501,7 +1503,9 @@ namespace
             {
                 if (!parsedReq["params"].is_object())
                 {
-                    return makeProtocolError("params 字段必须是对象", operationName).dump();
+                    json error = makeProtocolError("params 字段必须是对象");
+                    error["operation"] = operationName;
+                    return error.dump();
                 }
                 params = parsedReq["params"];
             }

@@ -245,6 +245,12 @@ namespace MemUtils
             HWBP_SET_MASK(&record, reg, HWBP_OP_READ);
     }
 
+    inline void HwbpRequestAll(Driver::hwbp_record &record)
+    {
+        for (int reg = Driver::IDX_PC; reg < Driver::MAX_REG_COUNT; ++reg)
+            HwbpRequestRead(record, reg);
+    }
+
     inline std::uint64_t HwbpGetXField(const Driver::hwbp_record &record, int index)
     {
         static constexpr std::uint64_t Driver::hwbp_record::*fields[] = {
@@ -313,9 +319,8 @@ namespace MemUtils
             (record.*fields[index]) = value;
     }
 
-    inline std::uint64_t HwbpReadRegisterValue(Driver::hwbp_record &record, int reg)
+    inline std::uint64_t HwbpGetRegisterValue(const Driver::hwbp_record &record, int reg)
     {
-        HwbpRequestRead(record, reg);
         switch (reg)
         {
         case Driver::IDX_PC:
@@ -339,6 +344,12 @@ namespace MemUtils
         default:
             return (reg >= Driver::IDX_X0 && reg <= Driver::IDX_X29) ? HwbpGetXField(record, reg - Driver::IDX_X0) : 0;
         }
+    }
+
+    inline std::uint64_t HwbpReadRegisterValue(Driver::hwbp_record &record, int reg)
+    {
+        HwbpRequestRead(record, reg);
+        return HwbpGetRegisterValue(record, reg);
     }
 
     inline bool HwbpWriteRegisterValue(Driver::hwbp_record &record, int reg, std::uint64_t value)
