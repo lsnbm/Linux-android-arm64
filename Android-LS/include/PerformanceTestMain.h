@@ -133,7 +133,8 @@ inline int mainno()
         r.readOverheadPct = (r.nullIoAvgNs / r.readAvgNs) * 100.0;
         r.writeOverheadPct = (r.nullIoAvgNs / r.writeAvgNs) * 100.0;
 
-        uint64_t verifyVal = dr.Read<uint64_t>(testAddr);
+        uint64_t verifyVal = 0;
+        const bool verifyOk = dr.ReadValue(testAddr, verifyVal);
         uint64_t expectedLast = 0x1000000000000000ULL + static_cast<uint64_t>(TEST_COUNT - 1);
 
         std::println(stdout, "  空IO:  总 {:>10.3f}ms  均 {:>8.2f}ns  吞吐 {:>8.2f}K/s",
@@ -143,8 +144,8 @@ inline int mainno()
         std::println(stdout, "  写入:  总 {:>10.3f}ms  均 {:>8.2f}ns  净 {:>8.2f}ns  吞吐 {:>8.2f}K/s  带宽 {:>6.2f}MB/s  失败 {}",
                      r.writeTotalMs, r.writeAvgNs, r.writeNetAvgNs, r.writeThroughputK, r.writeBandwidthMB, r.writeFailCount);
         std::println(stdout, "  校验:  0x{:016X} {} 0x{:016X} {}",
-                     verifyVal, verifyVal == expectedLast ? "==" : "!=", expectedLast,
-                     verifyVal == expectedLast ? "通过" : "失败");
+                     verifyVal, verifyOk && verifyVal == expectedLast ? "==" : "!=", expectedLast,
+                     verifyOk && verifyVal == expectedLast ? "通过" : "失败");
         std::println(stdout, "");
     }
 

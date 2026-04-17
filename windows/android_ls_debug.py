@@ -1353,9 +1353,7 @@ class TcpTestWindow(QWidget):
             response_payload = {
                 "ok": False,
                 "operation": operation_name,
-                "message": "",
                 "error": str(exc),
-                "pairs": {},
                 "data": None,
             }
 
@@ -1363,7 +1361,6 @@ class TcpTestWindow(QWidget):
             log_summary = {
                 "ok": bool(response_payload.get("ok", False)),
                 "operation": response_payload.get("operation", operation_name),
-                "message": response_payload.get("message", ""),
                 "error": response_payload.get("error", ""),
             }
             self._log(f"收到响应: {json.dumps(log_summary, ensure_ascii=False)}")
@@ -1380,10 +1377,76 @@ class TcpTestWindow(QWidget):
         error = str(response.get("error", "")).strip()
         if error:
             return error
-        message = str(response.get("message", "")).strip()
-        if message:
-            return message
         return "未知错误"
+
+    @staticmethod
+    def _response_data_dict(response: dict | None) -> dict:
+        if not isinstance(response, dict) or not bool(response.get("ok", False)):
+            return {}
+        data = response.get("data")
+        return data if isinstance(data, dict) else {}
+
+    def _request_ok(
+        self,
+        operation: str,
+        params: dict | None = None,
+        *,
+        error_title: str,
+        error_prefix: str = "",
+        error_message: str | None = None,
+        status_on_error: str = "",
+        log_enabled: bool = True,
+        warn: bool = True,
+    ) -> dict | None:
+        response = self._send_operation(operation, params, log_enabled=log_enabled)
+        if response is None:
+            return None
+        if self._response_ok(response):
+            return response
+        if warn:
+            if error_message is not None:
+                warning_text = error_message
+            else:
+                warning_text = f"{error_prefix}{self._response_error_text(response)}"
+            QMessageBox.warning(self, error_title, warning_text)
+        if status_on_error:
+            self._set_status(status_on_error)
+        return None
+
+    def _request_data_dict(
+        self,
+        operation: str,
+        params: dict | None = None,
+        *,
+        error_title: str,
+        error_prefix: str = "",
+        error_message: str | None = None,
+        parse_title: str = "解析失败",
+        parse_error_text: str = "响应格式异常。",
+        status_on_error: str = "",
+        log_enabled: bool = True,
+        warn: bool = True,
+    ) -> dict | None:
+        response = self._request_ok(
+            operation,
+            params,
+            error_title=error_title,
+            error_prefix=error_prefix,
+            error_message=error_message,
+            status_on_error=status_on_error,
+            log_enabled=log_enabled,
+            warn=warn,
+        )
+        if response is None:
+            return None
+        data = response.get("data")
+        if isinstance(data, dict):
+            return data
+        if warn:
+            QMessageBox.warning(self, parse_title, parse_error_text)
+        if status_on_error:
+            self._set_status(status_on_error)
+        return None
 
     @staticmethod
     def _safe_int(value: object, default: int = 0) -> int:
@@ -1681,8 +1744,13 @@ class TcpTestWindow(QWidget):
         success_count = 0
         failed_indices: list[int] = []
         for idx in indices:
-            response = self._send_operation("breakpoint.record.remove", {"index": idx})
-            if self._response_ok(response):
+            response = self._request_ok(
+                "breakpoint.record.remove",
+                {"index": idx},
+                error_title="删除失败",
+                warn=False,
+            )
+            if response is not None:
                 success_count += 1
             else:
                 failed_indices.append(idx)
@@ -1955,17 +2023,9 @@ class TcpTestWindow(QWidget):
 
     @staticmethod
     def _extract_value_field(response: dict | None) -> str | None:
-        if not isinstance(response, dict) or not bool(response.get("ok", False)):
-            return None
-        data = response.get("data")
-        if isinstance(data, dict):
+        data = TcpTestWindow._response_data_dict(response)
+        if data:
             value = data.get("value")
-            if value is not None:
-                return str(value)
-
-        pairs = response.get("pairs")
-        if isinstance(pairs, dict):
-            value = pairs.get("value")
             if value is not None:
                 return str(value)
         return None
@@ -2008,6 +2068,55 @@ class TcpTestWindow(QWidget):
             return False
         item["value"] = value
         return True
+
+    def _set_saved_item_lock_state(self, item: dict[str, str], locked: bool, *, warn: bool) -> bool:
+        addr = item.get("addr", "")
+        if not addr:
+            return False
+        if not locked:
+            response = self._request_ok(
+                "lock.unset",
+                {"address": addr},
+                error_title="锁定失败",
+                error_prefix="取消锁定失败: ",
+                warn=warn,
+            )
+            if response is None:
+                return False
+            item["locked"] = "0"
+            return True
+
+        type_token = item.get("type", "")
+        if not type_token:
+            return False
+        if not item.get("value", "") and not self._ensure_saved_item_value(item):
+            if warn:
+                QMessageBox.warning(self, "锁定失败", f"锁定前读取当前值失败: {addr}")
+            return False
+
+        response = self._request_ok(
+            "lock.set",
+            {"address": addr, "value_type": type_token, "value": item.get("value", "")},
+            error_title="锁定失败",
+            error_prefix="锁定失败: ",
+            warn=warn,
+        )
+        if response is None:
+            return False
+        item["locked"] = "1"
+        return True
+
+    def _apply_saved_item_lock_state(self, items: list[dict[str, str]], locked: bool) -> tuple[int, int]:
+        success_count = 0
+        fail_count = 0
+        for item in items:
+            if (item.get("locked", "0") == "1") == locked:
+                continue
+            if self._set_saved_item_lock_state(item, locked, warn=False):
+                success_count += 1
+            else:
+                fail_count += 1
+        return success_count, fail_count
 
     @staticmethod
     def _set_text_preserve_interaction(editor: QTextEdit, text: str) -> bool:
@@ -2224,79 +2333,25 @@ class TcpTestWindow(QWidget):
                 return
             if action != lock_action:
                 return
-            # 处理单项锁定/取消锁定
             item = items[0]
             locked = item.get("locked", "0") == "1"
-            addr = item.get("addr", "")
-            type_token = item.get("type", "")
-            value = item.get("value", "")
-            if not addr or not type_token:
+            if not self._set_saved_item_lock_state(item, not locked, warn=True):
                 return
-
+            addr = item.get("addr", "")
             if locked:
-                response = self._send_operation("lock.unset", {"address": addr})
-                if not self._response_ok(response):
-                    QMessageBox.warning(self, "锁定失败", f"取消锁定失败: {self._response_error_text(response)}")
-                    return
-                item["locked"] = "0"
                 self._set_status(f"已取消锁定: {addr}")
             else:
-                if not value and not self._ensure_saved_item_value(item):
-                    QMessageBox.warning(self, "锁定失败", f"锁定前读取当前值失败: {addr}")
-                    return
-                value = item.get("value", "")
-                response = self._send_operation("lock.set", {"address": addr, "value_type": type_token, "value": value})
-                if not self._response_ok(response):
-                    QMessageBox.warning(self, "锁定失败", f"锁定失败: {self._response_error_text(response)}")
-                    return
-                item["locked"] = "1"
-                self._set_status(f"已锁定: {addr} = {value}")
+                self._set_status(f"已锁定: {addr} = {item.get('value', '')}")
         else:
-            # 处理批量操作
             if action not in actions.values():
                 return
 
-            success_count = 0
-            fail_count = 0
-
             if action == actions.get("lock"):
-                # 批量锁定未锁定的项
-                for item in items:
-                    if item.get("locked", "0") == "1":
-                        continue
-                    addr = item.get("addr", "")
-                    type_token = item.get("type", "")
-                    value = item.get("value", "")
-                    if not addr or not type_token:
-                        fail_count += 1
-                        continue
-                    if not value and not self._ensure_saved_item_value(item):
-                        fail_count += 1
-                        continue
-                    value = item.get("value", "")
-                    response = self._send_operation("lock.set", {"address": addr, "value_type": type_token, "value": value})
-                    if self._response_ok(response):
-                        item["locked"] = "1"
-                        success_count += 1
-                    else:
-                        fail_count += 1
+                success_count, fail_count = self._apply_saved_item_lock_state(items, True)
                 self._set_status(f"已锁定 {success_count} 项" + (f"，失败 {fail_count} 项" if fail_count > 0 else ""))
 
             elif action == actions.get("unlock"):
-                # 批量取消锁定
-                for item in items:
-                    if item.get("locked", "0") != "1":
-                        continue
-                    addr = item.get("addr", "")
-                    if not addr:
-                        fail_count += 1
-                        continue
-                    response = self._send_operation("lock.unset", {"address": addr})
-                    if self._response_ok(response):
-                        item["locked"] = "0"
-                        success_count += 1
-                    else:
-                        fail_count += 1
+                success_count, fail_count = self._apply_saved_item_lock_state(items, False)
                 self._set_status(f"已取消锁定 {success_count} 项" + (f"，失败 {fail_count} 项" if fail_count > 0 else ""))
 
         # 清除选择后强制刷新显示
@@ -2333,23 +2388,17 @@ class TcpTestWindow(QWidget):
         type_data = self.scan_type_combo.currentData()
         type_token = str(type_data).strip() if type_data is not None else self.scan_type_combo.currentText().strip()
 
-        response = self._send_operation(
+        data = self._request_data_dict(
             "scan.page",
             {"start": start, "count": page_count, "value_type": type_token},
+            error_title="获取失败",
+            parse_title="解析失败",
+            parse_error_text="扫描结果格式异常。",
+            status_on_error="" if silent else "获取扫描结果失败",
             log_enabled=not silent,
+            warn=not silent,
         )
-        if response is None:
-            return False
-        if not self._response_ok(response):
-            if not silent:
-                QMessageBox.warning(self, "获取失败", self._response_error_text(response))
-                self._set_status("获取扫描结果失败")
-            return False
-
-        data = response.get("data")
-        if not isinstance(data, dict):
-            if not silent:
-                QMessageBox.warning(self, "解析失败", "扫描结果格式异常。")
+        if data is None:
             return False
 
         self._render_scan_page(data)
@@ -2367,12 +2416,8 @@ class TcpTestWindow(QWidget):
         if request is None:
             return
         operation, params = request
-        response = self._send_operation(operation, params)
+        response = self._request_ok(operation, params, error_title="扫描失败", status_on_error="首次扫描失败")
         if response is None:
-            return
-        if not self._response_ok(response):
-            QMessageBox.warning(self, "扫描失败", self._response_error_text(response))
-            self._set_status("首次扫描失败")
             return
         self._set_status("首次扫描已执行")
         self.on_scan_status()
@@ -2384,12 +2429,8 @@ class TcpTestWindow(QWidget):
         if request is None:
             return
         operation, params = request
-        response = self._send_operation(operation, params)
+        response = self._request_ok(operation, params, error_title="扫描失败", status_on_error="再次扫描失败")
         if response is None:
-            return
-        if not self._response_ok(response):
-            QMessageBox.warning(self, "扫描失败", self._response_error_text(response))
-            self._set_status("再次扫描失败")
             return
         self._set_status("再次扫描已执行")
         self.on_scan_status()
@@ -2397,11 +2438,8 @@ class TcpTestWindow(QWidget):
         self._fetch_scan_page(self.scan_page_start)
 
     def on_scan_clear(self) -> None:
-        response = self._send_operation("scan.clear")
+        response = self._request_ok("scan.clear", error_title="清空失败")
         if response is None:
-            return
-        if not self._response_ok(response):
-            QMessageBox.warning(self, "清空失败", self._response_error_text(response))
             return
         self.scan_view.clear()
         self.scan_page_start = 0
@@ -2411,20 +2449,14 @@ class TcpTestWindow(QWidget):
         self._set_status("扫描结果已清空")
 
     def on_scan_status(self) -> None:
-        response = self._send_operation("scan.status")
-        if response is None:
+        data = self._request_data_dict("scan.status", error_title="状态失败")
+        if data is None:
             return
-        if not self._response_ok(response):
-            QMessageBox.warning(self, "状态失败", self._response_error_text(response))
-            return
-        pairs = response.get("pairs", {})
-        if not isinstance(pairs, dict):
-            pairs = {}
-        scanning = pairs.get("scanning", "0")
-        progress = pairs.get("progress", "0")
-        count = pairs.get("count", "0")
+        scanning = bool(data.get("scanning", False))
+        progress = data.get("progress", 0)
+        count = data.get("count", 0)
         self.scan_total_label.setText(f"总结果数: {count}")
-        self._set_status(f"扫描状态: scanning={scanning}, progress={progress}, count={count}")
+        self._set_status(f"扫描状态: scanning={1 if scanning else 0}, progress={progress}, count={count}")
 
     def on_scan_fetch_page(self) -> None:
         if self.scan_page_start < 0:
@@ -2701,26 +2733,24 @@ class TcpTestWindow(QWidget):
         return "\n".join(lines) if lines else "没有可显示的反汇编结果。"
 
     def _read_viewer_snapshot(self) -> dict | None:
-        response = self._send_operation("viewer.snapshot", log_enabled=False)
-        if response is None:
-            return None
-        if not self._response_ok(response):
-            QMessageBox.warning(self, "读取失败", f"内存浏览读取失败: {self._response_error_text(response)}")
-            return None
-        data = response.get("data")
-        if not isinstance(data, dict):
-            QMessageBox.warning(self, "解析失败", "浏览器数据格式异常。")
-            return None
-        return data
-
-    def _open_viewer_snapshot(self, addr: int, mode_token: str) -> dict | None:
-        open_resp = self._send_operation(
-            "viewer.open",
-            {"address": f"0x{addr:X}", "view_format": mode_token},
+        return self._request_data_dict(
+            "viewer.snapshot",
+            error_title="读取失败",
+            error_prefix="内存浏览读取失败: ",
+            parse_title="解析失败",
+            parse_error_text="浏览器数据格式异常。",
             log_enabled=False,
         )
-        if not self._response_ok(open_resp):
-            QMessageBox.warning(self, "读取失败", f"打开浏览器失败: {self._response_error_text(open_resp)}")
+
+    def _open_viewer_snapshot(self, addr: int, mode_token: str) -> dict | None:
+        open_resp = self._request_ok(
+            "viewer.open",
+            {"address": f"0x{addr:X}", "view_format": mode_token},
+            error_title="读取失败",
+            error_prefix="打开浏览器失败: ",
+            log_enabled=False,
+        )
+        if open_resp is None:
             return None
 
         snapshot = self._read_viewer_snapshot()
@@ -2746,9 +2776,14 @@ class TcpTestWindow(QWidget):
         self.browser_view.setPlainText(self._render_disasm_dump(snapshot))
 
     def _move_disasm_view(self, lines: int) -> None:
-        move_resp = self._send_operation("viewer.move", {"lines": lines}, log_enabled=False)
-        if not self._response_ok(move_resp):
-            QMessageBox.warning(self, "移动失败", f"反汇编移动失败: {self._response_error_text(move_resp)}")
+        move_resp = self._request_ok(
+            "viewer.move",
+            {"lines": lines},
+            error_title="移动失败",
+            error_prefix="反汇编移动失败: ",
+            log_enabled=False,
+        )
+        if move_resp is None:
             return
 
         snapshot = self._read_viewer_snapshot()
@@ -2866,12 +2901,8 @@ class TcpTestWindow(QWidget):
             return
 
         operation, params = request
-        response = self._send_operation(operation, params)
+        response = self._request_ok(operation, params, error_title="指针扫描失败", status_on_error="指针扫描启动失败")
         if response is None:
-            return
-        if not self._response_ok(response):
-            QMessageBox.warning(self, "指针扫描失败", self._response_error_text(response))
-            self._set_status("指针扫描启动失败")
             return
 
         self.pointer_view.append(f"启动操作: {operation} {json.dumps(params, ensure_ascii=False)}")
@@ -2879,30 +2910,22 @@ class TcpTestWindow(QWidget):
         self._set_status("指针扫描任务已启动")
         self.on_pointer_status()
 
-    def _update_pointer_status_from_response(self, response: dict, *, silent: bool = False) -> None:
-        if not self._response_ok(response):
-            if not silent:
-                QMessageBox.warning(self, "状态失败", self._response_error_text(response))
-            return
-
-        pairs = response.get("pairs", {})
-        if not isinstance(pairs, dict):
-            pairs = {}
-        scanning = pairs.get("scanning", "0")
-        progress = pairs.get("progress", "0")
-        count = pairs.get("count", "0")
-        self.pointer_scan_running = (scanning == "1")
-        status_text = f"扫描状态: scanning={scanning}, progress={progress}, count={count}"
+    def _apply_pointer_status_data(self, data: dict, *, silent: bool = False) -> None:
+        scanning = bool(data.get("scanning", False))
+        progress = data.get("progress", 0)
+        count = data.get("count", 0)
+        self.pointer_scan_running = scanning
+        status_text = f"扫描状态: scanning={1 if scanning else 0}, progress={progress}, count={count}"
         self.pointer_status_label.setText(status_text)
         if not silent:
             self.pointer_view.append(status_text)
             self._set_status("指针状态已刷新")
 
     def on_pointer_status(self) -> None:
-        response = self._send_operation("pointer.status")
-        if response is None:
+        data = self._request_data_dict("pointer.status", error_title="状态失败")
+        if data is None:
             return
-        self._update_pointer_status_from_response(response, silent=False)
+        self._apply_pointer_status_data(data, silent=False)
 
     def _refresh_pointer_status_live(self) -> None:
         if not (self._is_pointer_tab_active() or self.pointer_scan_running):
@@ -2912,29 +2935,28 @@ class TcpTestWindow(QWidget):
 
         self.pointer_status_request_inflight = True
         try:
-            response = self._send_operation("pointer.status", log_enabled=False)
-            if response is None:
+            data = self._request_data_dict(
+                "pointer.status",
+                error_title="状态失败",
+                log_enabled=False,
+                warn=False,
+            )
+            if data is None:
                 return
-            self._update_pointer_status_from_response(response, silent=True)
+            self._apply_pointer_status_data(data, silent=True)
         finally:
             self.pointer_status_request_inflight = False
 
     def on_pointer_merge(self) -> None:
-        response = self._send_operation("pointer.merge")
+        response = self._request_ok("pointer.merge", error_title="合并失败")
         if response is None:
-            return
-        if not self._response_ok(response):
-            QMessageBox.warning(self, "合并失败", self._response_error_text(response))
             return
         self.pointer_view.append("已触发 Pointer.bin 合并任务。")
         self._set_status("已触发合并任务")
 
     def on_pointer_export(self) -> None:
-        response = self._send_operation("pointer.export")
+        response = self._request_ok("pointer.export", error_title="导出失败")
         if response is None:
-            return
-        if not self._response_ok(response):
-            QMessageBox.warning(self, "导出失败", self._response_error_text(response))
             return
         self.pointer_view.append("已触发指针链文本导出。")
         self._set_status("已触发导出任务")
@@ -2991,36 +3013,43 @@ class TcpTestWindow(QWidget):
                 QMessageBox.warning(self, "输入提示", "PID 必须大于 0。")
                 return
         else:
-            get_response = self._send_operation("target.pid.get", {"package_name": input_text})
-            if not self._response_ok(get_response):
-                pid_value = None
-            else:
-                pairs = get_response.get("pairs", {})
-                if isinstance(pairs, dict) and "pid" in pairs:
-                    pid_value = self._safe_int(pairs.get("pid"), 0)
-                else:
-                    pid_value = None
+            data = self._request_data_dict(
+                "target.pid.get",
+                {"package_name": input_text},
+                error_title="同步失败",
+                error_message="包名获取 PID 失败。",
+                parse_title="同步失败",
+                parse_error_text="包名获取 PID 失败。",
+                status_on_error="同步失败：包名获取 PID 失败",
+            )
+            pid_value = self._safe_int(data.get("pid"), 0) if isinstance(data, dict) and "pid" in data else None
             if pid_value is None:
-                QMessageBox.warning(self, "同步失败", "包名获取 PID 失败。")
-                self._set_status("同步失败：包名获取 PID 失败")
                 return
 
-        set_response = self._send_operation("target.pid.set", {"pid": pid_value})
-        if not self._response_ok(set_response):
-            QMessageBox.warning(self, "同步失败", "设置全局 PID 失败。")
-            self._set_status("同步失败：设置全局 PID 失败")
+        set_response = self._request_ok(
+            "target.pid.set",
+            {"pid": pid_value},
+            error_title="同步失败",
+            error_message="设置全局 PID 失败。",
+            status_on_error="同步失败：设置全局 PID 失败",
+        )
+        if set_response is None:
             return
 
-        current_response = self._send_operation("target.pid.current")
+        current_data = self._request_data_dict(
+            "target.pid.current",
+            error_title="同步失败",
+            error_message="同步后读取全局 PID 失败。",
+            parse_title="同步失败",
+            parse_error_text="同步后读取全局 PID 失败。",
+            status_on_error="同步后读取全局 PID 失败",
+        )
         current_pid: int | None = None
-        if self._response_ok(current_response):
-            pairs = current_response.get("pairs", {})
-            if isinstance(pairs, dict) and "pid" in pairs:
-                parsed_pid = self._safe_int(pairs.get("pid"), 0)
-                current_pid = parsed_pid if parsed_pid > 0 else None
+        if isinstance(current_data, dict) and "pid" in current_data:
+            parsed_pid = self._safe_int(current_data.get("pid"), 0)
+            current_pid = parsed_pid if parsed_pid > 0 else None
         if current_pid is None:
             self.global_pid_label.setText("--")
-            self._set_status("同步后读取全局 PID 失败")
             return
 
         self.global_pid_label.setText(str(current_pid))
@@ -3069,14 +3098,16 @@ class TcpTestWindow(QWidget):
         self._set_status("已清空筛选条件")
 
     def on_hwbp_refresh(self, silent: bool = False) -> None:
-        response = self._send_operation("breakpoint.info", log_enabled=not silent)
-        if response is None:
-            return
-        data = response.get("data") if self._response_ok(response) else None
-        if not isinstance(data, dict):
-            if not silent:
-                QMessageBox.warning(self, "刷新失败", f"断点信息响应异常: {self._response_error_text(response)}")
-                self._set_status("断点信息刷新失败")
+        data = self._request_data_dict(
+            "breakpoint.info",
+            error_title="刷新失败",
+            parse_title="刷新失败",
+            parse_error_text="断点信息响应异常。",
+            status_on_error="" if silent else "断点信息刷新失败",
+            log_enabled=not silent,
+            warn=not silent,
+        )
+        if data is None:
             return
         self.hwbp_info_data = data
         self._render_hwbp_info(data)
@@ -3102,25 +3133,20 @@ class TcpTestWindow(QWidget):
             return
         bp_type = str(type_data) if type_data is not None else "0"
         bp_scope = str(scope_data) if scope_data is not None else "0"
-        response = self._send_operation(
+        response = self._request_ok(
             "breakpoint.set",
             {"address": f"0x{addr:X}", "bp_type": bp_type, "bp_scope": bp_scope, "length": length},
+            error_title="设置失败",
+            status_on_error="设置硬件断点失败",
         )
         if response is None:
-            return
-        if not self._response_ok(response):
-            QMessageBox.warning(self, "设置失败", self._response_error_text(response))
-            self._set_status("设置硬件断点失败")
             return
         self._set_status("设置硬件断点成功")
         self.on_hwbp_refresh(silent=True)
 
     def on_hwbp_remove_all(self) -> None:
-        response = self._send_operation("breakpoint.clear")
+        response = self._request_ok("breakpoint.clear", error_title="移除失败")
         if response is None:
-            return
-        if not self._response_ok(response):
-            QMessageBox.warning(self, "移除失败", self._response_error_text(response))
             return
         self._set_status("已移除进程硬件断点")
         self.on_hwbp_refresh(silent=True)
@@ -3158,14 +3184,12 @@ class TcpTestWindow(QWidget):
             QMessageBox.warning(self, "输入提示", "请选择要写入的字段。")
             return
 
-        response = self._send_operation(
+        response = self._request_ok(
             "breakpoint.record.update",
             {"index": index, "field": field_name, "value": f"0x{value:X}"},
+            error_title="写入失败",
         )
         if response is None:
-            return
-        if not self._response_ok(response):
-            QMessageBox.warning(self, "写入失败", self._response_error_text(response))
             return
 
         self._set_status(f"已写入 hwbp_record[{index}].{field_name}")
@@ -3226,28 +3250,25 @@ class TcpTestWindow(QWidget):
         except ValueError:
             QMessageBox.warning(self, "输入提示", "目标地址或范围格式无效。")
             return
-        response = self._send_operation(
+        response = self._request_ok(
             "signature.scan_address",
             {"address": f"0x{addr:X}", "range": scan_range, "file_name": file_name},
+            error_title="执行失败",
         )
         if response is None:
-            return
-        if not self._response_ok(response):
-            QMessageBox.warning(self, "执行失败", self._response_error_text(response))
             self.sig_status_label.setText("特征码状态: 扫描并保存失败")
             return
         self.sig_status_label.setText("特征码状态: 扫描并保存成功")
         self._set_status(f"特征码已保存到 {file_name}")
 
     def _scan_signature_file_data(self, file_name: str) -> dict | None:
-        response = self._send_operation("signature.scan_file", {"file_name": file_name})
-        if response is None:
-            return None
-        data = response.get("data") if self._response_ok(response) else None
-        if not isinstance(data, dict):
-            QMessageBox.warning(self, "执行失败", f"文件扫描响应异常: {self._response_error_text(response)}")
-            return None
-        return data
+        return self._request_data_dict(
+            "signature.scan_file",
+            {"file_name": file_name},
+            error_title="执行失败",
+            parse_title="执行失败",
+            parse_error_text="文件扫描响应异常。",
+        )
 
     def on_sig_filter(self) -> None:
         addr_text = self.sig_verify_addr_input.text().strip()
@@ -3257,12 +3278,14 @@ class TcpTestWindow(QWidget):
         except ValueError:
             QMessageBox.warning(self, "输入提示", "过滤地址格式无效。")
             return
-        response = self._send_operation("signature.filter", {"address": f"0x{addr:X}", "file_name": file_name})
-        if response is None:
-            return
-        data = response.get("data") if self._response_ok(response) else None
-        if not isinstance(data, dict):
-            QMessageBox.warning(self, "执行失败", f"过滤响应异常: {self._response_error_text(response)}")
+        data = self._request_data_dict(
+            "signature.filter",
+            {"address": f"0x{addr:X}", "file_name": file_name},
+            error_title="执行失败",
+            parse_title="执行失败",
+            parse_error_text="过滤响应异常。",
+        )
+        if data is None:
             return
         success = bool(data.get("success", False))
         display_data = data
@@ -3290,12 +3313,14 @@ class TcpTestWindow(QWidget):
         except ValueError:
             QMessageBox.warning(self, "输入提示", "偏移必须是整数。")
             return
-        response = self._send_operation("signature.scan_pattern", {"range_offset": range_offset, "pattern": pattern})
-        if response is None:
-            return
-        data = response.get("data") if self._response_ok(response) else None
-        if not isinstance(data, dict):
-            QMessageBox.warning(self, "执行失败", f"特征码扫描响应异常: {self._response_error_text(response)}")
+        data = self._request_data_dict(
+            "signature.scan_pattern",
+            {"range_offset": range_offset, "pattern": pattern},
+            error_title="执行失败",
+            parse_title="执行失败",
+            parse_error_text="特征码扫描响应异常。",
+        )
+        if data is None:
             return
         self._render_signature_data(data, "特征码状态: 按特征码扫描完成")
         self._set_status("按特征码扫描已完成")

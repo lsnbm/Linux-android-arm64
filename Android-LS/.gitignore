@@ -1,0 +1,7 @@
+/.ndk/
+/libs/
+/obj/
+
+Pointer*.bin
+Pointer_Export.txt
+Pointer_Merged.tmp
