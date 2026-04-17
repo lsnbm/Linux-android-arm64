@@ -188,7 +188,7 @@ static int ConnectThreadFunction(void *data)
 				if (ret < num_pages)
 				{
 					pr_debug("get_user_pages_remote 失败, ret=%d\n", ret);
-					跳转到 输出页面;
+					goto out_put_pages;
 				}
 
 				// 映射到内核虚拟地址
@@ -196,7 +196,7 @@ static int ConnectThreadFunction(void *data)
 				if (!req)
 				{
 					pr_debug("vmap 失败\n");
-					跳转到 输出页面;
+					goto out_put_pages;
 				}
 
 				// 成功 get_user_pages_remote 持有页面引用，只需释放 mm
@@ -208,7 +208,7 @@ static int ConnectThreadFunction(void *data)
 				mm = NULL;
 				break; // 找到目标进程，退出遍历
 
-			out_put_pages:
+输出页面：
 				release_gup_pages(pages, ret);
 				kfree(pages);
 				pages = NULL;
