@@ -1,60 +1,43 @@
 #pragma once
-#include <cstdio>
-#include <sys/mman.h>
-#include <cerrno>
-#include <cstring>
-#include <atomic>
-#include <thread>
-#include <mutex>
-#include <sys/prctl.h>
-#include <stdio.h>
-#include <iostream>
-#include <vector>
-#include <list>
-#include <thread>
-#include <atomic>
-#include <memory>
-#include <string>
-#include <cstdint>
-#include <cstdlib>
-#include <set>
-#include <cmath>
-#include <cstring>
 #include <algorithm>
+#include <atomic>
+#include <cerrno>
+#include <charconv>
 #include <chrono>
-#include <map>
-#include <sstream>
+#include <cmath>
+#include <concepts>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <dirent.h>
+#include <elf.h>
+#include <fcntl.h>
+#include <format>
 #include <fstream>
 #include <functional>
+#include <iostream>
+#include <iterator>
+#include <list>
+#include <map>
+#include <memory>
 #include <mutex>
+#include <optional>
+#include <print>
+#include <ranges>
+#include <set>
 #include <shared_mutex>
 #include <span>
-#include <ranges>
-#include <format>
-#include <concepts>
-#include <variant>
-#include <optional>
-#include <charconv>
-#include <dirent.h>
-#include <cstdio>
-#include <cstdlib>
-#include <unistd.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <cstdio>
-#include <cstring>
-#include <atomic>
+#include <sstream>
+#include <string>
+#include <sys/mman.h>
+#include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <string>
-#include <ranges>
-#include <format>
-#include <print>
-#include <algorithm>
-#include <iterator>
-#include <string>
+#include <thread>
+#include <unistd.h>
+#include <variant>
 #include <vector>
-#include <elf.h>
 
 #define PAGE_SIZE 4096
 // 12月2日21:36开始记录修复问题:
@@ -450,6 +433,12 @@ public: // 外部读写接口
         return value;
     }
 
+    template <typename T>
+    bool ReadValue(uint64_t address, T &value)
+    {
+        return KReadProcessMemory(address, &value, sizeof(T)) == static_cast<int>(sizeof(T));
+    }
+
     int Read(uint64_t address, void *buffer, size_t size)
     {
         return KReadProcessMemory(address, buffer, size);
@@ -460,7 +449,7 @@ public: // 外部读写接口
         if (!address)
             return "";
         std::vector<char> buffer(max_length + 1, 0);
-        if (Read(address, buffer.data(), max_length))
+        if (Read(address, buffer.data(), max_length) > 0)
         {
             buffer[max_length] = '\0';
             return std::string(buffer.data());
@@ -473,7 +462,7 @@ public: // 外部读写接口
         if (length <= 0 || length > 1024)
             return "";
         std::vector<char16_t> buffer(length);
-        if (Read(address, buffer.data(), length * sizeof(char16_t)))
+        if (Read(address, buffer.data(), length * sizeof(char16_t)) > 0)
         {
             std::string result;
             for (size_t i = 0; i < length; ++i)

@@ -41,7 +41,7 @@ namespace Utils
             {
                 workers_.emplace_back([this](std::stop_token st)
                                       {
-                    while (!st.stop_requested()) {
+                    while (true) {
                         std::function<void()> task;
                         {
                             std::unique_lock lk(mtx_);
@@ -132,8 +132,11 @@ namespace Utils
                         tasks_.pop();
                 }
             }
-            for (auto &w : workers_)
-                w.request_stop();
+            if (drop_pending)
+            {
+                for (auto &w : workers_)
+                    w.request_stop();
+            }
             cv_.notify_all();
             done_cv_.notify_all();
             workers_.clear();

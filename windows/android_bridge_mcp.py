@@ -48,13 +48,6 @@ _bridge_session_pid: int | None = None
 
 
 def _extract_pid_from_response(payload: dict[str, Any]) -> int | None:
-    pairs = payload.get("pairs")
-    if isinstance(pairs, dict) and "pid" in pairs:
-        try:
-            return int(str(pairs.get("pid", "0")), 0)
-        except ValueError:
-            return None
-
     data = payload.get("data")
     if isinstance(data, dict) and "pid" in data:
         try:
@@ -185,7 +178,7 @@ def android_connection() -> dict[str, Any]:
 @mcp.resource("android://protocol")
 def android_protocol() -> dict[str, Any]:
     """Return the structured bridge protocol description exposed by the Android tcp_server."""
-    return bridge.describe()
+    return bridge.call_operation("bridge.describe").require_ok().to_dict()
 
 
 @mcp.resource("android://guide")
@@ -648,7 +641,7 @@ TOOL_META: dict[str, dict[str, Any]] = {
             "segment_index": "Zero-based segment index.",
             "which": "Either 'start' or 'end'.",
         },
-        "result_notes": "Returns resolved address in message/pairs.",
+        "result_notes": "Returns resolved address in data.address / data.address_hex.",
     },
     "android_memory_scan_start": {
         "group": "Memory Scan",
@@ -690,7 +683,7 @@ TOOL_META: dict[str, dict[str, Any]] = {
         "use_when": "Check whether a pointer scan is running and how many chains are currently preserved.",
         "example": {},
         "parameter_notes": {},
-        "result_notes": "Returns scanning/progress/count in pairs.",
+        "result_notes": "Returns scanning/progress/count in data.",
     },
     "android_pointer_scan": {
         "group": "Pointer Scan",

@@ -1,65 +1,56 @@
 
 #pragma once
-#include <stdio.h>
-#include <iostream>
-#include <vector>
-#include <list>
-#include <thread>
-#include <atomic>
-#include <memory>
-#include <string>
-#include <cstdint>
-#include <cstdlib>
-#include <set>
-#include <cmath>
-#include <cstring>
 #include <algorithm>
-#include <chrono>
-#include <map>
-#include <sstream>
-#include <fstream>
-#include <functional>
-#include <mutex>
-#include <shared_mutex>
-#include <span>
-#include <ranges>
-#include <format>
-#include <concepts>
-#include <variant>
-#include <optional>
+#include <array>
+#include <atomic>
+#include <cerrno>
 #include <charconv>
-#include <unordered_set>
-#include <stack>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <numeric>
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <sys/time.h>
-#include <print>
-#include <utility>
-#include <numeric>
+#include <chrono>
 #include <cinttypes>
-#include <atomic>
-#include <algorithm>
+#include <cmath>
+#include <concepts>
 #include <condition_variable>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <fstream>
+#include <format>
 #include <functional>
 #include <future>
+#include <iostream>
+#include <limits>
+#include <list>
+#include <map>
 #include <memory>
 #include <mutex>
+#include <numeric>
+#include <optional>
+#include <print>
 #include <queue>
+#include <ranges>
+#include <set>
+#include <shared_mutex>
+#include <span>
+#include <sstream>
+#include <stack>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <thread>
+#include <type_traits>
+#include <unordered_set>
+#include <utility>
+#include <variant>
 #include <vector>
-#include <array>
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <sys/mman.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <unistd.h>
 
 #include "DriverMemory.h"
 #include "ThreadPool.h"
@@ -202,6 +193,330 @@ namespace MemUtils
         return true;
     }
 
+    inline std::string HwbpRegName(int reg)
+    {
+        if (reg >= Driver::IDX_X0 && reg <= Driver::IDX_X29)
+            return std::format("x{}", reg - Driver::IDX_X0);
+        if (reg >= Driver::IDX_Q0 && reg <= Driver::IDX_Q31)
+            return std::format("q{}", reg - Driver::IDX_Q0);
+
+        switch (reg)
+        {
+        case Driver::IDX_PC:
+            return "pc";
+        case Driver::IDX_HIT_COUNT:
+            return "hit_count";
+        case Driver::IDX_LR:
+            return "lr";
+        case Driver::IDX_SP:
+            return "sp";
+        case Driver::IDX_ORIG_X0:
+            return "orig_x0";
+        case Driver::IDX_SYSCALLNO:
+            return "syscallno";
+        case Driver::IDX_PSTATE:
+            return "pstate";
+        case Driver::IDX_FPSR:
+            return "fpsr";
+        case Driver::IDX_FPCR:
+            return "fpcr";
+        default:
+            return std::format("idx{}", reg);
+        }
+    }
+
+    constexpr const char *HwbpOpName(std::uint8_t op) noexcept
+    {
+        switch (op)
+        {
+        case HWBP_OP_READ:
+            return "read";
+        case HWBP_OP_WRITE:
+            return "write";
+        case HWBP_OP_NONE:
+        default:
+            return "none";
+        }
+    }
+
+    inline void HwbpRequestRead(Driver::hwbp_record &record, int reg)
+    {
+        if (reg >= 0 && reg < Driver::MAX_REG_COUNT && HWBP_GET_MASK(&record, reg) != HWBP_OP_WRITE)
+            HWBP_SET_MASK(&record, reg, HWBP_OP_READ);
+    }
+
+    inline std::uint64_t HwbpGetXField(const Driver::hwbp_record &record, int index)
+    {
+        static constexpr std::uint64_t Driver::hwbp_record::*fields[] = {
+            &Driver::hwbp_record::x0, &Driver::hwbp_record::x1, &Driver::hwbp_record::x2,
+            &Driver::hwbp_record::x3, &Driver::hwbp_record::x4, &Driver::hwbp_record::x5,
+            &Driver::hwbp_record::x6, &Driver::hwbp_record::x7, &Driver::hwbp_record::x8,
+            &Driver::hwbp_record::x9, &Driver::hwbp_record::x10, &Driver::hwbp_record::x11,
+            &Driver::hwbp_record::x12, &Driver::hwbp_record::x13, &Driver::hwbp_record::x14,
+            &Driver::hwbp_record::x15, &Driver::hwbp_record::x16, &Driver::hwbp_record::x17,
+            &Driver::hwbp_record::x18, &Driver::hwbp_record::x19, &Driver::hwbp_record::x20,
+            &Driver::hwbp_record::x21, &Driver::hwbp_record::x22, &Driver::hwbp_record::x23,
+            &Driver::hwbp_record::x24, &Driver::hwbp_record::x25, &Driver::hwbp_record::x26,
+            &Driver::hwbp_record::x27, &Driver::hwbp_record::x28, &Driver::hwbp_record::x29};
+        return (index >= 0 && index < 30) ? (record.*fields[index]) : 0;
+    }
+
+    inline void HwbpSetXField(Driver::hwbp_record &record, int index, std::uint64_t value)
+    {
+        static constexpr std::uint64_t Driver::hwbp_record::*fields[] = {
+            &Driver::hwbp_record::x0, &Driver::hwbp_record::x1, &Driver::hwbp_record::x2,
+            &Driver::hwbp_record::x3, &Driver::hwbp_record::x4, &Driver::hwbp_record::x5,
+            &Driver::hwbp_record::x6, &Driver::hwbp_record::x7, &Driver::hwbp_record::x8,
+            &Driver::hwbp_record::x9, &Driver::hwbp_record::x10, &Driver::hwbp_record::x11,
+            &Driver::hwbp_record::x12, &Driver::hwbp_record::x13, &Driver::hwbp_record::x14,
+            &Driver::hwbp_record::x15, &Driver::hwbp_record::x16, &Driver::hwbp_record::x17,
+            &Driver::hwbp_record::x18, &Driver::hwbp_record::x19, &Driver::hwbp_record::x20,
+            &Driver::hwbp_record::x21, &Driver::hwbp_record::x22, &Driver::hwbp_record::x23,
+            &Driver::hwbp_record::x24, &Driver::hwbp_record::x25, &Driver::hwbp_record::x26,
+            &Driver::hwbp_record::x27, &Driver::hwbp_record::x28, &Driver::hwbp_record::x29};
+        if (index >= 0 && index < 30)
+            (record.*fields[index]) = value;
+    }
+
+    inline __uint128_t HwbpGetQField(const Driver::hwbp_record &record, int index)
+    {
+        static constexpr __uint128_t Driver::hwbp_record::*fields[] = {
+            &Driver::hwbp_record::q0, &Driver::hwbp_record::q1, &Driver::hwbp_record::q2,
+            &Driver::hwbp_record::q3, &Driver::hwbp_record::q4, &Driver::hwbp_record::q5,
+            &Driver::hwbp_record::q6, &Driver::hwbp_record::q7, &Driver::hwbp_record::q8,
+            &Driver::hwbp_record::q9, &Driver::hwbp_record::q10, &Driver::hwbp_record::q11,
+            &Driver::hwbp_record::q12, &Driver::hwbp_record::q13, &Driver::hwbp_record::q14,
+            &Driver::hwbp_record::q15, &Driver::hwbp_record::q16, &Driver::hwbp_record::q17,
+            &Driver::hwbp_record::q18, &Driver::hwbp_record::q19, &Driver::hwbp_record::q20,
+            &Driver::hwbp_record::q21, &Driver::hwbp_record::q22, &Driver::hwbp_record::q23,
+            &Driver::hwbp_record::q24, &Driver::hwbp_record::q25, &Driver::hwbp_record::q26,
+            &Driver::hwbp_record::q27, &Driver::hwbp_record::q28, &Driver::hwbp_record::q29,
+            &Driver::hwbp_record::q30, &Driver::hwbp_record::q31};
+        return (index >= 0 && index < 32) ? (record.*fields[index]) : 0;
+    }
+
+    inline void HwbpSetQField(Driver::hwbp_record &record, int index, __uint128_t value)
+    {
+        static constexpr __uint128_t Driver::hwbp_record::*fields[] = {
+            &Driver::hwbp_record::q0, &Driver::hwbp_record::q1, &Driver::hwbp_record::q2,
+            &Driver::hwbp_record::q3, &Driver::hwbp_record::q4, &Driver::hwbp_record::q5,
+            &Driver::hwbp_record::q6, &Driver::hwbp_record::q7, &Driver::hwbp_record::q8,
+            &Driver::hwbp_record::q9, &Driver::hwbp_record::q10, &Driver::hwbp_record::q11,
+            &Driver::hwbp_record::q12, &Driver::hwbp_record::q13, &Driver::hwbp_record::q14,
+            &Driver::hwbp_record::q15, &Driver::hwbp_record::q16, &Driver::hwbp_record::q17,
+            &Driver::hwbp_record::q18, &Driver::hwbp_record::q19, &Driver::hwbp_record::q20,
+            &Driver::hwbp_record::q21, &Driver::hwbp_record::q22, &Driver::hwbp_record::q23,
+            &Driver::hwbp_record::q24, &Driver::hwbp_record::q25, &Driver::hwbp_record::q26,
+            &Driver::hwbp_record::q27, &Driver::hwbp_record::q28, &Driver::hwbp_record::q29,
+            &Driver::hwbp_record::q30, &Driver::hwbp_record::q31};
+        if (index >= 0 && index < 32)
+            (record.*fields[index]) = value;
+    }
+
+    inline std::uint64_t HwbpReadRegisterValue(Driver::hwbp_record &record, int reg)
+    {
+        HwbpRequestRead(record, reg);
+        switch (reg)
+        {
+        case Driver::IDX_PC:
+            return record.pc;
+        case Driver::IDX_HIT_COUNT:
+            return record.hit_count;
+        case Driver::IDX_LR:
+            return record.lr;
+        case Driver::IDX_SP:
+            return record.sp;
+        case Driver::IDX_ORIG_X0:
+            return record.orig_x0;
+        case Driver::IDX_SYSCALLNO:
+            return record.syscallno;
+        case Driver::IDX_PSTATE:
+            return record.pstate;
+        case Driver::IDX_FPSR:
+            return record.fpsr;
+        case Driver::IDX_FPCR:
+            return record.fpcr;
+        default:
+            return (reg >= Driver::IDX_X0 && reg <= Driver::IDX_X29) ? HwbpGetXField(record, reg - Driver::IDX_X0) : 0;
+        }
+    }
+
+    inline bool HwbpWriteRegisterValue(Driver::hwbp_record &record, int reg, std::uint64_t value)
+    {
+        if (reg < 0 || reg >= Driver::MAX_REG_COUNT)
+            return false;
+
+        HWBP_SET_MASK(&record, reg, HWBP_OP_WRITE);
+        switch (reg)
+        {
+        case Driver::IDX_PC:
+            record.pc = value;
+            return true;
+        case Driver::IDX_HIT_COUNT:
+            record.hit_count = value;
+            return true;
+        case Driver::IDX_LR:
+            record.lr = value;
+            return true;
+        case Driver::IDX_SP:
+            record.sp = value;
+            return true;
+        case Driver::IDX_ORIG_X0:
+            record.orig_x0 = value;
+            return true;
+        case Driver::IDX_SYSCALLNO:
+            record.syscallno = value;
+            return true;
+        case Driver::IDX_PSTATE:
+            record.pstate = value;
+            return true;
+        case Driver::IDX_FPSR:
+            record.fpsr = static_cast<std::uint32_t>(value);
+            return true;
+        case Driver::IDX_FPCR:
+            record.fpcr = static_cast<std::uint32_t>(value);
+            return true;
+        default:
+            if (reg >= Driver::IDX_X0 && reg <= Driver::IDX_X29)
+            {
+                HwbpSetXField(record, reg - Driver::IDX_X0, value);
+                return true;
+            }
+            if (reg >= Driver::IDX_Q0 && reg <= Driver::IDX_Q31)
+            {
+                HwbpSetQField(record, reg - Driver::IDX_Q0, static_cast<__uint128_t>(value));
+                return true;
+            }
+            return false;
+        }
+    }
+
+    inline std::uint64_t HwbpReadXField(Driver::hwbp_record &record, int index)
+    {
+        HwbpRequestRead(record, Driver::IDX_X0 + index);
+        return HwbpGetXField(record, index);
+    }
+
+    inline __uint128_t HwbpReadQField(Driver::hwbp_record &record, int index)
+    {
+        HwbpRequestRead(record, Driver::IDX_Q0 + index);
+        return HwbpGetQField(record, index);
+    }
+
+    inline void HwbpWriteQField(Driver::hwbp_record &record, int index, __uint128_t value)
+    {
+        if (index < 0 || index >= 32)
+            return;
+        HWBP_SET_MASK(&record, Driver::IDX_Q0 + index, HWBP_OP_WRITE);
+        HwbpSetQField(record, index, value);
+    }
+
+    inline std::string HwbpLowerAscii(std::string_view input)
+    {
+        std::string out(input);
+        for (char &ch : out)
+        {
+            if (ch >= 'A' && ch <= 'Z')
+                ch = static_cast<char>(ch - 'A' + 'a');
+        }
+        return out;
+    }
+
+    inline std::optional<int> HwbpParseInt(std::string_view text)
+    {
+        if (text.empty())
+            return std::nullopt;
+
+        int value = 0;
+        const char *begin = text.data();
+        const char *end = begin + text.size();
+        const auto [ptr, ec] = std::from_chars(begin, end, value, 10);
+        if (ec != std::errc{} || ptr != end)
+            return std::nullopt;
+        return value;
+    }
+
+    inline std::optional<int> HwbpRegIndexFromToken(std::string_view fieldToken)
+    {
+        std::string token = HwbpLowerAscii(fieldToken);
+        if (token.starts_with("op."))
+            token.erase(0, 3);
+        else if (token.starts_with("mask."))
+            token.erase(0, 5);
+
+        if (token == "pc")
+            return Driver::IDX_PC;
+        if (token == "hit_count")
+            return Driver::IDX_HIT_COUNT;
+        if (token == "lr")
+            return Driver::IDX_LR;
+        if (token == "sp")
+            return Driver::IDX_SP;
+        if (token == "pstate")
+            return Driver::IDX_PSTATE;
+        if (token == "orig_x0")
+            return Driver::IDX_ORIG_X0;
+        if (token == "syscallno")
+            return Driver::IDX_SYSCALLNO;
+        if (token == "fpsr")
+            return Driver::IDX_FPSR;
+        if (token == "fpcr")
+            return Driver::IDX_FPCR;
+        if (token.size() >= 2 && token[0] == 'x')
+        {
+            const auto regIndex = HwbpParseInt(std::string_view(token).substr(1));
+            if (regIndex.has_value() && *regIndex >= 0 && *regIndex < 30)
+                return Driver::IDX_X0 + *regIndex;
+        }
+        if (token.size() >= 2 && (token[0] == 'v' || token[0] == 'q'))
+        {
+            const auto regIndex = HwbpParseInt(std::string_view(token).substr(1));
+            if (regIndex.has_value() && *regIndex >= 0 && *regIndex < 32)
+                return Driver::IDX_Q0 + *regIndex;
+        }
+        return std::nullopt;
+    }
+
+    inline std::optional<int> HwbpMaskByteIndexFromToken(std::string_view fieldToken)
+    {
+        std::string token = HwbpLowerAscii(fieldToken);
+        if (!token.starts_with("mask"))
+            return std::nullopt;
+
+        token.erase(0, 4);
+        if (!token.empty() && (token.front() == '.' || token.front() == '_' || token.front() == '['))
+            token.erase(0, 1);
+        if (!token.empty() && token.back() == ']')
+            token.pop_back();
+
+        const auto index = HwbpParseInt(token);
+        if (!index.has_value() || *index < 0 || *index >= 18)
+            return std::nullopt;
+        return *index;
+    }
+
+    inline bool AssignHwbpRecordField(Driver::hwbp_record &record, std::string_view fieldToken, std::uint64_t value)
+    {
+        const std::string token = HwbpLowerAscii(fieldToken);
+        if (const auto maskIndex = HwbpMaskByteIndexFromToken(token); maskIndex.has_value())
+        {
+            record.mask[*maskIndex] = static_cast<std::uint8_t>(value & 0xFF);
+            return true;
+        }
+
+        if (token.starts_with("op.") || token.starts_with("mask."))
+        {
+            const auto regIndex = HwbpRegIndexFromToken(token);
+            if (!regIndex.has_value() || value > HWBP_OP_WRITE)
+                return false;
+            HWBP_SET_MASK(&record, *regIndex, static_cast<std::uint8_t>(value));
+            return true;
+        }
+
+        const auto regIndex = HwbpRegIndexFromToken(token);
+        return regIndex.has_value() && HwbpWriteRegisterValue(record, *regIndex, value);
+    }
+
     // 统一的类型分发
     template <typename F>
     decltype(auto) DispatchType(DataType type, F &&fn)
@@ -260,7 +575,12 @@ namespace MemUtils
         if (!addr)
             return "??";
         return DispatchType(type, [&]<typename T>() -> std::string
-                            { return detail::ValueToString(dr.Read<T>(addr)); });
+                            {
+                                T value{};
+                                if (!dr.ReadValue(addr, value))
+                                    return "??";
+                                return detail::ValueToString(value);
+                            });
     }
 
     // 把字符串按指定类型写入目标地址。
@@ -273,7 +593,7 @@ namespace MemUtils
         {
             std::string s(str);
             return DispatchType(type, [&]<typename T>() -> bool
-                                { return dr.Write<T>(addr, detail::StringToValue<T>(s)); });
+                                { return dr.Write<T>(addr, detail::StringToValue<T>(s)) == static_cast<int>(sizeof(T)); });
         }
         catch (...)
         {
@@ -306,7 +626,8 @@ namespace MemUtils
             return false;
 
         std::string temp(str);
-        return dr.Write(addr, temp.data(), temp.size() + 1) > 0;
+        const auto size = temp.size() + 1;
+        return dr.Write(addr, temp.data(), size) == static_cast<int>(size);
     }
 
     inline std::string ReadAsPointerString(uintptr_t addr)
@@ -314,7 +635,10 @@ namespace MemUtils
         addr = Normalize(addr);
         if (!addr)
             return "??";
-        return std::format("{:X}", Normalize(static_cast<uintptr_t>(dr.Read<int64_t>(addr))));
+        int64_t value = 0;
+        if (!dr.ReadValue(addr, value))
+            return "??";
+        return std::format("{:X}", Normalize(static_cast<uintptr_t>(value)));
     }
 
     // 把十六进制文本解析后写入指针值。
@@ -325,8 +649,8 @@ namespace MemUtils
             return false;
         try
         {
-            return dr.Write<int64_t>(addr,
-                                     static_cast<int64_t>(std::strtoull(std::string(str).c_str(), nullptr, 16)));
+            const int64_t value = static_cast<int64_t>(std::strtoull(std::string(str).c_str(), nullptr, 16));
+            return dr.Write<int64_t>(addr, value) == static_cast<int>(sizeof(value));
         }
         catch (...)
         {
@@ -1563,7 +1887,8 @@ public:
             return;
         }
         std::ranges::fill(buffer_, 0);
-        readSuccess_ = (dr.Read(base_, buffer_.data(), buffer_.size()));
+        const int readBytes = dr.Read(base_, buffer_.data(), buffer_.size());
+        readSuccess_ = readBytes > 0;
         if (!readSuccess_)
         {
             disasmBusy_ = false;
@@ -2232,7 +2557,8 @@ private:
                 sym.arrayIndex = r.arrayIndex;
 
                 uintptr_t objAddr = 0;
-                dr.Read(MemUtils::Normalize(r.arrayBase) + r.arrayIndex * sizeof(uintptr_t), &objAddr, sizeof(objAddr));
+                if (dr.Read(MemUtils::Normalize(r.arrayBase) + r.arrayIndex * sizeof(uintptr_t), &objAddr, sizeof(objAddr)) != static_cast<int>(sizeof(objAddr)))
+                    objAddr = 0;
                 sym.start = MemUtils::Normalize(objAddr);
                 char arrName[128];
                 snprintf(arrName, sizeof(arrName), "array[%zu]", r.arrayIndex);
@@ -2429,7 +2755,7 @@ public:
             {
                 uintptr_t ptr = 0;
 
-                if (dr.Read(arrayBase + i * sizeof(uintptr_t), &ptr, sizeof(ptr)))
+                if (dr.Read(arrayBase + i * sizeof(uintptr_t), &ptr, sizeof(ptr)) == static_cast<int>(sizeof(ptr)))
                 {
                     ptr = MemUtils::Normalize(ptr);
                     if (MemUtils::IsValidAddr(ptr))

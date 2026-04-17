@@ -59,9 +59,6 @@ class BridgeConfig:
 class BridgeResponse:
     ok: bool
     operation: str = ""
-    command: str = ""
-    message: str = ""
-    pairs: dict[str, str] = field(default_factory=dict)
     data: Any = None
     error: str = ""
     raw: dict[str, Any] = field(default_factory=dict)
@@ -76,9 +73,6 @@ class BridgeResponse:
         payload: dict[str, Any] = {
             "ok": self.ok,
             "operation": self.operation,
-            "command": self.command,
-            "message": self.message,
-            "pairs": dict(self.pairs),
             "connection": dict(self.connection),
             "raw": dict(self.raw),
         }
@@ -87,15 +81,6 @@ class BridgeResponse:
         if self.error:
             payload["error"] = self.error
         return payload
-
-def parse_message_pairs(message: str) -> dict[str, str]:
-    pairs: dict[str, str] = {}
-    for token in str(message).split():
-        if "=" not in token:
-            continue
-        key, value = token.split("=", 1)
-        pairs[key.strip()] = value.strip()
-    return pairs
 
 
 def format_address(value: int | str) -> str:
@@ -260,14 +245,10 @@ def _coerce_bridge_response(
 
     ok = bool(response_obj.get("ok", False))
     operation = str(response_obj.get("operation") or fallback_operation)
-    message = str(response_obj.get("message", ""))
     error = str(response_obj.get("error", "")) if not ok else ""
     return BridgeResponse(
         ok=ok,
         operation=operation,
-        command=str(response_obj.get("command", "")),
-        message=message,
-        pairs=parse_message_pairs(message),
         data=response_obj.get("data"),
         error=error,
         raw=response_obj,
@@ -346,7 +327,7 @@ class AndroidBridgeSession:
             response_obj = self._read_response_object()
             return _coerce_bridge_response(
                 response_obj,
-                fallback_operation=str(request_obj.get("operation") or request_obj.get("command") or ""),
+                fallback_operation=str(request_obj.get("operation") or ""),
                 connection={
                     "host": self.host,
                     "resolved_host": self.host,
@@ -492,290 +473,6 @@ class AndroidBridgeClient:
     def call_operation(self, operation: str, params: dict[str, Any] | None = None) -> BridgeResponse:
         request = {"operation": operation.strip(), "params": params or {}}
         return self._call_with_discovery(request, fallback_operation=operation.strip())
-
-    def describe(self) -> dict[str, Any]:
-        return self.call_operation("bridge.describe").require_ok().to_dict()
-
-    def ping(self) -> dict[str, Any]:
-        return self.call_operation("bridge.ping").require_ok().to_dict()
-
-    def target_get_pid(self, package_name: str) -> dict[str, Any]:
-        return self.call_operation("target.pid.get", {"package_name": package_name}).require_ok().to_dict()
-
-    def target_set_pid(self, pid: int) -> dict[str, Any]:
-        return self.call_operation("target.pid.set", {"pid": pid}).require_ok().to_dict()
-
-    def target_attach_package(self, package_name: str) -> dict[str, Any]:
-        return self.call_operation("target.attach.package", {"package_name": package_name}).require_ok().to_dict()
-
-    def target_current(self) -> dict[str, Any]:
-        return self.call_operation("target.pid.current").require_ok().to_dict()
-
-    def memory_regions(self) -> dict[str, Any]:
-        return self.call_operation("memory.info.full").require_ok().to_dict()
-
-    def module_address(self, module_name: str, segment_index: int = 0, which: str = "start") -> dict[str, Any]:
-        return self.call_operation(
-            "module.resolve",
-            {
-                "module_name": module_name,
-                "segment_index": segment_index,
-                "which": which.strip().lower(),
-            },
-        ).require_ok().to_dict()
-
-    def memory_scan_start(
-        self,
-        value_type: str,
-        mode: str,
-        value: str = "",
-        range_max: str = "",
-    ) -> dict[str, Any]:
-        params: dict[str, Any] = {
-            "value_type": value_type.strip().lower(),
-            "mode": mode.strip().lower(),
-        }
-        if str(value).strip():
-            params["value"] = value
-        if str(range_max).strip():
-            params["range_max"] = range_max
-        return self.call_operation("scan.start", params).require_ok().to_dict()
-
-    def memory_scan_refine(
-        self,
-        value_type: str,
-        mode: str,
-        value: str = "",
-        range_max: str = "",
-    ) -> dict[str, Any]:
-        params: dict[str, Any] = {
-            "value_type": value_type.strip().lower(),
-            "mode": mode.strip().lower(),
-        }
-        if str(value).strip():
-            params["value"] = value
-        if str(range_max).strip():
-            params["range_max"] = range_max
-        return self.call_operation("scan.refine", params).require_ok().to_dict()
-
-    def memory_scan_results(self, start: int = 0, count: int = 100, value_type: str = "i32") -> dict[str, Any]:
-        return self.call_operation(
-            "scan.page",
-            {
-                "start": start,
-                "count": count,
-                "value_type": value_type.strip().lower(),
-            },
-        ).require_ok().to_dict()
-
-    def memory_scan_status(self) -> dict[str, Any]:
-        return self.call_operation("scan.status").require_ok().to_dict()
-
-    def memory_scan_clear(self) -> dict[str, Any]:
-        return self.call_operation("scan.clear").require_ok().to_dict()
-
-    def memory_view_open(self, address: int | str, view_format: str = "hex") -> dict[str, Any]:
-        return self.call_operation(
-            "viewer.open",
-            {"address": format_address(address), "view_format": normalize_view_format(view_format)},
-        ).require_ok().to_dict()
-
-    def memory_view_move(self, lines: int, step: int | None = None) -> dict[str, Any]:
-        params: dict[str, Any] = {"lines": lines}
-        if step is not None:
-            params["step"] = step
-        return self.call_operation("viewer.move", params).require_ok().to_dict()
-
-    def memory_view_offset(self, offset: str) -> dict[str, Any]:
-        offset_text = str(offset).strip()
-        if not offset_text:
-            raise ValueError("offset must not be empty")
-        return self.call_operation("viewer.offset", {"offset": offset_text}).require_ok().to_dict()
-
-    def memory_view_set_format(self, view_format: str) -> dict[str, Any]:
-        return self.call_operation(
-            "viewer.set_format",
-            {"view_format": normalize_view_format(view_format)},
-        ).require_ok().to_dict()
-
-    def memory_view_read(self) -> dict[str, Any]:
-        return self.call_operation("viewer.snapshot").require_ok().to_dict()
-
-    def breakpoint_list(self) -> dict[str, Any]:
-        return self.call_operation("breakpoint.info").require_ok().to_dict()
-
-    def breakpoint_set(self, address: int | str, bp_type: int, bp_scope: int, length: int) -> dict[str, Any]:
-        return self.call_operation(
-            "breakpoint.set",
-            {
-                "address": format_address(address),
-                "bp_type": bp_type,
-                "bp_scope": bp_scope,
-                "length": length,
-            },
-        ).require_ok().to_dict()
-
-    def breakpoint_clear_all(self) -> dict[str, Any]:
-        return self.call_operation("breakpoint.clear").require_ok().to_dict()
-
-    def breakpoint_record_remove(self, index: int) -> dict[str, Any]:
-        return self.call_operation("breakpoint.record.remove", {"index": index}).require_ok().to_dict()
-
-    def breakpoint_record_update(self, index: int, field: str, value: int | str) -> dict[str, Any]:
-        normalized_value = format_address(value) if isinstance(value, int) else str(value).strip()
-        return self.call_operation(
-            "breakpoint.record.update",
-            {"index": index, "field": field.strip(), "value": normalized_value},
-        ).require_ok().to_dict()
-
-    def breakpoint_record_set_float(
-        self,
-        index: int,
-        field: str,
-        value: float,
-        precision: str = "f32",
-    ) -> dict[str, Any]:
-        precision_token = str(precision).strip().lower() or "f32"
-        if precision_token not in {"f32", "f64"}:
-            raise ValueError("precision must be one of: f32, f64")
-        field_token = field.strip().lower()
-        if len(field_token) < 2 or field_token[0] not in {"q", "v"}:
-            raise ValueError("field must be q0~q31 or v0~v31")
-        return self.call_operation(
-            "breakpoint.record.set_float",
-            {
-                "index": index,
-                "field": field_token,
-                "value": str(value),
-                "precision": precision_token,
-            },
-        ).require_ok().to_dict()
-
-    def pointer_status(self) -> dict[str, Any]:
-        return self.call_operation("pointer.status").require_ok().to_dict()
-
-    def pointer_scan(
-        self,
-        target: int | str,
-        depth: int,
-        max_offset: int,
-        *,
-        mode: str = "module",
-        manual_base: int | str | None = None,
-        array_base: int | str | None = None,
-        array_count: int | None = None,
-        module_filter: str = "",
-    ) -> dict[str, Any]:
-        mode_token = str(mode).strip().lower() or "module"
-        if mode_token not in {"module", "manual", "array"}:
-            raise ValueError("mode must be one of: module, manual, array")
-
-        params: dict[str, Any] = {
-            "target": format_address(target),
-            "depth": depth,
-            "max_offset": max_offset,
-        }
-        if mode_token != "module":
-            params["mode"] = mode_token
-        if module_filter.strip():
-            params["module_filter"] = module_filter
-
-        if mode_token == "manual":
-            if manual_base is None:
-                raise ValueError("manual mode requires manual_base")
-            params["manual_base"] = format_address(manual_base)
-        elif mode_token == "array":
-            if array_base is None or array_count is None:
-                raise ValueError("array mode requires array_base and array_count")
-            params["array_base"] = format_address(array_base)
-            params["array_count"] = array_count
-
-        return self.call_operation("pointer.scan", params).require_ok().to_dict()
-
-    def pointer_merge(self) -> dict[str, Any]:
-        return self.call_operation("pointer.merge").require_ok().to_dict()
-
-    def pointer_export(self) -> dict[str, Any]:
-        return self.call_operation("pointer.export").require_ok().to_dict()
-
-    def signature_scan_address(self, address: int | str, range: int, file_name: str = "") -> dict[str, Any]:
-        params: dict[str, Any] = {
-            "address": format_address(address),
-            "range": range,
-        }
-        if file_name.strip():
-            params["file_name"] = file_name
-        return self.call_operation("signature.scan_address", params).require_ok().to_dict()
-
-    def signature_scan_file(self, file_name: str = "") -> dict[str, Any]:
-        params: dict[str, Any] = {}
-        if file_name.strip():
-            params["file_name"] = file_name
-        return self.call_operation("signature.scan_file", params).require_ok().to_dict()
-
-    def signature_scan_pattern(self, range_offset: int, pattern: str) -> dict[str, Any]:
-        return self.call_operation(
-            "signature.scan_pattern",
-            {
-                "range_offset": range_offset,
-                "pattern": pattern,
-            },
-        ).require_ok().to_dict()
-
-    def signature_filter(self, address: int | str, file_name: str = "") -> dict[str, Any]:
-        params: dict[str, Any] = {"address": format_address(address)}
-        if file_name.strip():
-            params["file_name"] = file_name
-        return self.call_operation("signature.filter", params).require_ok().to_dict()
-
-    def lock_set(self, address: int | str, value_type: str, value: int | float | str) -> dict[str, Any]:
-        return self.call_operation(
-            "lock.set",
-            {
-                "address": format_address(address),
-                "value_type": str(value_type).strip(),
-                "value": str(value),
-            },
-        ).require_ok().to_dict()
-
-    def lock_unset(self, address: int | str) -> dict[str, Any]:
-        return self.call_operation("lock.unset", {"address": format_address(address)}).require_ok().to_dict()
-
-    def lock_status(self, address: int | str) -> dict[str, Any]:
-        return self.call_operation("lock.status", {"address": format_address(address)}).require_ok().to_dict()
-
-    def lock_clear(self) -> dict[str, Any]:
-        return self.call_operation("lock.clear").require_ok().to_dict()
-
-    def memory_read_block(self, address: int | str, size: int) -> dict[str, Any]:
-        return self.call_operation(
-            "memory.read_block",
-            {
-                "address": format_address(address),
-                "size": size,
-            },
-        ).require_ok().to_dict()
-
-    def memory_read_value(self, address: int | str, value_type: str) -> dict[str, Any]:
-        return self.call_operation(
-            "memory.read_value",
-            {
-                "address": format_address(address),
-                "value_type": normalize_memory_value_type(value_type),
-            },
-        ).require_ok().to_dict()
-
-    def memory_write_block(self, address: int | str, data_hex: str) -> dict[str, Any]:
-        data = str(data_hex).strip()
-        if not data:
-            raise ValueError("data_hex must not be empty")
-        return self.call_operation(
-            "memory.write_block",
-            {
-                "address": format_address(address),
-                "data_hex": data,
-            },
-        ).require_ok().to_dict()
 
     def _call_with_discovery(self, request: dict[str, Any], *, fallback_operation: str) -> BridgeResponse:
         with self._lock:
