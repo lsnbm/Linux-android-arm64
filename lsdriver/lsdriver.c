@@ -226,9 +226,9 @@ static int handler_pre(struct kprobe *p, struct pt_regs *regs)
 		pr_debug("【进程监听】检测到 LS 进程即将退出！PID: %d, 进程名(comm): %s\n", task->pid, task->comm);
 
 		// 相应处理
-		atomic_xchg(&ProcessExit, 0);	 // 标记用户进程已断开
-		read_process_memory(1, 0, 0, 0); // 主动调用一下释放缓存的mm
-		v_touch_destroy();				 // 清理触摸
+		atomic_xchg(&ProcessExit, 0);				// 标记用户进程已断开
+		read_process_memory(1, 1, &ProcessExit, 1); // 主动调用一下释放缓存的mm
+		v_touch_destroy();							// 清理触摸
 	}
 
 	return 0;
