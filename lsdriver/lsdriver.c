@@ -208,7 +208,7 @@ static int ConnectThreadFunction(void *data)
 				mm = NULL;
 				break; // 找到目标进程，退出遍历
 
-输出页面：
+			    out_put_pages:
 				release_gup_pages(pages, ret);
 				kfree(pages);
 				pages = NULL;
