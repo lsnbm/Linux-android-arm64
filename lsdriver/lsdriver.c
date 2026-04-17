@@ -23,6 +23,26 @@ static struct req_obj *req = NULL;
 
 static atomic_t ProcessExit = ATOMIC_INIT(0); // 用户进程默认未启动
 static atomic_t KThreadExit = ATOMIC_INIT(1); // 内核线程默认启用
+// 避免模块内联 put_page() 把 Android 的 page_pinner 静态键依赖拉进来。
+static void release_gup_pages(struct page **pages, int nr)
+{
+	typedef void (*release_pages_t)(struct page **pages, int nr);
+	static release_pages_t fn_release_pages;
+
+	if (!pages || nr <= 0)
+		return;
+
+	if (!fn_release_pages)
+		fn_release_pages = (release_pages_t)generic_kallsyms_lookup_name("release_pages");
+
+	if (!fn_release_pages)
+	{
+		pr_debug("严重错误！无法找到 release_pages，跳过 %d 个页引用回收\n", nr);
+		return;
+	}
+
+	fn_release_pages(pages, nr);
+}
 
 static int DispatchThreadFunction(void *data)
 {
@@ -168,7 +188,7 @@ static int ConnectThreadFunction(void *data)
 				if (ret < num_pages)
 				{
 					pr_debug("get_user_pages_remote 失败, ret=%d\n", ret);
-					goto out_put_pages;
+					跳转到 输出页面;
 				}
 
 				// 映射到内核虚拟地址
@@ -176,7 +196,7 @@ static int ConnectThreadFunction(void *data)
 				if (!req)
 				{
 					pr_debug("vmap 失败\n");
-					goto out_put_pages;
+					跳转到 输出页面;
 				}
 
 				// 成功 get_user_pages_remote 持有页面引用，只需释放 mm
@@ -189,8 +209,7 @@ static int ConnectThreadFunction(void *data)
 				break; // 找到目标进程，退出遍历
 
 			out_put_pages:
-				for (i = 0; i < ret; i++)
-					put_page(pages[i]);
+				release_gup_pages(pages, ret);
 				kfree(pages);
 				pages = NULL;
 
