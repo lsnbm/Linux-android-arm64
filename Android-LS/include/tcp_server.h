@@ -11,19 +11,25 @@ namespace
     using nlohmann::json;
 
     constexpr std::uint16_t kServerPort = 9494;
-    constexpr int kListenBacklog = 4;
+    constexpr int kListenBacklog = 32;
     std::atomic_bool gRunning{true};
     std::atomic_uint64_t gClientSessionSeed{1};
     int gServerFd = -1;
     LockManager gLockManager;
-    std::mutex gDriverCommandMutex;
+    std::mutex gRequestMutex;
+
+    struct SharedBridgeState
+    {
+        MemScanner memScanner;
+        MemViewer memViewer;
+        PointerManager pointerManager;
+    };
+
+    SharedBridgeState gBridgeState;
 
     struct ClientSession
     {
         std::uint64_t sessionId;
-        MemScanner memScanner;
-        MemViewer memViewer;
-        PointerManager pointerManager;
 
         explicit ClientSession(std::uint64_t id)
             : sessionId(id) {}
@@ -847,28 +853,28 @@ namespace
         auto scannerStateJson = [&]() -> json
         {
             return {
-                {"scanning", session->memScanner.isScanning()},
-                {"progress", session->memScanner.progress()},
-                {"count", session->memScanner.count()},
+                {"scanning", gBridgeState.memScanner.isScanning()},
+                {"progress", gBridgeState.memScanner.progress()},
+                {"count", gBridgeState.memScanner.count()},
             };
         };
 
         auto pointerStateJson = [&]() -> json
         {
             return {
-                {"scanning", session->pointerManager.isScanning()},
-                {"progress", session->pointerManager.scanProgress()},
-                {"count", session->pointerManager.count()},
+                {"scanning", gBridgeState.pointerManager.isScanning()},
+                {"progress", gBridgeState.pointerManager.scanProgress()},
+                {"count", gBridgeState.pointerManager.count()},
             };
         };
+
+        std::lock_guard<std::mutex> requestLock(gRequestMutex);
 
         if (op == "bridge.describe")
             return okData(bridgeDescribePayload());
 
         if (op == "bridge.ping")
             return ok();
-
-        std::lock_guard<std::mutex> driverLock(gDriverCommandMutex);
 
         if (op == "target.pid.get")
         {
@@ -965,7 +971,7 @@ namespace
             {
                 if (valueToken.empty())
                     return fail("string 模式需要 value 参数");
-                session->memScanner.scanString(pid, valueToken, isFirst);
+                gBridgeState.memScanner.scanString(pid, valueToken, isFirst);
                 return okData(scannerStateJson());
             }
 
@@ -1004,7 +1010,7 @@ namespace
                         return fail("value 参数无效");
                     target = *parsedValue;
                 }
-                session->memScanner.scan<T>(pid, target, *fuzzyMode, isFirst, rangeMax);
+                gBridgeState.memScanner.scan<T>(pid, target, *fuzzyMode, isFirst, rangeMax);
                 return okData(scannerStateJson()); });
         }
 
@@ -1013,7 +1019,7 @@ namespace
 
         if (op == "scan.clear")
         {
-            session->memScanner.clear();
+            gBridgeState.memScanner.clear();
             return okData(scannerStateJson());
         }
 
@@ -1037,12 +1043,12 @@ namespace
             if (!stringType && !dataType.has_value())
                 return fail("value_type 参数无效");
 
-            const auto page = session->memScanner.getPage(static_cast<size_t>(std::get<std::uint64_t>(start)), static_cast<size_t>(std::get<std::uint64_t>(count)));
+            const auto page = gBridgeState.memScanner.getPage(static_cast<size_t>(std::get<std::uint64_t>(start)), static_cast<size_t>(std::get<std::uint64_t>(count)));
             json payload;
             payload["start"] = std::get<std::uint64_t>(start);
             payload["request_count"] = std::get<std::uint64_t>(count);
             payload["result_count"] = page.size();
-            payload["total_count"] = session->memScanner.count();
+            payload["total_count"] = gBridgeState.memScanner.count();
             payload["type"] = std::get<std::string>(type);
             payload["items"] = json::array();
             for (const auto addr : page)
@@ -1067,10 +1073,10 @@ namespace
                 const auto format = parseViewFormatToken(viewFormat);
                 if (!format.has_value())
                     return fail("view_format 无效，支持: hex/hex64/i8/i16/i32/i64/f32/f64/disasm");
-                session->memViewer.setFormat(*format);
+                gBridgeState.memViewer.setFormat(*format);
             }
-            session->memViewer.open(static_cast<uintptr_t>(std::get<std::uint64_t>(address)));
-            return okData({{"base", static_cast<std::uint64_t>(session->memViewer.base())}, {"format", viewFormatToToken(session->memViewer.format())}, {"read", session->memViewer.readSuccess()}});
+            gBridgeState.memViewer.open(static_cast<uintptr_t>(std::get<std::uint64_t>(address)));
+            return okData({{"base", static_cast<std::uint64_t>(gBridgeState.memViewer.base())}, {"format", viewFormatToToken(gBridgeState.memViewer.format())}, {"read", gBridgeState.memViewer.readSuccess()}});
         }
 
         if (op == "viewer.move")
@@ -1078,7 +1084,7 @@ namespace
             const auto lines = requiredInt("lines", "lines");
             if (std::holds_alternative<json>(lines))
                 return std::get<json>(lines);
-            std::size_t step = Types::GetViewSize(session->memViewer.format());
+            std::size_t step = Types::GetViewSize(gBridgeState.memViewer.format());
             const std::string stepToken = optionalString("step");
             if (!stepToken.empty())
             {
@@ -1087,8 +1093,8 @@ namespace
                     return fail("step 参数无效");
                 step = static_cast<std::size_t>(*parsedStep);
             }
-            session->memViewer.move(std::get<int>(lines), step);
-            return okData({{"base", static_cast<std::uint64_t>(session->memViewer.base())}, {"read", session->memViewer.readSuccess()}});
+            gBridgeState.memViewer.move(std::get<int>(lines), step);
+            return okData({{"base", static_cast<std::uint64_t>(gBridgeState.memViewer.base())}, {"read", gBridgeState.memViewer.readSuccess()}});
         }
 
         if (op == "viewer.offset")
@@ -1096,9 +1102,9 @@ namespace
             const auto offset = requiredString("offset", "offset");
             if (std::holds_alternative<json>(offset))
                 return std::get<json>(offset);
-            if (!session->memViewer.applyOffset(std::get<std::string>(offset)))
+            if (!gBridgeState.memViewer.applyOffset(std::get<std::string>(offset)))
                 return fail("offset 参数无效");
-            return okData({{"base", static_cast<std::uint64_t>(session->memViewer.base())}, {"read", session->memViewer.readSuccess()}});
+            return okData({{"base", static_cast<std::uint64_t>(gBridgeState.memViewer.base())}, {"read", gBridgeState.memViewer.readSuccess()}});
         }
 
         if (op == "viewer.set_format")
@@ -1109,15 +1115,15 @@ namespace
             const auto format = parseViewFormatToken(std::get<std::string>(viewFormat));
             if (!format.has_value())
                 return fail("view_format 无效，支持: hex/hex64/i8/i16/i32/i64/f32/f64/disasm");
-            session->memViewer.setFormat(*format);
-            return okData({{"format", viewFormatToToken(session->memViewer.format())}});
+            gBridgeState.memViewer.setFormat(*format);
+            return okData({{"format", viewFormatToToken(gBridgeState.memViewer.format())}});
         }
 
         if (op == "viewer.snapshot")
         {
-            if (session->memViewer.format() == Types::ViewFormat::Disasm)
-                session->memViewer.waitDisasm();
-            return okData(buildViewerSnapshotJson(session->memViewer));
+            if (gBridgeState.memViewer.format() == Types::ViewFormat::Disasm)
+                gBridgeState.memViewer.waitDisasm();
+            return okData(buildViewerSnapshotJson(gBridgeState.memViewer));
         }
 
         if (op == "pointer.status")
@@ -1174,23 +1180,23 @@ namespace
             const int pid = dr.GetGlobalPid();
             if (pid <= 0)
                 return fail("全局PID未设置，请先执行 target.pid.set 或 target.attach.package");
-            if (session->pointerManager.isScanning())
+            if (gBridgeState.pointerManager.isScanning())
                 return fail("当前已有指针扫描任务在运行");
 
             const std::string moduleFilter = optionalString("module_filter");
-            session->pointerManager.scan(pid, static_cast<uintptr_t>(std::get<std::uint64_t>(target)), std::get<int>(depth), std::get<int>(maxOffset), useManual, static_cast<uintptr_t>(manualBase), useArray, static_cast<uintptr_t>(arrayBase), arrayCount, moduleFilter);
+            gBridgeState.pointerManager.scan(pid, static_cast<uintptr_t>(std::get<std::uint64_t>(target)), std::get<int>(depth), std::get<int>(maxOffset), useManual, static_cast<uintptr_t>(manualBase), useArray, static_cast<uintptr_t>(arrayBase), arrayCount, moduleFilter);
             return okData(pointerStateJson());
         }
 
         if (op == "pointer.merge")
         {
-            session->pointerManager.MergeBins();
+            gBridgeState.pointerManager.MergeBins();
             return okData(pointerStateJson());
         }
 
         if (op == "pointer.export")
         {
-            session->pointerManager.ExportToTxt();
+            gBridgeState.pointerManager.ExportToTxt();
             return okData(pointerStateJson());
         }
 
