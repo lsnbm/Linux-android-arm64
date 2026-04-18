@@ -1,12 +1,15 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
 #include <print>
+#include <random>
 #include <unistd.h>
+#include <vector>
 
 #include "DriverMemory.h"
 
@@ -40,20 +43,48 @@ struct RoundResult
 
 inline int mainno()
 {
-    constexpr int TEST_COUNT = 1200000;
+    constexpr size_t ARRAY_CAPACITY = 1000000;
+    constexpr int TEST_COUNT = static_cast<int>(ARRAY_CAPACITY);
     constexpr int ROUND_COUNT = 12;
+    constexpr int WRITE_TARGET_VALUE = 1000;
 
     pid_t selfPid = getpid();
     dr.SetGlobalPid(selfPid);
 
     std::println(stdout, "================================================================");
-    std::println(stdout, "  驱动读写性能基准测试（连续 {} 轮，每轮 {} 次操作）", ROUND_COUNT, TEST_COUNT);
+    std::println(stdout, "  驱动读写性能基准测试（连续 {} 轮，每轮 {} 个 int 元素）", ROUND_COUNT, TEST_COUNT);
     std::println(stdout, "================================================================");
     std::println(stdout, "目标PID: {}（自身进程）", selfPid);
+    std::println(stdout, "数组容量: {} int（{} 字节）", ARRAY_CAPACITY, ARRAY_CAPACITY * sizeof(int));
     std::println(stdout, "================================================================\n");
 
-    volatile uint64_t testVar = 0xDEADBEEFCAFEBABE;
-    uint64_t testAddr = reinterpret_cast<uint64_t>(&testVar);
+    std::vector<int> testArray(ARRAY_CAPACITY, 0);
+    uint64_t testAddr = reinterpret_cast<uint64_t>(testArray.data());
+
+    std::vector<int> randomValues(ARRAY_CAPACITY, 0);
+    std::vector<int> readValues(ARRAY_CAPACITY, 0);
+    std::vector<int> writeValues(ARRAY_CAPACITY, 0);
+    std::vector<int> readByteCounts(ARRAY_CAPACITY, 0);
+    std::vector<int> writeByteCounts(ARRAY_CAPACITY, 0);
+
+    std::mt19937 rng(0xC0FFEEu);
+    std::uniform_int_distribution<int> dist(-0x3FFFFFFF, 0x3FFFFFFF);
+
+    auto fillRandomValues = [&](std::vector<int> &values)
+    {
+        for (auto &value : values)
+        {
+            value = dist(rng);
+            if (value == WRITE_TARGET_VALUE)
+                value = -WRITE_TARGET_VALUE;
+        }
+    };
+
+    auto resetTestArray = [&](const std::vector<int> &values)
+    {
+        for (size_t i = 0; i < ARRAY_CAPACITY; ++i)
+            testArray[i] = values[i];
+    };
 
     std::array<RoundResult, ROUND_COUNT> results{};
 
@@ -80,22 +111,30 @@ inline int mainno()
         }
 
         {
-            testVar = 0xDEADBEEFCAFEBABE;
-            uint64_t readResult = 0;
+            fillRandomValues(randomValues);
+            resetTestArray(randomValues);
+            std::fill(readValues.begin(), readValues.end(), 0);
+            std::fill(readByteCounts.begin(), readByteCounts.end(), 0);
             r.readFailCount = 0;
             size_t readTransferred = 0;
 
             auto t0 = std::chrono::high_resolution_clock::now();
             for (int i = 0; i < TEST_COUNT; ++i)
             {
-                int readBytes = dr.Read(testAddr, &readResult, sizeof(readResult));
+                uint64_t currentAddr = testAddr + static_cast<uint64_t>(i * sizeof(int));
+                int readBytes = dr.Read(currentAddr, &readValues[static_cast<size_t>(i)], sizeof(int));
+                readByteCounts[static_cast<size_t>(i)] = readBytes;
                 if (readBytes > 0)
                     readTransferred += static_cast<size_t>(readBytes);
-                if (readBytes != static_cast<int>(sizeof(readResult)) || readResult != 0xDEADBEEFCAFEBABE)
-                    r.readFailCount++;
             }
             auto t1 = std::chrono::high_resolution_clock::now();
             auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+
+            for (size_t i = 0; i < ARRAY_CAPACITY; ++i)
+            {
+                if (readByteCounts[i] != static_cast<int>(sizeof(int)) || readValues[i] != randomValues[i])
+                    r.readFailCount++;
+            }
 
             double totalS = ns / 1e9;
             r.readTotalMs = ns / 1e6;
@@ -106,21 +145,30 @@ inline int mainno()
         }
 
         {
+            resetTestArray(randomValues);
+            writeValues = randomValues;
+            std::fill(writeValues.begin(), writeValues.end(), WRITE_TARGET_VALUE);
+            std::fill(writeByteCounts.begin(), writeByteCounts.end(), 0);
             r.writeFailCount = 0;
             size_t writeTransferred = 0;
 
             auto t0 = std::chrono::high_resolution_clock::now();
             for (int i = 0; i < TEST_COUNT; ++i)
             {
-                uint64_t wv = 0x1000000000000000ULL + static_cast<uint64_t>(i);
-                int writeBytes = dr.Write(testAddr, &wv, sizeof(wv));
+                uint64_t currentAddr = testAddr + static_cast<uint64_t>(i * sizeof(int));
+                int writeBytes = dr.Write(currentAddr, &writeValues[static_cast<size_t>(i)], sizeof(int));
+                writeByteCounts[static_cast<size_t>(i)] = writeBytes;
                 if (writeBytes > 0)
                     writeTransferred += static_cast<size_t>(writeBytes);
-                if (writeBytes != static_cast<int>(sizeof(wv)))
-                    r.writeFailCount++;
             }
             auto t1 = std::chrono::high_resolution_clock::now();
             auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+
+            for (size_t i = 0; i < ARRAY_CAPACITY; ++i)
+            {
+                if (writeByteCounts[i] != static_cast<int>(sizeof(int)) || testArray[i] != WRITE_TARGET_VALUE)
+                    r.writeFailCount++;
+            }
 
             double totalS = ns / 1e9;
             r.writeTotalMs = ns / 1e6;
@@ -133,19 +181,12 @@ inline int mainno()
         r.readOverheadPct = (r.nullIoAvgNs / r.readAvgNs) * 100.0;
         r.writeOverheadPct = (r.nullIoAvgNs / r.writeAvgNs) * 100.0;
 
-        uint64_t verifyVal = 0;
-        const bool verifyOk = dr.ReadValue(testAddr, verifyVal);
-        uint64_t expectedLast = 0x1000000000000000ULL + static_cast<uint64_t>(TEST_COUNT - 1);
-
         std::println(stdout, "  空IO:  总 {:>10.3f}ms  均 {:>8.2f}ns  吞吐 {:>8.2f}K/s",
                      r.nullIoTotalMs, r.nullIoAvgNs, r.nullIoThroughputK);
-        std::println(stdout, "  读取:  总 {:>10.3f}ms  均 {:>8.2f}ns  净 {:>8.2f}ns  吞吐 {:>8.2f}K/s  带宽 {:>6.2f}MB/s  失败 {}",
+        std::println(stdout, "  读取:  总 {:>10.3f}ms  均 {:>8.2f}ns  净 {:>8.2f}ns  吞吐 {:>8.2f}K/s  带宽 {:>6.2f}MB/s  失败索引 {}",
                      r.readTotalMs, r.readAvgNs, r.readNetAvgNs, r.readThroughputK, r.readBandwidthMB, r.readFailCount);
-        std::println(stdout, "  写入:  总 {:>10.3f}ms  均 {:>8.2f}ns  净 {:>8.2f}ns  吞吐 {:>8.2f}K/s  带宽 {:>6.2f}MB/s  失败 {}",
+        std::println(stdout, "  写入:  总 {:>10.3f}ms  均 {:>8.2f}ns  净 {:>8.2f}ns  吞吐 {:>8.2f}K/s  带宽 {:>6.2f}MB/s  失败索引 {}",
                      r.writeTotalMs, r.writeAvgNs, r.writeNetAvgNs, r.writeThroughputK, r.writeBandwidthMB, r.writeFailCount);
-        std::println(stdout, "  校验:  0x{:016X} {} 0x{:016X} {}",
-                     verifyVal, verifyOk && verifyVal == expectedLast ? "==" : "!=", expectedLast,
-                     verifyOk && verifyVal == expectedLast ? "通过" : "失败");
         std::println(stdout, "");
     }
 
@@ -228,7 +269,7 @@ inline int mainno()
     }
 
     std::println(stdout, "================================================================");
-    std::println(stdout, "  {} 轮测试综合汇总（每轮 {} 次，共 {} 次操作）",
+    std::println(stdout, "  {} 轮测试综合汇总（每轮 {} 个元素，共 {} 个元素）",
                  ROUND_COUNT, TEST_COUNT, static_cast<long long>(ROUND_COUNT) * TEST_COUNT);
     std::println(stdout, "================================================================");
 
@@ -283,10 +324,10 @@ inline int mainno()
                  results[slowestWrite].writeAvgNs - results[fastestWrite].writeAvgNs);
 
     std::println(stdout, "\n累计失败统计：");
-    std::println(stdout, "  读取失败: {} / {} ({:.6f}%)",
+    std::println(stdout, "  读取失败索引: {} / {} ({:.6f}%)",
                  totalReadFail, static_cast<long long>(ROUND_COUNT) * TEST_COUNT,
                  totalReadFail * 100.0 / (static_cast<double>(ROUND_COUNT) * TEST_COUNT));
-    std::println(stdout, "  写入失败: {} / {} ({:.6f}%)",
+    std::println(stdout, "  写入失败索引: {} / {} ({:.6f}%)",
                  totalWriteFail, static_cast<long long>(ROUND_COUNT) * TEST_COUNT,
                  totalWriteFail * 100.0 / (static_cast<double>(ROUND_COUNT) * TEST_COUNT));
 

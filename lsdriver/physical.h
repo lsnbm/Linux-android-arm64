@@ -585,8 +585,8 @@ static inline int _process_memory_rw(enum sm_req_op op, pid_t pid, uint64_t vadd
         else
         {
             // 翻译地址
-            // status = mmu_translate_va_to_pa(s_last_mm, current_vpn, &paddr_of_page);
-            status = walk_translate_va_to_pa(s_last_mm, current_vpn, &paddr_of_page);
+            status = mmu_translate_va_to_pa(s_last_mm, current_vpn, &paddr_of_page);
+            //status = walk_translate_va_to_pa(s_last_mm, current_vpn, &paddr_of_page);
 
             if (unlikely(status != 0))
             {
