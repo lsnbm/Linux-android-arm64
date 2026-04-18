@@ -2,6 +2,7 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
+#include <uapi/linux/sched/types.h>
 #include <linux/kthread.h>
 #include <linux/delay.h>
 #include <linux/mm.h>
@@ -349,7 +350,7 @@ static int __init lsdriver_init(void)
 
 	hide_myself(); // 隐藏内核模块本身
 
-	allocate_physical_page_info(); // pte读写需要，线性读写不需要 // 初始化物理页地址和页表项
+	// allocate_physical_page_info(); // pte读写需要，线性读写不需要 // 初始化物理页地址和页表项
 
 	chf = kthread_run(ConnectThreadFunction, NULL, "C_thread");
 	if (IS_ERR(chf))
