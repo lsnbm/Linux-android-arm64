@@ -87,6 +87,7 @@ public:                // 外部初始化
 
     ~Driver()
     {
+        //ExitKernel();
     }
 
 public: // 共有结构体和锁
@@ -131,17 +132,31 @@ public: // 共有结构体和锁
     };
     SpinLock m_mutex;
 
-    // 断点类型
-    enum bp_type
+    // 断点类型(类型和长度完全与内核一致会冲突，所以这里HW加上BP后缀,原型没有BP)
+    enum hwbp_type
     {
-        BP_READ,       // 读
-        BP_WRITE,      // 写
-        BP_READ_WRITE, // 读写
-        BP_EXECUTE     // 执行
+        HWBP_BREAKPOINT_EMPTY = 0,
+        HWBP_BREAKPOINT_R = 1,
+        HWBP_BREAKPOINT_W = 2,
+        HWBP_BREAKPOINT_RW = HWBP_BREAKPOINT_R | HWBP_BREAKPOINT_W,
+        HWBP_BREAKPOINT_X = 4,
+        HWBP_BREAKPOINT_INVALID = HWBP_BREAKPOINT_RW | HWBP_BREAKPOINT_X,
     } __attribute__((packed));
+    // 断点长度
+    enum hwbp_len
+    {
+        HWBP_BREAKPOINT_LEN_1 = 1,
+        HWBP_BREAKPOINT_LEN_2 = 2,
+        HWBP_BREAKPOINT_LEN_3 = 3,
+        HWBP_BREAKPOINT_LEN_4 = 4,
+        HWBP_BREAKPOINT_LEN_5 = 5,
+        HWBP_BREAKPOINT_LEN_6 = 6,
+        HWBP_BREAKPOINT_LEN_7 = 7,
+        HWBP_BREAKPOINT_LEN_8 = 8,
 
+    } __attribute__((packed));
     // 断点作用线程范围
-    enum bp_scope
+    enum hwbp_scope
     {
         SCOPE_MAIN_THREAD,   // 仅主线程
         SCOPE_OTHER_THREADS, // 仅其他子线程
@@ -339,7 +354,6 @@ public: // 共有结构体和锁
 
         op_kexit // 内核线程退出
     } __attribute__((packed));
-
     // 将在队列中使用的请求实例结构体
     struct req_obj
     {
@@ -358,9 +372,9 @@ public: // 共有结构体和锁
         // 进程内存信息
         struct memory_info mem_info;
 
-        enum bp_type bt;          // 断点类型
-        enum bp_scope bs;         // 断点作用线程范围
-        int len_bytes;            // 断点长度字节
+        enum hwbp_type bt;        // 断点类型
+        enum hwbp_len bl;         // 断点长度
+        enum hwbp_scope bs;       // 断点作用线程范围
         struct hwbp_info bp_info; // 断点信息
 
         // 初始化触摸驱动返回屏幕维度
@@ -977,9 +991,9 @@ public: // 外部硬件断点接口
         return req->bp_info;
     }
     // 设置断点
-    int SetProcessHwbpRef(uint64_t target_addr, bp_type bt, bp_scope bs, int len_bytes)
+    int SetProcessHwbpRef(uint64_t target_addr, hwbp_type bt, hwbp_scope bs, hwbp_len bl)
     {
-        return SetProcessHwbp(target_addr, bt, bs, len_bytes);
+        return SetProcessHwbp(target_addr, bt, bs, bl);
     }
     // 删除断点
     void RemoveProcessHwbpRef()
@@ -1218,15 +1232,15 @@ private: // 私有实现，外部无需关系
     }
 
     // 设置进程断点(断点只要触发驱动就会向hwbp_info写值，外部获取引用循环读取就行)
-    int SetProcessHwbp(uint64_t target_addr, bp_type bt, bp_scope bs, int len_bytes = 8)
+    int SetProcessHwbp(uint64_t target_addr, hwbp_type bt, hwbp_scope bs, hwbp_len bl = HWBP_BREAKPOINT_LEN_8)
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
         req->op = op_set_process_hwbp;
         req->pid = global_pid;
         req->target_addr = target_addr;
         req->bt = bt;
+        req->bl = bl;
         req->bs = bs;
-        req->len_bytes = len_bytes;
         IoCommitAndWait();
         return req->status;
     }

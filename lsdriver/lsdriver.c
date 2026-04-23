@@ -90,7 +90,7 @@ static int DispatchThreadFunction(void *data)
 						get_hw_breakpoint_info(&req->bp_info);
 						break;
 					case op_set_process_hwbp:
-						req->status = set_process_hwbp(req->pid, req->target_addr, req->bt, req->bs, req->len_bytes, &req->bp_info);
+						req->status = set_process_hwbp(req->pid, req->target_addr, req->bt, req->bl, req->bs, &req->bp_info);
 						break;
 					case op_remove_process_hwbp:
 						remove_process_hwbp();

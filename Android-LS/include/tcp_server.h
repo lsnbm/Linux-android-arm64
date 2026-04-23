@@ -242,22 +242,22 @@ namespace
     }
 
     // 解析硬件断点类型
-    std::optional<decltype(dr)::bp_type> parseBpTypeToken(std::string_view token)
+    std::optional<decltype(dr)::hwbp_type> parseBpTypeToken(std::string_view token)
     {
         const std::string t = toLowerAscii(token);
         if (t == "0" || t == "read" || t == "r" || t == "bp_read")
-            return decltype(dr)::BP_READ;
+            return decltype(dr)::HWBP_BREAKPOINT_R;
         if (t == "1" || t == "write" || t == "w" || t == "bp_write")
-            return decltype(dr)::BP_WRITE;
+            return decltype(dr)::HWBP_BREAKPOINT_W;
         if (t == "2" || t == "read_write" || t == "rw" || t == "bp_read_write")
-            return decltype(dr)::BP_READ_WRITE;
+            return decltype(dr)::HWBP_BREAKPOINT_RW;
         if (t == "3" || t == "execute" || t == "x" || t == "exec" || t == "bp_execute")
-            return decltype(dr)::BP_EXECUTE;
+            return decltype(dr)::HWBP_BREAKPOINT_X;
         return std::nullopt;
     }
 
     // 解析硬件断点作用线程范围
-    std::optional<decltype(dr)::bp_scope> parseBpScopeToken(std::string_view token)
+    std::optional<decltype(dr)::hwbp_scope> parseBpScopeToken(std::string_view token)
     {
         const std::string t = toLowerAscii(token);
         if (t == "0" || t == "main" || t == "main_thread")
@@ -267,6 +267,31 @@ namespace
         if (t == "2" || t == "all" || t == "all_threads")
             return decltype(dr)::SCOPE_ALL_THREADS;
         return std::nullopt;
+    }
+
+    std::optional<decltype(dr)::hwbp_len> parseBpLengthValue(int length)
+    {
+        switch (length)
+        {
+        case 1:
+            return decltype(dr)::HWBP_BREAKPOINT_LEN_1;
+        case 2:
+            return decltype(dr)::HWBP_BREAKPOINT_LEN_2;
+        case 3:
+            return decltype(dr)::HWBP_BREAKPOINT_LEN_3;
+        case 4:
+            return decltype(dr)::HWBP_BREAKPOINT_LEN_4;
+        case 5:
+            return decltype(dr)::HWBP_BREAKPOINT_LEN_5;
+        case 6:
+            return decltype(dr)::HWBP_BREAKPOINT_LEN_6;
+        case 7:
+            return decltype(dr)::HWBP_BREAKPOINT_LEN_7;
+        case 8:
+            return decltype(dr)::HWBP_BREAKPOINT_LEN_8;
+        default:
+            return std::nullopt;
+        }
     }
 
     // 将显示格式枚举转换为标记
@@ -298,17 +323,17 @@ namespace
     }
 
     // 将硬件断点类型转换为文本标记
-    std::string_view bpTypeToToken(decltype(dr)::bp_type type)
+    std::string_view bpTypeToToken(decltype(dr)::hwbp_type type)
     {
         switch (type)
         {
-        case decltype(dr)::BP_READ:
+        case decltype(dr)::HWBP_BREAKPOINT_R:
             return "read";
-        case decltype(dr)::BP_WRITE:
+        case decltype(dr)::HWBP_BREAKPOINT_W:
             return "write";
-        case decltype(dr)::BP_READ_WRITE:
+        case decltype(dr)::HWBP_BREAKPOINT_RW:
             return "read_write";
-        case decltype(dr)::BP_EXECUTE:
+        case decltype(dr)::HWBP_BREAKPOINT_X:
             return "execute";
         default:
             return "unknown";
@@ -316,7 +341,7 @@ namespace
     }
 
     // 将硬件断点线程范围转换为文本标记
-    std::string_view bpScopeToToken(decltype(dr)::bp_scope scope)
+    std::string_view bpScopeToToken(decltype(dr)::hwbp_scope scope)
     {
         switch (scope)
         {
@@ -1226,9 +1251,10 @@ namespace
                 return fail("全局PID未设置，请先执行 target.pid.set 或 target.attach.package");
             const auto bpType = parseBpTypeToken(std::get<std::string>(type));
             const auto bpScope = parseBpScopeToken(std::get<std::string>(scope));
-            if (!bpType.has_value() || !bpScope.has_value() || std::get<int>(length) <= 0 || std::get<int>(length) > 8)
+            const auto bpLength = parseBpLengthValue(std::get<int>(length));
+            if (!bpType.has_value() || !bpScope.has_value() || !bpLength.has_value())
                 return fail("断点参数无效，长度范围为 1-8");
-            const int status = dr.SetProcessHwbpRef(std::get<std::uint64_t>(address), *bpType, *bpScope, std::get<int>(length));
+            const int status = dr.SetProcessHwbpRef(std::get<std::uint64_t>(address), *bpType, *bpScope, *bpLength);
             if (status != 0)
                 return fail(std::format("设置断点失败 status={}", status));
             return okData({{"status", status}, {"type", std::string(bpTypeToToken(*bpType))}, {"scope", std::string(bpScopeToToken(*bpScope))}, {"length", std::get<int>(length)}});

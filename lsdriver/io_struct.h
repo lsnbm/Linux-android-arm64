@@ -15,17 +15,31 @@
 #include <linux/pid.h>
 #include <linux/sort.h>
 
-// 断点类型
-enum bp_type
+// 断点类型(类型和长度完全与内核一致会冲突，所以这里HW加上BP后缀,原型没有BP)
+enum hwbp_type
 {
-    BP_READ,       // 读
-    BP_WRITE,      // 写
-    BP_READ_WRITE, // 读写
-    BP_EXECUTE     // 执行
+    HWBP_BREAKPOINT_EMPTY = 0,
+    HWBP_BREAKPOINT_R = 1,
+    HWBP_BREAKPOINT_W = 2,
+    HWBP_BREAKPOINT_RW = HWBP_BREAKPOINT_R | HWBP_BREAKPOINT_W,
+    HWBP_BREAKPOINT_X = 4,
+    HWBP_BREAKPOINT_INVALID = HWBP_BREAKPOINT_RW | HWBP_BREAKPOINT_X,
 } __attribute__((packed));
+// 断点长度
+enum hwbp_len
+{
+    HWBP_BREAKPOINT_LEN_1 = 1,
+    HWBP_BREAKPOINT_LEN_2 = 2,
+    HWBP_BREAKPOINT_LEN_3 = 3,
+    HWBP_BREAKPOINT_LEN_4 = 4,
+    HWBP_BREAKPOINT_LEN_5 = 5,
+    HWBP_BREAKPOINT_LEN_6 = 6,
+    HWBP_BREAKPOINT_LEN_7 = 7,
+    HWBP_BREAKPOINT_LEN_8 = 8,
 
+} __attribute__((packed));
 // 断点作用线程范围
-enum bp_scope
+enum hwbp_scope
 {
     SCOPE_MAIN_THREAD,   // 仅主线程
     SCOPE_OTHER_THREADS, // 仅其他子线程
@@ -242,9 +256,9 @@ struct req_obj
     // 进程内存信息
     struct memory_info mem_info;
 
-    enum bp_type bt;          // 断点类型
-    enum bp_scope bs;         // 断点作用线程范围
-    int len_bytes;            // 断点长度字节
+    enum hwbp_type bt;        // 断点类型
+    enum hwbp_len bl;         // 断点长度
+    enum hwbp_scope bs;       // 断点作用线程范围
     struct hwbp_info bp_info; // 断点信息
 
     // 初始化触摸驱动返回屏幕维度

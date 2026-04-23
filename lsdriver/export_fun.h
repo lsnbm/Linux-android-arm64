@@ -30,16 +30,22 @@ __attribute__((no_sanitize("cfi"))) static unsigned long generic_kallsyms_lookup
 }
 
 /*
-下面代码 由https://github.com/wangchuan2009提供
+
 旧版 CFI ( GKI 5.10 / 5.15):
-        编译器会在间接调用前插入跳转，跳到一个集中的验证函数（就是 __cfi_slowpath）。
+        编译器编译时进行类型哈希计算，在间接调用前插入跳转，跳到一个集中的验证函数（就是 __cfi_slowpath）来运行时比对，
+        校验失败直接panic
         你把它 patch 成 RET，相当于让验证永远通过
 新版 KCFI (Kernel 6.1+):
          编译器去掉了集中验证函数。KCFI 会在每一个间接跳转（BLR）指令的前面，内联插入几条汇编指令，
          直接比较 hash 值。如果不对，直接触发 BRK 指令宕机。
  如果是 6.1+ 内核，不存在 __cfi_slowpath，
 
+所以有好人给了一个5系的解决代码给我
+ 下面bypass_cfi由https://github.com/wangchuan2009提供，处理运行时校验函数来过5系cfi
  */
+
+int (*fn_aarch64_insn_patch_text_nosync)(void *addr, u32 insn);
+
 __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
 {
         // AArch64 RET 指令机器码
@@ -48,16 +54,14 @@ __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
         static bool is_cfi_bypassed = false;
         uint64_t cfi_addr = 0;
 
-        int (*x_aarch64_insn_patch_text_nosync)(void *, u32);
-
         if (is_cfi_bypassed)
                 return true;
 
         // 获取 patch 函数
-        x_aarch64_insn_patch_text_nosync =
+        fn_aarch64_insn_patch_text_nosync =
             (void *)generic_kallsyms_lookup_name("aarch64_insn_patch_text_nosync");
 
-        if (!x_aarch64_insn_patch_text_nosync)
+        if (!fn_aarch64_insn_patch_text_nosync)
                 return false;
 
         //  依次查找各个版本的 CFI slowpath 函数
@@ -71,10 +75,10 @@ __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
                 return false;
 
         // 强行 Patch 成 RET 指令 (直接返回，使得所有 CFI 校验默认通过)
-        if (x_aarch64_insn_patch_text_nosync((void *)cfi_addr, AARCH64_RET_INSTR) != 0)
+        if (fn_aarch64_insn_patch_text_nosync((void *)cfi_addr, AARCH64_RET_INSTR) != 0)
                 return false;
 
-        // x_aarch64_insn_patch_text_nosync内部一般已经处理了 缓存，
+        // aarch64_insn_patch_text_nosync内部一般已经处理了 缓存，
         // flush_icache_range(cfi_addr, cfi_addr + 4);
 
         is_cfi_bypassed = true;

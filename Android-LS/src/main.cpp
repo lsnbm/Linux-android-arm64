@@ -217,7 +217,8 @@ private:
     struct BpParams
     {
         uintptr_t address = 0;
-        int bpType = 1, bpScope = 2, lenBytes = 4;
+        int bpType = 1, bpScope = 2;
+        Driver::hwbp_len lenBytes = Driver::HWBP_BREAKPOINT_LEN_4;
         bool active = false;
 
         int editingRecordIdx = -1;    // 正在编辑哪条记录
@@ -1213,12 +1214,13 @@ private:
             uintptr_t addr = 0;
             if (sscanf(buf_.bpAddr, "%lx", &addr) == 1 && addr)
             {
-                int len = std::max(atoi(buf_.bpLen), 1);
+                int len = std::clamp(atoi(buf_.bpLen), 1, 8);
                 bpParams_.address = addr;
-                bpParams_.lenBytes = len;
+                bpParams_.lenBytes = static_cast<decltype(dr)::hwbp_len>(len);
                 if (dr.SetProcessHwbpRef(addr,
-                                         static_cast<decltype(dr)::bp_type>(bpParams_.bpType),
-                                         static_cast<decltype(dr)::bp_scope>(bpParams_.bpScope), len) == 0)
+                                         static_cast<decltype(dr)::hwbp_type>(bpParams_.bpType),
+                                         static_cast<decltype(dr)::hwbp_scope>(bpParams_.bpScope),
+                                         bpParams_.lenBytes) == 0)
                     bpParams_.active = true;
             }
         }
