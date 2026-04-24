@@ -217,7 +217,7 @@ private:
     struct BpParams
     {
         uintptr_t address = 0;
-        int bpType = 1, bpScope = 2;
+        int bpType = 0, bpScope = 2;
         Driver::hwbp_len lenBytes = Driver::HWBP_BREAKPOINT_LEN_4;
         bool active = false;
 
@@ -1170,6 +1170,12 @@ private:
     {
         float w = ImGui::GetContentRegionAvail().x, bh = S(45);
         static const char *bpTypeLabels[] = {"读取", "写入", "读写", "执行"};
+        static constexpr decltype(dr)::hwbp_type bpTypeValues[] = {
+            decltype(dr)::HWBP_BREAKPOINT_R,
+            decltype(dr)::HWBP_BREAKPOINT_W,
+            decltype(dr)::HWBP_BREAKPOINT_RW,
+            decltype(dr)::HWBP_BREAKPOINT_X,
+        };
         static const char *bpScopeLabels[] = {"仅主线程", "仅子线程", "全部线程"};
 
         UI::Text(Colors::TITLE, "━━ 硬件断点 ━━");
@@ -1217,8 +1223,9 @@ private:
                 int len = std::clamp(atoi(buf_.bpLen), 1, 8);
                 bpParams_.address = addr;
                 bpParams_.lenBytes = static_cast<decltype(dr)::hwbp_len>(len);
+                const int bpTypeIndex = std::clamp(bpParams_.bpType, 0, 3);
                 if (dr.SetProcessHwbpRef(addr,
-                                         static_cast<decltype(dr)::hwbp_type>(bpParams_.bpType),
+                                         bpTypeValues[bpTypeIndex],
                                          static_cast<decltype(dr)::hwbp_scope>(bpParams_.bpScope),
                                          bpParams_.lenBytes) == 0)
                     bpParams_.active = true;

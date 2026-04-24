@@ -450,7 +450,7 @@ def android_breakpoint_list() -> dict[str, Any]:
 
 
 @mcp.tool()
-def android_breakpoint_set(address: int | str, bp_type: int, bp_scope: int, length: int) -> dict[str, Any]:
+def android_breakpoint_set(address: int | str, bp_type: int | str, bp_scope: int | str, length: int) -> dict[str, Any]:
     """Create a hardware breakpoint on the current target process."""
     return _call_bridge_operation(
         "breakpoint.set",
@@ -766,10 +766,10 @@ TOOL_META: dict[str, dict[str, Any]] = {
     "android_breakpoint_set": {
         "group": "Breakpoints",
         "use_when": "Create one hardware breakpoint.",
-        "example": {"address": "0x12345678", "bp_type": 1, "bp_scope": 0, "length": 4},
+        "example": {"address": "0x12345678", "bp_type": "read", "bp_scope": 0, "length": 4},
         "parameter_notes": {
             "address": "Target instruction/data address.",
-            "bp_type": "Type enum from backend.",
+            "bp_type": "Type token or backend enum: read/1, write/2, read_write/3, execute/4.",
             "bp_scope": "Scope enum from backend.",
             "length": "Byte length constraint from backend.",
         },

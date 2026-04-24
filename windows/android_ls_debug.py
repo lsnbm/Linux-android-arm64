@@ -774,10 +774,10 @@ class TcpTestWindow(QWidget):
 
         config_row.addWidget(QLabel("类型"))
         self.hwbp_type_combo = QComboBox()
-        self.hwbp_type_combo.addItem("BP_READ", "0")
-        self.hwbp_type_combo.addItem("BP_WRITE", "1")
-        self.hwbp_type_combo.addItem("BP_READ_WRITE", "2")
-        self.hwbp_type_combo.addItem("BP_EXECUTE", "3")
+        self.hwbp_type_combo.addItem("BP_READ", "1")
+        self.hwbp_type_combo.addItem("BP_WRITE", "2")
+        self.hwbp_type_combo.addItem("BP_READ_WRITE", "3")
+        self.hwbp_type_combo.addItem("BP_EXECUTE", "4")
         config_row.addWidget(self.hwbp_type_combo)
 
         config_row.addWidget(QLabel("范围"))
@@ -2915,7 +2915,7 @@ class TcpTestWindow(QWidget):
         if length <= 0:
             QMessageBox.warning(self, "输入提示", "长度必须大于 0。")
             return
-        bp_type = str(type_data) if type_data is not None else "0"
+        bp_type = str(type_data) if type_data is not None else "1"
         bp_scope = str(scope_data) if scope_data is not None else "0"
         response = self._request_ok(
             "breakpoint.set",

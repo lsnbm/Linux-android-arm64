@@ -2024,11 +2024,15 @@ static inline int set_process_hwbp(pid_t pid, uint64_t addr, enum hwbp_type type
     bp_config.bl = len;
     bp_config.bs = scope;
     bp_config.addr = addr;
+    bp_config.suspended_step = 0;
+    bp_config.suspended_type = 0;
+    bp_config.suspended_ctrl = 0;
+    bp_config.suspended_task = NULL;
     bp_config.on_hit = sample_hbp_handler;
     bp_config.bp_info = info;
 
     // 接管异常
-    hw_breakpoint_hook_install(&bp_config);
+    hw_breakpoint_hook_install();
 
     start_task_run_monitor(&bp_config);
     return 0;
@@ -2037,6 +2041,6 @@ static inline int set_process_hwbp(pid_t pid, uint64_t addr, enum hwbp_type type
 static inline void remove_process_hwbp(void)
 {
     hw_breakpoint_hook_remove();
-    stop_task_run_monitor(&bp_config);
+    stop_task_run_monitor();
 }
 #endif // HWBP_H

@@ -245,13 +245,13 @@ namespace
     std::optional<decltype(dr)::hwbp_type> parseBpTypeToken(std::string_view token)
     {
         const std::string t = toLowerAscii(token);
-        if (t == "0" || t == "read" || t == "r" || t == "bp_read")
+        if (t == "1" || t == "read" || t == "r" || t == "bp_read")
             return decltype(dr)::HWBP_BREAKPOINT_R;
-        if (t == "1" || t == "write" || t == "w" || t == "bp_write")
+        if (t == "2" || t == "write" || t == "w" || t == "bp_write")
             return decltype(dr)::HWBP_BREAKPOINT_W;
-        if (t == "2" || t == "read_write" || t == "rw" || t == "bp_read_write")
+        if (t == "3" || t == "read_write" || t == "rw" || t == "bp_read_write")
             return decltype(dr)::HWBP_BREAKPOINT_RW;
-        if (t == "3" || t == "execute" || t == "x" || t == "exec" || t == "bp_execute")
+        if (t == "4" || t == "execute" || t == "x" || t == "exec" || t == "bp_execute")
             return decltype(dr)::HWBP_BREAKPOINT_X;
         return std::nullopt;
     }
