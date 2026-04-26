@@ -170,13 +170,13 @@ static inline void *pte_map_page(phys_addr_t paddr, size_t size, const void *buf
     uint64_t pfn = __phys_to_pfn(paddr);
 
     // 参数检查
-    if (unlikely(!size || !buffer))
+    if (!size || !buffer)
         return ERR_PTR(-EINVAL);
     // PFN 有效性检查：确保物理页帧在系统内存管理范围内
-    if (unlikely(!pfn_valid(pfn)))
+    if (!pfn_valid(pfn))
         return ERR_PTR(-EFAULT);
     // 跨页检查：读写可能跨越页边界，访问到未映射的下一页
-    if (unlikely(((paddr & ~PAGE_MASK) + size) > PAGE_SIZE))
+    if (((paddr & ~PAGE_MASK) + size) > PAGE_SIZE)
         return ERR_PTR(-EINVAL);
 
     // 修改 PTE 指向目标物理页
@@ -264,7 +264,7 @@ static inline int mmu_translate_va_to_pa(struct mm_struct *mm, u64 va, phys_addr
     u64 phys_out;
     u64 tmp_daif, tmp_ttbr, tmp_par, tmp_offset, tmp_ttbr_new;
 
-    if (unlikely(!mm || !mm->pgd || !pa))
+    if (!mm || !mm->pgd || !pa)
         return -EINVAL;
 
     pgd_phys = virt_to_phys(mm->pgd);
@@ -372,7 +372,7 @@ static inline int linear_read_physical(phys_addr_t paddr, void *buffer, size_t s
 
     // 下面这个先暂时不使用，靠翻译阶段得出绝对有效物理地址，死机请加上
     //  // 最后的安全底线：防算错物理地址/内存空洞导致死机
-    //  if (unlikely(!virt_addr_valid(kernel_vaddr)))
+    //  if (!virt_addr_valid(kernel_vaddr))
     //  {
     //      return -EFAULT;
     //  }
@@ -405,7 +405,7 @@ static inline int linear_write_physical(phys_addr_t paddr, void *buffer, size_t 
 {
     void *kernel_vaddr = phys_to_virt(paddr);
 
-    // if (unlikely(!virt_addr_valid(kernel_vaddr)))
+    // if (!virt_addr_valid(kernel_vaddr))
     // {
     //     return -EFAULT;
     // }
@@ -443,7 +443,7 @@ static inline int walk_translate_va_to_pa(struct mm_struct *mm, uint64_t vaddr, 
     pte_t *ptep, pte;
     unsigned long pfn;
 
-    if (unlikely(!mm || !paddr))
+    if (!mm || !paddr)
         return -1;
 
     // PGD Level
@@ -466,7 +466,7 @@ static inline int walk_translate_va_to_pa(struct mm_struct *mm, uint64_t vaddr, 
     {
         // 检查pfn
         pfn = pud_pfn(*pud);
-        if (unlikely(!pfn_valid(pfn)))
+        if (!pfn_valid(pfn))
             return -1;
 
         *paddr = (pud_pfn(*pud) << PAGE_SHIFT) + (vaddr & ~PUD_MASK);
@@ -485,7 +485,7 @@ static inline int walk_translate_va_to_pa(struct mm_struct *mm, uint64_t vaddr, 
     {
         // 检查pfn
         pfn = pmd_pfn(*pmd);
-        if (unlikely(!pfn_valid(pfn)))
+        if (!pfn_valid(pfn))
             return -1;
 
         *paddr = (pmd_pfn(*pmd) << PAGE_SHIFT) + (vaddr & ~PMD_MASK);
@@ -497,7 +497,7 @@ static inline int walk_translate_va_to_pa(struct mm_struct *mm, uint64_t vaddr, 
     //  PTE Level (普通的 4KB 页)
     // 较新内核中 __pte_offset_map 不导出，对于 64位 系统直接使用 pte_offset_kernel 即可
     ptep = pte_offset_kernel(pmd, vaddr);
-    if (unlikely(!ptep))
+    if (!ptep)
         return -1;
 
     pte = *ptep;
@@ -508,7 +508,7 @@ static inline int walk_translate_va_to_pa(struct mm_struct *mm, uint64_t vaddr, 
     {
         // 检查pfn
         pfn = pte_pfn(pte);
-        if (unlikely(!pfn_valid(pfn)))
+        if (!pfn_valid(pfn))
             return -1;
 
         *paddr = (pte_pfn(pte) << PAGE_SHIFT) + (vaddr & ~PAGE_MASK);
@@ -533,11 +533,11 @@ static inline int _process_memory_rw(enum sm_req_op op, pid_t pid, uint64_t vadd
     size_t bytes_done = 0;
     int status = 0;
 
-    if (unlikely(!buffer || size == 0))
+    if (!buffer || size == 0)
         return -EINVAL;
 
     /* ---------- mm_struct 缓存 ---------- */
-    if (unlikely(pid != s_last_pid || s_last_mm == NULL))
+    if (pid != s_last_pid || s_last_mm == NULL)
     {
         struct pid *pid_struct;
         struct task_struct *task;
@@ -588,7 +588,7 @@ static inline int _process_memory_rw(enum sm_req_op op, pid_t pid, uint64_t vadd
             status = mmu_translate_va_to_pa(s_last_mm, current_vpn, &paddr_of_page);
             //status = walk_translate_va_to_pa(s_last_mm, current_vpn, &paddr_of_page);
 
-            if (unlikely(status != 0))
+            if (status != 0)
             {
                 s_last_vpage_base = -1ULL;
                 if (op == op_r)
@@ -613,7 +613,7 @@ static inline int _process_memory_rw(enum sm_req_op op, pid_t pid, uint64_t vadd
             status = linear_write_physical(paddr_of_page + page_offset, (uint8_t *)buffer + bytes_copied, bytes_this_page);
         }
 
-        if (unlikely(status != 0))
+        if (status != 0)
         {
             s_last_vpage_base = -1ULL;
             if (op == op_r)
