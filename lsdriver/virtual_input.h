@@ -315,7 +315,7 @@ static inline void v_touch_destroy(void)
 static inline void v_touch_event(enum sm_req_op op, int x, int y)
 {
 
-    if (unlikely(!vt.initialized))
+    if (!vt.initialized)
         return;
 
     if (likely(op == op_move))

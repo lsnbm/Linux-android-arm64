@@ -145,7 +145,7 @@ static __always_inline bool emulate_insn(struct pt_regs *regs)
     u32 insn;
     u64 pc = regs->pc;
 
-    if (unlikely(__get_user(insn, (u32 __user *)pc)))
+    if (__get_user(insn, (u32 __user *)pc))
         goto fault;
 
     u32 iclass = (insn >> 25) & 0xF;
@@ -310,7 +310,7 @@ static __always_inline bool emulate_insn(struct pt_regs *regs)
             s64 off = sign_extend64((s64)((insn >> 15) & 0x7F), 6) * bytes;
             u64 base = addr_reg_read(regs, rn), addr = (idx == 1) ? base : (base + off);
 
-            if (unlikely(idx == 0))
+            if (idx == 0)
                 goto next_insn; // 没有这种操作模式，跳过
 
             if (l)

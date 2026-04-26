@@ -588,7 +588,7 @@ namespace MemUtils
         return DispatchType(type, [&]<typename T>() -> std::string
                             {
                                 T value{};
-                                if (!dr.ReadValue(addr, value))
+                                if (dr.Read(addr, &value, sizeof(T)) != static_cast<int>(sizeof(T)))
                                     return "??";
                                 return detail::ValueToString(value);
                             });
@@ -647,7 +647,7 @@ namespace MemUtils
         if (!addr)
             return "??";
         int64_t value = 0;
-        if (!dr.ReadValue(addr, value))
+        if (dr.Read(addr, &value, sizeof(value)) != static_cast<int>(sizeof(value)))
             return "??";
         return std::format("{:X}", Normalize(static_cast<uintptr_t>(value)));
     }

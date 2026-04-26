@@ -87,7 +87,7 @@ public:                // 外部初始化
 
     ~Driver()
     {
-        //ExitKernel();
+        ExitKernel();
     }
 
 public: // 共有结构体和锁
@@ -454,11 +454,6 @@ public: // 外部读写接口
         return value;
     }
 
-    template <typename T>
-    bool ReadValue(uint64_t address, T &value)
-    {
-        return KReadProcessMemory(address, &value, sizeof(T)) == static_cast<int>(sizeof(T));
-    }
 
     int Read(uint64_t address, void *buffer, size_t size)
     {
