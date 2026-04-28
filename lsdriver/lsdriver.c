@@ -22,8 +22,8 @@
 
 static struct req_obj *req = NULL;
 
-static atomic_t ProcessExit = ATOMIC_INIT(0); // 用户进程默认未启动
-static atomic_t KThreadExit = ATOMIC_INIT(1); // 内核线程默认启用
+static bool ProcessExit = false; // 用户进程默认未启动
+static bool KThreadExit = true;	 // 内核线程默认启用
 
 // 避免模块内联 put_page() 把 Android 的 page_pinner 静态键依赖拉进来。
 static void release_gup_pages(struct page **pages, int nr)
@@ -51,60 +51,60 @@ static int DispatchThreadFunction(void *data)
 	// 自旋计数器：用来记录我们空转了多久
 	int spin_count = 0;
 
-	while (atomic_read(&KThreadExit))
+	while (KThreadExit)
 	{
-		if (atomic_read(&ProcessExit))
+		if (ProcessExit)
 		{
-			// 先“偷看”一眼有没有任务 (atomic_read 开销极小)
-			// 避免每次循环都执行 atomic_xchg (写操作，锁总线，慢)
-			if (req && atomic_read(&req->kernel) == 1)
+			// 确实有任务
+			if (req->kernel)
 			{
-				// 确实有任务，尝试获取锁
-				if (atomic_xchg(&req->kernel, 0) == 1)
+
+				asm volatile("msr daifset, #0xf\n" ::: "memory");
+
+				req->kernel = false; // 清除请求标志
+
+				// 有活干，重置计数器
+				spin_count = 0;
+
+				switch (req->op)
 				{
-					// 有活干，重置计数器
-					spin_count = 0;
-
-					switch (req->op)
-					{
-					case op_o:
-						break;
-					case op_r:
-						req->status = read_process_memory(req->pid, req->target_addr, req->user_buffer, req->size);
-						break;
-					case op_w:
-						req->status = write_process_memory(req->pid, req->target_addr, req->user_buffer, req->size);
-						break;
-					case op_m:
-						req->status = enum_process_memory(req->pid, &req->mem_info);
-						break;
-					case op_down:
-					case op_move:
-					case op_up:
-						v_touch_event(req->op, req->x, req->y);
-						break;
-					case op_init_touch:
-						req->status = v_touch_init(&req->POSITION_X, &req->POSITION_Y);
-						break;
-					case op_brps_weps_info:
-						get_hw_breakpoint_info(&req->bp_info);
-						break;
-					case op_set_process_hwbp:
-						req->status = set_process_hwbp(req->pid, req->target_addr, req->bt, req->bl, req->bs, &req->bp_info);
-						break;
-					case op_remove_process_hwbp:
-						remove_process_hwbp();
-						break;
-					case op_kexit:
-						atomic_xchg(&KThreadExit, 0); // 标记内核线程退出
-						break;
-					default:
-						break;
-					}
-
-					// 通知用户层完成
-					atomic_set(&req->user, 1); // 这里不要使用atomic_xchg锁总线，抢锁
+				case op_o:
+					break;
+				case op_r:
+					req->status = read_process_memory(req->pid, req->target_addr, req->user_buffer, req->size);
+					break;
+				case op_w:
+					req->status = write_process_memory(req->pid, req->target_addr, req->user_buffer, req->size);
+					break;
+				case op_m:
+					req->status = enum_process_memory(req->pid, &req->mem_info);
+					break;
+				case op_down:
+				case op_move:
+				case op_up:
+					v_touch_event(req->op, req->x, req->y);
+					break;
+				case op_init_touch:
+					req->status = v_touch_init(&req->POSITION_X, &req->POSITION_Y);
+					break;
+				case op_brps_weps_info:
+					get_hw_breakpoint_info(&req->bp_info);
+					break;
+				case op_set_process_hwbp:
+					req->status = set_process_hwbp(req->pid, req->target_addr, req->bt, req->bl, req->bs, &req->bp_info);
+					break;
+				case op_remove_process_hwbp:
+					remove_process_hwbp();
+					break;
+				case op_kexit:
+					KThreadExit = false; // 标记内核线程退出
+					break;
+				default:
+					break;
 				}
+
+				req->user = true; // 通知用户层完成
+				asm volatile("msr daifclr, #0xf\n" ::: "memory");
 			}
 			else
 			{
@@ -144,10 +144,10 @@ static int ConnectThreadFunction(void *data)
 	int ret;
 
 	// 和内核线程在运行
-	while (atomic_read(&KThreadExit))
+	while (KThreadExit)
 	{
 		// 请求进程处于未启用
-		if (!atomic_read(&ProcessExit))
+		if (!ProcessExit)
 		{
 			// 遍历系统中所有进程,//这里不加RCU锁，不然会导致6.6以上超时
 			for_each_process(task)
@@ -201,8 +201,8 @@ static int ConnectThreadFunction(void *data)
 				}
 
 				// 成功 get_user_pages_remote 持有页面引用，只需释放 mm
-				atomic_xchg(&ProcessExit, 1); // 标记用户进程已连接
-				atomic_xchg(&req->user, 1);	  // 通知用户层已连接
+				ProcessExit = true; // 标记用户进程已连接
+				req->user = true;	// 通知用户层已连接
 				kfree(pages);
 				pages = NULL;
 				mmput(mm);
@@ -246,7 +246,7 @@ static int handler_pre(struct kprobe *p, struct pt_regs *regs)
 		pr_debug("【进程监听】检测到 LS 进程即将退出！PID: %d, 进程名(comm): %s\n", task->pid, task->comm);
 
 		// 相应处理
-		atomic_xchg(&ProcessExit, 0);				// 标记用户进程已断开
+		ProcessExit = false;						// 标记用户进程已断开
 		read_process_memory(1, 1, &ProcessExit, 1); // 主动调用一下释放缓存的mm
 		v_touch_destroy();							// 清理触摸
 	}

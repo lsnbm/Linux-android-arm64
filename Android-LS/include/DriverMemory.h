@@ -71,8 +71,6 @@
 
 */
 
-__attribute__((noinline))                                               // 禁止该类所有成员函数成员变量内联
-__attribute__((optimize("-fno-reorder-blocks,-fno-reorder-functions"))) // 禁止编译器重排代码
 class Driver
 {
 public:                // 外部初始化
@@ -357,8 +355,8 @@ public: // 共有结构体和锁
     // 将在队列中使用的请求实例结构体
     struct req_obj
     {
-        std::atomic<int> kernel; // 由用户模式设置 1 = 内核有待处理的请求, 0 = 请求已完成
-        std::atomic<int> user;   // 由内核模式设置 1 = 用户模式有待处理的请求, 0 = 请求已完成
+        bool kernel; // 由用户模式设置 true = 内核有待处理的请求, false = 请求已完成
+        bool user;   // 由内核模式设置 true = 用户模式有待处理的请求, false = 请求已完成
 
         enum sm_req_op op; // shared memory请求操作类型
         int status;        // 操作状态
@@ -395,7 +393,7 @@ public:
     {
         // 内核停止运行
         req->op = op_kexit;
-        IoCommitAndWait();
+        req->kernel = true;
     }
     int GetPid(std::string_view packageName)
     {
@@ -453,7 +451,6 @@ public: // 外部读写接口
         KReadProcessMemory(address, &value, sizeof(T));
         return value;
     }
-
 
     int Read(uint64_t address, void *buffer, size_t size)
     {
@@ -1014,15 +1011,14 @@ private: // 私有实现，外部无需关系
 
     inline void IoCommitAndWait()
     {
-        req->kernel.store(1, std::memory_order_release);
+        req->kernel = true;
 
-        while (req->user.load(std::memory_order_acquire) != 1)
+        while (!req->user)
         {
-            // 让出 CPU 时间片,100%降低性能的，不过保留主动降低性能功耗
-            // std::this_thread::yield();
+            __builtin_arm_yield();
         };
 
-        req->user.store(0, std::memory_order_relaxed);
+        req->user = false;
     }
 
     // 初始化驱动
