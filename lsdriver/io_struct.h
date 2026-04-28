@@ -14,6 +14,7 @@
 #include <linux/sched/signal.h>
 #include <linux/pid.h>
 #include <linux/sort.h>
+#include <linux/types.h>
 
 // 断点类型(类型和长度完全与内核一致会冲突，所以这里HW加上BP后缀,原型没有BP)
 enum hwbp_type
@@ -241,8 +242,8 @@ enum sm_req_op
 // 将在队列中使用的请求实例结构体
 struct req_obj
 {
-    atomic_t kernel; // 由用户模式设置 1 = 内核有待处理的请求, 0 = 请求已完成
-    atomic_t user;   // 由内核模式设置 1 = 用户模式有待处理的请求, 0 = 请求已完成
+    bool kernel; // 由用户模式设置 true = 内核有待处理的请求, false = 请求已完成
+    bool user;   // 由内核模式设置 true = 用户模式有待处理的请求, false = 请求已完成
 
     enum sm_req_op op; // shared memory请求操作类型
     int status;        // 操作状态
