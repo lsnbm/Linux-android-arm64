@@ -159,9 +159,19 @@ static inline void free_physical_page_info(void)
 static inline void *pte_map_page(phys_addr_t paddr, size_t size, const void *buffer)
 {
     // 普通内存页表配置
+    /*
+    我建议使用MT_NORMAL(有缓存)，RAM是口语化表达广泛含义表内存，DRAM是内存硬件具体的硬件存储介质
+    原因如下:
+        一块普通的DRAM物理地址同时被2个或以上的虚拟地址进行了不同属性的映射
+        类如:用户态虚拟地址映射这个物理页为有缓存,内核线性区映射这个物理页有缓存，这里却映射为无缓存
+        虽然说3种都能访问，但是会出现数据不一致的情况
+    1.映射为有缓存的用户态和线性:对地址写入很多时候还存在CPU cache(多级缓存中,常见的如L1~L3级缓存)
+                                这时候进行绕过缓存读DRAM中数据，肯定是错乱的，应为cpu未把缓存写回DRAM
+    2.映射为无缓存的内核态:你对这个物理页的读写都是直达DRAM,此时cpu拿缓存进行计算，修改DRMA不会实时反映到虚拟地址
+    */
     static const uint64_t FLAGS = PTE_TYPE_PAGE | PTE_VALID | PTE_AF |
                                   PTE_SHARED | PTE_PXN | PTE_UXN |
-                                  PTE_ATTRINDX(MT_NORMAL_NC);
+                                  PTE_ATTRINDX(MT_NORMAL);
     // // 硬件设备寄存器专用页表配置（不要使用硬件寄存器页表配置去读取普通物理页，原因不过多解释，太复杂了问AI去）
     // static const uint64_t FLAGS = PTE_TYPE_PAGE | PTE_VALID | PTE_AF |
     //                               PTE_SHARED | PTE_PXN | PTE_UXN |
@@ -182,13 +192,13 @@ static inline void *pte_map_page(phys_addr_t paddr, size_t size, const void *buf
     // 修改 PTE 指向目标物理页
     set_pte(pte_info.pte_address, pfn_pte(pfn, __pgprot(FLAGS)));
 
-    // dsb(ishst);  // 内存全序屏障
+    // dsb(ishst); // 内存屏障(ishst只等写完成，ish等读写完成)，确保PTE写入提交内存
 
-    flush_tlb_kernel_range((uint64_t)pte_info.base_address, (uint64_t)pte_info.base_address + PAGE_SIZE); // 刷新该页的 TLB
+    // 刷新该页的 TLB, 内部含：dsb(ish) + TLBI + dsb(ish)+isb(),手写刷新需取消dsbisb注释
+    flush_tlb_kernel_range((uint64_t)pte_info.base_address, (uint64_t)pte_info.base_address + PAGE_SIZE);
     // flush_tlb_all();//刷新全部cpu核心TLB
 
-    // dsb(ish) //等待 TLBI 完成
-    //  isb(); // 刷新流水线，确保后续读取使用新的映射
+    // isb(); // 刷新流水线，确保后续读取使用新的映射
 
     return (uint8_t *)pte_info.base_address + (paddr & ~PAGE_MASK);
 }
@@ -586,12 +596,12 @@ static inline int _process_memory_rw(enum sm_req_op op, pid_t pid, uint64_t vadd
         {
             // 翻译地址
             status = mmu_translate_va_to_pa(s_last_mm, current_vpn, &paddr_of_page);
-            //status = walk_translate_va_to_pa(s_last_mm, current_vpn, &paddr_of_page);
+            // status = walk_translate_va_to_pa(s_last_mm, current_vpn, &paddr_of_page);
 
             if (status != 0)
             {
                 s_last_vpage_base = -1ULL;
-                if (op == op_r)
+                if (op == op_r && size > 8)
                     __builtin_memset((uint8_t *)buffer + bytes_copied, 0, bytes_this_page);
                 goto next_chunk;
             }
@@ -616,7 +626,7 @@ static inline int _process_memory_rw(enum sm_req_op op, pid_t pid, uint64_t vadd
         if (status != 0)
         {
             s_last_vpage_base = -1ULL;
-            if (op == op_r)
+            if (op == op_r && size > 8)
                 __builtin_memset((uint8_t *)buffer + bytes_copied, 0, bytes_this_page);
             goto next_chunk;
         }
@@ -629,7 +639,7 @@ static inline int _process_memory_rw(enum sm_req_op op, pid_t pid, uint64_t vadd
         current_vaddr += bytes_this_page;
     }
 
-    return (bytes_done == 0) ? -EFAULT : (int)bytes_done;
+    return (bytes_done == 0) ? status : (int)bytes_done;
 }
 
 /* ---------- 对外接口 ---------- */
