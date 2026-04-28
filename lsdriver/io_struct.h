@@ -25,7 +25,7 @@ enum hwbp_type
     HWBP_BREAKPOINT_RW = HWBP_BREAKPOINT_R | HWBP_BREAKPOINT_W,
     HWBP_BREAKPOINT_X = 4,
     HWBP_BREAKPOINT_INVALID = HWBP_BREAKPOINT_RW | HWBP_BREAKPOINT_X,
-} __attribute__((packed));
+};
 // 断点长度
 enum hwbp_len
 {
@@ -38,14 +38,14 @@ enum hwbp_len
     HWBP_BREAKPOINT_LEN_7 = 7,
     HWBP_BREAKPOINT_LEN_8 = 8,
 
-} __attribute__((packed));
+};
 // 断点作用线程范围
 enum hwbp_scope
 {
     SCOPE_MAIN_THREAD,   // 仅主线程
     SCOPE_OTHER_THREADS, // 仅其他子线程
     SCOPE_ALL_THREADS    // 全部线程
-} __attribute__((packed));
+};
 
 // 寄存器索引枚举 (每个索引占用 2 bits)
 enum hwbp_reg_idx
@@ -171,8 +171,7 @@ struct hwbp_record
     __uint128_t q10, q11, q12, q13, q14, q15, q16, q17, q18, q19;
     __uint128_t q20, q21, q22, q23, q24, q25, q26, q27, q28, q29;
     __uint128_t q30, q31;
-
-} __attribute__((packed));
+};
 
 // 存储整体命中信息
 struct hwbp_info
@@ -182,7 +181,7 @@ struct hwbp_info
     uint64_t hit_addr;                 // 监控的地址
     int record_count;                  // 当前已记录的不同 PC 数量
     struct hwbp_record records[0x100]; // 记录不同 PC 触发状态的数组
-} __attribute__((packed));
+};
 
 #define MAX_MODULES 512
 #define MAX_SCAN_REGIONS 4096
@@ -196,20 +195,20 @@ struct segment_info
     uint8_t prot; // 区段权限: 1(R), 2(W), 4(X)。例如 RX 就是 5 (1+4)
     uint64_t start;
     uint64_t end;
-} __attribute__((packed));
+};
 
 struct module_info
 {
     char name[MOD_NAME_LEN];
     int seg_count;
     struct segment_info segs[MAX_SEGS_PER_MODULE];
-} __attribute__((packed));
+};
 
 struct region_info
 {
     uint64_t start;
     uint64_t end;
-} __attribute__((packed));
+};
 
 struct memory_info
 {
@@ -218,7 +217,7 @@ struct memory_info
 
     int region_count;                             // 总可扫描内存数量
     struct region_info regions[MAX_SCAN_REGIONS]; // 可扫描内存区域 (rw-p, 排除特殊区域)
-} __attribute__((packed));
+};
 
 enum sm_req_op
 {
@@ -237,7 +236,7 @@ enum sm_req_op
     op_remove_process_hwbp, // 删除硬件断点
 
     op_kexit // 内核线程退出
-} __attribute__((packed));
+};
 
 // 将在队列中使用的请求实例结构体
 struct req_obj
@@ -266,6 +265,6 @@ struct req_obj
     int POSITION_X, POSITION_Y;
     // 触摸坐标
     int x, y;
-} __attribute__((packed));
+};
 
 #endif // IO_STRUCT_H
