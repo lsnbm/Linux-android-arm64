@@ -125,11 +125,61 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
     short seq;
     bool excluded, mod_accepted;
 
-    static const char *const mod_include_prefixes[] = {
-        "/data/", NULL};
+    /*
+    开始解释:为何我白名单把/dev/加入到模块列表了
+    正常运行情况下:编译好的静态代码就放在模块里面，运行时加载到内存并分配文件映射型代码
+    被保护隐藏的代码:
+            我发现目标程序会用mmap通过open("/dev/zero")映射 /dev/zero 设备文件，
+            来获取一段初始全为 0 的、可读、可写、可执行的共享虚拟内存，vma和maps显示/dev/zero (deleted)
+            现在不需要获取文件描述符了，现代的mmap支持无设备描述符映射，
+            但是创建的内存页映射来源在vma和maps显示的还是/dev/zero (deleted)
+            并使用mprotect来修改权限，并在代码页上下页修改为无任何权限的保护页
+    还有这个存放代码的动态内存几乎是mmap分配的，不会出现malloc分配内存来存放代码
+    不用malloc有这些原因:
+            1.mprotect要求起始地址必须是页的整数倍(4kb页对齐), malloc 是8字节或 16 字节对齐不满足,必须手动计算页边界，或者使用 posix_memalign,mmap分配的天然页对齐
+            2.malloc返回的指针前几个字节带着内存块的控制信息(如大小、状态...),
+              mprotect页改只读后free会写入控制信息触发异常崩，代码段释放到内存后一般权限就会改为rx-p,没有写权限
+              但在这里观察都是rwxs-p全部给上
+            3.mprotect按页生效，对10字节改权限，内核也会把10 字节所在的整个 4KB 页面全部改掉
+              malloc内存可能和其他数据内存共享4KB页 ，改权限会意外导致程序其他部分异常，mmap按页分配安全
+    所以加上/dev可以
+        1.libso[0]+静态指针或函数地址偏移，
+        2.libso[bss]+静态指针偏移
+        3./dev/zero (deleted)+静态指针或函数地址偏移
+        4.直接dump/dev/zero (deleted)内存字节就可获取释放到内存中代码
 
+    这里在说一下这个模块内的静态指针偏移
+        众所周知一个二进制文件在linux下要求ELF格式，在windows下要求PE格式
+        这些格式核心就是二进制的节区分段：代码段(text), 数据段(data),只读数据段(ReadOnly Data),BSS段
+
+        char *g_pData=NULL;是已初始化(显式初始为0)
+        编译器放在 .data 段的指针，用区段地址+相对偏移获取: libc.so[0]+0x150000
+        char *g_pData;     是未初始化(语言标准来保证它为 0)
+        编译器放在 .bss 段的指针，用区段bss+相对偏移获取：libc.so[bss]+0x10000
+
+        现代clang对于这种显式初始为0的变量进行优化了
+        把已初始化和未初始化全放在.bss段来节省.data段的磁盘占用
+        g_pData这种全局指针只有给非0的初始值，才会固定到.data
+
+    这里在说一下不同起始区段到达同一个指针
+        0xb40000=libc.so[0]+0x2222
+        0xb40000=libc.so[1]+0x1111
+        这种的段0和段1获取到的都是同一个指针
+        想象:
+            你在作业本纸中间写上地址0xb40000
+            从第0行(libc.so[0])到中间的距离就0x2222
+            从第1行(libc.so[1])到中间的距离就0x1111
+        目标一样，区别就是起始地址不同，相对偏移根据起始地址位置进行变化
+        */
+
+    // 白名单(用于收集模块地址)，只搜集...开头虚拟地址区间
+    static const char *const mod_include_prefixes[] = {
+        "/data/", "/dev/", NULL};
+
+    // 黑名单(用于收集可扫描内存地址)，排除...开头的虚拟地址区间
     static const char *const excl_prefixes[] = {
         "/dev/", "/system/", "/vendor/", "/apex/", NULL};
+    // 黑名单(用于收集可扫描内存地址)，排除指定关键字的虚拟地址区间
     static const char *const excl_keywords[] = {
         ".oat", ".art", ".odex", ".vdex", ".dex", ".ttf",
         "dalvik", "gralloc", "ashmem", NULL};
@@ -290,7 +340,7 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
 
     /*
      * =========================================================================================
-     * 反作弊 VMA 碎裂与诱饵对抗机制 (七步完全体)
+     * 反作弊 VMA 碎裂与诱饵对抗机制
      * =========================================================================================
      *
      * 【第一阶段：理想状态下的纯净内存布局 (原生 ELF 加载)】
@@ -328,7 +378,7 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
      *   若 BSS 检测逻辑要求 VM_READ|VM_WRITE，则此类 BSS 完全不可见，
      *   导致上层计算出的模块尾部地址偏短，BSS 内的全局变量无法定位。
      *
-     * 【第三阶段：七步对抗算法 (完全体)】
+     * 【第三阶段：七步对抗算法】
      *
      *   步骤 1：纯物理排序
      *   无视所有权限和假象，按物理起始地址绝对升序排列所有碎片。
@@ -361,7 +411,7 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
      *     index=1(Header/RELRO) → prot=1(R)
      *     index=0(Code)         → prot=5(RX)
      *     index=2(Data)         → prot=3(RW)
-     *     index=-1(BSS)         → prot=3(RW)  
+     *     index=-1(BSS)         → prot=3(RW)
      *   彻底断绝 prot 污染，使对外输出的 prot 与原生 ELF 加载完全一致。
      *
      *   步骤 5：拉链式精准缝合 (还原原生边界)
@@ -372,7 +422,7 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
      *   步骤 6：最终 Index 序列化
      *   给缝合后的完美区段重新发放 0, 1, 2, 3... 的连续 Index，BSS 保留 -1。
      *
-     * 【最终战果】：
+     * 【最终结果】：
      * 无论反作弊怎么切分、放诱饵、异化权限，跑完此算法后，
      * 产出结果与干净手机上的原生 ELF 映射 1:1 完全一致。
      *
