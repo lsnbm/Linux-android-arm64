@@ -2024,10 +2024,6 @@ static inline int set_process_hwbp(pid_t pid, uint64_t addr, enum hwbp_type type
     bp_config.bl = len;
     bp_config.bs = scope;
     bp_config.addr = addr;
-    bp_config.suspended_step = 0;
-    bp_config.suspended_type = 0;
-    bp_config.suspended_ctrl = 0;
-    bp_config.suspended_task = NULL;
     bp_config.on_hit = sample_hbp_handler;
     bp_config.bp_info = info;
 

@@ -319,8 +319,9 @@ namespace MemUtils
             (record.*fields[index]) = value;
     }
 
-    inline std::uint64_t HwbpGetRegisterValue(const Driver::hwbp_record &record, int reg)
+    inline __uint128_t HwbpReadRegisterValue(Driver::hwbp_record &record, int reg)
     {
+        HwbpRequestRead(record, reg);
         switch (reg)
         {
         case Driver::IDX_PC:
@@ -342,17 +343,15 @@ namespace MemUtils
         case Driver::IDX_FPCR:
             return record.fpcr;
         default:
-            return (reg >= Driver::IDX_X0 && reg <= Driver::IDX_X29) ? HwbpGetXField(record, reg - Driver::IDX_X0) : 0;
+            if (reg >= Driver::IDX_X0 && reg <= Driver::IDX_X29)
+                return HwbpGetXField(record, reg - Driver::IDX_X0);
+            if (reg >= Driver::IDX_Q0 && reg <= Driver::IDX_Q31)
+                return HwbpGetQField(record, reg - Driver::IDX_Q0);
+            return 0;
         }
     }
 
-    inline std::uint64_t HwbpReadRegisterValue(Driver::hwbp_record &record, int reg)
-    {
-        HwbpRequestRead(record, reg);
-        return HwbpGetRegisterValue(record, reg);
-    }
-
-    inline bool HwbpWriteRegisterValue(Driver::hwbp_record &record, int reg, std::uint64_t value)
+    inline bool HwbpWriteRegisterValue(Driver::hwbp_record &record, int reg, __uint128_t value)
     {
         if (reg < 0 || reg >= Driver::MAX_REG_COUNT)
             return false;
@@ -361,25 +360,25 @@ namespace MemUtils
         switch (reg)
         {
         case Driver::IDX_PC:
-            record.pc = value;
+            record.pc = static_cast<std::uint64_t>(value);
             return true;
         case Driver::IDX_HIT_COUNT:
-            record.hit_count = value;
+            record.hit_count = static_cast<std::uint64_t>(value);
             return true;
         case Driver::IDX_LR:
-            record.lr = value;
+            record.lr = static_cast<std::uint64_t>(value);
             return true;
         case Driver::IDX_SP:
-            record.sp = value;
+            record.sp = static_cast<std::uint64_t>(value);
             return true;
         case Driver::IDX_ORIG_X0:
-            record.orig_x0 = value;
+            record.orig_x0 = static_cast<std::uint64_t>(value);
             return true;
         case Driver::IDX_SYSCALLNO:
-            record.syscallno = value;
+            record.syscallno = static_cast<std::uint64_t>(value);
             return true;
         case Driver::IDX_PSTATE:
-            record.pstate = value;
+            record.pstate = static_cast<std::uint64_t>(value);
             return true;
         case Driver::IDX_FPSR:
             record.fpsr = static_cast<std::uint32_t>(value);
@@ -390,36 +389,16 @@ namespace MemUtils
         default:
             if (reg >= Driver::IDX_X0 && reg <= Driver::IDX_X29)
             {
-                HwbpSetXField(record, reg - Driver::IDX_X0, value);
+                HwbpSetXField(record, reg - Driver::IDX_X0, static_cast<std::uint64_t>(value));
                 return true;
             }
             if (reg >= Driver::IDX_Q0 && reg <= Driver::IDX_Q31)
             {
-                HwbpSetQField(record, reg - Driver::IDX_Q0, static_cast<__uint128_t>(value));
+                HwbpSetQField(record, reg - Driver::IDX_Q0, value);
                 return true;
             }
             return false;
         }
-    }
-
-    inline std::uint64_t HwbpReadXField(Driver::hwbp_record &record, int index)
-    {
-        HwbpRequestRead(record, Driver::IDX_X0 + index);
-        return HwbpGetXField(record, index);
-    }
-
-    inline __uint128_t HwbpReadQField(Driver::hwbp_record &record, int index)
-    {
-        HwbpRequestRead(record, Driver::IDX_Q0 + index);
-        return HwbpGetQField(record, index);
-    }
-
-    inline void HwbpWriteQField(Driver::hwbp_record &record, int index, __uint128_t value)
-    {
-        if (index < 0 || index >= 32)
-            return;
-        HWBP_SET_MASK(&record, Driver::IDX_Q0 + index, HWBP_OP_WRITE);
-        HwbpSetQField(record, index, value);
     }
 
     inline std::string HwbpLowerAscii(std::string_view input)
