@@ -103,15 +103,28 @@ __attribute__((used)) static void work_trampoline_breakpoint(unsigned long unuse
         */
 
     // 清空执行控制寄存器
-    write_wb_reg(AARCH64_DBG_REG_BCR, 0, 0);
+
+    /*
+    这里先实时读取了执行控制寄存器配置，并只修改了bit 0 enabled是否启用位
+    为何不直接清空的原因就是
+        用户态如果也用perf下断，原本的硬件 debug 异常入口需要控制寄存器中的len/type/privilege
+        由于 BCR/WCR 被清空，原硬件 debug 异常入口无法通过 BVR/BCR 或 WVR/WCR 匹配到
+        对应的 perf_event owner，也就不会执行 perf_bp_event() 和后续disable + single-step + restore 的步过状态机。
+        硬件debug异常分发直接结束并返回已处理
+
+      结果是：硬件debug异常分发结束了，但 perf子系统没有收到这次命中的信息和步过闭环，状态机推进异常就死了
+    */
+
+    u64 ctrl = read_wb_reg(AARCH64_DBG_REG_BCR, 5);
+    write_wb_reg(AARCH64_DBG_REG_BCR, 5, ctrl & ~0x1);
 }
 __attribute__((used)) static void work_trampoline_watchpoint(unsigned long addr, unsigned long esr, struct pt_regs *regs)
 {
     struct breakpoint_config *cfg = g_bp_config;
     if (cfg && cfg->on_hit)
         cfg->on_hit(regs, cfg);
-    // 清空访问控制寄存器
-    write_wb_reg(AARCH64_DBG_REG_WCR, 0, 0);
+    u64 ctrl = read_wb_reg(AARCH64_DBG_REG_WCR, 3);
+    write_wb_reg(AARCH64_DBG_REG_WCR, 3, ctrl & ~0x1);
 }
 
 // 执行断异常处理跳板
@@ -515,24 +528,24 @@ static void probe_sched_switch(void *data, bool preempt,
         if (info.ctrl.type == ARM_BREAKPOINT_EXECUTE)
         {
             // 执行寄存器的地址寄存器
-            write_wb_reg(AARCH64_DBG_REG_BVR, 0, info.address);
+            write_wb_reg(AARCH64_DBG_REG_BVR, 5, info.address);
             // 执行寄存器的控制寄存器
             //"| 0x1"表示立即生效,
             //"& ~0x1"表示写入的寄存器配置，但是禁用不生效
             //"0"给控制寄存器请0，就删除了断点
-            write_wb_reg(AARCH64_DBG_REG_BCR, 0, encode_ctrl_reg(info.ctrl) | 0x1);
-            // write_wb_reg(AARCH64_DBG_REG_BCR, 0, encode_ctrl_reg(info.ctrl) & ~0x1);
+            write_wb_reg(AARCH64_DBG_REG_BCR, 5, encode_ctrl_reg(info.ctrl) | 0x1);
+            // write_wb_reg(AARCH64_DBG_REG_BCR, 5, encode_ctrl_reg(info.ctrl) & ~0x1);
         }
         else
         {
             // 访问寄存器的地址寄存器
-            write_wb_reg(AARCH64_DBG_REG_WVR, 0, info.address);
+            write_wb_reg(AARCH64_DBG_REG_WVR, 3, info.address);
             // 访问寄存器的控制寄存器
             //"| 0x1"表示立即生效,
             //"& ~0x1"表示写入的寄存器配置，但是禁用不生效
             //"0"给控制寄存器请0就删除了断点
-            write_wb_reg(AARCH64_DBG_REG_WCR, 0, encode_ctrl_reg(info.ctrl) | 0x1);
-            // write_wb_reg(AARCH64_DBG_REG_WCR, 0, encode_ctrl_reg(info.ctrl) & ~0x1);
+            write_wb_reg(AARCH64_DBG_REG_WCR, 3, encode_ctrl_reg(info.ctrl) | 0x1);
+            // write_wb_reg(AARCH64_DBG_REG_WCR, 3, encode_ctrl_reg(info.ctrl) & ~0x1);
         }
     }
 
@@ -548,8 +561,8 @@ static void probe_sched_switch(void *data, bool preempt,
         }
 
         // 请0执行寄存器和访问寄存器的控制寄存器
-        write_wb_reg(AARCH64_DBG_REG_BCR, 0, 0);
-        write_wb_reg(AARCH64_DBG_REG_WCR, 0, 0);
+        write_wb_reg(AARCH64_DBG_REG_BCR, 5, 0);
+        write_wb_reg(AARCH64_DBG_REG_WCR, 3, 0);
 
         // task被切出cpu进行管全局调试+上锁OS
         disable_hardware_debug_on_cpu(NULL);
