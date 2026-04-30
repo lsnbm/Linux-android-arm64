@@ -569,15 +569,15 @@ namespace
             json item;
             item["index"] = i;
             MemUtils::HwbpRequestAll(rec);
-            const auto pc = MemUtils::HwbpGetRegisterValue(rec, Driver::IDX_PC);
-            const auto hitCount = MemUtils::HwbpGetRegisterValue(rec, Driver::IDX_HIT_COUNT);
-            const auto lr = MemUtils::HwbpGetRegisterValue(rec, Driver::IDX_LR);
-            const auto sp = MemUtils::HwbpGetRegisterValue(rec, Driver::IDX_SP);
-            const auto origX0 = MemUtils::HwbpGetRegisterValue(rec, Driver::IDX_ORIG_X0);
-            const auto syscallNo = MemUtils::HwbpGetRegisterValue(rec, Driver::IDX_SYSCALLNO);
-            const auto pstate = MemUtils::HwbpGetRegisterValue(rec, Driver::IDX_PSTATE);
-            const auto fpsr = MemUtils::HwbpGetRegisterValue(rec, Driver::IDX_FPSR);
-            const auto fpcr = MemUtils::HwbpGetRegisterValue(rec, Driver::IDX_FPCR);
+            const auto pc = static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_PC));
+            const auto hitCount = static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_HIT_COUNT));
+            const auto lr = static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_LR));
+            const auto sp = static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_SP));
+            const auto origX0 = static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_ORIG_X0));
+            const auto syscallNo = static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_SYSCALLNO));
+            const auto pstate = static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_PSTATE));
+            const auto fpsr = static_cast<std::uint32_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_FPSR));
+            const auto fpcr = static_cast<std::uint32_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_FPCR));
             item["mask"] = json::array();
             for (int m = 0; m < 18; ++m)
             {
@@ -616,13 +616,13 @@ namespace
             item["regs"] = json::array();
             for (int reg = 0; reg < 30; ++reg)
             {
-                item["regs"].push_back(MemUtils::HwbpGetXField(rec, reg));
+                item["regs"].push_back(static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_X0 + reg)));
             }
             item["vregs"] = json::array();
             item["qregs"] = json::array();
             for (int reg = 0; reg < 32; ++reg)
             {
-                const auto qreg = MemUtils::HwbpGetQField(rec, reg);
+                const auto qreg = MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_Q0 + reg);
                 json qitem = {{"lo", static_cast<std::uint64_t>(qreg)},
                               {"hi", static_cast<std::uint64_t>(qreg >> 64)}};
                 item["vregs"].push_back(qitem);
@@ -1330,7 +1330,7 @@ namespace
                 const double fval = std::get<double>(value);
                 std::uint64_t bits = 0;
                 std::memcpy(&bits, &fval, sizeof(bits));
-                MemUtils::HwbpWriteQField(copy, *regIndex, static_cast<__uint128_t>(bits));
+                MemUtils::HwbpWriteRegisterValue(copy, Driver::IDX_Q0 + *regIndex, static_cast<__uint128_t>(bits));
                 const_cast<Driver::hwbp_record &>(info.records[std::get<int>(index)]) = copy;
                 return okData({{"index", std::get<int>(index)}, {"reg", *regIndex}, {"precision", "f64"}, {"bits", bits}});
             }
@@ -1339,7 +1339,7 @@ namespace
             const float fval = static_cast<float>(std::get<double>(value));
             std::uint32_t bits = 0;
             std::memcpy(&bits, &fval, sizeof(bits));
-            MemUtils::HwbpWriteQField(copy, *regIndex, static_cast<__uint128_t>(bits));
+            MemUtils::HwbpWriteRegisterValue(copy, Driver::IDX_Q0 + *regIndex, static_cast<__uint128_t>(bits));
             const_cast<Driver::hwbp_record &>(info.records[std::get<int>(index)]) = copy;
             return okData({{"index", std::get<int>(index)}, {"reg", *regIndex}, {"precision", "f32"}, {"bits", bits}});
         }

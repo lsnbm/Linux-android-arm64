@@ -23,11 +23,12 @@
 class UIStyle
 {
 public:
-    float scale = 2.0f, margin = 40.0f;
+    float scale = 2.0f, margin = 40.0f, opacity = 1.0f;
     constexpr float S(float v) const noexcept { return v * scale; }
     void apply() const
     {
         auto &s = ImGui::GetStyle();
+        s.Alpha = opacity;
         s.FramePadding = {S(10), S(10)};
         s.ItemSpacing = {S(6), S(6)};
         s.TouchExtraPadding = {8, 8};
@@ -247,8 +248,8 @@ private:
     {
         int tab = 0, resultScrollIdx = 0;
         uintptr_t modifyAddr = 0;
-        bool showModify = false, floating = false, dragging = false;
-        ImVec2 floatPos = {50, 200}, dragOffset = {};
+        bool showModify = false, floating = false, dragging = false, dragMoved = false;
+        ImVec2 floatPos = {50, 200}, dragOffset = {}, dragStartMouse = {};
         bool showType = false, showMode = false, showDepth = false,
              showOffset = false, showScale = false, showFormat = false;
         bool showBpType = false, showBpScope = false;
@@ -425,21 +426,35 @@ private:
         if (ImGui::Begin("##Float", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove))
         {
             auto &io = ImGui::GetIO();
+            bool releasedAfterDrag = false;
             if (ImGui::IsWindowHovered() && io.MouseDown[0] && !state_.dragging)
             {
                 state_.dragging = true;
+                state_.dragMoved = false;
+                state_.dragStartMouse = io.MousePos;
                 state_.dragOffset = {io.MousePos.x - ImGui::GetWindowPos().x,
                                      io.MousePos.y - ImGui::GetWindowPos().y};
             }
             if (state_.dragging)
             {
                 if (io.MouseDown[0])
+                {
+                    const float dx = io.MousePos.x - state_.dragStartMouse.x;
+                    const float dy = io.MousePos.y - state_.dragStartMouse.y;
+                    const float threshold = S(6);
+                    if (dx * dx + dy * dy > threshold * threshold)
+                        state_.dragMoved = true;
+
                     state_.floatPos = {io.MousePos.x - state_.dragOffset.x,
                                        io.MousePos.y - state_.dragOffset.y};
+                }
                 else
+                {
+                    releasedAfterDrag = state_.dragMoved;
                     state_.dragging = false;
+                }
             }
-            if (ImGui::Button("M", {sz, sz}) && !state_.dragging)
+            if (ImGui::Button("M", {sz, sz}) && !state_.dragging && !releasedAfterDrag)
             {
                 state_.floating = false;
                 SetInputBlocking(true);
@@ -1266,7 +1281,8 @@ private:
         for (int r = 0; r < info.record_count; ++r)
         {
             auto &rec = const_cast<Driver::hwbp_record &>(info.records[r]);
-            totalHits += MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_HIT_COUNT);
+            MemUtils::HwbpRequestAll(rec);
+            totalHits += static_cast<uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_HIT_COUNT));
         }
         UI::Text(Colors::WARN, "不同PC数: %d  总命中: %llu", info.record_count, (unsigned long long)totalHits);
         UI::Space(S(6));
@@ -1277,8 +1293,8 @@ private:
         for (int r = 0; r < info.record_count; ++r)
         {
             auto &rec = const_cast<Driver::hwbp_record &>(info.records[r]);
-            const auto pc = MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_PC);
-            const auto hitCount = MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_HIT_COUNT);
+            const auto pc = static_cast<uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_PC));
+            const auto hitCount = static_cast<uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_HIT_COUNT));
             ImGui::PushID(r);
             float btnW = S(55), expandW = S(45);
 
@@ -1341,7 +1357,7 @@ private:
         // fieldId: 0~29=X0~X29, 30=LR, 31=SP, 32=PC, 33=PSTATE, 34=ORIG_X0, 35=SYSCALLNO
         auto regLine = [&](const char *name, int regIndex)
         {
-            const auto val = MemUtils::HwbpReadRegisterValue(show, regIndex);
+            const auto val = static_cast<uint64_t>(MemUtils::HwbpReadRegisterValue(show, regIndex));
             UI::Text({0.7f, 0.85f, 1, 1}, "%s: ", name);
             ImGui::SameLine();
             UI::Text(Colors::ADDR_GREEN, "0x%llX", (unsigned long long)val);
@@ -1385,10 +1401,10 @@ private:
         UI::Space(S(4));
 
         // PSTATE / SYSCALL / ORIG_X0 同理
-        const auto pstate = MemUtils::HwbpReadRegisterValue(show, Driver::IDX_PSTATE);
-        const auto syscallno = MemUtils::HwbpReadRegisterValue(show, Driver::IDX_SYSCALLNO);
-        const auto origX0 = MemUtils::HwbpReadRegisterValue(show, Driver::IDX_ORIG_X0);
-        const auto hitCount = MemUtils::HwbpReadRegisterValue(show, Driver::IDX_HIT_COUNT);
+        const auto pstate = static_cast<uint64_t>(MemUtils::HwbpReadRegisterValue(show, Driver::IDX_PSTATE));
+        const auto syscallno = static_cast<uint64_t>(MemUtils::HwbpReadRegisterValue(show, Driver::IDX_SYSCALLNO));
+        const auto origX0 = static_cast<uint64_t>(MemUtils::HwbpReadRegisterValue(show, Driver::IDX_ORIG_X0));
+        const auto hitCount = static_cast<uint64_t>(MemUtils::HwbpReadRegisterValue(show, Driver::IDX_HIT_COUNT));
         UI::Text(Colors::LABEL, "PSTATE:  0x%llX", (unsigned long long)pstate);
         if (isEditing)
         {
@@ -1432,7 +1448,7 @@ private:
             for (int i = 0; i < 30; ++i)
             {
                 const int regIndex = Driver::IDX_X0 + i;
-                const auto regValue = MemUtils::HwbpReadXField(show, i);
+                const auto regValue = static_cast<uint64_t>(MemUtils::HwbpReadRegisterValue(show, regIndex));
                 ImGui::TableNextRow();
                 ImGui::PushID(i);
 
@@ -1543,7 +1559,7 @@ private:
             for (int i = 0; i < 32; ++i)
             {
                 const int regIndex = Driver::IDX_Q0 + i;
-                const auto qValue = MemUtils::HwbpReadQField(show, i);
+                const auto qValue = MemUtils::HwbpReadRegisterValue(show, regIndex);
                 const auto qLo = static_cast<uint64_t>(qValue);
                 const auto qHi = static_cast<uint64_t>(qValue >> 64);
                 ImGui::TableNextRow();
@@ -1580,24 +1596,27 @@ private:
                     }
                     if (bpParams_.editingField == regIndex && !ImGuiFloatingKeyboard::IsVisible() && bpParams_.regEditBuf[0])
                     {
-                        // 解析128位hex回写 (高16位_低16位 或 低16位)
-                        int len = static_cast<int>(strlen(bpParams_.regEditBuf));
+                        // 解析128位hex回写，超出128位时保留低128位。
+                        const char *hex = bpParams_.regEditBuf;
+                        int len = static_cast<int>(strlen(hex));
+                        if (len > 32)
+                        {
+                            hex += len - 32;
+                            len = 32;
+                        }
                         char hiBuf[17] = {}, loBuf[17] = {};
-                        if (len > 16)
+                        const int hiLen = std::max(0, len - 16);
+                        const int loLen = len - hiLen;
+                        if (hiLen > 0)
                         {
-                            strncpy(hiBuf, bpParams_.regEditBuf, len - 16);
-                            hiBuf[len - 16] = '\0';
-                            strncpy(loBuf, bpParams_.regEditBuf + len - 16, 16);
-                            loBuf[16] = '\0';
+                            strncpy(hiBuf, hex, hiLen);
+                            hiBuf[hiLen] = '\0';
                         }
-                        else
-                        {
-                            strncpy(loBuf, bpParams_.regEditBuf, 16);
-                            loBuf[16] = '\0';
-                        }
+                        strncpy(loBuf, hex + hiLen, loLen);
+                        loBuf[loLen] = '\0';
                         uint64_t hi = strtoull(hiBuf, nullptr, 16);
                         uint64_t lo = strtoull(loBuf, nullptr, 16);
-                        MemUtils::HwbpWriteQField(bpParams_.editCopy, i, (static_cast<__uint128_t>(hi) << 64) | lo);
+                        MemUtils::HwbpWriteRegisterValue(bpParams_.editCopy, regIndex, (static_cast<__uint128_t>(hi) << 64) | lo);
                         bpParams_.editingField = -1;
                         bpParams_.regEditBuf[0] = 0;
                     }
@@ -1638,8 +1657,10 @@ private:
         // 缩放弹窗
         if (state_.showScale)
         {
-            drawListPopup("缩放", &state_.showScale, sx, sy, sw, sh, S(180), S(160), [&](float fw)
+            drawListPopup("缩放", &state_.showScale, sx, sy, sw, sh, S(180), S(210), [&](float fw)
                           {
+                ImGui::Text("不透明度: %.0f%%", style_.opacity * 100);
+                ImGui::SliderFloat("##o", &style_.opacity, 0.2f, 1.0f, "");
                 ImGui::Text("UI: %.0f%%", style_.scale * 100);
                 ImGui::SliderFloat("##s", &style_.scale, 0.5f, 2.0f, "");
                 float bw = fw / 3 - S(3);
