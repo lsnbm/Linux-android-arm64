@@ -155,6 +155,7 @@ class TcpTestWindow(QWidget):
         self.browser_cache_data = b""
         self.browser_current_addr = 0
         self.hwbp_info_data: dict | None = None
+        self.hwbp_active = False
         self.live_refresh_timer = QTimer(self)
         self.live_refresh_timer.setInterval(1000)
         self.live_refresh_timer.timeout.connect(self.on_live_refresh_tick)
@@ -808,6 +809,7 @@ class TcpTestWindow(QWidget):
         action_row.addWidget(self.hwbp_remove_button)
         action_row.addStretch(1)
         config_layout.addLayout(action_row)
+        self._apply_hwbp_active_state()
 
         edit_row = QHBoxLayout()
         edit_row.setSpacing(10)
@@ -1090,6 +1092,7 @@ class TcpTestWindow(QWidget):
         self.pointer_scan_running = False
         self.pointer_status_request_inflight = False
         self.hwbp_refresh_inflight = False
+        self.hwbp_active = False
         self.global_pid_label.setText("--")
         self.pointer_status_label.setText("扫描状态: 未连接")
         self.hwbp_num_brps_label.setText("hwbp_info.num_brps: 0")
@@ -1100,6 +1103,7 @@ class TcpTestWindow(QWidget):
         self.browser_cache_data = b""
         self.browser_current_addr = 0
         self.hwbp_tree.clear()
+        self._apply_hwbp_active_state()
         if reason:
             self._set_status(reason)
 
@@ -1452,11 +1456,14 @@ class TcpTestWindow(QWidget):
         return operation, params
 
     @staticmethod
-    def _make_hwbp_field_item(index: int, field_name: str, value: int, text: str) -> QTreeWidgetItem:
+    def _make_hwbp_field_item(index: int, field_name: str, value: int | str, text: str) -> QTreeWidgetItem:
         item = QTreeWidgetItem([text])
         item.setData(0, Qt.UserRole, index)
         item.setData(0, Qt.UserRole + 2, field_name)
-        item.setData(0, Qt.UserRole + 3, f"0x{value:X}")
+        if isinstance(value, str):
+            item.setData(0, Qt.UserRole + 3, value)
+        else:
+            item.setData(0, Qt.UserRole + 3, f"0x{value:X}")
         return item
 
     def _extract_hwbp_index_from_tree_item(self, item: QTreeWidgetItem | None) -> int | None:
@@ -1692,7 +1699,8 @@ class TcpTestWindow(QWidget):
                     for reg_idx, qreg_val in enumerate(qregs):
                         hi, lo = self._hwbp_qreg_parts(qreg_val)
                         field_name = f"q{reg_idx}"
-                        top.addChild(self._make_hwbp_field_item(idx, field_name, lo, f"    Q{reg_idx}: 0x{hi:016X}_{lo:016X}  [{self._hwbp_reg_op(rec, field_name)}]"))
+                        qreg_hex = f"0x{hi:016X}{lo:016X}"
+                        top.addChild(self._make_hwbp_field_item(idx, field_name, qreg_hex, f"    Q{reg_idx}: 0x{hi:016X}_{lo:016X}  [{self._hwbp_reg_op(rec, field_name)}]"))
 
                 if self._safe_int(rec.get("write_op_count"), 0) > 0 or rw_text == "写入":
                     write_title = QTreeWidgetItem(["  写入寄存器候选"])
@@ -1716,12 +1724,24 @@ class TcpTestWindow(QWidget):
         num_brps = self._safe_int(info.get("num_brps"), 0)
         num_wrps = self._safe_int(info.get("num_wrps"), 0)
         hit_addr = self._safe_int(info.get("hit_addr"), 0)
+        self.hwbp_active = bool(info.get("active", self.hwbp_active))
+        active_addr = self._safe_int(info.get("active_address"), 0)
         self.hwbp_num_brps_label.setText(f"hwbp_info.num_brps: {num_brps}")
         self.hwbp_num_wrps_label.setText(f"hwbp_info.num_wrps: {num_wrps}")
-        self.hwbp_hit_addr_label.setText(f"hwbp_info.hit_addr: 0x{hit_addr:X}")
+        if self.hwbp_active:
+            self.hwbp_hit_addr_label.setText(f"hwbp_info.hit_addr: 0x{hit_addr:X}  active: 0x{active_addr:X}")
+        else:
+            self.hwbp_hit_addr_label.setText(f"hwbp_info.hit_addr: 0x{hit_addr:X}  active: false")
+        self._apply_hwbp_active_state()
         records_raw = info.get("records")
         records = records_raw if isinstance(records_raw, list) else []
         self._render_hwbp_tree(records)
+
+    def _apply_hwbp_active_state(self) -> None:
+        if hasattr(self, "hwbp_set_button"):
+            self.hwbp_set_button.setEnabled(not self.hwbp_active)
+        if hasattr(self, "hwbp_remove_button"):
+            self.hwbp_remove_button.setEnabled(self.hwbp_active)
 
     @staticmethod
     def _format_sig_result(data: dict) -> str:
@@ -2899,22 +2919,27 @@ class TcpTestWindow(QWidget):
             self._set_status("断点信息已刷新")
 
     def on_hwbp_set(self) -> None:
+        if self.hwbp_active:
+            QMessageBox.information(self, "提示", "断点已激活，请先移除当前断点。")
+            return
+
         addr_text = self.hwbp_addr_input.text().strip()
         len_text = self.hwbp_len_input.text().strip()
         type_data = self.hwbp_type_combo.currentData()
         scope_data = self.hwbp_scope_combo.currentData()
         try:
             addr = int(addr_text, 0)
+        except ValueError:
+            QMessageBox.warning(self, "输入提示", "断点地址格式无效。")
+            return
+        try:
             length = int(len_text, 10)
         except ValueError:
-            QMessageBox.warning(self, "输入提示", "断点地址或长度格式无效。")
-            return
+            length = 1
         if addr <= 0:
             QMessageBox.warning(self, "输入提示", "断点地址必须大于 0。")
             return
-        if length <= 0:
-            QMessageBox.warning(self, "输入提示", "长度必须大于 0。")
-            return
+        length = max(1, min(8, length))
         bp_type = str(type_data) if type_data is not None else "1"
         bp_scope = str(scope_data) if scope_data is not None else "0"
         response = self._request_ok(
@@ -2925,13 +2950,21 @@ class TcpTestWindow(QWidget):
         )
         if response is None:
             return
+        self.hwbp_active = True
+        self._apply_hwbp_active_state()
         self._set_status("设置硬件断点成功")
         self.on_hwbp_refresh(silent=True)
 
     def on_hwbp_remove_all(self) -> None:
+        if not self.hwbp_active:
+            self._set_status("断点未激活，无需移除")
+            return
+
         response = self._request_ok("breakpoint.clear", error_title="移除失败")
         if response is None:
             return
+        self.hwbp_active = False
+        self._apply_hwbp_active_state()
         self._set_status("已移除进程硬件断点")
         self.on_hwbp_refresh(silent=True)
 

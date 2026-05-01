@@ -452,13 +452,18 @@ def android_breakpoint_list() -> dict[str, Any]:
 @mcp.tool()
 def android_breakpoint_set(address: int | str, bp_type: int | str, bp_scope: int | str, length: int) -> dict[str, Any]:
     """Create a hardware breakpoint on the current target process."""
+    current = _call_bridge_operation("breakpoint.info")
+    data = current.get("data")
+    if isinstance(data, dict) and bool(data.get("active", False)):
+        raise BridgeError("hardware breakpoint is already active; call android_breakpoint_clear_all first")
+    clamped_length = max(1, min(8, int(length)))
     return _call_bridge_operation(
         "breakpoint.set",
         {
             "address": format_address(address),
             "bp_type": bp_type,
             "bp_scope": bp_scope,
-            "length": length,
+            "length": clamped_length,
         },
     )
 
@@ -466,6 +471,19 @@ def android_breakpoint_set(address: int | str, bp_type: int | str, bp_scope: int
 @mcp.tool()
 def android_breakpoint_clear_all() -> dict[str, Any]:
     """Remove all active hardware breakpoints from the current target process."""
+    current = _call_bridge_operation("breakpoint.info")
+    data = current.get("data")
+    if isinstance(data, dict) and not bool(data.get("active", False)):
+        return {
+            "ok": True,
+            "operation": "breakpoint.clear",
+            "data": {
+                "active": False,
+                "cleared": False,
+            },
+            "connection": current.get("connection", {}),
+            "raw": {},
+        }
     return _call_bridge_operation("breakpoint.clear")
 
 
@@ -480,20 +498,6 @@ def android_breakpoint_record_update(index: int, field: str, value: int | str) -
     """Patch one saved hardware breakpoint register field; backend sets the write mask before writing the field."""
     normalized = f"0x{value:X}" if isinstance(value, int) else str(value).strip()
     return _call_bridge_operation("breakpoint.record.update", {"index": index, "field": field, "value": normalized})
-
-
-@mcp.tool()
-def android_breakpoint_record_set_float(index: int, field: str, value: float, precision: str = "f32") -> dict[str, Any]:
-    """Set a SIMD/float register field (q0~q31 or v0~v31) in a breakpoint record."""
-    reg = str(field).strip().lower()
-    if len(reg) < 2 or reg[0] not in {"q", "v"}:
-        raise ValueError("field must be q0~q31 or v0~v31")
-    return _call_bridge_operation("breakpoint.record.set_float", {
-        "index": index,
-        "field": reg,
-        "value": str(value),
-        "precision": precision,
-    })
 
 
 @mcp.tool()
@@ -799,18 +803,6 @@ TOOL_META: dict[str, dict[str, Any]] = {
             "value": "Number or hex string. Register writes set HWBP_OP_WRITE before updating the struct field.",
         },
         "result_notes": "Requires non-empty records; otherwise index out of range.",
-    },
-    "android_breakpoint_record_set_float": {
-        "group": "Breakpoints",
-        "use_when": "Write an f32/f64 value into q0~q31/v0~v31 of a saved breakpoint record.",
-        "example": {"index": 0, "field": "q0", "value": 1.5, "precision": "f32"},
-        "parameter_notes": {
-            "index": "Valid existing record index.",
-            "field": "SIMD register field token: q0~q31 or v0~v31.",
-            "value": "Floating point value to encode and write.",
-            "precision": "f32 or f64. Defaults to f32.",
-        },
-        "result_notes": "Requires non-empty records; otherwise index out of range. Returns encoded bits.",
     },
     "android_help": {
         "group": "Docs",

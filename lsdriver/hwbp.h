@@ -1169,6 +1169,9 @@ static inline void sample_hbp_handler(struct pt_regs *regs, struct breakpoint_co
     {
         rec = &self->bp_info->records[self->bp_info->record_count];
         rec->pc = regs->pc;
+        //新槽位所有寄存器的mask默认读取
+        for (i = IDX_PC; i < MAX_REG_COUNT; i++)
+            HWBP_SET_MASK(rec, i, HWBP_OP_READ);
         self->bp_info->record_count++;
     }
 
