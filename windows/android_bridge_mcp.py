@@ -30,7 +30,7 @@ from tcp_server import (  # noqa: E402
 )
 
 DEFAULT_MCP_BIND_HOST = os.getenv("ANDROID_MCP_BIND_HOST", "127.0.0.1").strip() or "127.0.0.1"
-DEFAULT_MCP_BIND_PORT = int(os.getenv("ANDROID_MCP_BIND_PORT", "13337"))
+DEFAULT_MCP_BIND_PORT = int(os.getenv("ANDROID_MCP_BIND_PORT", "14447"))
 DEFAULT_MCP_PATH = os.getenv("ANDROID_MCP_PATH", "/mcp")
 DEFAULT_MCP_CONFIG_PATH = os.getenv("ANDROID_MCP_CONFIG_PATH", "/config.html")
 
@@ -483,15 +483,15 @@ def android_breakpoint_record_update(index: int, field: str, value: int | str) -
 
 
 @mcp.tool()
-def android_breakpoint_record_set_float(index: int, register_name: str, float_value: float, precision: str = "f32") -> dict[str, Any]:
-    """Set a SIMD/float register (Q0/V0~Q31/V31) in a breakpoint record. Backend sets the write mask before writing."""
-    reg = str(register_name).strip().lower()
+def android_breakpoint_record_set_float(index: int, field: str, value: float, precision: str = "f32") -> dict[str, Any]:
+    """Set a SIMD/float register field (q0~q31 or v0~v31) in a breakpoint record."""
+    reg = str(field).strip().lower()
     if len(reg) < 2 or reg[0] not in {"q", "v"}:
-        raise ValueError("register_name must be q0~q31 or v0~v31")
+        raise ValueError("field must be q0~q31 or v0~v31")
     return _call_bridge_operation("breakpoint.record.set_float", {
         "index": index,
         "field": reg,
-        "value": str(float_value),
+        "value": str(value),
         "precision": precision,
     })
 
@@ -766,12 +766,12 @@ TOOL_META: dict[str, dict[str, Any]] = {
     "android_breakpoint_set": {
         "group": "Breakpoints",
         "use_when": "Create one hardware breakpoint.",
-        "example": {"address": "0x12345678", "bp_type": "read", "bp_scope": 0, "length": 4},
+        "example": {"address": "0x12345678", "bp_type": "read", "bp_scope": "main", "length": 4},
         "parameter_notes": {
             "address": "Target instruction/data address.",
-            "bp_type": "Type token or backend enum: read/1, write/2, read_write/3, execute/4.",
-            "bp_scope": "Scope enum from backend.",
-            "length": "Byte length constraint from backend.",
+            "bp_type": "Service token: read/write/read_write/execute. Numeric tokens 1/2/3/4 are also accepted.",
+            "bp_scope": "Service token: main/other/all. Numeric tokens 0/1/2 are also accepted.",
+            "length": "Breakpoint length in bytes, 1..8.",
         },
         "result_notes": "Creates breakpoint; record update requires existing record index.",
     },
@@ -795,10 +795,22 @@ TOOL_META: dict[str, dict[str, Any]] = {
         "example": {"index": 0, "field": "x0", "value": "0x12345678"},
         "parameter_notes": {
             "index": "Valid existing record index.",
-            "field": "pc/hit_count/lr/sp/pstate/orig_x0/syscallno/fpsr/fpcr/x0~x29/q0~q31, or op.<field>/mask0~mask17 for advanced mask control.",
+            "field": "pc/hit_count/lr/sp/pstate/orig_x0/syscallno/fpsr/fpcr/x0~x29/q0~q31/v0~v31, op.<field> for write-mask control, or mask0~mask17.",
             "value": "Number or hex string. Register writes set HWBP_OP_WRITE before updating the struct field.",
         },
         "result_notes": "Requires non-empty records; otherwise index out of range.",
+    },
+    "android_breakpoint_record_set_float": {
+        "group": "Breakpoints",
+        "use_when": "Write an f32/f64 value into q0~q31/v0~v31 of a saved breakpoint record.",
+        "example": {"index": 0, "field": "q0", "value": 1.5, "precision": "f32"},
+        "parameter_notes": {
+            "index": "Valid existing record index.",
+            "field": "SIMD register field token: q0~q31 or v0~v31.",
+            "value": "Floating point value to encode and write.",
+            "precision": "f32 or f64. Defaults to f32.",
+        },
+        "result_notes": "Requires non-empty records; otherwise index out of range. Returns encoded bits.",
     },
     "android_help": {
         "group": "Docs",
