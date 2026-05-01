@@ -342,12 +342,22 @@ int hw_breakpoint_hook_install(void)
 }
 void hw_breakpoint_hook_remove(void)
 {
+    if (!breakpoint_handler && !watchpoint_handler)
+    {
+        pr_debug("[driver] hook remove skipped, not installed\n");
+        return;
+    }
+
     // 还原 watchpoint_handler 原始指令
-    unhook_one(watchpoint_handler, orig_wp_insn);
+    if (watchpoint_handler)
+        unhook_one(watchpoint_handler, orig_wp_insn);
 
     // 还原 breakpoint_handler 原始指令
-    unhook_one(breakpoint_handler, orig_bp_insn);
+    if (breakpoint_handler)
+        unhook_one(breakpoint_handler, orig_bp_insn);
 
+    breakpoint_handler = 0;
+    watchpoint_handler = 0;
     pr_debug("[driver] hook removed\n");
 }
 
@@ -526,9 +536,9 @@ static void probe_sched_switch(void *data, bool preempt,
         // 根据断点类型进行分发
         if (info.ctrl.type == ARM_BREAKPOINT_EXECUTE)
         {
-            // 执行寄存器的地址寄存器
+            // 执行地址寄存器
             write_wb_reg(AARCH64_DBG_REG_BVR, 5, info.address);
-            // 执行寄存器的控制寄存器
+            // 执行控制寄存器
             //"| 0x1"表示立即生效,
             //"& ~0x1"表示写入的寄存器配置，但是禁用不生效
             //"0"给控制寄存器请0，就删除了断点
@@ -537,9 +547,9 @@ static void probe_sched_switch(void *data, bool preempt,
         }
         else
         {
-            // 访问寄存器的地址寄存器
+            // 访问地址寄存器
             write_wb_reg(AARCH64_DBG_REG_WVR, 3, info.address);
-            // 访问寄存器的控制寄存器
+            // 访问控制寄存器
             //"| 0x1"表示立即生效,
             //"& ~0x1"表示写入的寄存器配置，但是禁用不生效
             //"0"给控制寄存器请0就删除了断点
@@ -559,7 +569,7 @@ static void probe_sched_switch(void *data, bool preempt,
             pr_debug("目标进程的子线程被切换走: pid=%d comm=%s cpu=%d\n", prev->pid, prev->comm, raw_smp_processor_id());
         }
 
-        // 请0执行寄存器和访问寄存器的控制寄存器
+        // 请0执行控制寄存器和访问控制寄存器
         write_wb_reg(AARCH64_DBG_REG_BCR, 5, 0);
         write_wb_reg(AARCH64_DBG_REG_WCR, 3, 0);
 
@@ -595,8 +605,15 @@ static int start_task_run_monitor(struct breakpoint_config *bp_config)
 // 注销回调，取消监听
 static void stop_task_run_monitor(void)
 {
+    if (!g_bp_config)
+    {
+        pr_debug("monitor stop skipped, not running\n");
+        return;
+    }
+
     unregister_trace_sched_switch(probe_sched_switch, NULL);
     pr_debug("monitor stop, target tgid=%d\n", g_bp_config->pid);
+    g_bp_config = NULL;
 }
 
 // // 单步异常步过的内核api，我不使用了，上面异常回调直接关寄存器
