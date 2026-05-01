@@ -85,7 +85,7 @@ public:                // 外部初始化
 
     ~Driver()
     {
-        ExitKernel();
+        //ExitKernel();
     }
 
 public: // 共有结构体和锁
@@ -677,11 +677,11 @@ public: // 外部获取内存信息
    这种情况下，代码虽然逻辑上来自某个 ELF，但在 maps 中可能没有原始
    so 文件路径，因此无法按普通模块名归属。
 
-4. Hook / Trampoline /  跳板
+4. Hook /  跳板
    Hook 框架或保护代码可能申请一小段可执行内存，用来存放跳板指令、桩代码或中转逻辑。
 
 注意:
-  这种区域地址位置受 ASLR、mmap 分配策略、MAP_FIXED、内存碎片等因素影响。
+  这种区域地址位置受 ASLR、mmap 分配策略、内存碎片等因素影响。
   权限是 rwx / rwxs，说明该区域同时可写可执行，通常更像动态代码、JIT 代码、解密代码或跳板代码。
 */
     bool DumpModule(std::string_view moduleName)
