@@ -23,6 +23,11 @@ namespace
         MemScanner memScanner;
         MemViewer memViewer;
         PointerManager pointerManager;
+        bool hwbpActive = false;
+        std::uint64_t hwbpAddress = 0;
+        std::string hwbpType;
+        std::string hwbpScope;
+        int hwbpLength = 0;
     };
 
     SharedBridgeState gBridgeState;
@@ -120,6 +125,55 @@ namespace
             return std::nullopt;
         }
         return value;
+    }
+
+    std::optional<__uint128_t> parseUInt128(std::string_view text)
+    {
+        if (text.empty())
+            return std::nullopt;
+
+        int base = 10;
+        if (text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X'))
+        {
+            base = 16;
+            text.remove_prefix(2);
+        }
+        if (text.empty())
+            return std::nullopt;
+
+        __uint128_t value = 0;
+        for (const char ch : text)
+        {
+            int digit = -1;
+            if (ch >= '0' && ch <= '9')
+                digit = ch - '0';
+            else if (base == 16 && ch >= 'a' && ch <= 'f')
+                digit = ch - 'a' + 10;
+            else if (base == 16 && ch >= 'A' && ch <= 'F')
+                digit = ch - 'A' + 10;
+            if (digit < 0 || digit >= base)
+                return std::nullopt;
+            value = value * static_cast<unsigned>(base) + static_cast<unsigned>(digit);
+        }
+        return value;
+    }
+
+    std::string formatUInt128Hex(__uint128_t value)
+    {
+        if (value == 0)
+            return "0x0";
+
+        char buf[35]{};
+        int pos = 34;
+        static constexpr char kHex[] = "0123456789ABCDEF";
+        while (value != 0 && pos > 1)
+        {
+            buf[--pos] = kHex[static_cast<unsigned>(value & 0xF)];
+            value >>= 4;
+        }
+        buf[--pos] = 'x';
+        buf[--pos] = '0';
+        return std::string(buf + pos);
     }
 
     template <typename T>
@@ -560,6 +614,12 @@ namespace
         root["num_wrps"] = info.num_wrps;
         root["hit_addr"] = info.hit_addr;
         root["hit_addr_hex"] = std::format("0x{:X}", static_cast<std::uint64_t>(info.hit_addr));
+        root["active"] = gBridgeState.hwbpActive;
+        root["active_address"] = gBridgeState.hwbpAddress;
+        root["active_address_hex"] = std::format("0x{:X}", gBridgeState.hwbpAddress);
+        root["active_type"] = gBridgeState.hwbpType;
+        root["active_scope"] = gBridgeState.hwbpScope;
+        root["active_length"] = gBridgeState.hwbpLength;
         root["record_count"] = recordCount;
         root["records"] = json::array();
 
@@ -771,7 +831,6 @@ namespace
                 "breakpoint.clear",
                 "breakpoint.record.remove",
                 "breakpoint.record.update",
-                "breakpoint.record.set_float",
                 "signature.scan_address",
                 "signature.scan_file",
                 "signature.scan_pattern",
@@ -1233,6 +1292,9 @@ namespace
 
         if (op == "breakpoint.set")
         {
+            if (gBridgeState.hwbpActive)
+                return fail("断点已激活，请先执行 breakpoint.clear");
+
             const auto address = requiredUInt64("address", "address");
             const auto type = requiredString("bp_type", "bp_type");
             const auto scope = requiredString("bp_scope", "bp_scope");
@@ -1251,19 +1313,37 @@ namespace
                 return fail("全局PID未设置，请先执行 target.pid.set 或 target.attach.package");
             const auto bpType = parseBpTypeToken(std::get<std::string>(type));
             const auto bpScope = parseBpScopeToken(std::get<std::string>(scope));
-            const auto bpLength = parseBpLengthValue(std::get<int>(length));
+            int clampedLength = std::get<int>(length);
+            if (clampedLength < 1)
+                clampedLength = 1;
+            else if (clampedLength > 8)
+                clampedLength = 8;
+            const auto bpLength = parseBpLengthValue(clampedLength);
             if (!bpType.has_value() || !bpScope.has_value() || !bpLength.has_value())
                 return fail("断点参数无效，长度范围为 1-8");
             const int status = dr.SetProcessHwbpRef(std::get<std::uint64_t>(address), *bpType, *bpScope, *bpLength);
             if (status != 0)
                 return fail(std::format("设置断点失败 status={}", status));
-            return okData({{"status", status}, {"type", std::string(bpTypeToToken(*bpType))}, {"scope", std::string(bpScopeToToken(*bpScope))}, {"length", std::get<int>(length)}});
+            gBridgeState.hwbpActive = true;
+            gBridgeState.hwbpAddress = std::get<std::uint64_t>(address);
+            gBridgeState.hwbpType = std::string(bpTypeToToken(*bpType));
+            gBridgeState.hwbpScope = std::string(bpScopeToToken(*bpScope));
+            gBridgeState.hwbpLength = clampedLength;
+            return okData({{"status", status}, {"active", true}, {"address", gBridgeState.hwbpAddress}, {"address_hex", std::format("0x{:X}", gBridgeState.hwbpAddress)}, {"type", gBridgeState.hwbpType}, {"scope", gBridgeState.hwbpScope}, {"length", gBridgeState.hwbpLength}});
         }
 
         if (op == "breakpoint.clear")
         {
+            if (!gBridgeState.hwbpActive)
+                return okData({{"active", false}, {"cleared", false}});
+
             dr.RemoveProcessHwbpRef();
-            return ok();
+            gBridgeState.hwbpActive = false;
+            gBridgeState.hwbpAddress = 0;
+            gBridgeState.hwbpType.clear();
+            gBridgeState.hwbpScope.clear();
+            gBridgeState.hwbpLength = 0;
+            return okData({{"active", false}, {"cleared", true}});
         }
 
         if (op == "breakpoint.record.remove")
@@ -1282,66 +1362,44 @@ namespace
         {
             const auto index = requiredInt("index", "index");
             const auto field = requiredString("field", "field");
-            const auto value = requiredUInt64("value", "value");
+            const auto valueText = requiredString("value", "value");
             if (std::holds_alternative<json>(index))
                 return std::get<json>(index);
             if (std::holds_alternative<json>(field))
                 return std::get<json>(field);
-            if (std::holds_alternative<json>(value))
-                return std::get<json>(value);
+            if (std::holds_alternative<json>(valueText))
+                return std::get<json>(valueText);
+            const auto value = parseUInt128(std::get<std::string>(valueText));
+            if (!value.has_value())
+                return fail(std::format("operation={} 参数 value 无效", op));
             const auto &info = dr.GetHwbpInfoRef();
             if (std::get<int>(index) < 0 || std::get<int>(index) >= info.record_count)
                 return fail("index 越界");
             auto copy = info.records[std::get<int>(index)];
-            if (!MemUtils::AssignHwbpRecordField(copy, std::get<std::string>(field), std::get<std::uint64_t>(value)))
+            const std::string fieldToken = MemUtils::HwbpLowerAscii(std::get<std::string>(field));
+            bool assigned = false;
+            if (const auto maskIndex = MemUtils::HwbpMaskByteIndexFromToken(fieldToken); maskIndex.has_value())
+            {
+                copy.mask[*maskIndex] = static_cast<std::uint8_t>(*value & 0xFF);
+                assigned = true;
+            }
+            else if (fieldToken.starts_with("op.") || fieldToken.starts_with("mask."))
+            {
+                const auto regIndex = MemUtils::HwbpRegIndexFromToken(fieldToken);
+                if (regIndex.has_value() && *value <= HWBP_OP_WRITE)
+                {
+                    HWBP_SET_MASK(&copy, *regIndex, static_cast<std::uint8_t>(*value));
+                    assigned = true;
+                }
+            }
+            else if (const auto regIndex = MemUtils::HwbpRegIndexFromToken(fieldToken); regIndex.has_value())
+            {
+                assigned = MemUtils::HwbpWriteRegisterValue(copy, *regIndex, *value);
+            }
+            if (!assigned)
                 return fail("field 无效");
             const_cast<Driver::hwbp_record &>(info.records[std::get<int>(index)]) = copy;
-            return okData({{"index", std::get<int>(index)}, {"field", std::get<std::string>(field)}, {"value", std::get<std::uint64_t>(value)}});
-        }
-
-        if (op == "breakpoint.record.set_float")
-        {
-            const auto index = requiredInt("index", "index");
-            const auto field = requiredString("field", "field");
-            const auto value = requiredDouble("value", "value");
-            if (std::holds_alternative<json>(index))
-                return std::get<json>(index);
-            if (std::holds_alternative<json>(field))
-                return std::get<json>(field);
-            if (std::holds_alternative<json>(value))
-                return std::get<json>(value);
-
-            const std::string fieldToken = toLowerAscii(std::get<std::string>(field));
-            if (fieldToken.size() < 2 || (fieldToken[0] != 'v' && fieldToken[0] != 'q'))
-                return fail("field 必须是 q0~q31");
-            const auto regIndex = parseInt(fieldToken.substr(1));
-            if (!regIndex.has_value() || *regIndex < 0 || *regIndex >= 32)
-                return fail("field 必须是 q0~q31");
-
-            const auto &info = dr.GetHwbpInfoRef();
-            if (std::get<int>(index) < 0 || std::get<int>(index) >= info.record_count)
-                return fail("index 越界");
-
-            const std::string precisionToken = optionalString("precision");
-            const std::string precision = precisionToken.empty() ? "f32" : toLowerAscii(precisionToken);
-            auto copy = info.records[std::get<int>(index)];
-            if (precision == "f64")
-            {
-                const double fval = std::get<double>(value);
-                std::uint64_t bits = 0;
-                std::memcpy(&bits, &fval, sizeof(bits));
-                MemUtils::HwbpWriteRegisterValue(copy, Driver::IDX_Q0 + *regIndex, static_cast<__uint128_t>(bits));
-                const_cast<Driver::hwbp_record &>(info.records[std::get<int>(index)]) = copy;
-                return okData({{"index", std::get<int>(index)}, {"reg", *regIndex}, {"precision", "f64"}, {"bits", bits}});
-            }
-            if (precision != "f32")
-                return fail("precision 仅支持 f32/f64");
-            const float fval = static_cast<float>(std::get<double>(value));
-            std::uint32_t bits = 0;
-            std::memcpy(&bits, &fval, sizeof(bits));
-            MemUtils::HwbpWriteRegisterValue(copy, Driver::IDX_Q0 + *regIndex, static_cast<__uint128_t>(bits));
-            const_cast<Driver::hwbp_record &>(info.records[std::get<int>(index)]) = copy;
-            return okData({{"index", std::get<int>(index)}, {"reg", *regIndex}, {"precision", "f32"}, {"bits", bits}});
+            return okData({{"index", std::get<int>(index)}, {"field", std::get<std::string>(field)}, {"value_hex", formatUInt128Hex(*value)}});
         }
 
         if (op == "signature.scan_address")

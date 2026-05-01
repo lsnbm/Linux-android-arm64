@@ -102,7 +102,6 @@ __attribute__((used)) static void work_trampoline_breakpoint(unsigned long unuse
         所以放心在异常回调关断步过
         */
 
-
     /*
     这里先实时读取了执行控制寄存器配置，并只修改了bit 0 enabled是否启用位
     为何不直接清空的原因就是
@@ -306,6 +305,13 @@ int hw_breakpoint_hook_install(void)
 {
     int ret;
 
+    //防止重复安装，下面删除hook时会清空来判断是否重新安装
+    if (breakpoint_handler || watchpoint_handler)
+    {
+        pr_debug("[driver] hook install skipped, already installed\n");
+        return 0;
+    }
+
     breakpoint_handler = generic_kallsyms_lookup_name("breakpoint_handler");
     if (!breakpoint_handler)
     {
@@ -331,6 +337,9 @@ int hw_breakpoint_hook_install(void)
     if (ret)
     {
         pr_debug("[driver] hook watchpoint_handler failed: %d\n", ret);
+        unhook_one(breakpoint_handler, orig_bp_insn);
+        breakpoint_handler = 0;
+        watchpoint_handler = 0;
         return ret;
     }
     //  把 trampoline 里的 nop 指令改成原始指令,执行因hook被修改的第一条指令
@@ -589,6 +598,13 @@ static int start_task_run_monitor(struct breakpoint_config *bp_config)
         return -EINVAL;
     }
     // 传递上下文给全局，让异常处理和断点写入都能互相传递配置信息
+    if (g_bp_config)//已有配置进行了注册，防止重复注册
+    {
+        g_bp_config = bp_config;
+        pr_debug("monitor already running, update target tgid=%d\n", g_bp_config->pid);
+        return 0;
+    }
+
     g_bp_config = bp_config;
 
     ret = register_trace_sched_switch(probe_sched_switch, NULL);
