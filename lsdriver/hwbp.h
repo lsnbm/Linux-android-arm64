@@ -1150,8 +1150,6 @@ struct breakpoint_config bp_config;
 // 断点触发回调函数
 static inline void sample_hbp_handler(struct pt_regs *regs, struct breakpoint_config *self)
 {
-
-    unsigned long flags;
     struct hwbp_record *rec = NULL;
     int i;
     // 直接从配置属性中获取原始断点地址
