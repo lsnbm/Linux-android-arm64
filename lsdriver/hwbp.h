@@ -1437,584 +1437,240 @@ static inline void sample_hbp_handler(struct pt_regs *regs, struct breakpoint_co
         // FPSR
         op = HWBP_GET_MASK(rec, IDX_FPSR);
         if (op == HWBP_OP_READ)
-        {
-            uint64_t v;
-            asm volatile(".arch_extension fp\n"
-                         "mrs %0, fpsr"
-                         : "=r"(v));
-            rec->fpsr = (uint32_t)v;
-        }
+            rec->fpsr = read_fpsr();
         else if (op == HWBP_OP_WRITE)
-        {
-            uint64_t v = rec->fpsr;
-            asm volatile(".arch_extension fp\n"
-                         "msr fpsr, %0"
-                         :
-                         : "r"(v));
-        }
+            write_fpsr(rec->fpsr);
 
         // FPCR
         op = HWBP_GET_MASK(rec, IDX_FPCR);
         if (op == HWBP_OP_READ)
-        {
-            uint64_t v;
-            asm volatile(".arch_extension fp\n"
-                         "mrs %0, fpcr"
-                         : "=r"(v));
-            rec->fpcr = (uint32_t)v;
-        }
+            rec->fpcr = read_fpcr();
         else if (op == HWBP_OP_WRITE)
-        {
-            uint64_t v = rec->fpcr;
-            asm volatile(".arch_extension fp\n"
-                         "msr fpcr, %0"
-                         :
-                         : "r"(v));
-        }
+            write_fpcr(rec->fpcr);
 
         // Q0
         op = HWBP_GET_MASK(rec, IDX_Q0);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q0, [%0]\n"
-                         :
-                         : "r"(&rec->q0)
-                         : "memory");
+            read_q_reg(0, &rec->q0);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q0, [%0]\n"
-                         :
-                         : "r"(&rec->q0)
-                         : "memory");
+            write_q_reg(0, &rec->q0);
 
         // Q1
         op = HWBP_GET_MASK(rec, IDX_Q1);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q1, [%0]\n"
-                         :
-                         : "r"(&rec->q1)
-                         : "memory");
+            read_q_reg(1, &rec->q1);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q1, [%0]\n"
-                         :
-                         : "r"(&rec->q1)
-                         : "memory");
+            write_q_reg(1, &rec->q1);
 
         // Q2
         op = HWBP_GET_MASK(rec, IDX_Q2);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q2, [%0]\n"
-                         :
-                         : "r"(&rec->q2)
-                         : "memory");
+            read_q_reg(2, &rec->q2);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q2, [%0]\n"
-                         :
-                         : "r"(&rec->q2)
-                         : "memory");
+            write_q_reg(2, &rec->q2);
 
         // Q3
         op = HWBP_GET_MASK(rec, IDX_Q3);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q3, [%0]\n"
-                         :
-                         : "r"(&rec->q3)
-                         : "memory");
+            read_q_reg(3, &rec->q3);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q3, [%0]\n"
-                         :
-                         : "r"(&rec->q3)
-                         : "memory");
+            write_q_reg(3, &rec->q3);
 
         // Q4
         op = HWBP_GET_MASK(rec, IDX_Q4);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q4, [%0]\n"
-                         :
-                         : "r"(&rec->q4)
-                         : "memory");
+            read_q_reg(4, &rec->q4);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q4, [%0]\n"
-                         :
-                         : "r"(&rec->q4)
-                         : "memory");
+            write_q_reg(4, &rec->q4);
 
         // Q5
         op = HWBP_GET_MASK(rec, IDX_Q5);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q5, [%0]\n"
-                         :
-                         : "r"(&rec->q5)
-                         : "memory");
+            read_q_reg(5, &rec->q5);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q5, [%0]\n"
-                         :
-                         : "r"(&rec->q5)
-                         : "memory");
+            write_q_reg(5, &rec->q5);
 
         // Q6
         op = HWBP_GET_MASK(rec, IDX_Q6);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q6, [%0]\n"
-                         :
-                         : "r"(&rec->q6)
-                         : "memory");
+            read_q_reg(6, &rec->q6);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q6, [%0]\n"
-                         :
-                         : "r"(&rec->q6)
-                         : "memory");
+            write_q_reg(6, &rec->q6);
 
         // Q7
         op = HWBP_GET_MASK(rec, IDX_Q7);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q7, [%0]\n"
-                         :
-                         : "r"(&rec->q7)
-                         : "memory");
+            read_q_reg(7, &rec->q7);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q7, [%0]\n"
-                         :
-                         : "r"(&rec->q7)
-                         : "memory");
+            write_q_reg(7, &rec->q7);
 
         // Q8
         op = HWBP_GET_MASK(rec, IDX_Q8);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q8, [%0]\n"
-                         :
-                         : "r"(&rec->q8)
-                         : "memory");
+            read_q_reg(8, &rec->q8);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q8, [%0]\n"
-                         :
-                         : "r"(&rec->q8)
-                         : "memory");
+            write_q_reg(8, &rec->q8);
 
         // Q9
         op = HWBP_GET_MASK(rec, IDX_Q9);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q9, [%0]\n"
-                         :
-                         : "r"(&rec->q9)
-                         : "memory");
+            read_q_reg(9, &rec->q9);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q9, [%0]\n"
-                         :
-                         : "r"(&rec->q9)
-                         : "memory");
+            write_q_reg(9, &rec->q9);
 
         // Q10
         op = HWBP_GET_MASK(rec, IDX_Q10);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q10, [%0]\n"
-                         :
-                         : "r"(&rec->q10)
-                         : "memory");
+            read_q_reg(10, &rec->q10);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q10, [%0]\n"
-                         :
-                         : "r"(&rec->q10)
-                         : "memory");
+            write_q_reg(10, &rec->q10);
 
         // Q11
         op = HWBP_GET_MASK(rec, IDX_Q11);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q11, [%0]\n"
-                         :
-                         : "r"(&rec->q11)
-                         : "memory");
+            read_q_reg(11, &rec->q11);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q11, [%0]\n"
-                         :
-                         : "r"(&rec->q11)
-                         : "memory");
+            write_q_reg(11, &rec->q11);
 
         // Q12
         op = HWBP_GET_MASK(rec, IDX_Q12);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q12, [%0]\n"
-                         :
-                         : "r"(&rec->q12)
-                         : "memory");
+            read_q_reg(12, &rec->q12);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q12, [%0]\n"
-                         :
-                         : "r"(&rec->q12)
-                         : "memory");
+            write_q_reg(12, &rec->q12);
 
         // Q13
         op = HWBP_GET_MASK(rec, IDX_Q13);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q13, [%0]\n"
-                         :
-                         : "r"(&rec->q13)
-                         : "memory");
+            read_q_reg(13, &rec->q13);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q13, [%0]\n"
-                         :
-                         : "r"(&rec->q13)
-                         : "memory");
+            write_q_reg(13, &rec->q13);
 
         // Q14
         op = HWBP_GET_MASK(rec, IDX_Q14);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q14, [%0]\n"
-                         :
-                         : "r"(&rec->q14)
-                         : "memory");
+            read_q_reg(14, &rec->q14);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q14, [%0]\n"
-                         :
-                         : "r"(&rec->q14)
-                         : "memory");
+            write_q_reg(14, &rec->q14);
 
         // Q15
         op = HWBP_GET_MASK(rec, IDX_Q15);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q15, [%0]\n"
-                         :
-                         : "r"(&rec->q15)
-                         : "memory");
+            read_q_reg(15, &rec->q15);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q15, [%0]\n"
-                         :
-                         : "r"(&rec->q15)
-                         : "memory");
+            write_q_reg(15, &rec->q15);
 
         // Q16
         op = HWBP_GET_MASK(rec, IDX_Q16);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q16, [%0]\n"
-                         :
-                         : "r"(&rec->q16)
-                         : "memory");
+            read_q_reg(16, &rec->q16);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q16, [%0]\n"
-                         :
-                         : "r"(&rec->q16)
-                         : "memory");
+            write_q_reg(16, &rec->q16);
 
         // Q17
         op = HWBP_GET_MASK(rec, IDX_Q17);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q17, [%0]\n"
-                         :
-                         : "r"(&rec->q17)
-                         : "memory");
+            read_q_reg(17, &rec->q17);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q17, [%0]\n"
-                         :
-                         : "r"(&rec->q17)
-                         : "memory");
+            write_q_reg(17, &rec->q17);
 
         // Q18
         op = HWBP_GET_MASK(rec, IDX_Q18);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q18, [%0]\n"
-                         :
-                         : "r"(&rec->q18)
-                         : "memory");
+            read_q_reg(18, &rec->q18);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q18, [%0]\n"
-                         :
-                         : "r"(&rec->q18)
-                         : "memory");
+            write_q_reg(18, &rec->q18);
 
         // Q19
         op = HWBP_GET_MASK(rec, IDX_Q19);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q19, [%0]\n"
-                         :
-                         : "r"(&rec->q19)
-                         : "memory");
+            read_q_reg(19, &rec->q19);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q19, [%0]\n"
-                         :
-                         : "r"(&rec->q19)
-                         : "memory");
+            write_q_reg(19, &rec->q19);
 
         // Q20
         op = HWBP_GET_MASK(rec, IDX_Q20);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q20, [%0]\n"
-                         :
-                         : "r"(&rec->q20)
-                         : "memory");
+            read_q_reg(20, &rec->q20);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q20, [%0]\n"
-                         :
-                         : "r"(&rec->q20)
-                         : "memory");
+            write_q_reg(20, &rec->q20);
 
         // Q21
         op = HWBP_GET_MASK(rec, IDX_Q21);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q21, [%0]\n"
-                         :
-                         : "r"(&rec->q21)
-                         : "memory");
+            read_q_reg(21, &rec->q21);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q21, [%0]\n"
-                         :
-                         : "r"(&rec->q21)
-                         : "memory");
+            write_q_reg(21, &rec->q21);
 
         // Q22
         op = HWBP_GET_MASK(rec, IDX_Q22);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q22, [%0]\n"
-                         :
-                         : "r"(&rec->q22)
-                         : "memory");
+            read_q_reg(22, &rec->q22);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q22, [%0]\n"
-                         :
-                         : "r"(&rec->q22)
-                         : "memory");
+            write_q_reg(22, &rec->q22);
 
         // Q23
         op = HWBP_GET_MASK(rec, IDX_Q23);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q23, [%0]\n"
-                         :
-                         : "r"(&rec->q23)
-                         : "memory");
+            read_q_reg(23, &rec->q23);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q23, [%0]\n"
-                         :
-                         : "r"(&rec->q23)
-                         : "memory");
+            write_q_reg(23, &rec->q23);
 
         // Q24
         op = HWBP_GET_MASK(rec, IDX_Q24);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q24, [%0]\n"
-                         :
-                         : "r"(&rec->q24)
-                         : "memory");
+            read_q_reg(24, &rec->q24);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q24, [%0]\n"
-                         :
-                         : "r"(&rec->q24)
-                         : "memory");
+            write_q_reg(24, &rec->q24);
 
         // Q25
         op = HWBP_GET_MASK(rec, IDX_Q25);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q25, [%0]\n"
-                         :
-                         : "r"(&rec->q25)
-                         : "memory");
+            read_q_reg(25, &rec->q25);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q25, [%0]\n"
-                         :
-                         : "r"(&rec->q25)
-                         : "memory");
+            write_q_reg(25, &rec->q25);
 
         // Q26
         op = HWBP_GET_MASK(rec, IDX_Q26);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q26, [%0]\n"
-                         :
-                         : "r"(&rec->q26)
-                         : "memory");
+            read_q_reg(26, &rec->q26);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q26, [%0]\n"
-                         :
-                         : "r"(&rec->q26)
-                         : "memory");
+            write_q_reg(26, &rec->q26);
 
         // Q27
         op = HWBP_GET_MASK(rec, IDX_Q27);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q27, [%0]\n"
-                         :
-                         : "r"(&rec->q27)
-                         : "memory");
+            read_q_reg(27, &rec->q27);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q27, [%0]\n"
-                         :
-                         : "r"(&rec->q27)
-                         : "memory");
+            write_q_reg(27, &rec->q27);
 
         // Q28
         op = HWBP_GET_MASK(rec, IDX_Q28);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q28, [%0]\n"
-                         :
-                         : "r"(&rec->q28)
-                         : "memory");
+            read_q_reg(28, &rec->q28);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q28, [%0]\n"
-                         :
-                         : "r"(&rec->q28)
-                         : "memory");
+            write_q_reg(28, &rec->q28);
 
         // Q29
         op = HWBP_GET_MASK(rec, IDX_Q29);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q29, [%0]\n"
-                         :
-                         : "r"(&rec->q29)
-                         : "memory");
+            read_q_reg(29, &rec->q29);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q29, [%0]\n"
-                         :
-                         : "r"(&rec->q29)
-                         : "memory");
+            write_q_reg(29, &rec->q29);
 
         // Q30
         op = HWBP_GET_MASK(rec, IDX_Q30);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q30, [%0]\n"
-                         :
-                         : "r"(&rec->q30)
-                         : "memory");
+            read_q_reg(30, &rec->q30);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q30, [%0]\n"
-                         :
-                         : "r"(&rec->q30)
-                         : "memory");
+            write_q_reg(30, &rec->q30);
 
         // Q31
         op = HWBP_GET_MASK(rec, IDX_Q31);
         if (op == HWBP_OP_READ)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "str q31, [%0]\n"
-                         :
-                         : "r"(&rec->q31)
-                         : "memory");
+            read_q_reg(31, &rec->q31);
         else if (op == HWBP_OP_WRITE)
-            asm volatile(".arch_extension fp\n"
-                         ".arch_extension simd\n"
-                         "ldr q31, [%0]\n"
-                         :
-                         : "r"(&rec->q31)
-                         : "memory");
+            write_q_reg(31, &rec->q31);
     }
 }
 
