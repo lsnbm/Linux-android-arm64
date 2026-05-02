@@ -156,6 +156,11 @@ class TcpTestWindow(QWidget):
         self.browser_current_addr = 0
         self.hwbp_info_data: dict | None = None
         self.hwbp_active = False
+        self.hwbp_selected_index: int | None = None
+        self.hwbp_editing_index: int | None = None
+        self.hwbp_edit_original: dict[str, str] = {}
+        self.hwbp_edit_values: dict[str, str] = {}
+        self.hwbp_edit_dirty_fields: set[str] = set()
         self.live_refresh_timer = QTimer(self)
         self.live_refresh_timer.setInterval(1000)
         self.live_refresh_timer.timeout.connect(self.on_live_refresh_tick)
@@ -811,30 +816,6 @@ class TcpTestWindow(QWidget):
         config_layout.addLayout(action_row)
         self._apply_hwbp_active_state()
 
-        edit_row = QHBoxLayout()
-        edit_row.setSpacing(10)
-        edit_row.addWidget(QLabel("写入字段"))
-        self.hwbp_field_combo = QComboBox()
-        for field_name in HWBP_BASE_FIELDS:
-            self.hwbp_field_combo.addItem(field_name, field_name)
-        for reg_idx in range(30):
-            field_name = f"x{reg_idx}"
-            self.hwbp_field_combo.addItem(field_name, field_name)
-        for reg_idx in range(32):
-            field_name = f"q{reg_idx}"
-            self.hwbp_field_combo.addItem(field_name, field_name)
-        edit_row.addWidget(self.hwbp_field_combo)
-
-        edit_row.addWidget(QLabel("写入值"))
-        self.hwbp_value_input = QLineEdit("0x0")
-        self.hwbp_value_input.setPlaceholderText("输入十六进制或十进制值")
-        edit_row.addWidget(self.hwbp_value_input, 1)
-
-        self.hwbp_write_button = QPushButton("写入寄存器")
-        self.hwbp_write_button.clicked.connect(self.on_hwbp_write_field)
-        edit_row.addWidget(self.hwbp_write_button)
-        config_layout.addLayout(edit_row)
-
         result_card, result_layout = self._create_section_card("断点记录", parent=self.breakpoint_page)
         layout.addWidget(result_card, 1)
 
@@ -845,6 +826,7 @@ class TcpTestWindow(QWidget):
         self.hwbp_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.hwbp_tree.customContextMenuRequested.connect(self.on_hwbp_tree_context_menu)
         self.hwbp_tree.currentItemChanged.connect(self.on_hwbp_tree_current_item_changed)
+        self.hwbp_tree.itemDoubleClicked.connect(self.on_hwbp_tree_item_double_clicked)
         result_layout.addWidget(self.hwbp_tree, 1)
 
     def _build_signature_page(self) -> None:
@@ -1093,6 +1075,8 @@ class TcpTestWindow(QWidget):
         self.pointer_status_request_inflight = False
         self.hwbp_refresh_inflight = False
         self.hwbp_active = False
+        self.hwbp_selected_index = None
+        self._clear_hwbp_edit_state()
         self.global_pid_label.setText("--")
         self.pointer_status_label.setText("扫描状态: 未连接")
         self.hwbp_num_brps_label.setText("hwbp_info.num_brps: 0")
@@ -1517,6 +1501,129 @@ class TcpTestWindow(QWidget):
             "records": matched_records,
         }
 
+    def _hwbp_record_index_exists(self, index: int) -> bool:
+        if index < 0 or not isinstance(self.hwbp_info_data, dict):
+            return False
+        records_raw = self.hwbp_info_data.get("records")
+        records = records_raw if isinstance(records_raw, list) else []
+        return any(
+            isinstance(record, dict) and self._safe_int(record.get("index"), -1) == index
+            for record in records
+        )
+
+    def _extract_single_hwbp_index_from_group(self, item: QTreeWidgetItem | None) -> int | None:
+        group_pc = self._extract_hwbp_group_pc_from_tree_item(item)
+        group_payload = self._build_hwbp_group_payload(group_pc if group_pc is not None else -1)
+        if group_payload is None:
+            return None
+
+        records_raw = group_payload.get("records")
+        records = records_raw if isinstance(records_raw, list) else []
+        indices = {
+            self._safe_int(record.get("index"), -1)
+            for record in records
+            if isinstance(record, dict) and self._safe_int(record.get("index"), -1) >= 0
+        }
+        if len(indices) != 1:
+            return None
+        return next(iter(indices))
+
+    def _get_hwbp_record_by_index(self, index: int) -> dict | None:
+        if index < 0 or not isinstance(self.hwbp_info_data, dict):
+            return None
+        records_raw = self.hwbp_info_data.get("records")
+        records = records_raw if isinstance(records_raw, list) else []
+        for record in records:
+            if isinstance(record, dict) and self._safe_int(record.get("index"), -1) == index:
+                return record
+        return None
+
+    def _hwbp_record_field_values(self, record: dict) -> dict[str, str]:
+        values: dict[str, str] = {}
+        pc = self._safe_int(record.get("pc"), 0)
+        for field_name in HWBP_BASE_FIELDS:
+            if field_name in record:
+                values[field_name] = f"0x{self._safe_int(record.get(field_name), 0):X}"
+        if "pc" not in values:
+            values["pc"] = f"0x{pc:X}"
+
+        regs_raw = record.get("regs")
+        regs = regs_raw if isinstance(regs_raw, list) else []
+        for reg_idx, reg_val in enumerate(regs[:30]):
+            values[f"x{reg_idx}"] = f"0x{self._safe_int(reg_val, 0):X}"
+
+        qregs_raw = record.get("qregs")
+        if not isinstance(qregs_raw, list):
+            qregs_raw = record.get("vregs")
+        qregs = qregs_raw if isinstance(qregs_raw, list) else []
+        for reg_idx, qreg_val in enumerate(qregs[:32]):
+            hi, lo = self._hwbp_qreg_parts(qreg_val)
+            values[f"q{reg_idx}"] = f"0x{hi:016X}{lo:016X}"
+        return values
+
+    @staticmethod
+    def _parse_hwbp_hex_value(value_text: str, field_name: str) -> int | None:
+        text = value_text.strip().replace("_", "").replace(" ", "")
+        if not text:
+            return None
+        if text.lower().startswith("0x"):
+            text = text[2:]
+        if not text or not re.fullmatch(r"[0-9A-Fa-f]+", text):
+            return None
+        if field_name.lower().startswith("q") and len(text) > 32:
+            text = text[-32:]
+        return int(text, 16)
+
+    @staticmethod
+    def _format_hwbp_edit_value(field_name: str, value: int) -> str:
+        lower_field = field_name.lower()
+        if lower_field.startswith("q"):
+            return f"0x{value & ((1 << 128) - 1):032X}"
+        if lower_field in {"fpsr", "fpcr"}:
+            return f"0x{value & 0xFFFFFFFF:X}"
+        return f"0x{value & ((1 << 64) - 1):X}"
+
+    def _apply_hwbp_edit_state(self) -> None:
+        return
+
+    def _clear_hwbp_edit_state(self) -> None:
+        self.hwbp_editing_index = None
+        self.hwbp_edit_original = {}
+        self.hwbp_edit_values = {}
+        self.hwbp_edit_dirty_fields = set()
+        self._apply_hwbp_edit_state()
+
+    def _begin_hwbp_edit_for_index(self, index: int) -> bool:
+        record = self._get_hwbp_record_by_index(index)
+        if record is None:
+            return False
+        values = self._hwbp_record_field_values(record)
+        self.hwbp_editing_index = index
+        self.hwbp_edit_original = dict(values)
+        self.hwbp_edit_values = dict(values)
+        self.hwbp_edit_dirty_fields = set()
+        self.hwbp_selected_index = index
+        self._apply_hwbp_edit_state()
+        return True
+
+    def _hwbp_effective_value_text(self, index: int, field_name: str, current_text: str) -> str:
+        if self.hwbp_editing_index == index and field_name in self.hwbp_edit_values:
+            return self.hwbp_edit_values[field_name]
+        return current_text
+
+    def _hwbp_value_display_text(self, index: int, field_name: str, current_text: str) -> str:
+        if self.hwbp_editing_index == index and field_name in self.hwbp_edit_dirty_fields:
+            new_text = self.hwbp_edit_values.get(field_name, current_text)
+            return f"{current_text} -> {new_text}  [待应用]"
+        return current_text
+
+    def _refresh_hwbp_tree_from_cache(self) -> None:
+        if not isinstance(self.hwbp_info_data, dict):
+            return
+        records_raw = self.hwbp_info_data.get("records")
+        records = records_raw if isinstance(records_raw, list) else []
+        self._render_hwbp_tree(records)
+
     def _remove_hwbp_group(self, group_payload: dict) -> None:
         records_raw = group_payload.get("records")
         records = records_raw if isinstance(records_raw, list) else []
@@ -1558,7 +1665,16 @@ class TcpTestWindow(QWidget):
         self._set_status(f"已删除 PC 0x{pc:X} 折叠，共 {success_count} 条记录")
 
     def _get_selected_hwbp_index(self) -> int | None:
-        return self._extract_hwbp_index_from_tree_item(self.hwbp_tree.currentItem())
+        current_item = self.hwbp_tree.currentItem()
+        index = self._extract_hwbp_index_from_tree_item(current_item)
+        if index is None:
+            index = self._extract_single_hwbp_index_from_group(current_item)
+        if index is not None:
+            self.hwbp_selected_index = index
+            return index
+        if self.hwbp_selected_index is not None and self._hwbp_record_index_exists(self.hwbp_selected_index):
+            return self.hwbp_selected_index
+        return None
 
     def _hwbp_reg_op(self, rec: dict, field_name: str) -> str:
         op_values = rec.get("op_values")
@@ -1662,14 +1778,27 @@ class TcpTestWindow(QWidget):
                 pstate = self._safe_int(rec.get("pstate"), 0)
                 fpsr = self._safe_int(rec.get("fpsr"), 0)
                 fpcr = self._safe_int(rec.get("fpcr"), 0)
-                top.addChild(self._make_hwbp_field_item(idx, "pc", pc, f"  PC: 0x{pc:X}  [{self._hwbp_reg_op(rec, 'pc')}]"))
-                top.addChild(self._make_hwbp_field_item(idx, "lr", lr, f"  LR: 0x{lr:X}  [{self._hwbp_reg_op(rec, 'lr')}]"))
-                top.addChild(self._make_hwbp_field_item(idx, "sp", sp, f"  SP: 0x{sp:X}  [{self._hwbp_reg_op(rec, 'sp')}]"))
-                top.addChild(self._make_hwbp_field_item(idx, "orig_x0", orig_x0, f"  ORIG_X0: 0x{orig_x0:X}  [{self._hwbp_reg_op(rec, 'orig_x0')}]"))
-                top.addChild(self._make_hwbp_field_item(idx, "syscallno", syscallno, f"  SYSCALLNO: {syscallno}  [{self._hwbp_reg_op(rec, 'syscallno')}]"))
-                top.addChild(self._make_hwbp_field_item(idx, "pstate", pstate, f"  PSTATE: 0x{pstate:X}  [{self._hwbp_reg_op(rec, 'pstate')}]"))
-                top.addChild(self._make_hwbp_field_item(idx, "fpsr", fpsr, f"  FPSR: 0x{fpsr:X}  [{self._hwbp_reg_op(rec, 'fpsr')}]"))
-                top.addChild(self._make_hwbp_field_item(idx, "fpcr", fpcr, f"  FPCR: 0x{fpcr:X}  [{self._hwbp_reg_op(rec, 'fpcr')}]"))
+                base_fields = (
+                    ("pc", "PC", f"0x{pc:X}"),
+                    ("lr", "LR", f"0x{lr:X}"),
+                    ("sp", "SP", f"0x{sp:X}"),
+                    ("orig_x0", "ORIG_X0", f"0x{orig_x0:X}"),
+                    ("syscallno", "SYSCALLNO", f"0x{syscallno:X}"),
+                    ("pstate", "PSTATE", f"0x{pstate:X}"),
+                    ("fpsr", "FPSR", f"0x{fpsr:X}"),
+                    ("fpcr", "FPCR", f"0x{fpcr:X}"),
+                )
+                for field_name, label, value_text in base_fields:
+                    effective_text = self._hwbp_effective_value_text(idx, field_name, value_text)
+                    display_text = self._hwbp_value_display_text(idx, field_name, value_text)
+                    top.addChild(
+                        self._make_hwbp_field_item(
+                            idx,
+                            field_name,
+                            effective_text,
+                            f"  {label}: {display_text}  [{self._hwbp_reg_op(rec, field_name)}]",
+                        )
+                    )
 
                 mask_raw = rec.get("mask")
                 if isinstance(mask_raw, list) and mask_raw:
@@ -1686,7 +1815,10 @@ class TcpTestWindow(QWidget):
                 for reg_idx, reg_val in enumerate(regs):
                     reg_hex = self._safe_int(reg_val, 0)
                     field_name = f"x{reg_idx}"
-                    top.addChild(self._make_hwbp_field_item(idx, field_name, reg_hex, f"    X{reg_idx}: 0x{reg_hex:X}  [{self._hwbp_reg_op(rec, field_name)}]"))
+                    value_text = f"0x{reg_hex:X}"
+                    effective_text = self._hwbp_effective_value_text(idx, field_name, value_text)
+                    display_text = self._hwbp_value_display_text(idx, field_name, value_text)
+                    top.addChild(self._make_hwbp_field_item(idx, field_name, effective_text, f"    X{reg_idx}: {display_text}  [{self._hwbp_reg_op(rec, field_name)}]"))
 
                 qregs_raw = rec.get("qregs")
                 if not isinstance(qregs_raw, list):
@@ -1700,7 +1832,10 @@ class TcpTestWindow(QWidget):
                         hi, lo = self._hwbp_qreg_parts(qreg_val)
                         field_name = f"q{reg_idx}"
                         qreg_hex = f"0x{hi:016X}{lo:016X}"
-                        top.addChild(self._make_hwbp_field_item(idx, field_name, qreg_hex, f"    Q{reg_idx}: 0x{hi:016X}_{lo:016X}  [{self._hwbp_reg_op(rec, field_name)}]"))
+                        qreg_display = f"0x{hi:016X}_{lo:016X}"
+                        effective_text = self._hwbp_effective_value_text(idx, field_name, qreg_hex)
+                        display_text = self._hwbp_value_display_text(idx, field_name, qreg_display)
+                        top.addChild(self._make_hwbp_field_item(idx, field_name, effective_text, f"    Q{reg_idx}: {display_text}  [{self._hwbp_reg_op(rec, field_name)}]"))
 
                 if self._safe_int(rec.get("write_op_count"), 0) > 0 or rw_text == "写入":
                     write_title = QTreeWidgetItem(["  写入寄存器候选"])
@@ -1708,8 +1843,10 @@ class TcpTestWindow(QWidget):
                     top.addChild(write_title)
                     x0_val = self._safe_int(regs[0], 0) if len(regs) > 0 else 0
                     x1_val = self._safe_int(regs[1], 0) if len(regs) > 1 else 0
-                    top.addChild(self._make_hwbp_field_item(idx, "x0", x0_val, f"    候选写入值(X0): 0x{x0_val:X}"))
-                    top.addChild(self._make_hwbp_field_item(idx, "x1", x1_val, f"    候选写入地址(X1): 0x{x1_val:X}"))
+                    x0_text = f"0x{x0_val:X}"
+                    x1_text = f"0x{x1_val:X}"
+                    top.addChild(self._make_hwbp_field_item(idx, "x0", self._hwbp_effective_value_text(idx, "x0", x0_text), f"    候选写入值(X0): {self._hwbp_value_display_text(idx, 'x0', x0_text)}"))
+                    top.addChild(self._make_hwbp_field_item(idx, "x1", self._hwbp_effective_value_text(idx, "x1", x1_text), f"    候选写入地址(X1): {self._hwbp_value_display_text(idx, 'x1', x1_text)}"))
 
                 separator = QTreeWidgetItem([""])
                 separator.setData(0, Qt.UserRole, idx)
@@ -1735,6 +1872,10 @@ class TcpTestWindow(QWidget):
         self._apply_hwbp_active_state()
         records_raw = info.get("records")
         records = records_raw if isinstance(records_raw, list) else []
+        if self.hwbp_selected_index is not None and not self._hwbp_record_index_exists(self.hwbp_selected_index):
+            self.hwbp_selected_index = None
+        if self.hwbp_editing_index is not None and not self._hwbp_record_index_exists(self.hwbp_editing_index):
+            self._clear_hwbp_edit_state()
         self._render_hwbp_tree(records)
 
     def _apply_hwbp_active_state(self) -> None:
@@ -1835,6 +1976,45 @@ class TcpTestWindow(QWidget):
         return None
 
     @staticmethod
+    def _pack_saved_value_for_type(type_token: str, value_text: str) -> tuple[bytes | None, str]:
+        text = value_text.strip()
+        if not text:
+            return None, "值不能为空。"
+
+        integer_sizes = {
+            "I8": 1,
+            "I16": 2,
+            "I32": 4,
+            "I64": 8,
+        }
+        if type_token in integer_sizes:
+            size = integer_sizes[type_token]
+            bits = size * 8
+            min_value = -(1 << (bits - 1))
+            max_value = (1 << bits) - 1
+            try:
+                value = int(text, 0)
+            except ValueError:
+                return None, f"{type_token} 需要整数，支持十进制或 0x 十六进制。"
+            if value < min_value or value > max_value:
+                return None, f"{type_token} 范围为 {min_value} 到 {max_value}。"
+            return (value & max_value).to_bytes(size, "little", signed=False), ""
+
+        if type_token == "Float":
+            try:
+                return struct.pack("<f", float(text)), ""
+            except (OverflowError, ValueError):
+                return None, "Float 需要有效浮点数。"
+
+        if type_token == "Double":
+            try:
+                return struct.pack("<d", float(text)), ""
+            except (OverflowError, ValueError):
+                return None, "Double 需要有效浮点数。"
+
+        return None, f"不支持的类型: {type_token}"
+
+    @staticmethod
     def _normalize_saved_note(note_text: str) -> str:
         return " ".join(part.strip() for part in note_text.replace("\r", "\n").split("\n") if part.strip())
 
@@ -1908,6 +2088,54 @@ class TcpTestWindow(QWidget):
         if response is None:
             return False
         item["locked"] = "1"
+        return True
+
+    def _write_saved_item_value(self, item: dict[str, str]) -> bool:
+        addr = item.get("addr", "")
+        type_token = item.get("type", "")
+        if not addr or not type_token:
+            return False
+
+        value_text, accepted = QInputDialog.getText(
+            self,
+            "改写值",
+            f"写入地址 {addr} ({type_token})：",
+            QLineEdit.Normal,
+            item.get("value", ""),
+        )
+        if not accepted:
+            return False
+
+        packed_value, error_text = self._pack_saved_value_for_type(type_token, value_text)
+        if packed_value is None:
+            QMessageBox.warning(self, "写入失败", error_text)
+            return False
+
+        was_locked = item.get("locked", "0") == "1"
+        if was_locked and not self._set_saved_item_lock_state(item, False, warn=True):
+            return False
+
+        response = self._request_ok(
+            "memory.write_block",
+            {"address": addr, "data_hex": packed_value.hex().upper()},
+            error_title="写入失败",
+            error_prefix="写入失败: ",
+            warn=True,
+        )
+        if response is None:
+            if was_locked:
+                self._set_saved_item_lock_state(item, True, warn=False)
+            return False
+
+        item["value"] = value_text.strip()
+        readback_value = self._read_saved_item_value(type_token, addr)
+        if readback_value:
+            item["value"] = readback_value
+
+        if was_locked and not self._set_saved_item_lock_state(item, True, warn=True):
+            return False
+
+        self._set_status(f"已写入: {addr} = {item.get('value', '')}")
         return True
 
     def _apply_saved_item_lock_state(self, items: list[dict[str, str]], locked: bool) -> tuple[int, int]:
@@ -2108,6 +2336,7 @@ class TcpTestWindow(QWidget):
             clear_note_action = None
             if self._normalize_saved_note(items[0].get("note", "")):
                 clear_note_action = menu.addAction("清空备注")
+            write_action = menu.addAction("改写值")
             menu.addSeparator()
             # 单选：显示锁定/取消锁定
             locked = items[0].get("locked", "0") == "1"
@@ -2116,6 +2345,7 @@ class TcpTestWindow(QWidget):
             # 多选：显示批量操作选项
             note_action = None
             clear_note_action = None
+            write_action = None
             lock_action = None
             actions = {}
             if unlocked_count > 0:
@@ -2134,6 +2364,10 @@ class TcpTestWindow(QWidget):
                 items[0]["note"] = ""
                 self._refresh_saved_view(force=True)
                 self._set_status(f"已清空备注: {items[0].get('addr', '')}")
+                return
+            if action == write_action:
+                if self._write_saved_item_value(items[0]):
+                    self._refresh_saved_view(force=True)
                 return
             if action != lock_action:
                 return
@@ -2971,55 +3205,121 @@ class TcpTestWindow(QWidget):
     def on_hwbp_tree_current_item_changed(self, current: QTreeWidgetItem | None, _previous: QTreeWidgetItem | None) -> None:
         if current is None:
             return
-        field_data = current.data(0, Qt.UserRole + 2)
-        if field_data is not None:
-            field_name = str(field_data)
-            combo_index = self.hwbp_field_combo.findData(field_name)
-            if combo_index >= 0:
-                self.hwbp_field_combo.setCurrentIndex(combo_index)
-        value_data = current.data(0, Qt.UserRole + 3)
-        if value_data is not None:
-            self.hwbp_value_input.setText(str(value_data))
+        index = self._extract_hwbp_index_from_tree_item(current)
+        if index is None:
+            index = self._extract_single_hwbp_index_from_group(current)
+        if index is not None:
+            self.hwbp_selected_index = index
 
-    def on_hwbp_write_field(self) -> None:
-        value_text = self.hwbp_value_input.text().strip()
-        field_data = self.hwbp_field_combo.currentData()
-        field_name = str(field_data).strip() if field_data is not None else ""
-        try:
-            value = int(value_text, 0)
-        except ValueError:
-            QMessageBox.warning(self, "输入提示", "写入值格式无效。")
+    def _edit_hwbp_tree_item_value(self, item: QTreeWidgetItem | None) -> None:
+        if item is None:
             return
-        index = self._get_selected_hwbp_index()
+        field_data = item.data(0, Qt.UserRole + 2)
+        if field_data is None:
+            return
+        field_name = str(field_data).strip()
+        if not field_name:
+            return
+        index = self._extract_hwbp_index_from_tree_item(item)
         if index is None:
             QMessageBox.warning(self, "输入提示", "请先在断点树里选择一条 hwbp_record。")
             return
         if index < 0:
             QMessageBox.warning(self, "输入提示", "记录索引不能小于 0。")
             return
-        if not field_name:
-            QMessageBox.warning(self, "输入提示", "请选择要写入的字段。")
+
+        if self.hwbp_editing_index is None:
+            if not self._begin_hwbp_edit_for_index(index):
+                QMessageBox.warning(self, "输入提示", "选中的 hwbp_record 已不存在，请刷新后重试。")
+                return
+        elif self.hwbp_editing_index != index:
+            QMessageBox.warning(self, "输入提示", f"当前正在编辑 hwbp_record[{self.hwbp_editing_index}]，请先应用或取消。")
             return
 
-        response = self._request_ok(
-            "breakpoint.record.update",
-            {"index": index, "field": field_name, "value": f"0x{value:X}"},
-            error_title="写入失败",
+        current_value = self.hwbp_edit_values.get(field_name, str(item.data(0, Qt.UserRole + 3) or "0x0"))
+        value_text, accepted = QInputDialog.getText(
+            self,
+            "修改寄存器",
+            f"hwbp_record[{index}].{field_name} =",
+            QLineEdit.Normal,
+            current_value,
         )
-        if response is None:
+        if not accepted:
+            return
+        value = self._parse_hwbp_hex_value(value_text, field_name)
+        if value is None:
+            QMessageBox.warning(self, "输入提示", "写入值格式无效，请输入十六进制值。")
             return
 
-        self._set_status(f"已写入 hwbp_record[{index}].{field_name}")
+        formatted_value = self._format_hwbp_edit_value(field_name, value)
+        self.hwbp_edit_values[field_name] = formatted_value
+        if formatted_value == self.hwbp_edit_original.get(field_name, ""):
+            self.hwbp_edit_dirty_fields.discard(field_name)
+        else:
+            self.hwbp_edit_dirty_fields.add(field_name)
+        self._apply_hwbp_edit_state()
+        self._refresh_hwbp_tree_from_cache()
+        self._set_status(f"已修改副本 hwbp_record[{index}].{field_name}，右键应用写回")
+
+    def on_hwbp_tree_item_double_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
+        self._edit_hwbp_tree_item_value(item)
+
+    def on_hwbp_apply_edit(self) -> None:
+        if self.hwbp_editing_index is None:
+            return
+        if not self.hwbp_edit_dirty_fields:
+            self._clear_hwbp_edit_state()
+            self._set_status("没有寄存器改动需要应用")
+            return
+
+        index = self.hwbp_editing_index
+        for field_name in sorted(self.hwbp_edit_dirty_fields):
+            value_text = self.hwbp_edit_values.get(field_name, "")
+            response = self._request_ok(
+                "breakpoint.record.update",
+                {"index": index, "field": field_name, "value": value_text},
+                error_title="写入失败",
+            )
+            if response is None:
+                return
+
+        changed_count = len(self.hwbp_edit_dirty_fields)
+        self._clear_hwbp_edit_state()
+        self._set_status(f"已应用 hwbp_record[{index}] 的 {changed_count} 处寄存器改动")
         self.on_hwbp_refresh(silent=True)
+
+    def on_hwbp_cancel_edit(self) -> None:
+        if self.hwbp_editing_index is None:
+            return
+        index = self.hwbp_editing_index
+        self._clear_hwbp_edit_state()
+        self._set_status(f"已取消编辑 hwbp_record[{index}]")
 
     def on_hwbp_tree_context_menu(self, pos) -> None:
         item = self.hwbp_tree.itemAt(pos)
         if item is None:
             item = self.hwbp_tree.currentItem()
+        if item is not None:
+            self.hwbp_tree.setCurrentItem(item)
+        item_index = self._extract_hwbp_index_from_tree_item(item)
+        if item_index is None:
+            item_index = self._extract_single_hwbp_index_from_group(item)
+        item_field = str(item.data(0, Qt.UserRole + 2)).strip() if item is not None and item.data(0, Qt.UserRole + 2) is not None else ""
         group_pc = self._extract_hwbp_group_pc_from_tree_item(item)
         group_payload = self._build_hwbp_group_payload(group_pc if group_pc is not None else -1)
 
         menu = QMenu(self.hwbp_tree)
+        edit_value_action = None
+        apply_edit_action = None
+        cancel_edit_action = None
+        if item_field:
+            edit_value_action = menu.addAction("修改寄存器值")
+        if self.hwbp_editing_index is not None and item_index == self.hwbp_editing_index:
+            if self.hwbp_edit_dirty_fields:
+                apply_edit_action = menu.addAction(f"应用当前记录修改 ({len(self.hwbp_edit_dirty_fields)} 项)")
+            cancel_edit_action = menu.addAction("取消当前记录修改")
+        if edit_value_action is not None or apply_edit_action is not None or cancel_edit_action is not None:
+            menu.addSeparator()
         copy_json_action = menu.addAction("复制当前折叠完整JSON")
         delete_action = menu.addAction("删除当前折叠页")
 
@@ -3031,6 +3331,16 @@ class TcpTestWindow(QWidget):
         if action is None:
             return
 
+        if action == edit_value_action:
+            self._edit_hwbp_tree_item_value(item)
+            return
+        if action == apply_edit_action:
+            self.on_hwbp_apply_edit()
+            return
+        if action == cancel_edit_action:
+            self.on_hwbp_cancel_edit()
+            self._refresh_hwbp_tree_from_cache()
+            return
         if action == copy_json_action:
             if group_payload is None:
                 return

@@ -10,7 +10,7 @@
 #include <asm/virt.h>
 #include <trace/events/sched.h>
 #include "export_fun.h"
-#include "hwbp_debug_reg.h"
+#include "arm64_reg.h"
 
 struct breakpoint_config
 {
