@@ -194,11 +194,12 @@ __attribute__((naked, __noinline__)) static int trampoline_breakpoint(unsigned l
         "ldr x16, =breakpoint_handler\n"
         "ldr x16, [x16]\n"
         "add x16, x16, #4\n"
-        "br x16\n"
+        "ret x16\n" // 5系启用BTI,不能用br x16间接跳到一个函数+4中间地址,br是无条件间接,目标地址需要是合法的 BTI landing pad。函数入口有 bti c，所以跳函数入口可以；但 +4 已经越过入口 landing pad，BTI会认为是非法间接跳转panic死机。
         :
         :
         : "memory");
 }
+
 // 访问断异常处理跳板
 __attribute__((naked, __noinline__)) static int trampoline_watchpoint(unsigned long addr, unsigned long esr, struct pt_regs *regs)
 {
@@ -268,7 +269,7 @@ __attribute__((naked, __noinline__)) static int trampoline_watchpoint(unsigned l
         "ldr x16, =watchpoint_handler\n"
         "ldr x16, [x16]\n"
         "add x16, x16, #4\n"
-        "br x16\n"
+        "ret x16\n"
         :
         :
         : "memory");
@@ -305,7 +306,7 @@ int hw_breakpoint_hook_install(void)
 {
     int ret;
 
-    //防止重复安装，下面删除hook时会清空来判断是否重新安装
+    // 防止重复安装，下面删除hook时会清空来判断是否重新安装
     if (breakpoint_handler || watchpoint_handler)
     {
         pr_debug("[driver] hook install skipped, already installed\n");
@@ -598,7 +599,7 @@ static int start_task_run_monitor(struct breakpoint_config *bp_config)
         return -EINVAL;
     }
     // 传递上下文给全局，让异常处理和断点写入都能互相传递配置信息
-    if (g_bp_config)//已有配置进行了注册，防止重复注册
+    if (g_bp_config) // 已有配置进行了注册，防止重复注册
     {
         g_bp_config = bp_config;
         pr_debug("monitor already running, update target tgid=%d\n", g_bp_config->pid);
