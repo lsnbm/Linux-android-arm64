@@ -313,8 +313,8 @@ static inline int mmu_translate_va_to_pa(struct mm_struct *mm, u64 va, phys_addr
 
         /*清除 ASID=0 的 TLB 污染
         vaae1is: VA+所有ASID, EL1, 广播所有核
-        虽然 AT 是本地触发，但在复杂的 SMP 环境下，使用 ish 是硬件流水线一致性的最稳妥做法。
-
+        虽然 AT 是本地触发，但在复杂的 SMP 环境下
+        使用 vaae1is+ish 是硬件一致性的稳妥做法。
 备用指令只清理本地TLB
         "lsr    %[tmp_offset], %[va], #12\n"
         "tlbi   vae1, %[tmp_offset]\n"
@@ -339,10 +339,10 @@ static inline int mmu_translate_va_to_pa(struct mm_struct *mm, u64 va, phys_addr
         "tbnz   %[tmp_par], #0, .L_efault%=\n"
 
         /*
-         * 提取物理地址
-         * PAR_EL1[51:12] 存放物理页地址。
-         * 提取从 bit 12 开始的 40 位 (即到 bit 51)。
-         */
+        提取物理地址
+        PAR_EL1[51:12] 存放物理页地址。
+        提取从 bit 12 开始的 40 位 (即到 bit 51)。
+        */
         "ubfx   %[tmp_par], %[tmp_par], #12, #40\n" // 提取 PA[51:12]
         "lsl    %[tmp_par], %[tmp_par], #12\n"      // 恢复偏移
         "and    %[tmp_offset], %[va], #0xFFF\n"     // 提取页内偏移

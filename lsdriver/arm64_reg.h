@@ -188,52 +188,50 @@ static inline void disable_hardware_debug_on_cpu(void *unused)
 // Q寄存器名称拼接辅助宏：QREG(0) → q0, QREG(1) → q1, ...
 #define QREG(n) q##n
 
-#define READ_Q_REG_CASE(N, DST)                                       \
-    case N:                                                           \
-        asm volatile(".arch_extension fp\n.arch_extension simd\n"     \
-                     "str " __stringify(QREG(N)) ", [%0]\n"           \
-                     :: "r"(DST) : "memory");                         \
+#define READ_Q_REG_CASE(N, DST)                                                     \
+    case N:                                                                         \
+        asm volatile(".arch_extension fp\n.arch_extension simd\n"                   \
+                     "str " __stringify(QREG(N)) ", [%0]\n" ::"r"(DST) : "memory"); \
         break
 
-#define WRITE_Q_REG_CASE(N, SRC)                                      \
-    case N:                                                           \
-        asm volatile(".arch_extension fp\n.arch_extension simd\n"     \
-                     "ldr " __stringify(QREG(N)) ", [%0]\n"           \
-                     :: "r"(SRC) : "memory");                         \
+#define WRITE_Q_REG_CASE(N, SRC)                                                    \
+    case N:                                                                         \
+        asm volatile(".arch_extension fp\n.arch_extension simd\n"                   \
+                     "ldr " __stringify(QREG(N)) ", [%0]\n" ::"r"(SRC) : "memory"); \
         break
 
-#define GEN_READ_Q_REG_CASES(DST)  \
-    READ_Q_REG_CASE(0, DST);       \
-    READ_Q_REG_CASE(1, DST);       \
-    READ_Q_REG_CASE(2, DST);       \
-    READ_Q_REG_CASE(3, DST);       \
-    READ_Q_REG_CASE(4, DST);       \
-    READ_Q_REG_CASE(5, DST);       \
-    READ_Q_REG_CASE(6, DST);       \
-    READ_Q_REG_CASE(7, DST);       \
-    READ_Q_REG_CASE(8, DST);       \
-    READ_Q_REG_CASE(9, DST);       \
-    READ_Q_REG_CASE(10, DST);      \
-    READ_Q_REG_CASE(11, DST);      \
-    READ_Q_REG_CASE(12, DST);      \
-    READ_Q_REG_CASE(13, DST);      \
-    READ_Q_REG_CASE(14, DST);      \
-    READ_Q_REG_CASE(15, DST);      \
-    READ_Q_REG_CASE(16, DST);      \
-    READ_Q_REG_CASE(17, DST);      \
-    READ_Q_REG_CASE(18, DST);      \
-    READ_Q_REG_CASE(19, DST);      \
-    READ_Q_REG_CASE(20, DST);      \
-    READ_Q_REG_CASE(21, DST);      \
-    READ_Q_REG_CASE(22, DST);      \
-    READ_Q_REG_CASE(23, DST);      \
-    READ_Q_REG_CASE(24, DST);      \
-    READ_Q_REG_CASE(25, DST);      \
-    READ_Q_REG_CASE(26, DST);      \
-    READ_Q_REG_CASE(27, DST);      \
-    READ_Q_REG_CASE(28, DST);      \
-    READ_Q_REG_CASE(29, DST);      \
-    READ_Q_REG_CASE(30, DST);      \
+#define GEN_READ_Q_REG_CASES(DST) \
+    READ_Q_REG_CASE(0, DST);      \
+    READ_Q_REG_CASE(1, DST);      \
+    READ_Q_REG_CASE(2, DST);      \
+    READ_Q_REG_CASE(3, DST);      \
+    READ_Q_REG_CASE(4, DST);      \
+    READ_Q_REG_CASE(5, DST);      \
+    READ_Q_REG_CASE(6, DST);      \
+    READ_Q_REG_CASE(7, DST);      \
+    READ_Q_REG_CASE(8, DST);      \
+    READ_Q_REG_CASE(9, DST);      \
+    READ_Q_REG_CASE(10, DST);     \
+    READ_Q_REG_CASE(11, DST);     \
+    READ_Q_REG_CASE(12, DST);     \
+    READ_Q_REG_CASE(13, DST);     \
+    READ_Q_REG_CASE(14, DST);     \
+    READ_Q_REG_CASE(15, DST);     \
+    READ_Q_REG_CASE(16, DST);     \
+    READ_Q_REG_CASE(17, DST);     \
+    READ_Q_REG_CASE(18, DST);     \
+    READ_Q_REG_CASE(19, DST);     \
+    READ_Q_REG_CASE(20, DST);     \
+    READ_Q_REG_CASE(21, DST);     \
+    READ_Q_REG_CASE(22, DST);     \
+    READ_Q_REG_CASE(23, DST);     \
+    READ_Q_REG_CASE(24, DST);     \
+    READ_Q_REG_CASE(25, DST);     \
+    READ_Q_REG_CASE(26, DST);     \
+    READ_Q_REG_CASE(27, DST);     \
+    READ_Q_REG_CASE(28, DST);     \
+    READ_Q_REG_CASE(29, DST);     \
+    READ_Q_REG_CASE(30, DST);     \
     READ_Q_REG_CASE(31, DST)
 
 #define GEN_WRITE_Q_REG_CASES(SRC) \
