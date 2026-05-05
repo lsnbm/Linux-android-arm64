@@ -900,7 +900,7 @@ private:
                 if (memViewer_.disasmBusy())
                     UI::Text(Colors::HINT, "反汇编中...");
                 else
-                    drawDisasmView(memViewer_.base(), memViewer_.getDisasm(), rows, memViewer_.disasmScrollIdx());
+                    drawDisasmView(memViewer_.base(), memViewer_.getDisasm(), rows);
             }
             else if (fmt == Types::ViewFormat::Hex)
                 drawHexDump(memViewer_.base(), memViewer_.buffer(), rows);
@@ -1943,16 +1943,13 @@ private:
         ImGui::PopStyleVar();
     }
 
-    void drawDisasmView(uintptr_t base, std::span<const Disasm::DisasmLine> lines, int rows, int scrollIdx)
+    void drawDisasmView(uintptr_t base, std::span<const Disasm::DisasmLine> lines, int rows)
     {
         if (lines.empty())
         {
             UI::Text(Colors::ERR, "无法反汇编 (无效地址或非代码段)");
             return;
         }
-        if (scrollIdx >= (int)lines.size())
-            scrollIdx = 0;
-        auto visible = lines.subspan(scrollIdx);
         ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, {S(4), S(4)});
         if (ImGui::BeginTable("Disasm", 5, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
         {
@@ -1962,9 +1959,9 @@ private:
             ImGui::TableSetupColumn("操作数", ImGuiTableColumnFlags_WidthStretch);
             ImGui::TableSetupColumn("操作", ImGuiTableColumnFlags_WidthFixed, S(80));
             ImGui::TableHeadersRow();
-            for (int i = 0; i < std::min((int)visible.size(), rows); ++i)
+            for (int i = 0; i < std::min((int)lines.size(), rows); ++i)
             {
-                const auto &line = visible[i];
+                const auto &line = lines[i];
                 if (!line.valid)
                     continue;
                 ImGui::TableNextRow();

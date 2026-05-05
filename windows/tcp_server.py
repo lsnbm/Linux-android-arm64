@@ -61,7 +61,6 @@ class BridgeResponse:
     operation: str = ""
     data: Any = None
     error: str = ""
-    raw: dict[str, Any] = field(default_factory=dict)
     connection: dict[str, Any] = field(default_factory=dict)
 
     def require_ok(self) -> "BridgeResponse":
@@ -74,7 +73,6 @@ class BridgeResponse:
             "ok": self.ok,
             "operation": self.operation,
             "connection": dict(self.connection),
-            "raw": dict(self.raw),
         }
         if self.data is not None:
             payload["data"] = self.data
@@ -251,7 +249,6 @@ def _coerce_bridge_response(
         operation=operation,
         data=response_obj.get("data"),
         error=error,
-        raw=response_obj,
         connection=connection or {},
     )
 

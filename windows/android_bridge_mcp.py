@@ -155,6 +155,20 @@ def _call_bridge_operation(operation: str, params: dict[str, Any] | None = None)
     if last_exc is not None:
         raise last_exc
     raise BridgeConnectionError(f"bridge operation failed: {op}")
+
+
+def _strip_scan_regions(response: dict[str, Any]) -> dict[str, Any]:
+    data = response.get("data")
+    if not isinstance(data, dict):
+        return response
+    slim_data = dict(data)
+    slim_data.pop("regions", None)
+    slim_data.pop("region_count", None)
+    slim_response = dict(response)
+    slim_response["data"] = slim_data
+    return slim_response
+
+
 mcp = FastMCP(
     "NativeTcpBridge Android MCP",
     host=DEFAULT_MCP_BIND_HOST,
@@ -175,21 +189,9 @@ def android_connection() -> dict[str, Any]:
     return snapshot
 
 
-@mcp.resource("android://protocol")
-def android_protocol() -> dict[str, Any]:
-    """Return the structured bridge protocol description exposed by the Android tcp_server."""
-    return bridge.call_operation("bridge.describe").require_ok().to_dict()
-
-
 @mcp.resource("android://guide")
 def android_guide() -> dict[str, Any]:
-    """Return minimal AI tool guide: purpose, parameters, and examples only."""
-    return _build_ai_guide_payload()
-
-
-@mcp.resource("android://tool_catalog")
-def android_tool_catalog() -> dict[str, Any]:
-    """Return minimal tool catalog: purpose, parameters, and examples only."""
+    """Return minimal AI tool guide with workflow, limits, parameters, results, and examples."""
     return _build_ai_guide_payload()
 
 
@@ -277,8 +279,8 @@ def android_target_current() -> dict[str, Any]:
 
 @mcp.tool()
 def android_memory_regions() -> dict[str, Any]:
-    """Fetch the full module and memory region map for the current target process."""
-    return _call_bridge_operation("memory.info.full")
+    """Fetch module and segment information for the current target process."""
+    return _strip_scan_regions(_call_bridge_operation("memory.info.full"))
 
 
 @mcp.tool()
@@ -336,8 +338,8 @@ def android_memory_scan_refine(
 @mcp.tool()
 def android_memory_scan_results(start: int = 0, count: int = 100, value_type: str = "i32") -> dict[str, Any]:
     """Read one page of the current memory scan results."""
-    if count <= 0 or count > 2000:
-        raise ValueError("count must be in 1..2000")
+    if count <= 0 or count > 200:
+        raise ValueError("count must be in 1..200")
     return _call_bridge_operation(
         "scan.page",
         {"start": start, "count": count, "value_type": value_type.strip().lower()},
@@ -409,7 +411,7 @@ def android_pointer_export() -> dict[str, Any]:
 
 @mcp.tool()
 def android_memory_view_open(address: int | str, view_format: str = "hex") -> dict[str, Any]:
-    """Open the memory viewer at an address. Use view_format='disasm' to request disassembly instead of raw hex bytes."""
+    """Open the memory viewer at an address. Use view_format='disasm' to decode the shared 100-byte cache."""
     return _call_bridge_operation(
         "viewer.open",
         {"address": format_address(address), "view_format": normalize_view_format(view_format)},
@@ -433,13 +435,13 @@ def android_memory_view_offset(offset: str) -> dict[str, Any]:
 
 @mcp.tool()
 def android_memory_view_set_format(view_format: str) -> dict[str, Any]:
-    """Change the current viewer format. Use 'disasm' for disassembly, otherwise the viewer returns formatted memory values."""
+    """Change the current viewer format. Use 'disasm' for disassembly; every format shares the 100-byte cache."""
     return _call_bridge_operation("viewer.set_format", {"view_format": normalize_view_format(view_format)})
 
 
 @mcp.tool()
 def android_memory_view_read() -> dict[str, Any]:
-    """Read the current viewer snapshot. In disasm mode, the result is in data.disasm; in other modes, raw bytes remain in data.data_hex."""
+    """Read the current 100-byte viewer cache. All formats share data.data_hex; disasm also returns data.disasm."""
     return _call_bridge_operation("viewer.snapshot")
 
 
@@ -482,7 +484,6 @@ def android_breakpoint_clear_all() -> dict[str, Any]:
                 "cleared": False,
             },
             "connection": current.get("connection", {}),
-            "raw": {},
         }
     return _call_bridge_operation("breakpoint.clear")
 
@@ -631,10 +632,10 @@ TOOL_META: dict[str, dict[str, Any]] = {
     },
     "android_memory_regions": {
         "group": "Target Selection",
-        "use_when": "Query modules/segments/regions for address planning.",
+        "use_when": "Query loaded modules and module segments for address planning.",
         "example": {},
         "parameter_notes": {},
-        "result_notes": "Returns full memory map payload.",
+        "result_notes": "MCP returns modules only; scan regions are intentionally omitted to keep AI payloads small.",
     },
     "android_module_address": {
         "group": "Target Selection",
@@ -677,7 +678,7 @@ TOOL_META: dict[str, dict[str, Any]] = {
         "example": {"start": 0, "count": 100, "value_type": "i32"},
         "parameter_notes": {
             "start": "Offset into scan result list.",
-            "count": "1..2000 page size.",
+            "count": "1..200 page size.",
             "value_type": "How to render values in output.",
         },
         "result_notes": "Returns page items and total_count.",
@@ -758,7 +759,7 @@ TOOL_META: dict[str, dict[str, Any]] = {
         "use_when": "Read current viewer snapshot payload.",
         "example": {},
         "parameter_notes": {},
-        "result_notes": "In disasm mode read data.disasm; otherwise use data.data_hex.",
+        "result_notes": "Returns the current 100-byte cache in data.data_hex. Disasm mode also returns data.disasm decoded from that cache.",
     },
     "android_breakpoint_list": {
         "group": "Breakpoints",
@@ -799,7 +800,7 @@ TOOL_META: dict[str, dict[str, Any]] = {
         "example": {"index": 0, "field": "x0", "value": "0x12345678"},
         "parameter_notes": {
             "index": "Valid existing record index.",
-            "field": "pc/hit_count/lr/sp/pstate/orig_x0/syscallno/fpsr/fpcr/x0~x29/q0~q31/v0~v31, op.<field> for write-mask control, or mask0~mask17.",
+            "field": "pc/hit_count/lr/sp/pstate/orig_x0/syscallno/fpsr/fpcr/x0~x29/q0~q31, op.<field> for write-mask control, or mask0~mask17.",
             "value": "Number or hex string. Register writes set HWBP_OP_WRITE before updating the struct field.",
         },
         "result_notes": "Requires non-empty records; otherwise index out of range.",
@@ -877,6 +878,7 @@ def _build_tool_catalog() -> list[dict[str, Any]]:
                 "purpose": str(meta.get("use_when", "") or tool.description or ""),
                 "parameters": _build_tool_parameter_docs(tool.parameters, parameter_notes),
                 "example": dict(meta.get("example", {})) if isinstance(meta.get("example"), dict) else meta.get("example", {}),
+                "result": str(meta.get("result_notes", "")),
             }
         )
     return catalog
@@ -916,6 +918,8 @@ def _render_tool_guide(tool_catalog: list[dict[str, Any]]) -> str:
                     sections.append(fragment)
             else:
                 sections.append("  - 无")
+            if tool.get("result"):
+                sections.append(f"  返回: {tool.get('result', '')}")
             sections.append(f"  调用示例: {example_text}")
         sections.append("")
     return "\n".join(sections).strip()
@@ -923,6 +927,18 @@ def _render_tool_guide(tool_catalog: list[dict[str, Any]]) -> str:
 
 def _build_ai_guide_payload() -> dict[str, Any]:
     return {
+        "workflow": [
+            "configure_android_bridge",
+            "connect_android_bridge",
+            "android_bridge_ping",
+            "android_target_attach_package or android_target_set_pid",
+            "call task-specific tools",
+        ],
+        "limits": {
+            "android_memory_regions": "MCP returns modules only; scan regions stay available to backend/Windows UI.",
+            "android_memory_scan_results": "count is capped at 200.",
+            "android_memory_view_read": "returns one shared 100-byte cache; disasm adds decoded lines from that cache.",
+        },
         "tools": _build_tool_catalog(),
     }
 
@@ -935,9 +951,8 @@ def _build_connection_steps(runtime: dict[str, Any]) -> str:
             "3. Initialize MCP, call tools/list, then call tools by their exact names.",
             "4. Start with configure_android_bridge, connect_android_bridge, android_bridge_ping, and android_target_attach_package.",
             "5. For module base addresses use android_memory_regions or android_module_address.",
-            "6. For disassembly use android_memory_view_open(view_format='disasm') and then read data.disasm from android_memory_view_read.",
+            "6. For memory browsing use android_memory_view_open, then android_memory_view_read; every view returns the shared 100-byte data_hex cache, and disasm also returns data.disasm.",
             "7. Keep the session alive for stateful operations; call disconnect_android_bridge only when you really want to reset PID/session state.",
-            "8. The Android bridge also exposes a structured operation protocol at android://protocol.",
         ]
     )
 
@@ -990,7 +1005,6 @@ def _build_startup_handoff(runtime: dict[str, Any]) -> str:
         [
             "[MCP] AI tool usage guide:",
             "  Resource: android://guide",
-            "  Resource: android://tool_catalog",
             "  Tool: android_help(topic='all' or topic='<tool_name>')",
         ]
     )
@@ -1002,7 +1016,7 @@ def _build_config_html(runtime: dict[str, Any]) -> str:
     guide_text = "\n\n".join(
         [
             "NativeTcpBridge MCP Tool Guide",
-            "仅包含: 工具作用 / 参数说明 / 调用示例",
+            "仅包含: 工具作用 / 参数说明 / 返回说明 / 调用示例",
             f"{_render_tool_guide(tool_catalog)}",
         ]
     )

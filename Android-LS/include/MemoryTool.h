@@ -67,9 +67,8 @@ namespace Config
 
     struct Constants
     {
-        static constexpr size_t MEM_VIEW_RANGE = 50;
-        // 内存浏览缓存默认保留当前地址上下各 4096 字节。
-        static constexpr size_t MEM_VIEW_DEFAULT_BYTES = 8192;
+        // 内存浏览缓存固定为当前浏览地址开始的 100 字节。
+        static constexpr size_t MEM_VIEW_DEFAULT_BYTES = 100;
         static constexpr size_t SCAN_BUFFER = 4096;
         static constexpr size_t BATCH_SIZE = 16384;
         static constexpr size_t MAX_READ_GAP = 64;
@@ -1771,7 +1770,6 @@ private:
     std::vector<Disasm::DisasmLine> disasmCache_;
     std::future<std::vector<Disasm::DisasmLine>> disasmFuture_;
     bool disasmBusy_ = false;
-    int disasmScrollIdx_ = 0;
 
 public:
     MemViewer() : buffer_(Config::Constants::MEM_VIEW_DEFAULT_BYTES) {}
@@ -1789,8 +1787,6 @@ public:
     const std::vector<uint8_t> &buffer() const noexcept { return buffer_; }
     const std::vector<Disasm::DisasmLine> &getDisasm() const noexcept { return disasmCache_; }
     bool disasmBusy() const noexcept { return disasmBusy_; }
-    // 返回当前反汇编滚动索引。
-    int disasmScrollIdx() const noexcept { return disasmScrollIdx_; }
 
     void pollDisasm()
     {
@@ -1809,7 +1805,6 @@ public:
             disasmCache_.clear();
         }
         disasmBusy_ = false;
-        disasmScrollIdx_ = 0;
     }
 
     // 切换浏览格式并触发刷新。
@@ -1827,13 +1822,11 @@ public:
             disasmCache_.clear();
         }
         disasmBusy_ = false;
-        disasmScrollIdx_ = 0;
     }
 
     void setFormat(Types::ViewFormat fmt)
     {
         format_ = fmt;
-        disasmScrollIdx_ = 0;
         refresh();
     }
 
@@ -1843,7 +1836,6 @@ public:
         if (format_ == Types::ViewFormat::Disasm)
             addr &= ~static_cast<uintptr_t>(3); // 强制 4 字节对齐
         base_ = addr;
-        disasmScrollIdx_ = 0;
         refresh();
         visible_ = true;
     }
@@ -1888,7 +1880,6 @@ public:
         if (format_ == Types::ViewFormat::Disasm)
         {
             disasmCache_.clear();
-            disasmScrollIdx_ = 0;
             disasmBusy_ = false;
             if (!buffer_.empty())
             {
@@ -1901,7 +1892,7 @@ public:
                         Disasm::Disassembler disasm;
                         if (!disasm.IsValid())
                             return std::vector<Disasm::DisasmLine>{};
-                        return disasm.Disassemble(base, bytes.data(), bytes.size(), 1000, true); });
+                        return disasm.Disassemble(base, bytes.data(), bytes.size(), Disasm::Disassembler::DEFAULT_MAX_INSTRUCTIONS, true); });
                     disasmBusy_ = true;
                 }
                 catch (...)
@@ -1909,6 +1900,11 @@ public:
                     disasmCache_.clear();
                 }
             }
+        }
+        else
+        {
+            disasmBusy_ = false;
+            disasmCache_.clear();
         }
     }
 
@@ -1923,42 +1919,26 @@ public:
     }
 
 private:
-    // 在反汇编模式下移动显示窗口。
+    // 在反汇编模式下移动浏览基址。
     void moveDisasm(int lines)
     {
         if (lines == 0)
             return;
 
-        int newIdx = disasmScrollIdx_ + lines;
-
-        int margin = std::min(50, static_cast<int>(disasmCache_.size() / 4));
-        if (margin < 0)
-            margin = 0;
-
-        if (disasmCache_.empty() || newIdx < 0 || newIdx + margin >= static_cast<int>(disasmCache_.size()))
+        // ARM64 中，1 行指令 = 4 字节。反汇编浏览始终移动窗口基址并刷新同一个 100 字节缓存。
+        int64_t deltaBytes = static_cast<int64_t>(lines) * 4;
+        if (deltaBytes < 0 && base_ < static_cast<uintptr_t>(-deltaBytes))
         {
-            // ARM64 中，1 行指令 = 4 字节
-            int64_t deltaBytes = static_cast<int64_t>(newIdx) * 4;
-
-            if (deltaBytes < 0 && base_ < static_cast<uintptr_t>(-deltaBytes))
-            {
-                base_ = 0;
-            }
-            else
-            {
-                base_ += deltaBytes;
-            }
-
-            // 强制 4 字节对齐，防止计算偏差
-            base_ &= ~static_cast<uintptr_t>(3);
-
-            disasmScrollIdx_ = 0;
-            refresh();
+            base_ = 0;
         }
         else
         {
-            disasmScrollIdx_ = newIdx;
+            base_ += deltaBytes;
         }
+
+        // 强制 4 字节对齐，防止计算偏差。
+        base_ &= ~static_cast<uintptr_t>(3);
+        refresh();
     }
 };
 
