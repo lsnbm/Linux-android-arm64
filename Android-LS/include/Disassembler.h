@@ -23,6 +23,8 @@ namespace Disasm
     class Disassembler
     {
     public:
+        static constexpr size_t DEFAULT_MAX_INSTRUCTIONS = 500;
+
         Disassembler() : m_handle(0), m_valid(false)
         {
             int major = 0, minor = 0;
@@ -69,7 +71,7 @@ namespace Disasm
         }
 
         std::vector<DisasmLine> Disassemble(uint64_t address, const uint8_t *buffer,
-                                            size_t size, size_t maxCount = 0,
+                                            size_t size, size_t maxCount = DEFAULT_MAX_INSTRUCTIONS,
                                             bool logInstructions = false)
         {
             std::vector<DisasmLine> results;

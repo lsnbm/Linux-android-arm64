@@ -572,25 +572,32 @@ namespace
         root["read_success"] = viewer.readSuccess();
         root["base"] = static_cast<std::uint64_t>(viewer.base());
         root["base_hex"] = std::format("0x{:X}", static_cast<std::uint64_t>(viewer.base()));
-        root["format"] = viewFormatToToken(viewer.format());
+        const auto format = viewer.format();
+        root["format"] = viewFormatToToken(format);
 
         const auto &buffer = viewer.buffer();
         root["byte_count"] = buffer.size();
         root["data_hex"] = bytesToHex(buffer.data(), buffer.size());
 
-        root["disasm_scroll_idx"] = viewer.disasmScrollIdx();
-        root["disasm"] = json::array();
-        for (const auto &line : viewer.getDisasm())
+        if (format == Types::ViewFormat::Disasm)
         {
-            json item;
-            item["valid"] = line.valid;
-            item["address"] = line.address;
-            item["address_hex"] = std::format("0x{:X}", line.address);
-            item["size"] = line.size;
-            item["bytes_hex"] = bytesToHex(line.bytes, line.size);
-            item["mnemonic"] = sanitizeLine(line.mnemonic);
-            item["op_str"] = sanitizeLine(line.op_str);
-            root["disasm"].push_back(std::move(item));
+            root["disasm"] = json::array();
+            std::size_t emittedLines = 0;
+            for (const auto &line : viewer.getDisasm())
+            {
+                if (emittedLines >= buffer.size() / 4)
+                    break;
+                json item;
+                item["valid"] = line.valid;
+                item["address"] = line.address;
+                item["address_hex"] = std::format("0x{:X}", line.address);
+                item["size"] = line.size;
+                item["bytes_hex"] = bytesToHex(line.bytes, line.size);
+                item["mnemonic"] = sanitizeLine(line.mnemonic);
+                item["op_str"] = sanitizeLine(line.op_str);
+                root["disasm"].push_back(std::move(item));
+                ++emittedLines;
+            }
         }
 
         return root;
@@ -643,28 +650,6 @@ namespace
             {
                 item["mask"].push_back(rec.mask[m]);
             }
-            item["ops"] = json::object();
-            item["op_values"] = json::object();
-            int readOps = 0;
-            int writeOps = 0;
-            for (int reg = Driver::IDX_PC; reg < Driver::MAX_REG_COUNT; ++reg)
-            {
-                const auto op = static_cast<std::uint8_t>(HWBP_GET_MASK(&rec, reg));
-                const auto name = MemUtils::HwbpRegName(reg);
-                item["ops"][name] = MemUtils::HwbpOpName(op);
-                item["op_values"][name] = op;
-                if (op == HWBP_OP_READ)
-                {
-                    ++readOps;
-                }
-                else if (op == HWBP_OP_WRITE)
-                {
-                    ++writeOps;
-                }
-            }
-            item["read_op_count"] = readOps;
-            item["write_op_count"] = writeOps;
-            item["rw"] = writeOps > 0 ? "write" : (readOps > 0 ? "read" : "none");
             item["pc"] = pc;
             item["pc_hex"] = std::format("0x{:X}", static_cast<std::uint64_t>(pc));
             item["hit_count"] = hitCount;
@@ -673,20 +658,16 @@ namespace
             item["orig_x0"] = origX0;
             item["syscallno"] = syscallNo;
             item["pstate"] = pstate;
-            item["regs"] = json::array();
             for (int reg = 0; reg < 30; ++reg)
             {
-                item["regs"].push_back(static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_X0 + reg)));
+                item[std::format("x{}", reg)] = static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_X0 + reg));
             }
-            item["vregs"] = json::array();
-            item["qregs"] = json::array();
             for (int reg = 0; reg < 32; ++reg)
             {
                 const auto qreg = MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_Q0 + reg);
                 json qitem = {{"lo", static_cast<std::uint64_t>(qreg)},
                               {"hi", static_cast<std::uint64_t>(qreg >> 64)}};
-                item["vregs"].push_back(qitem);
-                item["qregs"].push_back(std::move(qitem));
+                item[std::format("q{}", reg)] = std::move(qitem);
             }
             item["fpsr"] = fpsr;
             item["fpcr"] = fpcr;
@@ -1118,8 +1099,8 @@ namespace
                 return std::get<json>(count);
             if (std::holds_alternative<json>(type))
                 return std::get<json>(type);
-            if (std::get<std::uint64_t>(count) == 0 || std::get<std::uint64_t>(count) > 2000)
-                return fail("count 范围 1-2000");
+            if (std::get<std::uint64_t>(count) == 0 || std::get<std::uint64_t>(count) > 200)
+                return fail("count 范围 1-200");
 
             const std::string typeToken = toLowerAscii(std::get<std::string>(type));
             const bool stringType = (typeToken == "str" || typeToken == "string" || typeToken == "text");

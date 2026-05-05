@@ -39,10 +39,8 @@ from PySide6.QtWidgets import (
 DEFAULT_PORT = 9494
 NETWORK_TIMEOUT_SECONDS = 6
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
-BROWSER_CACHE_RADIUS_BYTES = 4096
-BROWSER_WINDOW_BYTES = BROWSER_CACHE_RADIUS_BYTES * 2
-BROWSER_VISIBLE_BYTES = 256
-BROWSER_DISASM_WINDOW_LINES = 220
+BROWSER_WINDOW_BYTES = 100
+BROWSER_DISASM_CACHE_LINES = BROWSER_WINDOW_BYTES // 4
 VALUE_TYPE_OPTIONS = (
     ("I8", "I8"),
     ("I16", "I16"),
@@ -60,6 +58,20 @@ HWBP_OP_LABELS = {
     "1": "读取",
     "2": "写入",
 }
+HWBP_MAX_REG_COUNT = 71
+HWBP_REG_INDEX = {
+    "pc": 0,
+    "hit_count": 1,
+    "lr": 2,
+    "sp": 3,
+    "orig_x0": 4,
+    "syscallno": 5,
+    "pstate": 6,
+    "fpsr": 37,
+    "fpcr": 38,
+}
+HWBP_X0_REG_INDEX = 7
+HWBP_Q0_REG_INDEX = 39
 
 
 class BrowserTextEdit(QTextEdit):
@@ -150,7 +162,6 @@ class TcpTestWindow(QWidget):
         self.pointer_status_request_inflight = False
         self.hwbp_refresh_inflight = False
         self.saved_items: list[dict[str, str]] = []
-        self.browser_base_addr = 0
         self.browser_cache_base = 0
         self.browser_cache_data = b""
         self.browser_current_addr = 0
@@ -625,9 +636,7 @@ class TcpTestWindow(QWidget):
         row1.addWidget(self.browser_addr_input, 1)
 
         row1.addWidget(QLabel("缓存"))
-        self.browser_size_label = QLabel(
-            f"{BROWSER_WINDOW_BYTES} 字节缓存（上/下各 {BROWSER_CACHE_RADIUS_BYTES}）"
-        )
+        self.browser_size_label = QLabel(f"{BROWSER_WINDOW_BYTES} 字节缓存")
         self.browser_size_label.setMinimumWidth(120)
         row1.addWidget(self.browser_size_label)
 
@@ -646,6 +655,9 @@ class TcpTestWindow(QWidget):
         self.browser_read_button = QPushButton("读取")
         self.browser_read_button.clicked.connect(self.on_browser_read)
         row1.addWidget(self.browser_read_button)
+        self.browser_refresh_button = QPushButton("刷新缓存")
+        self.browser_refresh_button.clicked.connect(self.on_browser_refresh_cache)
+        row1.addWidget(self.browser_refresh_button)
         row1.addStretch(1)
         toolbar_layout.addLayout(row1)
 
@@ -1082,7 +1094,6 @@ class TcpTestWindow(QWidget):
         self.hwbp_num_brps_label.setText("hwbp_info.num_brps: 0")
         self.hwbp_num_wrps_label.setText("hwbp_info.num_wrps: 0")
         self.hwbp_hit_addr_label.setText("hwbp_info.hit_addr: 0x0")
-        self.browser_base_addr = 0
         self.browser_cache_base = 0
         self.browser_cache_data = b""
         self.browser_current_addr = 0
@@ -1547,15 +1558,11 @@ class TcpTestWindow(QWidget):
         if "pc" not in values:
             values["pc"] = f"0x{pc:X}"
 
-        regs_raw = record.get("regs")
-        regs = regs_raw if isinstance(regs_raw, list) else []
+        regs = self._hwbp_xregs(record)
         for reg_idx, reg_val in enumerate(regs[:30]):
             values[f"x{reg_idx}"] = f"0x{self._safe_int(reg_val, 0):X}"
 
-        qregs_raw = record.get("qregs")
-        if not isinstance(qregs_raw, list):
-            qregs_raw = record.get("vregs")
-        qregs = qregs_raw if isinstance(qregs_raw, list) else []
+        qregs = self._hwbp_qregs(record)
         for reg_idx, qreg_val in enumerate(qregs[:32]):
             hi, lo = self._hwbp_qreg_parts(qreg_val)
             values[f"q{reg_idx}"] = f"0x{hi:016X}{lo:016X}"
@@ -1676,25 +1683,74 @@ class TcpTestWindow(QWidget):
             return self.hwbp_selected_index
         return None
 
+    @staticmethod
+    def _hwbp_xregs(record: dict) -> list[object]:
+        return [record[f"x{reg_idx}"] for reg_idx in range(30) if f"x{reg_idx}" in record]
+
+    @staticmethod
+    def _hwbp_qregs(record: dict) -> list[object]:
+        return [record[f"q{reg_idx}"] for reg_idx in range(32) if f"q{reg_idx}" in record]
+
+    @staticmethod
+    def _hwbp_reg_index(field_name: str) -> int | None:
+        field = field_name.strip().lower()
+        if field in HWBP_REG_INDEX:
+            return HWBP_REG_INDEX[field]
+        match = re.fullmatch(r"x(\d+)", field)
+        if match:
+            reg_idx = int(match.group(1), 10)
+            if 0 <= reg_idx < 30:
+                return HWBP_X0_REG_INDEX + reg_idx
+        match = re.fullmatch(r"q(\d+)", field)
+        if match:
+            reg_idx = int(match.group(1), 10)
+            if 0 <= reg_idx < 32:
+                return HWBP_Q0_REG_INDEX + reg_idx
+        return None
+
+    @staticmethod
+    def _hwbp_mask_op_at_index(rec: dict, reg_idx: int) -> int | None:
+        if reg_idx < 0 or reg_idx >= HWBP_MAX_REG_COUNT:
+            return None
+        mask_raw = rec.get("mask")
+        if not isinstance(mask_raw, list):
+            return None
+        byte_idx = reg_idx >> 2
+        if byte_idx < 0 or byte_idx >= len(mask_raw):
+            return None
+        byte_value = TcpTestWindow._safe_int(mask_raw[byte_idx], 0) & 0xFF
+        bit_offset = (reg_idx & 0x3) << 1
+        return (byte_value >> bit_offset) & 0x3
+
+    @staticmethod
+    def _hwbp_mask_op_value(rec: dict, field_name: str) -> int | None:
+        reg_idx = TcpTestWindow._hwbp_reg_index(field_name)
+        if reg_idx is None:
+            return None
+        return TcpTestWindow._hwbp_mask_op_at_index(rec, reg_idx)
+
+    @staticmethod
+    def _hwbp_mask_counts(rec: dict) -> tuple[int, int]:
+        read_count = 0
+        write_count = 0
+        for reg_idx in range(HWBP_MAX_REG_COUNT):
+            op_value = TcpTestWindow._hwbp_mask_op_at_index(rec, reg_idx)
+            if op_value == 1:
+                read_count += 1
+            elif op_value == 2:
+                write_count += 1
+        return read_count, write_count
+
     def _hwbp_reg_op(self, rec: dict, field_name: str) -> str:
-        op_values = rec.get("op_values")
-        if isinstance(op_values, dict) and field_name in op_values:
-            return HWBP_OP_LABELS.get(str(op_values.get(field_name)).lower(), str(op_values.get(field_name)))
-        ops = rec.get("ops")
-        if isinstance(ops, dict) and field_name in ops:
-            return HWBP_OP_LABELS.get(str(ops.get(field_name)).lower(), str(ops.get(field_name)))
+        op_value = self._hwbp_mask_op_value(rec, field_name)
+        if op_value is not None:
+            return HWBP_OP_LABELS.get(str(op_value), str(op_value))
         return "未设置"
 
     def _hwbp_ops_summary(self, rec: dict) -> str:
-        write_count = self._safe_int(rec.get("write_op_count"), 0)
-        read_count = self._safe_int(rec.get("read_op_count"), 0)
+        read_count, write_count = self._hwbp_mask_counts(rec)
         if write_count or read_count:
             return f"读 {read_count} / 写 {write_count}"
-        rw_text = str(rec.get("rw", "")).lower()
-        if rw_text == "write":
-            return "写入"
-        if rw_text == "read":
-            return "读取"
         return "未设置"
 
     @staticmethod
@@ -1707,24 +1763,13 @@ class TcpTestWindow(QWidget):
         value = TcpTestWindow._safe_int(qreg, 0)
         return ((value >> 64) & ((1 << 64) - 1), value & ((1 << 64) - 1))
 
-    @staticmethod
-    def _hwbp_qreg_value(qreg: object) -> int:
-        hi, lo = TcpTestWindow._hwbp_qreg_parts(qreg)
-        return (hi << 64) | lo
-
     def _decode_hwbp_rw_text(self, rec: dict) -> str:
-        write_count = self._safe_int(rec.get("write_op_count"), 0)
-        read_count = self._safe_int(rec.get("read_op_count"), 0)
+        read_count, write_count = self._hwbp_mask_counts(rec)
         if write_count and read_count:
             return "读/写"
         if write_count:
             return "写入"
         if read_count:
-            return "读取"
-        rw_text = str(rec.get("rw", "")).lower()
-        if rw_text == "write":
-            return "写入"
-        if rw_text == "read":
             return "读取"
         return "未知"
 
@@ -1807,8 +1852,7 @@ class TcpTestWindow(QWidget):
                     mask_item.setData(0, Qt.UserRole, idx)
                     top.addChild(mask_item)
 
-                regs_raw = rec.get("regs")
-                regs = regs_raw if isinstance(regs_raw, list) else []
+                regs = self._hwbp_xregs(rec)
                 regs_title = QTreeWidgetItem(["  寄存器快照 X0~X29"])
                 regs_title.setData(0, Qt.UserRole, idx)
                 top.addChild(regs_title)
@@ -1820,10 +1864,7 @@ class TcpTestWindow(QWidget):
                     display_text = self._hwbp_value_display_text(idx, field_name, value_text)
                     top.addChild(self._make_hwbp_field_item(idx, field_name, effective_text, f"    X{reg_idx}: {display_text}  [{self._hwbp_reg_op(rec, field_name)}]"))
 
-                qregs_raw = rec.get("qregs")
-                if not isinstance(qregs_raw, list):
-                    qregs_raw = rec.get("vregs")
-                qregs = qregs_raw if isinstance(qregs_raw, list) else []
+                qregs = self._hwbp_qregs(rec)
                 if qregs:
                     qregs_title = QTreeWidgetItem(["  SIMD 寄存器快照 Q0~Q31"])
                     qregs_title.setData(0, Qt.UserRole, idx)
@@ -1837,7 +1878,7 @@ class TcpTestWindow(QWidget):
                         display_text = self._hwbp_value_display_text(idx, field_name, qreg_display)
                         top.addChild(self._make_hwbp_field_item(idx, field_name, effective_text, f"    Q{reg_idx}: {display_text}  [{self._hwbp_reg_op(rec, field_name)}]"))
 
-                if self._safe_int(rec.get("write_op_count"), 0) > 0 or rw_text == "写入":
+                if self._hwbp_mask_counts(rec)[1] > 0:
                     write_title = QTreeWidgetItem(["  写入寄存器候选"])
                     write_title.setData(0, Qt.UserRole, idx)
                     top.addChild(write_title)
@@ -2416,6 +2457,10 @@ class TcpTestWindow(QWidget):
             if not silent:
                 QMessageBox.warning(self, "输入提示", "分页数量必须大于 0。")
             return None
+        if page_count > 200:
+            if not silent:
+                QMessageBox.warning(self, "输入提示", "分页数量不能超过 200。")
+            return None
         return page_count
 
     def _fetch_scan_page(self, start: int, *, silent: bool = False) -> bool:
@@ -2564,34 +2609,19 @@ class TcpTestWindow(QWidget):
             return None
         return total
 
-    @staticmethod
-    def _browser_window_size() -> int:
-        return BROWSER_WINDOW_BYTES
-
-    def _browser_cache_request_base(self, addr: int) -> int:
-        if BROWSER_CACHE_RADIUS_BYTES <= 0:
-            return max(0, addr)
-        return max(0, addr - BROWSER_CACHE_RADIUS_BYTES)
-
-    def _browser_visible_size(self, view_mode: str) -> int:
-        unit = max(1, self._browser_scroll_unit(view_mode))
-        visible_size = max(unit, BROWSER_VISIBLE_BYTES - (BROWSER_VISIBLE_BYTES % unit))
-        return min(visible_size, self._browser_window_size())
-
-    def _browser_cache_contains(self, addr: int, visible_size: int) -> bool:
+    def _browser_cache_contains(self, addr: int) -> bool:
         if not self.browser_cache_data:
             return False
         cache_start = self.browser_cache_base
         cache_end = cache_start + len(self.browser_cache_data)
-        return cache_start <= addr and addr + visible_size <= cache_end
+        return cache_start <= addr and addr + BROWSER_WINDOW_BYTES <= cache_end
 
     def _render_browser_cached_view(self, addr: int, view_mode: str) -> bool:
-        visible_size = self._browser_visible_size(view_mode)
-        if not self._browser_cache_contains(addr, visible_size):
+        if not self._browser_cache_contains(addr):
             return False
 
         offset = addr - self.browser_cache_base
-        data = self.browser_cache_data[offset : offset + visible_size]
+        data = self.browser_cache_data[offset : offset + BROWSER_WINDOW_BYTES]
         if view_mode == "hex":
             text = self._render_hex_dump(addr, data)
         elif view_mode == "hex64":
@@ -2664,13 +2694,11 @@ class TcpTestWindow(QWidget):
             if parsed_addr is None:
                 return False
             current = parsed_addr
-        size = self._browser_window_size()
-
         byte_delta = self._browser_scroll_unit(view_mode) * step_count
         next_addr = max(0, current - byte_delta) if delta_y > 0 else current + byte_delta
         if self._render_browser_cached_view(next_addr, view_mode):
             return True
-        self._refresh_browser_view(next_addr, size)
+        self._refresh_browser_view(next_addr)
         return True
 
     @staticmethod
@@ -2736,12 +2764,10 @@ class TcpTestWindow(QWidget):
         if not disasm_list:
             return [], base_addr
 
-        scroll_idx = TcpTestWindow._safe_int(snapshot.get("disasm_scroll_idx"), 0)
-        scroll_idx = max(0, min(scroll_idx, len(disasm_list) - 1))
-        end_idx = min(len(disasm_list), scroll_idx + BROWSER_DISASM_WINDOW_LINES)
+        end_idx = min(len(disasm_list), BROWSER_DISASM_CACHE_LINES)
 
         window_items: list[dict] = []
-        for item in disasm_list[scroll_idx:end_idx]:
+        for item in disasm_list[:end_idx]:
             if isinstance(item, dict):
                 window_items.append(item)
 
@@ -2807,8 +2833,11 @@ class TcpTestWindow(QWidget):
             return
 
         base_addr = self._safe_int(snapshot.get("base"), addr)
+        data = self._hex_to_bytes(str(snapshot.get("data_hex", "")))
+        if data is not None:
+            self.browser_cache_base = base_addr
+            self.browser_cache_data = data[:BROWSER_WINDOW_BYTES]
         visible_addr = self._extract_disasm_window(snapshot)[1]
-        self.browser_base_addr = base_addr
         self.browser_current_addr = visible_addr
         self.browser_addr_input.setText(f"0x{visible_addr:X}")
         self.browser_view.setPlainText(self._render_disasm_dump(snapshot))
@@ -2828,18 +2857,21 @@ class TcpTestWindow(QWidget):
         if snapshot is None:
             return
         base_addr = self._safe_int(snapshot.get("base"), 0)
+        data = self._hex_to_bytes(str(snapshot.get("data_hex", "")))
+        if data is not None:
+            self.browser_cache_base = base_addr
+            self.browser_cache_data = data[:BROWSER_WINDOW_BYTES]
         visible_addr = self._extract_disasm_window(snapshot)[1]
-        self.browser_base_addr = base_addr
         self.browser_current_addr = visible_addr
         self.browser_addr_input.setText(f"0x{visible_addr:X}")
         self.browser_view.setPlainText(self._render_disasm_dump(snapshot))
 
-    def _refresh_browser_view(self, addr: int, size: int) -> None:
+    def _refresh_browser_view(self, addr: int, *, force: bool = False) -> None:
         mode_data = self.browser_view_combo.currentData()
         view_mode = str(mode_data).strip() if mode_data is not None else self._browser_mode_to_token(self.browser_view_combo.currentText().strip())
-        if self._render_browser_cached_view(addr, view_mode):
+        if not force and self._render_browser_cached_view(addr, view_mode):
             return
-        request_base = self._browser_cache_request_base(addr)
+        request_base = max(0, addr)
         snapshot = self._open_viewer_snapshot(request_base, view_mode)
         if not isinstance(snapshot, dict):
             return
@@ -2848,9 +2880,7 @@ class TcpTestWindow(QWidget):
             QMessageBox.warning(self, "读取失败", "MemViewer HEX 数据解析失败。")
             return
         base_addr = self._safe_int(snapshot.get("base"), addr)
-        if size > 0:
-            data = data[:size]
-        self.browser_base_addr = base_addr
+        data = data[:BROWSER_WINDOW_BYTES]
         self.browser_cache_base = base_addr
         self.browser_cache_data = data
         if not self._render_browser_cached_view(addr, view_mode):
@@ -2873,8 +2903,18 @@ class TcpTestWindow(QWidget):
         if addr is None:
             return
         self.browser_current_addr = addr
-        size = self._browser_window_size()
-        self._refresh_browser_view(addr, size)
+        self._refresh_browser_view(addr)
+
+    def on_browser_refresh_cache(self) -> None:
+        addr = self._parse_browser_addr()
+        if addr is None:
+            return
+        self.browser_current_addr = addr
+        view_mode = self._current_browser_view_mode()
+        if view_mode == "disasm":
+            self._refresh_disasm_view(addr)
+            return
+        self._refresh_browser_view(addr, force=True)
 
     def _build_pointer_scan_request(self) -> tuple[str, dict] | None:
         target_text = self.pointer_target_input.text().strip()
