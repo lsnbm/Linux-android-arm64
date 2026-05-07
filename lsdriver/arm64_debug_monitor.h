@@ -11,6 +11,7 @@
 #include <trace/events/sched.h>
 #include "export_fun.h"
 #include "arm64_reg.h"
+#include "inline_hook_frame.h"
 
 struct breakpoint_config
 {
@@ -37,41 +38,7 @@ struct breakpoint_config
 */
 struct breakpoint_config *g_bp_config = NULL;
 
-/*
-kprobe 被 NOKPROBE_SYMBOL 拒绝(-EINVAL)，ftrace 未开启
-因此改用 inline hook 方案：
-需要注意的是PACIASP 指令（指针认证，ARM64 PAC 特性），这是函数的第一条
-*/
-
-// 保存原始的第一条指令
-static u32 orig_bp_insn;
-static u32 orig_wp_insn;
-
-// 用extern申明2个链接符号，去引用下面汇编标签符号的地址，运行时把下面汇编nop修改为保存的原指令
-extern char bp_orig_insn_slot[];
-extern char wp_orig_insn_slot[];
-
-// 保存的被hook函数地址
-static unsigned long breakpoint_handler;
-static unsigned long watchpoint_handler;
-
-// 编码一条 ARM64 B 指令(跳转指令所在地址, 跳转目标地址)
-static u32 arm64_encode_branch(unsigned long from, unsigned long to)
-{
-    long offset = (long)(to - from);
-
-    // B 指令范围 ±128MB，超出范围则无法使用
-    if (offset < -(1L << 27) || offset >= (1L << 27))
-    {
-        pr_debug("[driver] branch offset out of range: 0x%lx -> 0x%lx\n",
-                 from, to);
-        return 0;
-    }
-
-    // [31:26]=000101b, [25:0]=offset>>2
-    return (0x14000000U) | ((u32)((offset >> 2) & 0x3FFFFFF));
-}
-
+// 执行断异常处理跳板工作函数
 __attribute__((used)) static void work_trampoline_breakpoint(unsigned long unused, unsigned long esr, struct pt_regs *regs)
 {
     struct breakpoint_config *cfg = g_bp_config;
@@ -113,264 +80,26 @@ __attribute__((used)) static void work_trampoline_breakpoint(unsigned long unuse
       结果是：硬件debug异常分发结束了，但 perf子系统没有收到这次命中的信息和步过闭环，状态机推进异常就死了
     */
 
-    u64 ctrl = read_wb_reg(AARCH64_DBG_REG_BCR, 5);
+    uint64_t ctrl = read_wb_reg(AARCH64_DBG_REG_BCR, 5);
     write_wb_reg(AARCH64_DBG_REG_BCR, 5, ctrl & ~0x1);
 }
+
+// 访问断异常处理跳板工作函数
 __attribute__((used)) static void work_trampoline_watchpoint(unsigned long addr, unsigned long esr, struct pt_regs *regs)
 {
     struct breakpoint_config *cfg = g_bp_config;
     if (cfg && cfg->on_hit)
         cfg->on_hit(regs, cfg);
-    u64 ctrl = read_wb_reg(AARCH64_DBG_REG_WCR, 3);
+    uint64_t ctrl = read_wb_reg(AARCH64_DBG_REG_WCR, 3);
     write_wb_reg(AARCH64_DBG_REG_WCR, 3, ctrl & ~0x1);
 }
 
-// 执行断异常处理跳板
-__attribute__((naked, __noinline__)) static int trampoline_breakpoint(unsigned long unused, unsigned long esr, struct pt_regs *regs)
-{
-    asm volatile(
-        // 开辟272 字节栈空间
-        "sub sp, sp, #272\n"
 
-        // 保存所有通用寄存器
-        "stp x0,  x1,  [sp, #0]\n"
-        "stp x2,  x3,  [sp, #16]\n"
-        "stp x4,  x5,  [sp, #32]\n"
-        "stp x6,  x7,  [sp, #48]\n"
-        "stp x8,  x9,  [sp, #64]\n"
-        "stp x10, x11, [sp, #80]\n"
-        "stp x12, x13, [sp, #96]\n"
-        "stp x14, x15, [sp, #112]\n"
-        "stp x16, x17, [sp, #128]\n"
-        "stp x18, x19, [sp, #144]\n"
-        "stp x20, x21, [sp, #160]\n"
-        "stp x22, x23, [sp, #176]\n"
-        "stp x24, x25, [sp, #192]\n"
-        "stp x26, x27, [sp, #208]\n"
-        "stp x28, x29, [sp, #224]\n"
-        "str x30,      [sp, #240]\n"
-
-        // 保存 NZCV 条件标志
-        "mrs x9, nzcv\n"
-        "str x9, [sp, #256]\n"
-
-        // 给 trampoline 自己建立临时栈帧
-        "mov x29, sp\n"
-
-        // 调用工作逻辑
-        "bl work_trampoline_breakpoint\n"
-
-        // 恢复 NZCV 条件标志
-        "ldr x9, [sp, #256]\n"
-        "msr nzcv, x9\n"
-
-        // 恢复所有通用寄存器
-        "ldr x30,      [sp, #240]\n"
-        "ldp x28, x29, [sp, #224]\n"
-        "ldp x26, x27, [sp, #208]\n"
-        "ldp x24, x25, [sp, #192]\n"
-        "ldp x22, x23, [sp, #176]\n"
-        "ldp x20, x21, [sp, #160]\n"
-        "ldp x18, x19, [sp, #144]\n"
-        "ldp x16, x17, [sp, #128]\n"
-        "ldp x14, x15, [sp, #112]\n"
-        "ldp x12, x13, [sp, #96]\n"
-        "ldp x10, x11, [sp, #80]\n"
-        "ldp x8,  x9,  [sp, #64]\n"
-        "ldp x6,  x7,  [sp, #48]\n"
-        "ldp x4,  x5,  [sp, #32]\n"
-        "ldp x2,  x3,  [sp, #16]\n"
-        "ldp x0,  x1,  [sp, #0]\n"
-
-        // 恢复原始 sp
-        "add sp, sp, #272\n"
-
-        // 初始是 nop，上面符号链接到这个地址，安装 hook 时 patch 成 orig_bp_insn。
-        ".global bp_orig_insn_slot\n"
-        "bp_orig_insn_slot:\n"
-        ".inst 0xd503201f\n"
-
-        // 跳回保存的 breakpoint_handler + 4。
-        "ldr x16, =breakpoint_handler\n"
-        "ldr x16, [x16]\n"
-        "add x16, x16, #4\n"
-        "ret x16\n" // 5系启用BTI,不能用br x16间接跳到一个函数+4中间地址,br是无条件间接,目标地址需要是合法的 BTI landing pad。函数入口有 bti c，所以跳函数入口可以；但 +4 已经越过入口 landing pad，BTI会认为是非法间接跳转panic死机。
-        :
-        :
-        : "memory");
-}
-
-// 访问断异常处理跳板
-__attribute__((naked, __noinline__)) static int trampoline_watchpoint(unsigned long addr, unsigned long esr, struct pt_regs *regs)
-{
-    asm volatile(
-        // 开辟272 字节栈空间
-        "sub sp, sp, #272\n"
-
-        // 保存所有通用寄存器
-        "stp x0,  x1,  [sp, #0]\n"
-        "stp x2,  x3,  [sp, #16]\n"
-        "stp x4,  x5,  [sp, #32]\n"
-        "stp x6,  x7,  [sp, #48]\n"
-        "stp x8,  x9,  [sp, #64]\n"
-        "stp x10, x11, [sp, #80]\n"
-        "stp x12, x13, [sp, #96]\n"
-        "stp x14, x15, [sp, #112]\n"
-        "stp x16, x17, [sp, #128]\n"
-        "stp x18, x19, [sp, #144]\n"
-        "stp x20, x21, [sp, #160]\n"
-        "stp x22, x23, [sp, #176]\n"
-        "stp x24, x25, [sp, #192]\n"
-        "stp x26, x27, [sp, #208]\n"
-        "stp x28, x29, [sp, #224]\n"
-        "str x30,      [sp, #240]\n"
-
-        // 保存 NZCV 条件标志
-        "mrs x9, nzcv\n"
-        "str x9, [sp, #256]\n"
-
-        // 给 trampoline 自己建立临时栈帧
-        "mov x29, sp\n"
-
-        // 调用工作逻辑
-        "bl work_trampoline_watchpoint\n"
-
-        // 恢复 NZCV 条件标志
-        "ldr x9, [sp, #256]\n"
-        "msr nzcv, x9\n"
-
-        // 恢复所有通用寄存器
-        "ldr x30,      [sp, #240]\n"
-        "ldp x28, x29, [sp, #224]\n"
-        "ldp x26, x27, [sp, #208]\n"
-        "ldp x24, x25, [sp, #192]\n"
-        "ldp x22, x23, [sp, #176]\n"
-        "ldp x20, x21, [sp, #160]\n"
-        "ldp x18, x19, [sp, #144]\n"
-        "ldp x16, x17, [sp, #128]\n"
-        "ldp x14, x15, [sp, #112]\n"
-        "ldp x12, x13, [sp, #96]\n"
-        "ldp x10, x11, [sp, #80]\n"
-        "ldp x8,  x9,  [sp, #64]\n"
-        "ldp x6,  x7,  [sp, #48]\n"
-        "ldp x4,  x5,  [sp, #32]\n"
-        "ldp x2,  x3,  [sp, #16]\n"
-        "ldp x0,  x1,  [sp, #0]\n"
-
-        // 恢复原始 sp
-        "add sp, sp, #272\n"
-
-        // 初始是 nop，上面符号链接到这个地址，安装 hook 时 patch 成 orig_bp_insn。
-        ".global wp_orig_insn_slot\n"
-        "wp_orig_insn_slot:\n"
-        ".inst 0xd503201f\n"
-
-        // 跳回保存的 watchpoint_handler + 4。
-        "ldr x16, =watchpoint_handler\n"
-        "ldr x16, [x16]\n"
-        "add x16, x16, #4\n"
-        "ret x16\n"
-        :
-        :
-        : "memory");
-}
-
-// inline hook(目标函数地址，跳板函数地址，输出参数原始指令)
-static int hook_one(unsigned long target_addr, unsigned long trampoline_addr, u32 *saved_insn)
-{
-    u32 branch;
-
-    // 保存目标函数入口原始指令，卸载时用于还原
-    *saved_insn = *(u32 *)target_addr;
-
-    // 编码跳转到 trampoline 的 B 指令
-    branch = arm64_encode_branch(target_addr, trampoline_addr);
-    if (!branch)
-        return -ERANGE;
-
-    // 将 B 指令写入目标函数入口
-    fn_aarch64_insn_patch_text_nosync((void *)target_addr, branch);
-
-    pr_debug("[driver] hooked 0x%lx -> 0x%lx (orig insn: 0x%08x)\n", target_addr, trampoline_addr, *saved_insn);
-    return 0;
-}
-
-// 还原单个目标函数的原始指令(目标函数地址，原始指令)
-static void unhook_one(unsigned long target_addr, u32 saved_insn)
-{
-    fn_aarch64_insn_patch_text_nosync((void *)target_addr, saved_insn);
-    pr_debug("[driver] restored 0x%lx (insn: 0x%08x)\n", target_addr, saved_insn);
-}
-// 安装hook接管断点异常
-int hw_breakpoint_hook_install(void)
-{
-    int ret;
-
-    // 防止重复安装，下面删除hook时会清空来判断是否重新安装
-    if (breakpoint_handler || watchpoint_handler)
-    {
-        pr_debug("[driver] hook install skipped, already installed\n");
-        return 0;
-    }
-
-    breakpoint_handler = generic_kallsyms_lookup_name("breakpoint_handler");
-    if (!breakpoint_handler)
-    {
-        pr_debug("[driver] cannot find symbol: breakpoint_handler\n");
-        return -ENOENT;
-    }
-    watchpoint_handler = generic_kallsyms_lookup_name("watchpoint_handler");
-    if (!watchpoint_handler)
-    {
-        pr_debug("[driver] cannot find symbol: watchpoint_handler\n");
-        return -ENOENT;
-    }
-
-    // 安装 breakpoint_handler 的 inline hook
-    ret = hook_one(breakpoint_handler, (unsigned long)trampoline_breakpoint, &orig_bp_insn);
-    if (ret)
-    {
-        pr_debug("[driver] hook breakpoint_handler failed: %d\n", ret);
-        return ret;
-    }
-    // 安装 watchpoint_handler 的 inline hook
-    ret = hook_one(watchpoint_handler, (unsigned long)trampoline_watchpoint, &orig_wp_insn);
-    if (ret)
-    {
-        pr_debug("[driver] hook watchpoint_handler failed: %d\n", ret);
-        unhook_one(breakpoint_handler, orig_bp_insn);
-        breakpoint_handler = 0;
-        watchpoint_handler = 0;
-        return ret;
-    }
-    //  把 trampoline 里的 nop 指令改成原始指令,执行因hook被修改的第一条指令
-    fn_aarch64_insn_patch_text_nosync((void *)bp_orig_insn_slot, orig_bp_insn);
-    fn_aarch64_insn_patch_text_nosync((void *)wp_orig_insn_slot, orig_wp_insn);
-
-    pr_debug("[driver] hook installed\n");
-    return 0;
-}
-void hw_breakpoint_hook_remove(void)
-{
-    if (!breakpoint_handler && !watchpoint_handler)
-    {
-        pr_debug("[driver] hook remove skipped, not installed\n");
-        return;
-    }
-
-    // 还原 watchpoint_handler 原始指令
-    if (watchpoint_handler)
-        unhook_one(watchpoint_handler, orig_wp_insn);
-
-    // 还原 breakpoint_handler 原始指令
-    if (breakpoint_handler)
-        unhook_one(breakpoint_handler, orig_bp_insn);
-
-    breakpoint_handler = 0;
-    watchpoint_handler = 0;
-    pr_debug("[driver] hook removed\n");
-}
-
+// 声明 hook 表
+static struct hook_entry g_hooks[] = {
+    HOOK_ENTRY("breakpoint_handler", work_trampoline_breakpoint),
+    HOOK_ENTRY("watchpoint_handler", work_trampoline_watchpoint),
+};
 /*
  把外部断点参数转换成ARM架构内部格式，并完成基础检测/修正。
  这里只处理用户态断点（EL0）场景。
@@ -378,7 +107,7 @@ void hw_breakpoint_hook_remove(void)
  */
 static int hw_breakpoint_parse(struct breakpoint_config *cfg, bool is_compat, struct arch_hw_breakpoint *hw)
 {
-    u64 alignment_mask, offset;
+    uint64_t alignment_mask, offset;
 
     if (!cfg || !hw)
         return -EINVAL;
@@ -503,9 +232,8 @@ static int hw_breakpoint_parse(struct breakpoint_config *cfg, bool is_compat, st
 
     return 0;
 }
-// encode_ctrl_reg是控制码转ARM架构内部格式
 
-// 线程切换回调,6.1系是分水岭，内核整体上下区别变化大
+// 线程切换回调,6.1系是分水岭，内核整体上下区别变化大，encode_ctrl_reg是控制码转ARM架构内部格式
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
 static void probe_sched_switch(void *data, bool preempt,
                                struct task_struct *prev,
@@ -593,11 +321,12 @@ static int start_task_run_monitor(struct breakpoint_config *bp_config)
 {
     int ret;
 
-    if (bp_config->pid <= 0)
+    if (!bp_config || bp_config->pid <= 0)
     {
         pr_debug("pid error\n");
         return -EINVAL;
     }
+
     // 传递上下文给全局，让异常处理和断点写入都能互相传递配置信息
     if (g_bp_config) // 已有配置进行了注册，防止重复注册
     {
@@ -606,12 +335,22 @@ static int start_task_run_monitor(struct breakpoint_config *bp_config)
         return 0;
     }
 
+    // 安装inline hook接管异常
+    ret = inline_hook_install(g_hooks, sizeof(g_hooks) / sizeof(g_hooks[0]));
+    if (ret)
+    {
+        pr_debug("inline_hook_install failed: %d\n", ret);
+        return ret;
+    }
+
     g_bp_config = bp_config;
 
     ret = register_trace_sched_switch(probe_sched_switch, NULL);
     if (ret)
     {
         pr_debug("register_trace_sched_switch failed: %d\n", ret);
+        g_bp_config = NULL;
+        inline_hook_remove(g_hooks, sizeof(g_hooks) / sizeof(g_hooks[0]));
         return ret;
     }
 
@@ -627,13 +366,14 @@ static void stop_task_run_monitor(void)
         pr_debug("monitor stop skipped, not running\n");
         return;
     }
-
+    // 逆序清理
     unregister_trace_sched_switch(probe_sched_switch, NULL);
     pr_debug("monitor stop, target tgid=%d\n", g_bp_config->pid);
     g_bp_config = NULL;
+    inline_hook_remove(g_hooks, sizeof(g_hooks) / sizeof(g_hooks[0]));
 }
 
-// // 单步异常步过的内核api，我不使用了，上面异常回调直接关寄存器
+// //下面不用看了，是单步异常步过的内核api，我不使用了，上面异常回调直接关寄存器
 // static struct step_hook hwbp_step_hook;
 // static void (*fn_user_enable_single_step)(struct task_struct *task);
 // static void (*fn_user_disable_single_step)(struct task_struct *task);
@@ -643,7 +383,7 @@ static void stop_task_run_monitor(void)
 // // 命中断点后临时关闭当前控制寄存器，并开启单步执行一条指令
 // static void hwbp_begin_step(struct breakpoint_config *cfg, int type, struct pt_regs *regs)
 // {
-//     u32 ctrl;
+//     uint32_t ctrl;
 
 //     // 只处理用户态命中
 //     if (!cfg || !user_mode(regs))

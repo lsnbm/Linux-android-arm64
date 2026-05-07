@@ -1,10 +1,98 @@
 #ifndef LSDRIVER_ARM64_REG_H
 #define LSDRIVER_ARM64_REG_H
 
+#include <linux/types.h>
+#include <asm/memory.h>
+#include <asm/pgtable.h>
+
+// 直接从硬件寄存器获取内核页表基地址
+static inline pgd_t *get_kernel_pgd_base(void)
+{
+    // TTBR0_EL1：对应 "低地址段虚拟地址"（如用户进程的虚拟地址，由内核管理）；
+    // TTBR1_EL1：对应 "高地址段虚拟地址"（如内核自身的虚拟地址，仅内核可访问）；
+    uint64_t ttbr1;
+
+    // 读取 TTBR1_EL1 寄存器 (存放内核页表物理地址)
+    asm volatile("mrs %0, ttbr1_el1" : "=r"(ttbr1));
+
+    // TTBR1 包含 ASID 或其他控制位，通常低 48 位是物理地址
+    // 这里做一个简单的掩码处理 (64位用48位物理寻址)
+    // 将物理地址转为内核虚拟地址
+    return (pgd_t *)phys_to_virt(ttbr1 & 0x0000FFFFFFFFF000ULL);
+}
+
+// 获取执行给观察寄存器数量
+static inline int get_brps_num(void)
+{
+    uint64_t dfr0;
+    asm volatile("mrs %0, id_aa64dfr0_el1" : "=r"(dfr0));
+    return ((dfr0 >> 12) & 0xF) + 1;
+}
+static inline int get_wrps_num(void)
+{
+    uint64_t dfr0;
+    asm volatile("mrs %0, id_aa64dfr0_el1" : "=r"(dfr0));
+    return ((dfr0 >> 20) & 0xF) + 1;
+}
+
+// 解锁操作系统调试锁和全局启用硬件调试功能
+static inline void enable_hardware_debug_on_cpu(void *unused)
+{
+    uint64_t mdscr;
+
+    (void)unused;
+
+    // 解锁 OS Lock，允许访问调试寄存器
+    __asm__ volatile(
+        "msr oslar_el1, xzr\n\t"
+        "isb\n\t" ::: "memory");
+
+    /*
+    读取 MDSCR_EL1，置位后写回：
+    bit 15 (MDE): Monitor Debug Enable，用户态调试使能(EL0)
+    bit 13 (KDE): Kernel Debug Enable，内核态调试使能(EL1)
+    */
+    __asm__ volatile(
+        "mrs %[val], mdscr_el1\n\t"
+        "orr %[val], %[val], %[mask]\n\t"
+        "msr mdscr_el1, %[val]\n\t"
+        "isb\n\t"
+        : [val] "=&r"(mdscr)
+        : [mask] "r"((uint64_t)((1 << 15) | (1 << 13)))
+        : "memory");
+}
+
+// 关闭当前 CPU 上的自托管硬件调试；重新上 OS Lock
+static inline void disable_hardware_debug_on_cpu(void *unused)
+{
+    uint64_t mdscr;
+
+    (void)unused;
+
+    // 清掉 MDSCR_EL1 的 MDE(bit15) 和 KDE(bit13)
+    __asm__ volatile(
+        "mrs    %[val], mdscr_el1\n\t"
+        "bic    %[val], %[val], %[mask]\n\t"
+        "msr    mdscr_el1, %[val]\n\t"
+        "isb\n\t"
+        : [val] "=&r"(mdscr)
+        : [mask] "r"((uint64_t)((1UL << 15) | (1UL << 13)))
+        : "memory");
+
+    // 重新锁住 OS Lock
+    __asm__ volatile(
+        "mov    x0, #1\n\t"
+        "msr    oslar_el1, x0\n\t"
+        "isb\n\t"
+        :
+        :
+        : "x0", "memory");
+}
+
 // 读写调试寄存器的宏
 #ifndef read_sysreg
 #define read_sysreg(r) ({                                  \
-    u64 __val;                                             \
+    uint64_t __val;                                             \
     asm volatile("mrs %0, " __stringify(r) : "=r"(__val)); \
     __val;                                                 \
 })
@@ -14,7 +102,7 @@
 #define write_sysreg(v, r)                         \
     do                                             \
     {                                              \
-        u64 __val = (u64)(v);                      \
+        uint64_t __val = (uint64_t)(v);                      \
         asm volatile("msr " __stringify(r) ", %x0" \
                      : : "rZ"(__val));             \
     } while (0)
@@ -83,9 +171,9 @@
     WRITE_WB_REG_CASE(OFF, 15, REG, VAL)
 
 // reg:读哪一类寄存器，n:该类寄存器中的槽位编号 return:对应寄存器中的64位值
-static u64 read_wb_reg(int reg, int n)
+static uint64_t read_wb_reg(int reg, int n)
 {
-    u64 val = 0;
+    uint64_t val = 0;
 
     switch (reg + n)
     {
@@ -101,7 +189,7 @@ static u64 read_wb_reg(int reg, int n)
 }
 
 // reg:写哪一类寄存器，n:该类寄存器中的槽位编号，val:要写入寄存器的 64 位值
-static void write_wb_reg(int reg, int n, u64 val)
+static void write_wb_reg(int reg, int n, uint64_t val)
 {
     switch (reg + n)
     {
@@ -113,74 +201,6 @@ static void write_wb_reg(int reg, int n, u64 val)
         pr_debug("[driver] attempt to write to unknown breakpoint register %d\n", n);
     }
     isb();
-}
-
-// 获取执行给观察寄存器数量
-static inline int get_brps_num(void)
-{
-    u64 dfr0;
-    asm volatile("mrs %0, id_aa64dfr0_el1" : "=r"(dfr0));
-    return ((dfr0 >> 12) & 0xF) + 1;
-}
-static inline int get_wrps_num(void)
-{
-    u64 dfr0;
-    asm volatile("mrs %0, id_aa64dfr0_el1" : "=r"(dfr0));
-    return ((dfr0 >> 20) & 0xF) + 1;
-}
-
-// 解锁操作系统调试锁和全局启用硬件调试功能
-static inline void enable_hardware_debug_on_cpu(void *unused)
-{
-    uint64_t mdscr;
-
-    (void)unused;
-
-    // 解锁 OS Lock，允许访问调试寄存器
-    __asm__ volatile(
-        "msr oslar_el1, xzr\n\t"
-        "isb\n\t" ::: "memory");
-
-    /*
-    读取 MDSCR_EL1，置位后写回：
-    bit 15 (MDE): Monitor Debug Enable，用户态调试使能(EL0)
-    bit 13 (KDE): Kernel Debug Enable，内核态调试使能(EL1)
-    */
-    __asm__ volatile(
-        "mrs %[val], mdscr_el1\n\t"
-        "orr %[val], %[val], %[mask]\n\t"
-        "msr mdscr_el1, %[val]\n\t"
-        "isb\n\t"
-        : [val] "=&r"(mdscr)
-        : [mask] "r"((uint64_t)((1 << 15) | (1 << 13)))
-        : "memory");
-}
-
-// 关闭当前 CPU 上的自托管硬件调试；重新上 OS Lock
-static inline void disable_hardware_debug_on_cpu(void *unused)
-{
-    uint64_t mdscr;
-
-    (void)unused;
-
-    // 清掉 MDSCR_EL1 的 MDE(bit15) 和 KDE(bit13)
-    __asm__ volatile(
-        "mrs    %[val], mdscr_el1\n\t"
-        "bic    %[val], %[val], %[mask]\n\t"
-        "msr    mdscr_el1, %[val]\n\t"
-        "isb\n\t"
-        : [val] "=&r"(mdscr)
-        : [mask] "r"((uint64_t)((1UL << 15) | (1UL << 13)))
-        : "memory");
-
-    // 重新锁住 OS Lock
-    __asm__ volatile(
-        "mov    x0, #1\n\t"
-        "msr    oslar_el1, x0\n\t"
-        "isb\n\t"
-        :
-        :
-        : "x0", "memory");
 }
 
 // ========== FP/SIMD 寄存器操作 ==========

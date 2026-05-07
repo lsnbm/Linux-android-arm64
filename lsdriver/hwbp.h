@@ -19,7 +19,7 @@
 #include <linux/hw_breakpoint.h>
 #include <linux/slab.h>
 
-#include "hwbp_breakpoint.h"
+#include "arm64_debug_monitor.h"
 
 // static struct perf_event *(*fn_register_user_hw_breakpoint)(struct perf_event_attr *attr, perf_overflow_handler_t triggered, void *context, struct task_struct *tsk) = NULL;
 // static void (*fn_unregister_hw_breakpoint)(struct perf_event *bp) = NULL;
@@ -1676,6 +1676,11 @@ static inline void sample_hbp_handler(struct pt_regs *regs, struct breakpoint_co
 
 static inline int set_process_hwbp(pid_t pid, uint64_t addr, enum hwbp_type type, enum hwbp_len len, enum hwbp_scope scope, struct hwbp_info *info)
 {
+    int ret;
+
+    if (pid <= 0 || !info)
+        return -EINVAL;
+
     bp_config.pid = pid;
     bp_config.bt = type;
     bp_config.bl = len;
@@ -1684,16 +1689,15 @@ static inline int set_process_hwbp(pid_t pid, uint64_t addr, enum hwbp_type type
     bp_config.on_hit = sample_hbp_handler;
     bp_config.bp_info = info;
 
-    // 接管异常
-    hw_breakpoint_hook_install();
+    ret = start_task_run_monitor(&bp_config);
+    if (ret)
+        return ret;
 
-    start_task_run_monitor(&bp_config);
     return 0;
 }
 
 static inline void remove_process_hwbp(void)
 {
-    hw_breakpoint_hook_remove();
     stop_task_run_monitor();
 }
 #endif // HWBP_H
