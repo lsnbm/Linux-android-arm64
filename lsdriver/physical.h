@@ -40,30 +40,10 @@ struct pte_physical_page_info
 };
 static struct pte_physical_page_info pte_info;
 
-// 直接从硬件寄存器获取内核页表基地址
-static inline pgd_t *get_kernel_pgd_base(void)
-{
-    // TTBR0_EL1：对应 "低地址段虚拟地址"（如用户进程的虚拟地址，由内核管理）；
-    // TTBR1_EL1：对应 "高地址段虚拟地址"（如内核自身的虚拟地址，仅内核可访问）；
-    uint64_t ttbr1;
-
-    // 读取 TTBR1_EL1 寄存器 (存放内核页表物理地址)
-    asm volatile("mrs %0, ttbr1_el1" : "=r"(ttbr1));
-
-    // TTBR1 包含 ASID 或其他控制位，通常低 48 位是物理地址
-    // 这里做一个简单的掩码处理 (64位用48位物理寻址)
-    // 将物理地址转为内核虚拟地址
-    return (pgd_t *)phys_to_virt(ttbr1 & 0x0000FFFFFFFFF000ULL);
-}
-
 // 初始化
 static inline int allocate_physical_page_info(void)
 {
     uint64_t vaddr;
-    pgd_t *pgd;
-    p4d_t *p4d;
-    pud_t *pud;
-    pmd_t *pmd;
     pte_t *ptep;
 
     if (in_atomic())
@@ -85,52 +65,11 @@ static inline int allocate_physical_page_info(void)
     // 必须 memset 触发缺页，让内核填充 TTBR1 指向的页表
     __builtin_memset((void *)vaddr, 0xAA, PAGE_SIZE);
 
-    // --- 页表 Walk: PGD → P4D → PUD → PMD → PTE ---
-
-    // 计算 PGD 索引 (pgd_offset_raw)
-    pgd = get_kernel_pgd_base() + pgd_index(vaddr);
-    if (pgd_none(*pgd) || pgd_bad(*pgd))
-    {
-        pr_debug("PGD 无效\n");
-        goto err_out;
-    }
-
-    // P4D
-    p4d = p4d_offset(pgd, vaddr);
-    if (p4d_none(*p4d) || p4d_bad(*p4d))
-    {
-        pr_debug("P4D 无效\n");
-        goto err_out;
-    }
-
-    // PUD
-    pud = pud_offset(p4d, vaddr);
-    if (pud_none(*pud) || pud_bad(*pud))
-    {
-        pr_debug("PUD 无效\n");
-        goto err_out;
-    }
-
-    // PMD
-    pmd = pmd_offset(pud, vaddr);
-    if (pmd_none(*pmd) || pmd_bad(*pmd))
-    {
-        pr_debug("PMD 无效\n");
-        goto err_out;
-    }
-
-    // 大页检查
-    if (pmd_leaf(*pmd))
-    {
-        pr_debug("遇到大页，无法获取 PTE\n");
-        goto err_out;
-    }
-
-    // PTE
-    ptep = pte_offset_kernel(pmd, vaddr);
+    // 获取内核地址对应的 PTE 指针
+    ptep = get_kernel_pte(vaddr);
     if (!ptep)
     {
-        pr_debug("PTE 指针为空\n");
+        pr_debug("获取 PTE 失败\n");
         goto err_out;
     }
 
@@ -141,9 +80,9 @@ static inline int allocate_physical_page_info(void)
 
 err_out:
     vfree((void *)vaddr);
+    __builtin_memset(&pte_info, 0, sizeof(pte_info));
     return -EFAULT;
 }
-
 // 释放
 static inline void free_physical_page_info(void)
 {
@@ -151,7 +90,7 @@ static inline void free_physical_page_info(void)
     {
         // 释放之前通过 vmalloc 分配的虚拟内存
         vfree(pte_info.base_address);
-        pte_info.base_address = NULL;
+        __builtin_memset(&pte_info, 0, sizeof(pte_info));
     }
 }
 
@@ -267,12 +206,12 @@ static inline int pte_write_physical(phys_addr_t paddr, const void *buffer, size
 }
 
 // 硬件mmu翻译
-static inline int mmu_translate_va_to_pa(struct mm_struct *mm, u64 va, phys_addr_t *pa)
+static inline int mmu_translate_va_to_pa(struct mm_struct *mm, uint64_t va, phys_addr_t *pa)
 {
-    u64 pgd_phys;
+    uint64_t pgd_phys;
     int ret;
-    u64 phys_out;
-    u64 tmp_daif, tmp_ttbr, tmp_par, tmp_offset, tmp_ttbr_new;
+    uint64_t phys_out;
+    uint64_t tmp_daif, tmp_ttbr, tmp_par, tmp_offset, tmp_ttbr_new;
 
     if (!mm || !mm->pgd || !pa)
         return -EINVAL;
@@ -446,88 +385,29 @@ static inline int linear_write_physical(phys_addr_t paddr, void *buffer, size_t 
 // 手动走页表翻译（不再禁止中断，靠每级安全检查防护）
 static inline int walk_translate_va_to_pa(struct mm_struct *mm, uint64_t vaddr, phys_addr_t *paddr)
 {
-    pgd_t *pgd;
-    p4d_t *p4d;
-    pud_t *pud;
-    pmd_t *pmd;
     pte_t *ptep, pte;
     unsigned long pfn;
 
-    if (!mm || !paddr)
+    if (!paddr)
         return -1;
-
-    // PGD Level
-    pgd = pgd_offset(mm, vaddr);
-    if (pgd_none(*pgd) || pgd_bad(*pgd))
-        return -1;
-
-    // P4D Level
-    p4d = p4d_offset(pgd, vaddr);
-    if (p4d_none(*p4d) || p4d_bad(*p4d))
-        return -1;
-
-    // PUD Level (可能遇到 1GB 大页)
-    pud = pud_offset(p4d, vaddr);
-    if (pud_none(*pud))
-        return -1;
-
-    // 检查是否是 1G 大页
-    if (pud_leaf(*pud))
-    {
-        // 检查pfn
-        pfn = pud_pfn(*pud);
-        if (!pfn_valid(pfn))
-            return -1;
-
-        *paddr = (pud_pfn(*pud) << PAGE_SHIFT) + (vaddr & ~PUD_MASK);
-        return 0;
-    }
-    if (pud_bad(*pud))
-        return -1;
-
-    //  PMD Level (可能遇到 2MB 大页)
-    pmd = pmd_offset(pud, vaddr);
-    if (pmd_none(*pmd))
-        return -1;
-
-    // 检查是否是 2M 大页
-    if (pmd_leaf(*pmd))
-    {
-        // 检查pfn
-        pfn = pmd_pfn(*pmd);
-        if (!pfn_valid(pfn))
-            return -1;
-
-        *paddr = (pmd_pfn(*pmd) << PAGE_SHIFT) + (vaddr & ~PMD_MASK);
-        return 0;
-    }
-    if (pmd_bad(*pmd))
-        return -1;
-
-    //  PTE Level (普通的 4KB 页)
-    // 较新内核中 __pte_offset_map 不导出，对于 64位 系统直接使用 pte_offset_kernel 即可
-    ptep = pte_offset_kernel(pmd, vaddr);
+    // 获取pte指针
+    ptep = get_user_pte(mm, vaddr);
     if (!ptep)
         return -1;
-
     pte = *ptep;
-
     // 必须检查 pte_present，因为页可能被换出到 Swap 分区
     // 如果 present 为 false，pfn 字段是无效的（存的是 swap offset）
-    if (pte_present(pte))
-    {
-        // 检查pfn
-        pfn = pte_pfn(pte);
-        if (!pfn_valid(pfn))
-            return -1;
+    if (!pte_present(pte))
+        return -1;
 
-        *paddr = (pte_pfn(pte) << PAGE_SHIFT) + (vaddr & ~PAGE_MASK);
-        return 0;
-    }
+    // 检查 pfn
+    pfn = pte_pfn(pte);
+    if (!pfn_valid(pfn))
+        return -1;
 
-    return -1;
+    *paddr = (pfn << PAGE_SHIFT) + (vaddr & ~PAGE_MASK);
+    return 0;
 }
-
 // 进程读写
 static inline int _process_memory_rw(enum sm_req_op op, pid_t pid, uint64_t vaddr, void *buffer, size_t size)
 {
