@@ -246,9 +246,9 @@ static int handler_pre(struct kprobe *p, struct pt_regs *regs)
 		pr_debug("【进程监听】检测到 LS 进程即将退出！PID: %d, 进程名(comm): %s\n", task->pid, task->comm);
 
 		// 相应处理
-		read_process_memory(1, 1, &ProcessExit, 1); // 主动调用一下释放缓存的mm
-		v_touch_destroy();							// 清理触摸
-		ProcessExit = false;						// 标记用户进程已断开,前面read借用了ProcessExit，这里最后置为false，保证状态正确
+		read_process_memory(666666, 1, &ProcessExit, 1); // 主动调用一下释放缓存的mm
+		v_touch_destroy();								 // 清理触摸
+		ProcessExit = false;							 // 标记用户进程已断开,前面read借用了ProcessExit，这里最后置为false，保证状态正确
 	}
 
 	return 0;

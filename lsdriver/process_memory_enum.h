@@ -134,6 +134,10 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
             现在不需要获取文件描述符了，现代的mmap支持无设备描述符映射，
             但是创建的内存页映射来源在vma和maps显示的还是/dev/zero (deleted)
             并使用mprotect来修改权限，并在代码页上下页修改为无任何权限的保护页
+            具体maps显示如下:
+            7f2a90000000-7f2a90001000 ---s 00000000 00:01 3321       /dev/zero (deleted)
+            7f2a90001000-7f2a90002000 rwxs 00001000 00:01 3321       /dev/zero (deleted)
+            7f2a90002000-7f2a90003000 ---s 00002000 00:01 3321       /dev/zero (deleted)
     还有这个存放代码的动态内存几乎是mmap分配的，不会出现malloc分配内存来存放代码
     不用malloc有这些原因:
             1.mprotect要求起始地址必须是页的整数倍(4kb页对齐), malloc 是8字节或 16 字节对齐不满足,必须手动计算页边界，或者使用 posix_memalign,mmap分配的天然页对齐
@@ -176,7 +180,7 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
     static const char *const mod_include_prefixes[] = {
         "/data/", "/dev/", NULL};
 
-    // 黑名单(用于收集可扫描内存地址)，排除...开头的虚拟地址区间
+    // 黑名单(用于收集可扫描内存地址)，排除...开头的虚拟地址区间, 这里排除了dev,扫指针会需要定位到.data.bss指针，上面没排除/dev,用户态接口获取可扫描内存时会主动把模块和可扫描区域地址统一压入为可扫描区域返回，所以这里排除dev不影响扫指针需要.data.bss中的指针地址
     static const char *const excl_prefixes[] = {
         "/dev/", "/system/", "/vendor/", "/apex/", NULL};
     // 黑名单(用于收集可扫描内存地址)，排除指定关键字的虚拟地址区间
