@@ -238,6 +238,9 @@ static inline int pte_read_physical(phys_addr_t paddr, void *buffer, size_t size
 // 写入
 static inline int pte_write_physical(phys_addr_t paddr, const void *buffer, size_t size)
 {
+    if (!capable(CAP_SYS_RAWIO))
+        return -EPERM;
+
     void *mapped = pte_map_page(paddr, size, (void *)buffer);
     if (IS_ERR(mapped))
     {
