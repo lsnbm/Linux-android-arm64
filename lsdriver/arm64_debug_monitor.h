@@ -336,7 +336,7 @@ static int start_task_run_monitor(struct breakpoint_config *bp_config)
     }
 
     // 安装inline hook接管异常
-    ret = inline_hook_install(g_hooks, sizeof(g_hooks) / sizeof(g_hooks[0]));
+    ret = inline_hook_install(g_hooks);
     if (ret)
     {
         pr_debug("inline_hook_install failed: %d\n", ret);
@@ -350,7 +350,7 @@ static int start_task_run_monitor(struct breakpoint_config *bp_config)
     {
         pr_debug("register_trace_sched_switch failed: %d\n", ret);
         g_bp_config = NULL;
-        inline_hook_remove(g_hooks, sizeof(g_hooks) / sizeof(g_hooks[0]));
+        inline_hook_remove(g_hooks);
         return ret;
     }
 
@@ -370,7 +370,7 @@ static void stop_task_run_monitor(void)
     unregister_trace_sched_switch(probe_sched_switch, NULL);
     pr_debug("monitor stop, target tgid=%d\n", g_bp_config->pid);
     g_bp_config = NULL;
-    inline_hook_remove(g_hooks, sizeof(g_hooks) / sizeof(g_hooks[0]));
+    inline_hook_remove(g_hooks);
 }
 
 // //下面不用看了，是单步异常步过的内核api，我不使用了，上面异常回调直接关寄存器

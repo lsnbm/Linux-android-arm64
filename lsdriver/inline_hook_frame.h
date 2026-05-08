@@ -254,7 +254,7 @@ static void hook_entry_remove(struct hook_entry *e)
 }
 
 // 批量安装卸载接口
-int inline_hook_install(struct hook_entry *entries, int count)
+int inline_hook_install_count(struct hook_entry *entries, int count)
 {
     int i, ret;
     if (count > TRAMP_SLOT_COUNT)
@@ -273,10 +273,13 @@ int inline_hook_install(struct hook_entry *entries, int count)
     }
     return 0;
 }
-
-void inline_hook_remove(struct hook_entry *entries, int count)
+void inline_hook_remove_count(struct hook_entry *entries, int count)
 {
     // 逆序卸载
     for (int i = count - 1; i >= 0; i--)
         hook_entry_remove(&entries[i]);
 }
+
+//外部调用宏，宏函数计算数组数量，不要直接在函数内部使用sizeof,参数会退化为指针
+#define inline_hook_install(entries) inline_hook_install_count((entries), sizeof(entries) / sizeof((entries)[0]))
+#define inline_hook_remove(entries) inline_hook_remove_count((entries), sizeof(entries) / sizeof((entries)[0]))
