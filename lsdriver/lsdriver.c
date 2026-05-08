@@ -15,6 +15,7 @@
 
 #include "io_struct.h"
 #include "export_fun.h"
+#include "inline_hook_frame.h"
 #include "physical.h"
 #include "hwbp.h"
 #include "virtual_input.h"
@@ -24,27 +25,6 @@ static struct req_obj *req = NULL;
 
 static bool ProcessExit = false; // 用户进程默认未启动
 static bool KThreadExit = true;	 // 内核线程默认启用
-
-// 避免模块内联 put_page() 把 Android 的 page_pinner 静态键依赖拉进来。
-static void release_gup_pages(struct page **pages, int nr)
-{
-	typedef void (*release_pages_t)(struct page **pages, int nr);
-	static release_pages_t fn_release_pages;
-
-	if (!pages || nr <= 0)
-		return;
-
-	if (!fn_release_pages)
-		fn_release_pages = (release_pages_t)generic_kallsyms_lookup_name("release_pages");
-
-	if (!fn_release_pages)
-	{
-		pr_debug("严重错误！无法找到 release_pages，跳过 %d 个页引用回收\n", nr);
-		return;
-	}
-
-	fn_release_pages(pages, nr);
-}
 
 static int DispatchThreadFunction(void *data)
 {
@@ -226,52 +206,46 @@ static int ConnectThreadFunction(void *data)
 	return 0;
 }
 
-// do_exit 执行前的回调函数
-static int handler_pre(struct kprobe *p, struct pt_regs *regs)
+// do_exit 执行前的 inline hook 工作函数
+static void do_exit_hook_work(void)
 {
 	// 调用 do_exit 的进程就是当前正在运行并准备死去的进程 (current)
 	struct task_struct *task = current;
 
 	// 只监听主线程的退出
 	if (!thread_group_leader(task))
-		return 0;
+		return;
 
 	// 匹配进程名
-	// Android 中 task->comm 最长只有 15 个字符，包名极可能被截断！
+	// Android 中 task->comm 最长只有 15 个字符，包名被截断
 	// 比如 "com.ss.android.LS" 可能会变成 "com.ss.android."
-	// 不是Android包名程序除外
 	if (__builtin_strstr(task->comm, "ls") != NULL || __builtin_strstr(task->comm, "LS") != NULL)
 	{
-
 		pr_debug("【进程监听】检测到 LS 进程即将退出！PID: %d, 进程名(comm): %s\n", task->pid, task->comm);
 
 		// 相应处理
 		read_process_memory(666666, 1, &ProcessExit, 1); // 主动调用一下释放缓存的mm
 		v_touch_destroy();								 // 清理触摸
+		inline_hook_remove_all();						 // 清理所有hook
 		ProcessExit = false;							 // 标记用户进程已断开,前面read借用了ProcessExit，这里最后置为false，保证状态正确
 	}
-
-	return 0;
 }
-static int kprobe_do_exit_init(void)
+static int do_exit_init(void)
 {
-	static struct kprobe kp = {
-		.symbol_name = "do_exit",
+	static struct hook_entry do_exit_hook[] = {
+		HOOK_ENTRY("do_exit", do_exit_hook_work),
 	};
+
 	int ret;
 
-	// 绑定回调函数
-	kp.pre_handler = handler_pre;
-
-	// 注册 kprobe
-	ret = register_kprobe(&kp);
+	ret = inline_hook_install(do_exit_hook);
 	if (ret < 0)
 	{
-		pr_err("注册 kprobe(do_exit) 失败，错误码: %d\n", ret);
+		pr_err("安装 inline hook(do_exit) 失败，错误码: %d\n", ret);
 		return ret;
 	}
 
-	pr_debug("成功：Kprobe(do_exit) 已注册，开始监听 LS 退出。\n");
+	pr_debug("成功：inline hook(do_exit) 已安装，开始监听 LS 退出。\n");
 	return 0;
 }
 
@@ -367,7 +341,7 @@ static int __init lsdriver_init(void)
 	}
 
 	// 注册回调
-	kprobe_do_exit_init();
+	do_exit_init();
 
 	// 隐藏内核线程
 	hide_kthread(chf);
