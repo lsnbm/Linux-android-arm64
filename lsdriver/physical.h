@@ -240,30 +240,30 @@ static inline int mmu_translate_va_to_pa(struct mm_struct *mm, uint64_t va, phys
         "and    %[tmp_offset], %[pgd_phys], #0xffffffffffff\n"             // 提取 PA[47:0]
         "orr    %[tmp_ttbr_new], %[tmp_offset], %[tmp_ttbr_new], lsl #2\n" // 组合到新 TTBR 格式
 
-        // 切换 TTBR0，ASID 域清零 (bits[63:48]=0)
+        // 切换 TTBR0
         "mrs    %[tmp_ttbr], ttbr0_el1\n"
         "msr    ttbr0_el1, %[tmp_ttbr_new]\n"
         "isb\n"
 
-        // 硬件地址翻译
+        /*
+        硬件地址翻译，这里会导致某个TLB entry(TLB条目)的 ASID(地址空间标识符) 中VA->PA 的被污染
+        ASID允许相同虚拟地址映射不同物理地址，不同进程的地址空间分配不同的ASID到mm,运行时根据TCR_EL1.A1装载到ttbr0_el1或TTBR1_EL1
+        TLB entry 1: ASID 10 + VA 0x400000 -> PA 0x10000000
+        TLB entry 2: ASID 20 + VA 0x400000 -> PA 0x20000000
+        */
         "at     s1e0r, %[va]\n"
         "isb\n"
         "mrs    %[tmp_par], par_el1\n"
 
-        /*清除 ASID=0 的 TLB 污染
-        vaae1is: VA+所有ASID, EL1, 广播所有核
-        虽然 AT 是本地触发，但在复杂的 SMP 环境下
-        使用 vaae1is+ish 是硬件一致性的稳妥做法。
-备用指令只清理本地TLB
-        "lsr    %[tmp_offset], %[va], #12\n"
-        "tlbi   vae1, %[tmp_offset]\n"
-        "dsb    nsh\n"
-        "isb\n"
-
+        /*
+        只清除当前va地址所有的ASID并只同步当前cpu，不用vae1清除指定ASID原因是不知道 AT 这次污染在哪个 ASID
+        想要知道需要如下判断，太麻烦了
+        TCR_EL1.A1 = 0  => ASID 来自 TTBR0_EL1[63:48]
+        TCR_EL1.A1 = 1  => ASID 来自 TTBR1_EL1[63:48]
         */
-        "lsr    %[tmp_offset], %[va], #12\n"
-        "tlbi   vaae1is, %[tmp_offset]\n"
-        "dsb    ish\n"
+        "lsr    %[tmp_offset], %[va], #12\n" // 清除当前va地址
+        "tlbi   vaae1, %[tmp_offset]\n"      // 所有的ASID
+        "dsb    nsh\n"                       // 并只同步当前cpu
         "isb\n"
 
         // 恢复原始 TTBR0
