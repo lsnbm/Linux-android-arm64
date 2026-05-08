@@ -85,7 +85,7 @@ public:                // 外部初始化
 
     ~Driver()
     {
-         ExitKernel();
+        // ExitKernel();
     }
 
 public: // 共有结构体和锁
