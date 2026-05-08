@@ -1,4 +1,6 @@
 
+#ifndef INLINE_HOOK_FRAME_H
+#define INLINE_HOOK_FRAME_H
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/string.h>
@@ -41,14 +43,25 @@ asm(
                                                      ".endr\n\t"
                                                      ".popsection\n\t");
 
-// 获取一个槽位
-static inline uint32_t *trampoline_slot_get(int index)
-{
-    if (index < 0 || index >= TRAMP_SLOT_COUNT)
-        return NULL;
+// 全局槽位位图，多处调用自动分配不冲突
+static DECLARE_BITMAP(g_slot_used, TRAMP_SLOT_COUNT);
 
-    return inline_hook_trampoline_slots + index * TRAMP_WORDS;
+// 分配并获取一个槽位
+static int slot_alloc(uint32_t **trampoline_out)
+{
+    int bit = find_first_zero_bit(g_slot_used, TRAMP_SLOT_COUNT);
+    if (bit >= TRAMP_SLOT_COUNT)
+        return -ENOSPC;
+    set_bit(bit, g_slot_used);
+    *trampoline_out = inline_hook_trampoline_slots + bit * TRAMP_WORDS;
+    return bit;
 }
+// 释放槽位
+static void slot_free(int index)
+{
+    clear_bit(index, g_slot_used);
+}
+
 // patch预留代码段
 static int trampoline_patch(uint32_t *dst, const uint32_t *src)
 {
@@ -78,6 +91,7 @@ struct hook_entry
     uint32_t *trampoline; // 模块代码段预留的跳板
     uint32_t saved_insn;  // 目标函数入口被覆盖的原始指令
     bool installed;       // 是否已安装
+    int slot_index;       // 分配到的槽位，-1 表示未分配
 };
 
 // 便捷宏:申明一个hook_entry
@@ -89,6 +103,7 @@ struct hook_entry
         .trampoline = NULL,  \
         .saved_insn = 0,     \
         .installed = false,  \
+        .slot_index = -1,    \
     }
 
 // 生成模板跳板汇编代码
@@ -177,11 +192,11 @@ static void trampoline_build(uint32_t *buf, uint32_t orig_insn, unsigned long wo
 }
 
 // 安装单条hook
-static int hook_entry_install(struct hook_entry *e, int slot_index)
+static int hook_entry_install(struct hook_entry *e)
 {
     uint32_t tramp_code[TRAMP_WORDS];
     uint32_t hook_code;
-    int ret;
+    int ret, slot;
     unsigned long return_addr;
 
     if (e->installed)
@@ -200,10 +215,11 @@ static int hook_entry_install(struct hook_entry *e, int slot_index)
     if (!e->target_addr || !e->work_fn)
         return -EINVAL;
 
-    // 获取一个槽位给跳板代码
-    e->trampoline = trampoline_slot_get(slot_index);
-    if (!e->trampoline)
+    // 分配并获取一个槽位
+    slot = slot_alloc(&e->trampoline);
+    if (slot < 0)
         return -ENOSPC;
+    e->slot_index = slot;
 
     // 保存原始指令
     e->saved_insn = READ_ONCE(*(uint32_t *)e->target_addr);
@@ -213,10 +229,13 @@ static int hook_entry_install(struct hook_entry *e, int slot_index)
 
     // 填充跳板
     trampoline_build(tramp_code, e->saved_insn, (unsigned long)e->work_fn, return_addr);
+
     // 写到预留代码段槽位
     ret = trampoline_patch(e->trampoline, tramp_code);
     if (ret)
     {
+        slot_free(slot);
+        e->slot_index = -1;
         e->trampoline = NULL;
         return ret;
     }
@@ -225,13 +244,18 @@ static int hook_entry_install(struct hook_entry *e, int slot_index)
     ret = arm64_make_b(e->target_addr, (unsigned long)e->trampoline, &hook_code);
     if (ret)
     {
+        slot_free(slot);
+        e->slot_index = -1;
         e->trampoline = NULL;
         return ret;
     }
+
     // patch 目标函数入口 → b trampoline
     ret = fn_aarch64_insn_patch_text_nosync((void *)e->target_addr, hook_code);
     if (ret)
     {
+        slot_free(slot);
+        e->slot_index = -1;
         e->trampoline = NULL;
         return ret;
     }
@@ -248,6 +272,8 @@ static void hook_entry_remove(struct hook_entry *e)
         return;
     // 恢复原指令
     fn_aarch64_insn_patch_text_nosync((void *)e->target_addr, e->saved_insn);
+    slot_free(e->slot_index);
+    e->slot_index = -1;
     e->trampoline = NULL;
     e->installed = false;
     pr_debug("[hook] removed %s\n", e->target_sym);
@@ -262,7 +288,7 @@ int inline_hook_install_count(struct hook_entry *entries, int count)
 
     for (i = 0; i < count; i++)
     {
-        ret = hook_entry_install(&entries[i], i);
+        ret = hook_entry_install(&entries[i]);
         // 失败回退
         if (ret)
         {
@@ -273,6 +299,7 @@ int inline_hook_install_count(struct hook_entry *entries, int count)
     }
     return 0;
 }
+
 void inline_hook_remove_count(struct hook_entry *entries, int count)
 {
     // 逆序卸载
@@ -280,6 +307,28 @@ void inline_hook_remove_count(struct hook_entry *entries, int count)
         hook_entry_remove(&entries[i]);
 }
 
-//外部调用宏，宏函数计算数组数量，不要直接在函数内部使用sizeof,参数会退化为指针
+//用于驱动/用户态退出的强行卸载所有hook
+void inline_hook_remove_all(void)
+{
+    int i;
+
+    for (i = 0; i < TRAMP_SLOT_COUNT; i++)
+    {
+        if (!test_bit(i, g_slot_used))
+            continue;
+
+        // trampoline[41] 就是 orig_insn，直接还原
+        uint32_t *trampoline = inline_hook_trampoline_slots + i * TRAMP_WORDS;
+        unsigned long target_addr = *(unsigned long *)&trampoline[44] - 4; // RET_SLOT存的是target+4
+
+        fn_aarch64_insn_patch_text_nosync((void *)target_addr, trampoline[41]);
+        slot_free(i);
+        pr_debug("[hook] force removed slot %d, target 0x%lx\n", i, target_addr);
+    }
+}
+
+// 外部调用宏，宏函数计算数组数量，不要直接在函数内部使用sizeof,参数会退化为指针
 #define inline_hook_install(entries) inline_hook_install_count((entries), sizeof(entries) / sizeof((entries)[0]))
 #define inline_hook_remove(entries) inline_hook_remove_count((entries), sizeof(entries) / sizeof((entries)[0]))
+
+#endif // INLINE_HOOK_FRAME_H

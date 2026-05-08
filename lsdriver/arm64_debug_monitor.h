@@ -39,7 +39,7 @@ struct breakpoint_config
 struct breakpoint_config *g_bp_config = NULL;
 
 // 执行断异常处理跳板工作函数
-__attribute__((used)) static void work_trampoline_breakpoint(unsigned long unused, unsigned long esr, struct pt_regs *regs)
+static void work_trampoline_breakpoint(unsigned long unused, unsigned long esr, struct pt_regs *regs)
 {
     struct breakpoint_config *cfg = g_bp_config;
     if (cfg && cfg->on_hit)
@@ -85,7 +85,7 @@ __attribute__((used)) static void work_trampoline_breakpoint(unsigned long unuse
 }
 
 // 访问断异常处理跳板工作函数
-__attribute__((used)) static void work_trampoline_watchpoint(unsigned long addr, unsigned long esr, struct pt_regs *regs)
+static void work_trampoline_watchpoint(unsigned long addr, unsigned long esr, struct pt_regs *regs)
 {
     struct breakpoint_config *cfg = g_bp_config;
     if (cfg && cfg->on_hit)

@@ -91,7 +91,7 @@ __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
         return true;
 }
 
-//------------------下面是通用但未导出未定义函数-----------------
+//------------------下面是通用，但未导出，未定义函数-----------------
 
 // 获取内核态虚拟地址的pte
 static inline pte_t *get_kernel_pte(uint64_t vaddr)
@@ -210,6 +210,27 @@ static int arm64_make_b(unsigned long from, unsigned long to, uint32_t *insn)
 
     *insn = 0x14000000 | ((offset >> 2) & 0x03FFFFFF);
     return 0;
+}
+
+// 释放一批通过GUP获取的page *;避免使用 put_page() 把 page_pinner 拉进来。
+static void release_gup_pages(struct page **pages, int nr)
+{
+	typedef void (*release_pages_t)(struct page **pages, int nr);
+	static release_pages_t fn_release_pages;
+
+	if (!pages || nr <= 0)
+		return;
+
+	if (!fn_release_pages)
+		fn_release_pages = (release_pages_t)generic_kallsyms_lookup_name("release_pages");
+
+	if (!fn_release_pages)
+	{
+		pr_debug("严重错误！无法找到 release_pages，跳过 %d 个页引用回收\n", nr);
+		return;
+	}
+
+	fn_release_pages(pages, nr);
 }
 
 
