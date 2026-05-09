@@ -360,3 +360,46 @@ module_exit(lsdriver_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Liao");
+
+/*
+闲聊
+统一物理寻址空间(Unified Physical Address Space)
+	CPU 有一个巨大的物理地址寻址空间 (比如寻址40 位长度的空间)
+	CPU 会把这些物理地址划分成不同的区域，分配给不同的硬件：
+	典型的就是骁龙ARM SoC 的物理内存
+		0x00000000 ~ 0x07FFFFFF	Boot ROM / 内部SRAM	      固件代码,芯片内部的启动代码
+		0x08000000 ~ 0x1FFFFFFF	外设寄存器 (MMIO 区)	   外设硬件寄存器地址
+		0x20000000 ~ 0x7FFFFFFF	保留区 / PCI-E 映射	       其他用途
+		0x80000000 ~ 0xFFFFFFFF 主 DRAM (运行内存/内存条)  运行时数据存放地址
+	在现代mmu开启的情况下cpu只能寻址虚拟地址
+	    比如一个usb设备物理地址是a600000
+		需要用ioremap(0xa600000,4096);来映射物理地址到虚拟地址，
+		然后 CPU 读写虚拟地址时被mmu拦截，由mmu转为物理地址
+		然后由 CPU 的总线接口单元(Bus Interface Unit)把这个物理地址，连同你要写的数据，打包放到 AXI 总线（或其升级版如 CHI 等片上互联总线）上。
+		然后由 AXI 总线内部的地址解码器转为电信号，把这个电信号送到 USB 控制器的寄存器物理引脚上
+		最后寄存器写入会触发芯片内部的数字逻辑电路完成硬件工作
+		
+		这就是通过读写虚拟地址来控制设备
+
+内核子系统
+        VFS 子系统
+		   常见挂载目录
+		   /proc    进程信息,内核状态,能查看部分设备/总线信息是历史遗留接口，现在标准是/sys
+		   /sys     设备模型,驱动,总线,类,是设备对象信息
+		   /dev     设备节点,用户程序读写操作设备的设备节点
+		   /run     运行时状态文件
+		   /dev/pts 伪终端设备
+		input 子系统
+			cat /proc/bus/input/devices   查看输入设备
+			ls /dev/input/                查看设备节点
+			ls /sys/class/input/
+		perf 子系统
+			我这里不使用，最常用于硬件断点
+		usb 子系统
+			ls /sys/class/udc/            查看最底层USB设备控制器
+			   output: a600000.dwc3
+					   a600000:           焊死在USB 控制器寄存器的物理地址。CPU 通过向这个地址读写数据，来控制 USB 接口的收发。
+					   dwc3:			  全称是 DesignWare Cores USB 3.0。这是半导体巨头 Synopsys（新思科技）设计的 USB 控制器 IP 核心。几乎所有现代的高通骁龙芯片内部，都集成了这个 dwc3 硬件模块来管理底层的 Type-C 接口。
+			getprop | grep sys.usb.config 查看上层的Android配置的usb模式
+		gnss 子系统
+*/
