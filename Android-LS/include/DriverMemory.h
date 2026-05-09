@@ -375,8 +375,10 @@ public: // 共有结构体和锁
         enum hwbp_scope bs;       // 断点作用线程范围
         struct hwbp_info bp_info; // 断点信息
 
-        // 初始化触摸驱动返回屏幕维度
+        // 初始化触摸时返回的屏幕维度
         int POSITION_X, POSITION_Y;
+        // 触摸槽位
+        int slot;
         // 触摸坐标
         int x, y;
     };
@@ -501,17 +503,17 @@ public: // 外部读写接口
     }
 
 public: // 外部触摸接口
-    void TouchDown(int x, int y, int screenW, int screenH)
+    void TouchDown(int slot, int x, int y, int screenW, int screenH)
     {
-        HandleTouchEvent(sm_req_op::op_down, x, y, screenW, screenH);
+        HandleTouchEvent(sm_req_op::op_down, slot, x, y, screenW, screenH);
     }
 
-    void TouchMove(int x, int y, int screenW, int screenH)
+    void TouchMove(int slot, int x, int y, int screenW, int screenH)
     {
-        HandleTouchEvent(sm_req_op::op_move, x, y, screenW, screenH);
+        HandleTouchEvent(sm_req_op::op_move, slot, x, y, screenW, screenH);
     }
 
-    void TouchUp() { HandleTouchEvent(sm_req_op::op_up, 1, 1, 1, 1); }
+    void TouchUp(int slot) { HandleTouchEvent(sm_req_op::op_up, slot, 1, 1, 1, 1); }
 
 public: // 外部获取内存信息
     // 获取进程内存信息(刷新)
@@ -1104,7 +1106,7 @@ private: // 私有实现，外部无需关系
     }
 
     // 触摸事件
-    void HandleTouchEvent(sm_req_op op, int x, int y, int screenW, int screenH)
+    void HandleTouchEvent(sm_req_op op, int slot, int x, int y, int screenW, int screenH)
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
 
@@ -1113,7 +1115,7 @@ private: // 私有实现，外部无需关系
             return;
 
         req->op = op;
-
+        req->slot = slot;
         // 浮点运算提到前面，保持清晰
         double normX = static_cast<double>(x) / screenW;
         double normY = static_cast<double>(y) / screenH;

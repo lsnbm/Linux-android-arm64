@@ -261,8 +261,10 @@ struct req_obj
     enum hwbp_scope bs;       // 断点作用线程范围
     struct hwbp_info bp_info; // 断点信息
 
-    // 初始化触摸驱动返回屏幕维度
+    // 初始化触摸时返回的屏幕维度
     int POSITION_X, POSITION_Y;
+    // 触摸槽位
+    int slot;
     // 触摸坐标
     int x, y;
 };

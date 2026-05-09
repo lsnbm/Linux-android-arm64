@@ -39,6 +39,7 @@ static int DispatchThreadFunction(void *data)
 			if (req->kernel)
 			{
 
+				// 不保存中断+恢复中断状态，这里强行关闭所有中断，后续在强行打开所有
 				asm volatile("msr daifset, #0xf\n" ::: "memory");
 
 				req->kernel = false; // 清除请求标志
@@ -62,7 +63,7 @@ static int DispatchThreadFunction(void *data)
 				case op_down:
 				case op_move:
 				case op_up:
-					v_touch_event(req->op, req->x, req->y);
+					v_touch_event(req->op, req->slot, req->x, req->y);
 					break;
 				case op_init_touch:
 					req->status = v_touch_init(&req->POSITION_X, &req->POSITION_Y);
