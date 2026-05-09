@@ -250,6 +250,10 @@ static inline int mmu_translate_va_to_pa(struct mm_struct *mm, uint64_t va, phys
         ASID允许相同虚拟地址映射不同物理地址，不同进程的地址空间分配不同的ASID到mm,运行时根据TCR_EL1.A1装载到ttbr0_el1或TTBR1_EL1
         TLB entry 1: ASID 10 + VA 0x400000 -> PA 0x10000000
         TLB entry 2: ASID 20 + VA 0x400000 -> PA 0x20000000
+        at指令就是为了安全地探测页表，翻译的结果(无论成功还是失败)都会更新到 PAR_EL1寄存器中。
+        普通ldr/str 指令导致mmu翻译失败会直接触发翻译异常，CPU 跳入 el1_da，执行翻译异常处理
+        现在翻译异常绝大部分都是<缺页>导致的
+        因为现在现代系统中，大页是非常普遍的(内核空间几乎全大页)，遇到大页直接就可以返回物理地址了，mmu不需要继续查找下级页表
         */
         "at     s1e0r, %[va]\n"
         "isb\n"
@@ -382,32 +386,92 @@ static inline int linear_write_physical(phys_addr_t paddr, void *buffer, size_t 
     return 0;
 }
 
-// 手动走页表翻译（不再禁止中断，靠每级安全检查防护）
+// 手动走页表翻译，遇到PUD:1G大页/PMD:2MB大页，可以直接返回物理地址了
 static inline int walk_translate_va_to_pa(struct mm_struct *mm, uint64_t vaddr, phys_addr_t *paddr)
 {
+    pgd_t *pgd;
+    p4d_t *p4d;
+    pud_t *pud;
+    pmd_t *pmd;
     pte_t *ptep, pte;
     unsigned long pfn;
 
-    if (!paddr)
+    if (!mm || !paddr)
         return -1;
-    // 获取pte指针
-    ptep = get_user_pte(mm, vaddr);
+
+    // PGD Level
+    pgd = pgd_offset(mm, vaddr);
+    if (pgd_none(*pgd) || pgd_bad(*pgd))
+        return -1;
+
+    // P4D Level
+    p4d = p4d_offset(pgd, vaddr);
+    if (p4d_none(*p4d) || p4d_bad(*p4d))
+        return -1;
+
+    // PUD Level (可能遇到 1GB 大页)
+    pud = pud_offset(p4d, vaddr);
+    if (pud_none(*pud))
+        return -1;
+
+    // 检查是否是 1G 大页
+    if (pud_leaf(*pud))
+    {
+        // 检查pfn
+        pfn = pud_pfn(*pud);
+        if (!pfn_valid(pfn))
+            return -1;
+
+        *paddr = (pud_pfn(*pud) << PAGE_SHIFT) + (vaddr & ~PUD_MASK);
+        return 0;
+    }
+    if (pud_bad(*pud))
+        return -1;
+
+    //  PMD Level (可能遇到 2MB 大页)
+    pmd = pmd_offset(pud, vaddr);
+    if (pmd_none(*pmd))
+        return -1;
+
+    // 检查是否是 2M 大页
+    if (pmd_leaf(*pmd))
+    {
+        // 检查pfn
+        pfn = pmd_pfn(*pmd);
+        if (!pfn_valid(pfn))
+            return -1;
+
+        *paddr = (pmd_pfn(*pmd) << PAGE_SHIFT) + (vaddr & ~PMD_MASK);
+        return 0;
+    }
+    if (pmd_bad(*pmd))
+        return -1;
+
+    //  PTE Level (普通的 4KB 页)
+    // 较新内核中 __pte_offset_map 不导出，对于 64位 系统直接使用 pte_offset_kernel 即可
+    ptep = pte_offset_kernel(pmd, vaddr);
     if (!ptep)
         return -1;
+
     pte = *ptep;
+
     // 必须检查 pte_present，因为页可能被换出到 Swap 分区
     // 如果 present 为 false，pfn 字段是无效的（存的是 swap offset）
-    if (!pte_present(pte))
-        return -1;
+    if (pte_present(pte))
+    {
+        // 检查pfn
+        pfn = pte_pfn(pte);
+        if (!pfn_valid(pfn))
+            return -1;
 
-    // 检查 pfn
-    pfn = pte_pfn(pte);
-    if (!pfn_valid(pfn))
-        return -1;
+        *paddr = (pte_pfn(pte) << PAGE_SHIFT) + (vaddr & ~PAGE_MASK);
+        return 0;
+    }
 
-    *paddr = (pfn << PAGE_SHIFT) + (vaddr & ~PAGE_MASK);
-    return 0;
+    return -1;
 }
+
+
 // 进程读写
 static inline int _process_memory_rw(enum sm_req_op op, pid_t pid, uint64_t vaddr, void *buffer, size_t size)
 {
