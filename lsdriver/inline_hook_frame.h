@@ -19,8 +19,10 @@ inline hook框架
 kprobe 被 NOKPROBE_SYMBOL 拒绝(-EINVAL)，ftrace 未开启
 因此改用 inline hook 方案：
 需要注意的是paciasp 指令和bti c指令，这是函数的第一条
-一般没有paciasp ，这种强语义的搬到跳板执行可能有风险
+PAC 防返回导向攻击（ROP），BTI 防跳转导向攻击（JOP）
+现在paciasp全局启用，内核90%函数都有 ，这种强语义的搬到跳板执行可能有风险
 bti只限制br/blr间接跳
+paciasp启用时只有paciasp指令，并且包含bti功能
 */
 
 #define TRAMP_WORDS 48
