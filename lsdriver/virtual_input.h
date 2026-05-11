@@ -54,7 +54,11 @@ static inline int hijack_init_slots(struct input_dev *dev)
         return -EINVAL;
 
     // 直接砍掉后半段对驱动的可见性
-    mt->num_slots = PHYSICAL_SLOTS; // 物理屏驱动只循环 slot 0–3
+    mt->num_slots = PHYSICAL_SLOTS + 1; // 物理屏驱动只循环 slot 0–3
+                                        /*
+                                        驱动即使只有 4 根手指，也可能仍然遍历/清理 slot4-9。把 slot4 选择禁掉后，清理事件就串到 slot3。
+                                        串到 slot3 的原因就是 ABS_MT_SLOT 4 被忽略后，mt->slot 不会变，仍然停在上一次的 slot3。
+                                        */
 
     // --- Flag 设置 ---
     mt->flags &= ~INPUT_MT_DROP_UNUSED; // 即使没更新也不要丢弃

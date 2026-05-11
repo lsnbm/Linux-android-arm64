@@ -78,7 +78,8 @@ static int DispatchThreadFunction(void *data)
 					remove_process_hwbp();
 					break;
 				case op_kexit:
-					KThreadExit = false; // 标记内核线程退出
+					KThreadExit = false;	  // 标记内核线程退出
+					inline_hook_remove_all(); // 内核退出才清理所有hook
 					break;
 				default:
 					break;
@@ -227,7 +228,6 @@ static void do_exit_hook_work(void)
 		// 相应处理
 		read_process_memory(666666, 1, &ProcessExit, 1); // 主动调用一下释放缓存的mm
 		v_touch_destroy();								 // 清理触摸
-		inline_hook_remove_all();						 // 清理所有hook
 		ProcessExit = false;							 // 标记用户进程已断开,前面read借用了ProcessExit，这里最后置为false，保证状态正确
 	}
 }
@@ -321,6 +321,8 @@ static int __init lsdriver_init(void)
 	struct task_struct *chf;
 	struct task_struct *dhf;
 
+	print_el2_status(); // 输出Hypervisor相关信息
+
 	bypass_cfi(); // 先尝试绕过 5系的cfi
 
 	hide_myself(); // 隐藏内核模块本身
@@ -372,17 +374,17 @@ MODULE_AUTHOR("Liao");
 		0x20000000 ~ 0x7FFFFFFF	保留区 / PCI-E 映射	       其他用途
 		0x80000000 ~ 0xFFFFFFFF 主 DRAM (运行内存/内存条)  运行时数据存放地址
 	在现代mmu开启的情况下cpu只能寻址虚拟地址
-	    比如一个usb设备物理地址是a600000
+		比如一个usb设备物理地址是a600000
 		需要用ioremap(0xa600000,4096);来映射物理地址到虚拟地址，
 		然后 CPU 读写虚拟地址时被mmu拦截，由mmu转为物理地址
 		然后由 CPU 的总线接口单元(Bus Interface Unit)把这个物理地址，连同你要写的数据，打包放到 AXI 总线（或其升级版如 CHI 等片上互联总线）上。
 		然后由 AXI 总线内部的地址解码器转为电信号，把这个电信号送到 USB 控制器的寄存器物理引脚上
 		最后寄存器写入会触发芯片内部的数字逻辑电路完成硬件工作
-		
+
 		这就是通过读写虚拟地址来控制设备
 
 内核子系统
-        VFS 子系统
+		VFS 子系统
 		   常见挂载目录
 		   /proc    进程信息,内核状态,能查看部分设备/总线信息是历史遗留接口，现在标准是/sys
 		   /sys     设备模型,驱动,总线,类,是设备对象信息

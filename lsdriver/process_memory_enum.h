@@ -238,7 +238,7 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
          * BSS 检测条件：
          *   - 无文件映射（匿名页）
          *   - 含写权限（VM_WRITE）即可，不强求可读。
-         *     ACE 反作弊会将 BSS 权限故意设为 -w-p（只写无读），
+         *     反作弊会将 BSS 权限故意设为 -w-p（只写无读），
          *     原先的 VMA_IS_RW 宏要求同时具备读写，导致此类 BSS 被漏掉。
          *   - 与上一个 VMA 首尾严格相连（vm_start == prev->vm_end）
          *   - 上一个 VMA 属于我们正在追踪的模块（last_mod_idx >= 0）
@@ -378,7 +378,7 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
      *   使本该是 RX 的代码段最终呈现为 RWX，干扰上层对段类型的判断。
      *
      *   攻击四：BSS 权限异化
-     *   ACE 反作弊将 BSS 段的权限故意设为 -w-p（只写，无读权限）。
+     *   反作弊将 BSS 段的权限故意设为 -w-p（只写，无读权限）。
      *   若 BSS 检测逻辑要求 VM_READ|VM_WRITE，则此类 BSS 完全不可见，
      *   导致上层计算出的模块尾部地址偏短，BSS 内的全局变量无法定位。
      *
@@ -399,7 +399,7 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
      *   豁免：index==-1 的匿名 BSS 段即便 end 超出 best_end，
      *   只要 start 在 best_end 附近（≤ 0x3000，一个 guard 页的余量），
      *   就视为合法的本体尾部延伸，保留并动态扩展 best_end。
-     *   这直接解决了 ACE 将 BSS 权限设为 -w-p 后尾部被误杀的问题。
+     *   这直接解决了 反作弊 将 BSS 权限设为 -w-p 后尾部被误杀的问题。
      *
      *   步骤 4：严谨拓扑标记 (核心：破解权限篡改)
      *   寻找天然的"防波堤"：向后扫描找到第一个"纯原生数据段 (有W无X)"。
@@ -430,7 +430,7 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
      * 无论反作弊怎么切分、放诱饵、异化权限，跑完此算法后，
      * 产出结果与干净手机上的原生 ELF 映射 1:1 完全一致。
      *
-     * 典型输出（libil2cpp.so，ACE 保护环境）：
+     * 典型输出（libil2cpp.so，保护环境）：
      *   seg[0] index=0  prot=1(R)  → PT_LOAD[0] ELF Header
      *   seg[1] index=1  prot=5(RX) → PT_LOAD[1] .text 代码段
      *   seg[2] index=2  prot=3(RW) → PT_LOAD[2] .data.rel.ro

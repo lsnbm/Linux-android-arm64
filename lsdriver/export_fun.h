@@ -42,13 +42,13 @@ __attribute__((no_sanitize("cfi"))) static unsigned long generic_kallsyms_lookup
         校验失败直接panic
         你把它 patch 成 RET，相当于让验证永远通过
 新版 KCFI (Kernel 6.1+):
-         编译器去掉了集中验证函数。KCFI 会在每一个间接跳转（BLR）指令的前面，内联插入几条汇编指令，
-         直接比较 hash 值。如果不对，直接触发 BRK 指令宕机。
- 如果是 6.1+ 内核，不存在 __cfi_slowpath，
+        内核去掉了集中验证函数。编译器会在每一个间接跳转（BLR）指令的前面，内联插入几条汇编指令，
+        直接比较 hash 值。如果不对，直接触发 BRK 指令宕机。
+如果是 6.1+ 内核，不存在 __cfi_slowpath，
 
 所以有好人给了一个5系的解决代码给我，所以5系就不用下面纯汇编进行间接调用了
- 下面bypass_cfi由https://github.com/wangchuan2009提供，处理运行时校验函数来过5系cfi
- */
+下面bypass_cfi由https://github.com/wangchuan2009提供，处理运行时校验函数来过5系cfi
+*/
 
 int (*fn_aarch64_insn_patch_text_nosync)(void *addr, uint32_t insn);
 

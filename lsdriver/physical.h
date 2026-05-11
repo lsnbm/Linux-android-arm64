@@ -285,6 +285,10 @@ static inline int mmu_translate_va_to_pa(struct mm_struct *mm, uint64_t va, phys
         提取物理地址
         PAR_EL1[51:12] 存放物理页地址。
         提取从 bit 12 开始的 40 位 (即到 bit 51)。
+        at s1e0r，遇到 2MB/1GB 大页时
+        返回的 PAR_EL1[51:12] 已经包含了完整的 PA[51:12]，大页内偏移 [20:12] 或 [29:12] 已经算进去了
+        所以 VA 里只有最低 12 位 [11:0]（页内字节偏移）是 PAR_EL1 没有的，补上就行了
+        只要这样拼：pa = (PAR_EL1[51:12] << 12) | (va & 0xfff);
         */
         "ubfx   %[tmp_par], %[tmp_par], #12, #40\n" // 提取 PA[51:12]
         "lsl    %[tmp_par], %[tmp_par], #12\n"      // 恢复偏移
@@ -470,7 +474,6 @@ static inline int walk_translate_va_to_pa(struct mm_struct *mm, uint64_t vaddr, 
 
     return -1;
 }
-
 
 // 进程读写
 static inline int _process_memory_rw(enum sm_req_op op, pid_t pid, uint64_t vaddr, void *buffer, size_t size)

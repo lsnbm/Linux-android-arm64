@@ -4,6 +4,8 @@
 #include <linux/types.h>
 #include <asm/memory.h>
 #include <asm/pgtable.h>
+#include <linux/of.h>
+#include <linux/string.h>
 
 // 直接从硬件寄存器获取内核页表基地址
 static inline pgd_t *get_kernel_pgd_base(void)
@@ -33,6 +35,260 @@ static inline int get_wrps_num(void)
     uint64_t dfr0;
     asm volatile("mrs %0, id_aa64dfr0_el1" : "=r"(dfr0));
     return ((dfr0 >> 20) & 0xF) + 1;
+}
+
+// 读取 CurrentEL
+static inline unsigned int read_current_el(void)
+{
+    unsigned long val;
+    asm volatile(
+        "mrs %0, CurrentEL\n\t"
+        "lsr %0, %0, #2\n\t"
+        "and %0, %0, #0x3"
+        : "=r"(val)
+        :
+        : "cc");
+    return (unsigned int)val;
+}
+
+// 读取 ID_AA64MMFR1_EL1
+static inline unsigned int read_vhe_support(void)
+{
+    unsigned long val;
+    asm volatile(
+        "mrs %0, ID_AA64MMFR1_EL1\n\t"
+        "lsr %0, %0, #4\n\t"
+        "and %0, %0, #0xF"
+        : "=r"(val)
+        :
+        : "cc");
+    return (unsigned int)val;
+}
+
+// 读取 ID_AA64PFR0_EL
+static inline unsigned int read_el2_implemented(void)
+{
+    unsigned long val;
+    asm volatile(
+        "mrs %0, ID_AA64PFR0_EL1\n\t"
+        "lsr %0, %0, #8\n\t"
+        "and %0, %0, #0xF"
+        : "=r"(val)
+        :
+        : "cc");
+    return (unsigned int)val;
+}
+
+// 读取 SCTLR_EL1
+static inline unsigned long read_sctlr_el1(void)
+{
+    unsigned long val;
+    asm volatile(
+        "mrs %0, SCTLR_EL1"
+        : "=r"(val)
+        :
+        : "cc");
+    return val;
+}
+
+// 输出Hypervisor相关信息
+static void print_el2_status(void)
+{
+    unsigned int current_el;
+    unsigned int el2_implemented;
+    unsigned int vhe_supported;
+    unsigned long sctlr_el1;
+
+    struct device_node *np;
+    struct property *prop;
+    const char *str;
+    const char *model;
+    bool hyp_hint = false;
+    bool tz_hint = false;
+
+    /*
+    读取当前 CPU 正在运行的异常级别
+    CurrentEL[3:2]：
+    01b = EL1
+    10b = EL2
+    */
+    current_el = read_current_el();
+
+    /*
+    判断硬件是否实现 EL2。
+    ID_AA64PFR0_EL1[11:8]
+    0 = 未实现 EL2
+    1 = 实现 EL2
+    */
+    el2_implemented = read_el2_implemented();
+
+    /*
+    判断硬件是否支持 VHE(Virtualization Host Extensions)。
+    ID_AA64MMFR1_EL1[11:8]
+    非 0 表示支持虚拟机主机扩展
+    */
+    vhe_supported = read_vhe_support();
+
+    /*
+    读取 SCTLR_EL1。是 MMU 与 Cache 是否启用的总开关。
+    在 VHE 模式下，EL1 系统寄存器访问可能会被重定向到 EL2 侧。
+    这里仅打印出来作为辅助判断信息。
+    */
+    sctlr_el1 = read_sctlr_el1();
+
+    pr_info("===== EL2 Detection =====\n");
+
+    // 打印当前运行级别。
+    pr_info("CurrentEL          : EL%u\n", current_el);
+
+    // 打印硬件是否实现 EL2。
+    pr_info("EL2 implemented    : %s (ID_AA64PFR0_EL1[11:8] = %u)\n",
+            el2_implemented ? "YES" : "NO",
+            el2_implemented);
+
+    // 打印硬件是否支持 VHE。注意：硬件支持 VHE，不代表当前系统已经启用 VHE。
+    pr_info("VHE supported      : %s (ID_AA64MMFR1_EL1[11:8] = %u)\n",
+            vhe_supported ? "YES" : "NO",
+            vhe_supported);
+
+    // 打印 SCTLR_EL1 的当前值。该值主要用于辅助观察当前控制寄存器状态。
+    pr_info("SCTLR_EL1          : 0x%016lx\n", sctlr_el1);
+
+    // 判断 VHE 是否 active。
+    pr_info("VHE mode active    : %s\n",
+            current_el == 2 ? "YES" : "NO");
+
+    // 判断当前是否可以直接访问 EL2 寄存器。
+    pr_info("EL2 regs accessible: %s\n",
+            current_el == 2 ? "YES" : "NO (trap)");
+
+    // 运行在 EL2 时，读取 HCR_EL2。
+    if (current_el == 2)
+    {
+        unsigned long hcr_el2;
+
+        // 读取 HCR_EL2。
+        asm volatile(
+            "mrs %0, HCR_EL2"
+            : "=r"(hcr_el2)
+            :
+            :);
+
+        pr_info("HCR_EL2            : 0x%016lx\n", hcr_el2);
+        pr_info("  E2H bit[34]      : %lu (VHE=%s)\n",
+                (hcr_el2 >> 34) & 1,
+                ((hcr_el2 >> 34) & 1) ? "enabled" : "disabled");
+    }
+    else
+    {
+        pr_info("HCR_EL2            : NOT readable from EL1 (would trap)\n");
+    }
+
+    pr_info("===== Hypervisor / TrustZone / Platform Probe =====\n");
+
+    /*
+    查看是否有高通 Hypervisor (Gunyah/Haven)
+    dmesg | grep -iE "gunyah|haven|qhee|qtee|smmu"
+
+    查看 TrustZone / ATF 痕迹
+    dmesg | grep -iE "psci|atf|tfa|arm-tf|trust"
+
+    看设备树里有没有 hypervisor 节点
+    cat /proc/device-tree/hypervisor/compatible 2>/dev/null || echo "no hyp node"
+    find /proc/device-tree -name "compatible" | xargs grep -il "hyp\|kvm" 2>/dev/null
+
+    看 PSCI 版本（间接判断固件层级）
+    dmesg | grep -i psci
+
+    直接看芯片型号，推断用的什么方案
+    cat /proc/cpuinfo | grep -i "hardware\|model"
+    getprop ro.board.platform
+    getprop ro.hardware
+    */
+    np = of_find_node_by_path("/hypervisor");
+    if (np)
+    {
+        pr_info("DT /hypervisor     : present\n");
+        of_property_for_each_string(np, "compatible", prop, str)
+        {
+            pr_info("  compatible       : %s\n", str);
+
+            if (strnstr(str, "gunyah", strlen(str)) ||
+                strnstr(str, "haven", strlen(str)) ||
+                strnstr(str, "qhee", strlen(str)) ||
+                strnstr(str, "qtee", strlen(str)))
+            {
+                hyp_hint = true;
+            }
+        }
+
+        of_node_put(np);
+    }
+    else
+    {
+        pr_info("DT /hypervisor     : no hyp node\n");
+    }
+    np = of_find_node_by_path("/psci");
+    if (!np)
+        np = of_find_node_by_path("/firmware/psci");
+    if (np)
+    {
+        pr_info("DT PSCI            : present\n");
+
+        of_property_for_each_string(np, "compatible", prop, str)
+        {
+            pr_info("  compatible       : %s\n", str);
+
+            if (strnstr(str, "psci", strlen(str)) ||
+                strnstr(str, "arm,psci", strlen(str)))
+            {
+                tz_hint = true;
+            }
+        }
+
+        of_node_put(np);
+    }
+    else
+    {
+        pr_info("DT PSCI            : not found\n");
+    }
+
+    // 直接看芯片/平台型号
+    np = of_find_node_by_path("/");
+    if (np)
+    {
+        if (!of_property_read_string(np, "model", &model))
+            pr_info("DT model           : %s\n", model);
+        else
+            pr_info("DT model           : unavailable\n");
+
+        of_property_for_each_string(np, "compatible", prop, str)
+        {
+            pr_info("DT compatible      : %s\n", str);
+
+            if (strnstr(str, "qcom", strlen(str)))
+                pr_info("  platform hint    : Qualcomm SoC / board\n");
+
+            if (strnstr(str, "gunyah", strlen(str)) ||
+                strnstr(str, "haven", strlen(str)) ||
+                strnstr(str, "qhee", strlen(str)) ||
+                strnstr(str, "qtee", strlen(str)))
+            {
+                hyp_hint = true;
+            }
+        }
+
+        of_node_put(np);
+    }
+    else
+    {
+        pr_info("DT root            : unavailable\n");
+    }
+
+    pr_info("HV keyword hint    : %s\n", hyp_hint ? "YES" : "NO");
+    pr_info("TZ/PSCI hint       : %s\n", tz_hint ? "YES" : "NO");
+
+    pr_info("=========================\n");
 }
 
 // 解锁操作系统调试锁和全局启用硬件调试功能
@@ -92,7 +348,7 @@ static inline void disable_hardware_debug_on_cpu(void *unused)
 // 读写调试寄存器的宏
 #ifndef read_sysreg
 #define read_sysreg(r) ({                                  \
-    uint64_t __val;                                             \
+    uint64_t __val;                                        \
     asm volatile("mrs %0, " __stringify(r) : "=r"(__val)); \
     __val;                                                 \
 })
@@ -102,7 +358,7 @@ static inline void disable_hardware_debug_on_cpu(void *unused)
 #define write_sysreg(v, r)                         \
     do                                             \
     {                                              \
-        uint64_t __val = (uint64_t)(v);                      \
+        uint64_t __val = (uint64_t)(v);            \
         asm volatile("msr " __stringify(r) ", %x0" \
                      : : "rZ"(__val));             \
     } while (0)
