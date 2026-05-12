@@ -1,5 +1,7 @@
 
 
+#include <linux/printk.h>
+
 #include "inline_hook_frame.h"
 
 /*
@@ -27,29 +29,18 @@ int gnss_insert_raw(struct gnss_device *gdev, const unsigned char *buf,size_t co
 用户态 GNSS HAL / daemon / 应用侧服务
 
 
+gnss_insert_raw:
+  标准 Linux GNSS raw 字节流路径。现代设备不用它了。
+tty/serdev:
+  串口 GNSS 才可能走。手机 SoC 基带定位通常不走。
+unix_stream_sendmsg / sock_sendmsg:
+  能看到 HAL/LocSvc 的 socket 数据，但只是字节流，协议私有，且高通/MTK 不通用。
+qmi / glink / qrtr:
+  高通专用传输层，能更底层，但不是通用 Android 定位接口，解析成本很高。
+
+binder_transaction:
+  最通用。App、system_server、GNSS HAL 都通过 Binder/AIDL 交互。
+
+
+所以还是hook用户态的进程，内核没法
 */
-
-static int gnss_insert_raw_hook_work(struct gnss_device *gdev, const unsigned char *buf, size_t count)
-{
-
-    
-}
-
-static int gnss_insert_raw_init(void)
-{
-    static struct hook_entry gnss_insert_raw_hook[] = {
-        HOOK_ENTRY("gnss_insert_raw", gnss_insert_raw_hook_work),
-    };
-
-    int ret;
-
-    ret = inline_hook_install(gnss_insert_raw_hook);
-    if (ret < 0)
-    {
-        pr_debug("安装 inline hook(gnss_insert_raw) 失败，错误码: %d\n", ret);
-        return ret;
-    }
-
-    pr_debug("成功：inline hook(gnss_insert_raw) 已安装，开始监听 LS 退出。\n");
-    return 0;
-}

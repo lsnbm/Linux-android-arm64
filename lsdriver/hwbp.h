@@ -1689,7 +1689,7 @@ static inline int set_process_hwbp(pid_t pid, uint64_t addr, enum hwbp_type type
     bp_config.on_hit = sample_hbp_handler;
     bp_config.bp_info = info;
 
-    ret = start_task_run_monitor(&bp_config);
+    ret = start_task_run_monitor(bp_config);
     if (ret)
         return ret;
 
@@ -1698,6 +1698,6 @@ static inline int set_process_hwbp(pid_t pid, uint64_t addr, enum hwbp_type type
 
 static inline void remove_process_hwbp(void)
 {
-    stop_task_run_monitor();
+    stop_task_run_monitor(bp_config);
 }
 #endif // HWBP_H
