@@ -123,8 +123,6 @@ static void deviceHandlerThread(DeviceConfig *config)
                         currentSlot = MAX_FINGERS - 1;
                     break;
                 case ABS_MT_TRACKING_ID:
-                    if (currentSlot == 9)
-                        break; // 忽略slot9
                     if (ie.value == -1)
                     {
                         slot_active[currentSlot] = false;
@@ -137,12 +135,10 @@ static void deviceHandlerThread(DeviceConfig *config)
                     }
                     break;
                 case ABS_MT_POSITION_X:
-                    if (currentSlot != 9)
-                        slot_raw_x[currentSlot] = ie.value;
+                    slot_raw_x[currentSlot] = ie.value;
                     break;
                 case ABS_MT_POSITION_Y:
-                    if (currentSlot != 9)
-                        slot_raw_y[currentSlot] = ie.value;
+                    slot_raw_y[currentSlot] = ie.value;
                     break;
                 }
             }
@@ -156,9 +152,6 @@ static void deviceHandlerThread(DeviceConfig *config)
                 std::lock_guard<std::mutex> lock(touch_mutex); // 保护全局数组
                 for (int s = 0; s < MAX_FINGERS; s++)
                 {
-                    if (s == 9)
-                        continue;
-
                     fingers[deviceIndex][s].isDown = slot_active[s];
                     fingers[deviceIndex][s].id = slot_id[s];
 

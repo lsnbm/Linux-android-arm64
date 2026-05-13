@@ -70,110 +70,40 @@ namespace
 
     // 按空白切分命令参数
 
-    // 解析无符号64位整数
-    std::optional<std::uint64_t> parseUInt64(std::string_view text)
+    template <typename T, typename ParseFn>
+    std::optional<T> parseNumber(std::string_view text, ParseFn &&parse)
     {
         if (text.empty())
-        {
             return std::nullopt;
-        }
 
         std::string temp(text);
         char *end = nullptr;
         errno = 0;
-        const unsigned long long value = std::strtoull(temp.c_str(), &end, 0);
+        const auto value = parse(temp.c_str(), &end);
         if (errno != 0 || end == temp.c_str() || *end != '\0')
-        {
             return std::nullopt;
-        }
-        return static_cast<std::uint64_t>(value);
+        return static_cast<T>(value);
+    }
+
+    // 解析无符号64位整数
+    std::optional<std::uint64_t> parseUInt64(std::string_view text)
+    {
+        return parseNumber<std::uint64_t>(text, [](const char *s, char **end)
+                                          { return std::strtoull(s, end, 0); });
     }
 
     // 解析整数参数
     std::optional<int> parseInt(std::string_view text)
     {
-        if (text.empty())
-        {
-            return std::nullopt;
-        }
-
-        std::string temp(text);
-        char *end = nullptr;
-        errno = 0;
-        const long value = std::strtol(temp.c_str(), &end, 0);
-        if (errno != 0 || end == temp.c_str() || *end != '\0')
-        {
-            return std::nullopt;
-        }
-        return static_cast<int>(value);
+        return parseNumber<int>(text, [](const char *s, char **end)
+                                { return std::strtol(s, end, 0); });
     }
 
     // 解析浮点数参数
     std::optional<double> parseDouble(std::string_view text)
     {
-        if (text.empty())
-        {
-            return std::nullopt;
-        }
-
-        std::string temp(text);
-        char *end = nullptr;
-        errno = 0;
-        const double value = std::strtod(temp.c_str(), &end);
-        if (errno != 0 || end == temp.c_str() || *end != '\0')
-        {
-            return std::nullopt;
-        }
-        return value;
-    }
-
-    std::optional<__uint128_t> parseUInt128(std::string_view text)
-    {
-        if (text.empty())
-            return std::nullopt;
-
-        int base = 10;
-        if (text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X'))
-        {
-            base = 16;
-            text.remove_prefix(2);
-        }
-        if (text.empty())
-            return std::nullopt;
-
-        __uint128_t value = 0;
-        for (const char ch : text)
-        {
-            int digit = -1;
-            if (ch >= '0' && ch <= '9')
-                digit = ch - '0';
-            else if (base == 16 && ch >= 'a' && ch <= 'f')
-                digit = ch - 'a' + 10;
-            else if (base == 16 && ch >= 'A' && ch <= 'F')
-                digit = ch - 'A' + 10;
-            if (digit < 0 || digit >= base)
-                return std::nullopt;
-            value = value * static_cast<unsigned>(base) + static_cast<unsigned>(digit);
-        }
-        return value;
-    }
-
-    std::string formatUInt128Hex(__uint128_t value)
-    {
-        if (value == 0)
-            return "0x0";
-
-        char buf[35]{};
-        int pos = 34;
-        static constexpr char kHex[] = "0123456789ABCDEF";
-        while (value != 0 && pos > 1)
-        {
-            buf[--pos] = kHex[static_cast<unsigned>(value & 0xF)];
-            value >>= 4;
-        }
-        buf[--pos] = 'x';
-        buf[--pos] = '0';
-        return std::string(buf + pos);
+        return parseNumber<double>(text, [](const char *s, char **end)
+                                   { return std::strtod(s, end); });
     }
 
     template <typename T>
@@ -191,23 +121,21 @@ namespace
         return dr.Write<T>(address, value) == static_cast<int>(sizeof(T));
     }
 
+    std::uint64_t readHwbp64(Driver::hwbp_record &record, int reg)
+    {
+        return static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(record, reg));
+    }
+
+    std::uint32_t readHwbp32(Driver::hwbp_record &record, int reg)
+    {
+        return static_cast<std::uint32_t>(MemUtils::HwbpReadRegisterValue(record, reg));
+    }
+
     // 解析有符号64位整数
     std::optional<std::int64_t> parseInt64(std::string_view text)
     {
-        if (text.empty())
-        {
-            return std::nullopt;
-        }
-
-        std::string temp(text);
-        char *end = nullptr;
-        errno = 0;
-        const long long value = std::strtoll(temp.c_str(), &end, 0);
-        if (errno != 0 || end == temp.c_str() || *end != '\0')
-        {
-            return std::nullopt;
-        }
-        return static_cast<std::int64_t>(value);
+        return parseNumber<std::int64_t>(text, [](const char *s, char **end)
+                                         { return std::strtoll(s, end, 0); });
     }
 
     // 将字符串转换为小写ASCII
@@ -636,15 +564,15 @@ namespace
             json item;
             item["index"] = i;
             MemUtils::HwbpRequestAll(rec);
-            const auto pc = static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_PC));
-            const auto hitCount = static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_HIT_COUNT));
-            const auto lr = static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_LR));
-            const auto sp = static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_SP));
-            const auto origX0 = static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_ORIG_X0));
-            const auto syscallNo = static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_SYSCALLNO));
-            const auto pstate = static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_PSTATE));
-            const auto fpsr = static_cast<std::uint32_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_FPSR));
-            const auto fpcr = static_cast<std::uint32_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_FPCR));
+            const auto pc = readHwbp64(rec, Driver::IDX_PC);
+            const auto hitCount = readHwbp64(rec, Driver::IDX_HIT_COUNT);
+            const auto lr = readHwbp64(rec, Driver::IDX_LR);
+            const auto sp = readHwbp64(rec, Driver::IDX_SP);
+            const auto origX0 = readHwbp64(rec, Driver::IDX_ORIG_X0);
+            const auto syscallNo = readHwbp64(rec, Driver::IDX_SYSCALLNO);
+            const auto pstate = readHwbp64(rec, Driver::IDX_PSTATE);
+            const auto fpsr = readHwbp32(rec, Driver::IDX_FPSR);
+            const auto fpcr = readHwbp32(rec, Driver::IDX_FPCR);
             item["mask"] = json::array();
             for (int m = 0; m < 18; ++m)
             {
@@ -660,7 +588,7 @@ namespace
             item["pstate"] = pstate;
             for (int reg = 0; reg < 30; ++reg)
             {
-                item[std::format("x{}", reg)] = static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_X0 + reg));
+                item[std::format("x{}", reg)] = readHwbp64(rec, Driver::IDX_X0 + reg);
             }
             for (int reg = 0; reg < 32; ++reg)
             {
@@ -871,48 +799,35 @@ namespace
             return value.has_value() ? *value : "";
         };
 
-        auto requiredUInt64 = [&](std::string_view key, std::string_view desc) -> std::variant<std::uint64_t, json>
+        auto requiredParsed = [&]<typename T>(std::string_view key, std::string_view desc, auto &&parse) -> std::variant<T, json>
         {
             const auto text = requiredString(key, desc);
             if (std::holds_alternative<json>(text))
-                return std::variant<std::uint64_t, json>{std::in_place_index<1>, std::get<json>(text)};
-            const auto parsed = parseUInt64(std::get<std::string>(text));
+                return std::variant<T, json>{std::in_place_index<1>, std::get<json>(text)};
+            const auto parsed = parse(std::get<std::string>(text));
             if (!parsed.has_value())
-                return std::variant<std::uint64_t, json>{std::in_place_index<1>, fail(std::format("operation={} 参数 {} 无效", op, desc))};
-            return std::variant<std::uint64_t, json>{std::in_place_index<0>, *parsed};
+                return std::variant<T, json>{std::in_place_index<1>, fail(std::format("operation={} 参数 {} 无效", op, desc))};
+            return std::variant<T, json>{std::in_place_index<0>, *parsed};
+        };
+
+        auto requiredUInt64 = [&](std::string_view key, std::string_view desc) -> std::variant<std::uint64_t, json>
+        {
+            return requiredParsed.template operator()<std::uint64_t>(key, desc, parseUInt64);
         };
 
         auto requiredInt = [&](std::string_view key, std::string_view desc) -> std::variant<int, json>
         {
-            const auto text = requiredString(key, desc);
-            if (std::holds_alternative<json>(text))
-                return std::variant<int, json>{std::in_place_index<1>, std::get<json>(text)};
-            const auto parsed = parseInt(std::get<std::string>(text));
-            if (!parsed.has_value())
-                return std::variant<int, json>{std::in_place_index<1>, fail(std::format("operation={} 参数 {} 无效", op, desc))};
-            return std::variant<int, json>{std::in_place_index<0>, *parsed};
+            return requiredParsed.template operator()<int>(key, desc, parseInt);
         };
 
         auto requiredInt64 = [&](std::string_view key, std::string_view desc) -> std::variant<std::int64_t, json>
         {
-            const auto text = requiredString(key, desc);
-            if (std::holds_alternative<json>(text))
-                return std::variant<std::int64_t, json>{std::in_place_index<1>, std::get<json>(text)};
-            const auto parsed = parseInt64(std::get<std::string>(text));
-            if (!parsed.has_value())
-                return std::variant<std::int64_t, json>{std::in_place_index<1>, fail(std::format("operation={} 参数 {} 无效", op, desc))};
-            return std::variant<std::int64_t, json>{std::in_place_index<0>, *parsed};
+            return requiredParsed.template operator()<std::int64_t>(key, desc, parseInt64);
         };
 
         auto requiredDouble = [&](std::string_view key, std::string_view desc) -> std::variant<double, json>
         {
-            const auto text = requiredString(key, desc);
-            if (std::holds_alternative<json>(text))
-                return std::variant<double, json>{std::in_place_index<1>, std::get<json>(text)};
-            const auto parsed = parseDouble(std::get<std::string>(text));
-            if (!parsed.has_value())
-                return std::variant<double, json>{std::in_place_index<1>, fail(std::format("operation={} 参数 {} 无效", op, desc))};
-            return std::variant<double, json>{std::in_place_index<0>, *parsed};
+            return requiredParsed.template operator()<double>(key, desc, parseDouble);
         };
 
         auto scannerStateJson = [&]() -> json
@@ -1350,37 +1265,17 @@ namespace
                 return std::get<json>(field);
             if (std::holds_alternative<json>(valueText))
                 return std::get<json>(valueText);
-            const auto value = parseUInt128(std::get<std::string>(valueText));
+            const auto value = MemUtils::ParseUInt128(std::get<std::string>(valueText));
             if (!value.has_value())
                 return fail(std::format("operation={} 参数 value 无效", op));
             const auto &info = dr.GetHwbpInfoRef();
             if (std::get<int>(index) < 0 || std::get<int>(index) >= info.record_count)
                 return fail("index 越界");
             auto copy = info.records[std::get<int>(index)];
-            const std::string fieldToken = MemUtils::HwbpLowerAscii(std::get<std::string>(field));
-            bool assigned = false;
-            if (const auto maskIndex = MemUtils::HwbpMaskByteIndexFromToken(fieldToken); maskIndex.has_value())
-            {
-                copy.mask[*maskIndex] = static_cast<std::uint8_t>(*value & 0xFF);
-                assigned = true;
-            }
-            else if (fieldToken.starts_with("op.") || fieldToken.starts_with("mask."))
-            {
-                const auto regIndex = MemUtils::HwbpRegIndexFromToken(fieldToken);
-                if (regIndex.has_value() && *value <= HWBP_OP_WRITE)
-                {
-                    HWBP_SET_MASK(&copy, *regIndex, static_cast<std::uint8_t>(*value));
-                    assigned = true;
-                }
-            }
-            else if (const auto regIndex = MemUtils::HwbpRegIndexFromToken(fieldToken); regIndex.has_value())
-            {
-                assigned = MemUtils::HwbpWriteRegisterValue(copy, *regIndex, *value);
-            }
-            if (!assigned)
+            if (!MemUtils::AssignHwbpRecordField(copy, std::get<std::string>(field), *value))
                 return fail("field 无效");
             const_cast<Driver::hwbp_record &>(info.records[std::get<int>(index)]) = copy;
-            return okData({{"index", std::get<int>(index)}, {"field", std::get<std::string>(field)}, {"value_hex", formatUInt128Hex(*value)}});
+            return okData({{"index", std::get<int>(index)}, {"field", std::get<std::string>(field)}, {"value_hex", MemUtils::FormatUInt128Hex(*value)}});
         }
 
         if (op == "signature.scan_address")
