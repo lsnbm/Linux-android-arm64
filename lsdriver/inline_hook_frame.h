@@ -27,7 +27,7 @@ paciasp启用时只有paciasp指令，并且包含bti功能
 
 #define TRAMP_WORDS 48
 #define TRAMP_BYTES (TRAMP_WORDS * 4)
-#define TRAMP_SLOT_COUNT 4
+#define TRAMP_SLOT_COUNT 10
 
 #define HOOK_STR_1(x) #x
 #define HOOK_STR(x) HOOK_STR_1(x)

@@ -174,6 +174,85 @@ namespace MemUtils
         return addr & ~(0xFFULL << 56);
     }
 
+    inline std::string_view BaseName(std::string_view path) noexcept
+    {
+        if (auto slash = path.rfind('/'); slash != std::string_view::npos)
+            return path.substr(slash + 1);
+        return path;
+    }
+
+    inline std::optional<std::uint64_t> ParseUInt64(std::string_view text, int base = 0)
+    {
+        if (text.empty())
+            return std::nullopt;
+
+        std::string temp(text);
+        char *end = nullptr;
+        errno = 0;
+        const auto value = std::strtoull(temp.c_str(), &end, base);
+        if (errno != 0 || end == temp.c_str() || *end != '\0')
+            return std::nullopt;
+        return static_cast<std::uint64_t>(value);
+    }
+
+    inline std::optional<__uint128_t> ParseUInt128(std::string_view text, int base = 0)
+    {
+        if (text.empty())
+            return std::nullopt;
+
+        if (base == 0)
+        {
+            base = 10;
+            if (text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X'))
+            {
+                base = 16;
+                text.remove_prefix(2);
+            }
+        }
+        else if (base == 16 && text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X'))
+        {
+            text.remove_prefix(2);
+        }
+
+        if (text.empty())
+            return std::nullopt;
+
+        __uint128_t value = 0;
+        for (const char ch : text)
+        {
+            int digit = -1;
+            if (ch >= '0' && ch <= '9')
+                digit = ch - '0';
+            else if (base == 16 && ch >= 'a' && ch <= 'f')
+                digit = ch - 'a' + 10;
+            else if (base == 16 && ch >= 'A' && ch <= 'F')
+                digit = ch - 'A' + 10;
+
+            if (digit < 0 || digit >= base)
+                return std::nullopt;
+            value = value * static_cast<unsigned>(base) + static_cast<unsigned>(digit);
+        }
+        return value;
+    }
+
+    inline std::string FormatUInt128Hex(__uint128_t value)
+    {
+        if (value == 0)
+            return "0x0";
+
+        char buf[35]{};
+        int pos = 34;
+        static constexpr char kHex[] = "0123456789ABCDEF";
+        while (value != 0 && pos > 1)
+        {
+            buf[--pos] = kHex[static_cast<unsigned>(value & 0xF)];
+            value >>= 4;
+        }
+        buf[--pos] = 'x';
+        buf[--pos] = '0';
+        return std::string(buf + pos);
+    }
+
     // 验证地址合法
     constexpr bool IsValidAddr(uintptr_t addr) noexcept
     {
@@ -638,7 +717,10 @@ namespace MemUtils
             return false;
         try
         {
-            const int64_t value = static_cast<int64_t>(std::strtoull(std::string(str).c_str(), nullptr, 16));
+            const auto parsed = ParseUInt64(str, 16);
+            if (!parsed)
+                return false;
+            const int64_t value = static_cast<int64_t>(*parsed);
             return dr.Write<int64_t>(addr, value) == static_cast<int>(sizeof(value));
         }
         catch (...)
@@ -903,6 +985,33 @@ private:
     std::atomic<float> progress_{0.0f};
     std::atomic<bool> scanning_{false};
     double rangeMax_ = 0.0;
+
+    struct ScanRunGuard
+    {
+        std::atomic<bool> &scanning;
+        std::atomic<float> &progress;
+        ~ScanRunGuard()
+        {
+            scanning = false;
+            progress = 1.0f;
+        }
+    };
+
+    template <typename HitBuckets>
+    static Results mergeUniqueAddresses(HitBuckets &threadHits)
+    {
+        Results merged;
+        size_t total = 0;
+        for (auto &hits : threadHits)
+            total += hits.size();
+        merged.reserve(total);
+
+        for (auto &hits : threadHits)
+            merged.insert(merged.end(), hits.begin(), hits.end());
+        std::sort(merged.begin(), merged.end());
+        merged.erase(std::unique(merged.begin(), merged.end()), merged.end());
+        return merged;
+    }
 
     //  位 ↔ 地址映射
     size_t addrToBit(uintptr_t addr) const noexcept
@@ -1328,13 +1437,7 @@ private:
         for (auto &f : futs)
             f.get();
 
-        std::vector<uintptr_t> merged;
-        for (auto &hits : threadHits)
-        {
-            merged.insert(merged.end(), hits.begin(), hits.end());
-        }
-        std::sort(merged.begin(), merged.end());
-        merged.erase(std::unique(merged.begin(), merged.end()), merged.end());
+        auto merged = mergeUniqueAddresses(threadHits);
 
         std::unique_lock lock(mutex_);
         addedList_.swap(merged);
@@ -1387,13 +1490,7 @@ private:
         for (auto &f : futs)
             f.get();
 
-        std::vector<uintptr_t> merged;
-        for (auto &hits : threadHits)
-        {
-            merged.insert(merged.end(), hits.begin(), hits.end());
-        }
-        std::sort(merged.begin(), merged.end());
-        merged.erase(std::unique(merged.begin(), merged.end()), merged.end());
+        auto merged = mergeUniqueAddresses(threadHits);
 
         std::unique_lock lock(mutex_);
         addedList_.swap(merged);
@@ -1589,17 +1686,7 @@ public:
         if (scanning_.exchange(true))
             return;
 
-        // RAII guard 确保状态恢复
-        struct Guard
-        {
-            std::atomic<bool> &s;
-            std::atomic<float> &p;
-            ~Guard()
-            {
-                s = false;
-                p = 1.0f;
-            }
-        } guard{scanning_, progress_};
+        ScanRunGuard guard{scanning_, progress_};
 
         progress_ = 0.0f;
         rangeMax_ = rangeMax;
@@ -1622,16 +1709,7 @@ public:
         if (scanning_.exchange(true))
             return;
 
-        struct Guard
-        {
-            std::atomic<bool> &s;
-            std::atomic<float> &p;
-            ~Guard()
-            {
-                s = false;
-                p = 1.0f;
-            }
-        } guard{scanning_, progress_};
+        ScanRunGuard guard{scanning_, progress_};
 
         progress_ = 0.0f;
         if (isFirst)
@@ -1733,8 +1811,7 @@ public:
         std::lock_guard lk(mutex_);
         for (auto addr : addrs)
         {
-            if (!std::ranges::any_of(locks_, [addr](const auto &item)
-                                     { return item.addr == addr; }))
+            if (find(addr) == locks_.end())
                 locks_.emplace_back(addr, type, MemUtils::ReadAsString(addr, type));
         }
     }
@@ -2199,9 +2276,7 @@ private:
         for (int mi = 0; mi < info.module_count; ++mi)
         {
             const auto &mod = info.modules[mi];
-            std::string_view fullPath(mod.name);
-            if (auto slash = fullPath.rfind('/'); slash != std::string_view::npos)
-                fullPath = fullPath.substr(slash + 1);
+            std::string_view fullPath = MemUtils::BaseName(mod.name);
 
             if (!filterModule.empty() && fullPath.find(filterModule) == std::string_view::npos)
                 continue;
@@ -2251,9 +2326,7 @@ private:
             for (int mi = 0; mi < info.module_count; ++mi)
             {
                 const auto &mod = info.modules[mi];
-                std::string_view fullPath(mod.name);
-                if (auto slash = fullPath.rfind('/'); slash != std::string_view::npos)
-                    fullPath = fullPath.substr(slash + 1);
+                std::string_view fullPath = MemUtils::BaseName(mod.name);
 
                 if (!filterModule.empty() && fullPath.find(filterModule) == std::string_view::npos)
                     continue;
@@ -2545,9 +2618,7 @@ private:
                 sym.segment = seg.index;
                 sym.isBss = (seg.index == -1);
 
-                std::string_view fullPath(mod.name);
-                if (auto slash = fullPath.rfind('/'); slash != std::string_view::npos)
-                    fullPath = fullPath.substr(slash + 1);
+                std::string_view fullPath = MemUtils::BaseName(mod.name);
                 strncpy(sym.name, fullPath.data(), std::min(fullPath.size(), sizeof(sym.name) - 1));
                 sym.sourceMode = 0;
             }

@@ -2,10 +2,12 @@
 #include <imgui.h>
 #include <Android_touch/ImGuiFloatingKeyboard.h>
 #include <cstdarg>
+#include <cstdint>
 #include <cstring>
 #include <functional>
 #include <future>
 #include <mutex>
+#include <optional>
 #include <vector>
 #include <span>
 
@@ -257,6 +259,83 @@ private:
 
     float S(float v) const { return style_.S(v); }
 
+    static bool KeyboardValueReady(const char *buf)
+    {
+        return buf[0] && !ImGuiFloatingKeyboard::IsVisible();
+    }
+
+    static std::optional<uintptr_t> ParseHexAddress(const char *buf)
+    {
+        uintptr_t addr = 0;
+        return std::sscanf(buf, "%lx", &addr) == 1 && addr
+                   ? std::optional<uintptr_t>(addr)
+                   : std::nullopt;
+    }
+
+    static int ParseIntOr(const char *buf, int fallback = 0)
+    {
+        char *end = nullptr;
+        const long value = std::strtol(buf, &end, 10);
+        return end != buf && *end == '\0' ? static_cast<int>(value) : fallback;
+    }
+
+    static std::string Hex64(std::uint64_t value)
+    {
+        return std::format("{:X}", value);
+    }
+
+    static std::string Hex128(__uint128_t value)
+    {
+        return std::format("{:016X}{:016X}",
+                           static_cast<unsigned long long>(value >> 64),
+                           static_cast<unsigned long long>(value));
+    }
+
+    static std::uint64_t HwbpRead64(Driver::hwbp_record &record, int regIndex)
+    {
+        return static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(record, regIndex));
+    }
+
+    static std::uint32_t HwbpRead32(Driver::hwbp_record &record, int regIndex)
+    {
+        return static_cast<std::uint32_t>(MemUtils::HwbpReadRegisterValue(record, regIndex));
+    }
+
+    static void CopyText(std::string_view text)
+    {
+        std::string temp(text);
+        ImGui::SetClipboardText(temp.c_str());
+    }
+
+    void openRegisterEdit(int regIndex, std::string_view name, std::string_view hexValue)
+    {
+        bpParams_.editingField = regIndex;
+        std::snprintf(bpParams_.regEditBuf, sizeof(bpParams_.regEditBuf),
+                      "%.*s", static_cast<int>(std::min(hexValue.size(), sizeof(bpParams_.regEditBuf) - 1)), hexValue.data());
+        const std::string title = std::format("修改 {} (Hex)", name);
+        ImGuiFloatingKeyboard::Open(bpParams_.regEditBuf, 63, title.c_str());
+    }
+
+    bool commitRegisterEdit(int regIndex)
+    {
+        if (bpParams_.editingField != regIndex || !KeyboardValueReady(bpParams_.regEditBuf))
+            return false;
+
+        MemUtils::HwbpWriteRegisterValue(bpParams_.editCopy, regIndex,
+                                         MemUtils::ParseUInt128(bpParams_.regEditBuf, 16).value_or(0));
+        bpParams_.editingField = -1;
+        bpParams_.regEditBuf[0] = 0;
+        return true;
+    }
+
+    void drawRegisterEditButton(const char *buttonId, int regIndex, std::string_view name,
+                                std::string_view hexValue, ImVec2 size)
+    {
+        if (UI::Btn(buttonId, size, {0.4f, 0.3f, 0.15f, 1}))
+            openRegisterEdit(regIndex, name, hexValue);
+        commitRegisterEdit(regIndex);
+    }
+
     void collectFinishedTasks()
     {
         std::lock_guard lock(backgroundTasksMutex_);
@@ -315,7 +394,10 @@ private:
             enqueueBackgroundTask([=, this]
                                   {
                 try {
-                    auto addr = MemUtils::Normalize(std::strtoull(valCopy.c_str(), nullptr, 16));
+                    auto parsed = MemUtils::ParseUInt64(valCopy, 16);
+                    if (!parsed)
+                        return;
+                    auto addr = MemUtils::Normalize(static_cast<uintptr_t>(*parsed));
                     scanner_.scan<int64_t>(pid, static_cast<int64_t>(addr), mode, isFirst, 0.0);
                 } catch (...) {} });
             return;
@@ -370,7 +452,7 @@ private:
 
     void copyAddress(uintptr_t addr)
     {
-        ImGui::SetClipboardText(std::format("{:X}", addr).c_str());
+        CopyText(Hex64(addr));
     }
 
 public:
@@ -505,8 +587,8 @@ private:
             ImGui::SameLine();
             UI::KbBtn(buf_.pid, "PID", {S(85), bh}, buf_.pid, 31, "PID");
             ImGui::SameLine();
-            if (!ImGuiFloatingKeyboard::IsVisible() && buf_.pid[0]) {
-                int pid = atoi(buf_.pid);
+            if (KeyboardValueReady(buf_.pid)) {
+                int pid = ParseIntOr(buf_.pid);
                 if (pid > 0 && pid != dr.GetGlobalPid())
                     dr.SetGlobalPid(pid);
             }
@@ -623,10 +705,9 @@ private:
         ImGui::SameLine();
         if (UI::Btn("添加", {S(70), bh}, Colors::BTN_GREEN))
         {
-            uintptr_t addr = 0;
-            if (sscanf(buf_.addAddr, "%lx", &addr) == 1 && addr)
+            if (auto addr = ParseHexAddress(buf_.addAddr))
             {
-                scanner_.add(addr);
+                scanner_.add(*addr);
                 buf_.addAddr[0] = 0;
             }
         }
@@ -701,9 +782,9 @@ private:
         ImGui::Text("每页:");
         ImGui::SameLine();
         UI::KbBtn(buf_.page, buf_.page, {S(55), S(36)}, buf_.page, 10, "每页数量");
-        if (buf_.page[0] && !ImGuiFloatingKeyboard::IsVisible())
+        if (KeyboardValueReady(buf_.page))
         {
-            int v = atoi(buf_.page);
+            int v = ParseIntOr(buf_.page);
             if (v >= 1 && v <= 500)
             {
                 if (v != Config::g_ItemsPerPage.load())
@@ -745,7 +826,7 @@ private:
             buf_.resultOffset[0] = 0;
             ImGuiFloatingKeyboard::Open(buf_.resultOffset, 31, "偏移量(Hex,可负)");
         }
-        if (buf_.resultOffset[0] && !ImGuiFloatingKeyboard::IsVisible())
+        if (KeyboardValueReady(buf_.resultOffset))
         {
             if (auto r = MemUtils::ParseHexOffset(buf_.resultOffset))
                 scanner_.applyOffset(r->negative ? -(int64_t)r->offset : (int64_t)r->offset);
@@ -826,9 +907,8 @@ private:
         ImGui::SameLine();
         if (UI::Btn("跳转", {goW, bh}, {0.15f, 0.4f, 0.25f, 1}))
         {
-            uintptr_t addr = 0;
-            if (sscanf(buf_.viewAddr, "%lx", &addr) == 1 && addr)
-                memViewer_.open(addr);
+            if (auto addr = ParseHexAddress(buf_.viewAddr))
+                memViewer_.open(*addr);
         }
         ImGui::SameLine();
         if (UI::Btn("偏移", {ofsW, bh}, Colors::BTN_ORANGE))
@@ -836,7 +916,7 @@ private:
             buf_.memOffset[0] = 0;
             ImGuiFloatingKeyboard::Open(buf_.memOffset, 31, "偏移量(Hex,可负)");
         }
-        if (buf_.memOffset[0] && !ImGuiFloatingKeyboard::IsVisible())
+        if (KeyboardValueReady(buf_.memOffset))
         {
             memViewer_.applyOffset(buf_.memOffset);
             buf_.memOffset[0] = 0;
@@ -963,9 +1043,7 @@ private:
                 for (int i = 0; i < info.module_count; ++i)
                 {
                     const auto &mod = info.modules[i];
-                    std::string_view name = mod.name;
-                    if (auto s = name.rfind('/'); s != std::string_view::npos)
-                        name = name.substr(s + 1);
+                    std::string_view name = MemUtils::BaseName(mod.name);
                     if (buf_.moduleSearch[0] && name.find(buf_.moduleSearch) == std::string_view::npos)
                         continue;
                     for (int j = 0; j < mod.seg_count; ++j)
@@ -977,8 +1055,8 @@ private:
                                        {
                             UI::Text({0.7f,0.85f,1,1}, "%.*s", (int)name.size(), name.data());
                             seg.index == -1
-                                ? UI::Text({0.9f,0.6f,0.3f,1}, "Segment: BSS")
-                                : UI::Text(Colors::ADDR_GREEN, "Segment: %d", seg.index);
+                                ? UI::Text({0.9f,0.6f,0.3f,1}, "Segment: BSS  %c%c%c", (seg.prot & 1) ? 'R' : '-', (seg.prot & 2) ? 'W' : '-', (seg.prot & 4) ? 'X' : '-')
+                                : UI::Text(Colors::ADDR_GREEN, "Segment: %d  %c%c%c", seg.index, (seg.prot & 1) ? 'R' : '-', (seg.prot & 2) ? 'W' : '-', (seg.prot & 4) ? 'X' : '-');
                             UI::Text(Colors::HINT, "范围: "); ImGui::SameLine();
                             UI::Text({0.4f,1,0.4f,1}, "%llX - ", (unsigned long long)seg.start);
                             ImGui::SameLine();
@@ -1050,17 +1128,18 @@ private:
             UI::Space(S(6));
             if (UI::Btn("开始扫描", {w, S(48)}, Colors::BTN_GREEN))
             {
-                if (sscanf(buf_.ptrTarget, "%lx", &ptrParams_.target) == 1 && ptrParams_.target)
+                if (auto target = ParseHexAddress(buf_.ptrTarget))
                 {
+                    ptrParams_.target = *target;
                     ptrParams_.filterModule = buf_.filterModule;
                     if (ptrParams_.useManual && buf_.base[0])
-                        ptrParams_.manualBase = strtoull(buf_.base, nullptr, 16);
+                        ptrParams_.manualBase = static_cast<uintptr_t>(MemUtils::ParseUInt64(buf_.base, 16).value_or(0));
                     if (ptrParams_.useArray)
                     {
                         if (buf_.arrayBase[0])
-                            ptrParams_.arrayBase = strtoull(buf_.arrayBase, nullptr, 16);
+                            ptrParams_.arrayBase = static_cast<uintptr_t>(MemUtils::ParseUInt64(buf_.arrayBase, 16).value_or(0));
                         if (buf_.arrayCount[0])
-                            ptrParams_.arrayCount = strtoull(buf_.arrayCount, nullptr, 10);
+                            ptrParams_.arrayCount = static_cast<size_t>(MemUtils::ParseUInt64(buf_.arrayCount, 10).value_or(0));
                     }
                     startPtrScan();
                 }
@@ -1130,9 +1209,8 @@ private:
         UI::Space(S(8));
         if (UI::Btn("扫描保存", {w, S(48)}, Colors::BTN_GREEN))
         {
-            uintptr_t addr = 0;
-            if (sscanf(buf_.sigScanAddr, "%lx", &addr) == 1 && addr)
-                SignatureScanner::ScanAddressSignature(addr, sigParams_.range);
+            if (auto addr = ParseHexAddress(buf_.sigScanAddr))
+                SignatureScanner::ScanAddressSignature(*addr, sigParams_.range);
         }
         UI::Text(Colors::HINT, "保存到 Signature.txt");
 
@@ -1148,8 +1226,9 @@ private:
 
         if (UI::Btn("过滤并更新", {w, S(48)}, {0.4f, 0.3f, 0.15f, 1}))
         {
-            if (sscanf(buf_.sigVerifyAddr, "%lx", &sigParams_.verifyAddr) == 1 && sigParams_.verifyAddr)
+            if (auto addr = ParseHexAddress(buf_.sigVerifyAddr))
             {
+                sigParams_.verifyAddr = *addr;
                 auto vr = SignatureScanner::FilterSignature(sigParams_.verifyAddr);
                 sigParams_.lastChanged = vr.success ? vr.changedCount : -2;
                 if (vr.success)
@@ -1232,14 +1311,13 @@ private:
         ImGui::BeginDisabled(bpParams_.active);
         if (UI::Btn("设置断点", {halfW, S(52)}, Colors::BTN_GREEN))
         {
-            uintptr_t addr = 0;
-            if (sscanf(buf_.bpAddr, "%lx", &addr) == 1 && addr)
+            if (auto addr = ParseHexAddress(buf_.bpAddr))
             {
-                int len = std::clamp(atoi(buf_.bpLen), 1, 8);
-                bpParams_.address = addr;
+                int len = std::clamp(ParseIntOr(buf_.bpLen), 1, 8);
+                bpParams_.address = *addr;
                 bpParams_.lenBytes = static_cast<decltype(dr)::hwbp_len>(len);
                 const int bpTypeIndex = std::clamp(bpParams_.bpType, 0, 3);
-                if (dr.SetProcessHwbpRef(addr,
+                if (dr.SetProcessHwbpRef(*addr,
                                          bpTypeValues[bpTypeIndex],
                                          static_cast<decltype(dr)::hwbp_scope>(bpParams_.bpScope),
                                          bpParams_.lenBytes) == 0)
@@ -1282,7 +1360,7 @@ private:
         {
             auto &rec = const_cast<Driver::hwbp_record &>(info.records[r]);
             MemUtils::HwbpRequestAll(rec);
-            totalHits += static_cast<uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_HIT_COUNT));
+            totalHits += HwbpRead64(rec, Driver::IDX_HIT_COUNT);
         }
         UI::Text(Colors::WARN, "不同PC数: %d  总命中: %llu", info.record_count, (unsigned long long)totalHits);
         UI::Space(S(6));
@@ -1293,8 +1371,8 @@ private:
         for (int r = 0; r < info.record_count; ++r)
         {
             auto &rec = const_cast<Driver::hwbp_record &>(info.records[r]);
-            const auto pc = static_cast<uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_PC));
-            const auto hitCount = static_cast<uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_HIT_COUNT));
+            const auto pc = HwbpRead64(rec, Driver::IDX_PC);
+            const auto hitCount = HwbpRead64(rec, Driver::IDX_HIT_COUNT);
             ImGui::PushID(r);
             float btnW = S(55), expandW = S(45);
 
@@ -1357,7 +1435,8 @@ private:
         // fieldId: 0~29=X0~X29, 30=LR, 31=SP, 32=PC, 33=PSTATE, 34=ORIG_X0, 35=SYSCALLNO
         auto regLine = [&](const char *name, int regIndex)
         {
-            const auto val = static_cast<uint64_t>(MemUtils::HwbpReadRegisterValue(show, regIndex));
+            const auto val = HwbpRead64(show, regIndex);
+            const auto hex = Hex64(val);
             UI::Text({0.7f, 0.85f, 1, 1}, "%s: ", name);
             ImGui::SameLine();
             UI::Text(Colors::ADDR_GREEN, "0x%llX", (unsigned long long)val);
@@ -1366,32 +1445,13 @@ private:
             char id[32];
             snprintf(id, sizeof(id), "复制##%s%d", name, r);
             if (UI::Btn(id, {S(50), S(28)}, Colors::BTN_COPY))
-            {
-                char tmp[32];
-                snprintf(tmp, sizeof(tmp), "%llX", (unsigned long long)val);
-                ImGui::SetClipboardText(tmp);
-            }
+                CopyText(hex);
 
             if (isEditing)
             {
                 ImGui::SameLine();
                 snprintf(id, sizeof(id), "改##%s%d", name, r);
-                if (UI::Btn(id, {S(40), S(28)}, {0.4f, 0.3f, 0.15f, 1}))
-                {
-                    bpParams_.editingField = regIndex;
-                    snprintf(bpParams_.regEditBuf, sizeof(bpParams_.regEditBuf),
-                             "%llX", (unsigned long long)val);
-                    char title[48];
-                    snprintf(title, sizeof(title), "修改 %s (Hex)", name);
-                    ImGuiFloatingKeyboard::Open(bpParams_.regEditBuf, 63, title);
-                }
-                // 键盘关闭，写入副本
-                if (bpParams_.editingField == regIndex && !ImGuiFloatingKeyboard::IsVisible() && bpParams_.regEditBuf[0])
-                {
-                    MemUtils::HwbpWriteRegisterValue(bpParams_.editCopy, regIndex, strtoull(bpParams_.regEditBuf, nullptr, 16));
-                    bpParams_.editingField = -1;
-                    bpParams_.regEditBuf[0] = 0;
-                }
+                drawRegisterEditButton(id, regIndex, name, hex, {S(40), S(28)});
             }
         };
 
@@ -1401,27 +1461,15 @@ private:
         UI::Space(S(4));
 
         // PSTATE / SYSCALL / ORIG_X0 同理
-        const auto pstate = static_cast<uint64_t>(MemUtils::HwbpReadRegisterValue(show, Driver::IDX_PSTATE));
-        const auto syscallno = static_cast<uint64_t>(MemUtils::HwbpReadRegisterValue(show, Driver::IDX_SYSCALLNO));
-        const auto origX0 = static_cast<uint64_t>(MemUtils::HwbpReadRegisterValue(show, Driver::IDX_ORIG_X0));
-        const auto hitCount = static_cast<uint64_t>(MemUtils::HwbpReadRegisterValue(show, Driver::IDX_HIT_COUNT));
+        const auto pstate = HwbpRead64(show, Driver::IDX_PSTATE);
+        const auto syscallno = HwbpRead64(show, Driver::IDX_SYSCALLNO);
+        const auto origX0 = HwbpRead64(show, Driver::IDX_ORIG_X0);
+        const auto hitCount = HwbpRead64(show, Driver::IDX_HIT_COUNT);
         UI::Text(Colors::LABEL, "PSTATE:  0x%llX", (unsigned long long)pstate);
         if (isEditing)
         {
             ImGui::SameLine();
-            if (UI::Btn("改##pst", {S(40), S(28)}, {0.4f, 0.3f, 0.15f, 1}))
-            {
-                bpParams_.editingField = Driver::IDX_PSTATE;
-                snprintf(bpParams_.regEditBuf, sizeof(bpParams_.regEditBuf),
-                         "%llX", (unsigned long long)pstate);
-                ImGuiFloatingKeyboard::Open(bpParams_.regEditBuf, 63, "修改 PSTATE (Hex)");
-            }
-            if (bpParams_.editingField == Driver::IDX_PSTATE && !ImGuiFloatingKeyboard::IsVisible() && bpParams_.regEditBuf[0])
-            {
-                MemUtils::HwbpWriteRegisterValue(bpParams_.editCopy, Driver::IDX_PSTATE, strtoull(bpParams_.regEditBuf, nullptr, 16));
-                bpParams_.editingField = -1;
-                bpParams_.regEditBuf[0] = 0;
-            }
+            drawRegisterEditButton("改##pst", Driver::IDX_PSTATE, "PSTATE", Hex64(pstate), {S(40), S(28)});
         }
 
         UI::Text(Colors::LABEL, "SYSCALL: %llu", (unsigned long long)syscallno);
@@ -1448,7 +1496,8 @@ private:
             for (int i = 0; i < 30; ++i)
             {
                 const int regIndex = Driver::IDX_X0 + i;
-                const auto regValue = static_cast<uint64_t>(MemUtils::HwbpReadRegisterValue(show, regIndex));
+                const auto regValue = HwbpRead64(show, regIndex);
+                const auto regHex = Hex64(regValue);
                 ImGui::TableNextRow();
                 ImGui::PushID(i);
 
@@ -1460,32 +1509,14 @@ private:
 
                 ImGui::TableSetColumnIndex(2);
                 if (UI::Btn("复制", {S(42), S(28)}, Colors::BTN_COPY))
-                {
-                    char tmp[32];
-                    snprintf(tmp, sizeof(tmp), "%llX", (unsigned long long)regValue);
-                    ImGui::SetClipboardText(tmp);
-                }
+                    CopyText(regHex);
 
                 if (isEditing)
                 {
                     ImGui::TableSetColumnIndex(3);
                     char bid[16];
                     snprintf(bid, sizeof(bid), "改##x%d", i);
-                    if (UI::Btn(bid, {S(42), S(28)}, {0.4f, 0.3f, 0.15f, 1}))
-                    {
-                        bpParams_.editingField = regIndex;
-                        snprintf(bpParams_.regEditBuf, sizeof(bpParams_.regEditBuf),
-                                 "%llX", (unsigned long long)regValue);
-                        char title[32];
-                        snprintf(title, sizeof(title), "修改 X%d (Hex)", i);
-                        ImGuiFloatingKeyboard::Open(bpParams_.regEditBuf, 63, title);
-                    }
-                    if (bpParams_.editingField == regIndex && !ImGuiFloatingKeyboard::IsVisible() && bpParams_.regEditBuf[0])
-                    {
-                        MemUtils::HwbpWriteRegisterValue(bpParams_.editCopy, regIndex, strtoull(bpParams_.regEditBuf, nullptr, 16));
-                        bpParams_.editingField = -1;
-                        bpParams_.regEditBuf[0] = 0;
-                    }
+                    drawRegisterEditButton(bid, regIndex, std::format("X{}", i), regHex, {S(42), S(28)});
                 }
                 ImGui::PopID();
             }
@@ -1501,7 +1532,8 @@ private:
         // FPSR / FPCR 显示与编辑
         auto fpCtrlLine = [&](const char *name, int regIndex)
         {
-            const auto val = static_cast<uint32_t>(MemUtils::HwbpReadRegisterValue(show, regIndex));
+            const auto val = HwbpRead32(show, regIndex);
+            const auto hex = std::format("{:X}", val);
             UI::Text({0.7f, 0.85f, 1, 1}, "%s: ", name);
             ImGui::SameLine();
             UI::Text(Colors::ADDR_GREEN, "0x%X", (unsigned int)val);
@@ -1510,31 +1542,13 @@ private:
             char id[32];
             snprintf(id, sizeof(id), "复制##%s%d", name, r);
             if (UI::Btn(id, {S(50), S(28)}, Colors::BTN_COPY))
-            {
-                char tmp[32];
-                snprintf(tmp, sizeof(tmp), "%X", (unsigned int)val);
-                ImGui::SetClipboardText(tmp);
-            }
+                CopyText(hex);
 
             if (isEditing)
             {
                 ImGui::SameLine();
                 snprintf(id, sizeof(id), "改##%s%d", name, r);
-                if (UI::Btn(id, {S(40), S(28)}, {0.4f, 0.3f, 0.15f, 1}))
-                {
-                    bpParams_.editingField = regIndex;
-                    snprintf(bpParams_.regEditBuf, sizeof(bpParams_.regEditBuf),
-                             "%X", (unsigned int)val);
-                    char title[48];
-                    snprintf(title, sizeof(title), "修改 %s (Hex)", name);
-                    ImGuiFloatingKeyboard::Open(bpParams_.regEditBuf, 63, title);
-                }
-                if (bpParams_.editingField == regIndex && !ImGuiFloatingKeyboard::IsVisible() && bpParams_.regEditBuf[0])
-                {
-                    MemUtils::HwbpWriteRegisterValue(bpParams_.editCopy, regIndex, strtoul(bpParams_.regEditBuf, nullptr, 16));
-                    bpParams_.editingField = -1;
-                    bpParams_.regEditBuf[0] = 0;
-                }
+                drawRegisterEditButton(id, regIndex, name, hex, {S(40), S(28)});
             }
         };
 
@@ -1562,6 +1576,7 @@ private:
                 const auto qValue = MemUtils::HwbpReadRegisterValue(show, regIndex);
                 const auto qLo = static_cast<uint64_t>(qValue);
                 const auto qHi = static_cast<uint64_t>(qValue >> 64);
+                const auto qHex = Hex128(qValue);
                 ImGui::TableNextRow();
                 ImGui::PushID(i + 32); // offset to avoid ID clash with X regs
 
@@ -1574,52 +1589,14 @@ private:
 
                 ImGui::TableSetColumnIndex(2);
                 if (UI::Btn("复制", {S(42), S(28)}, Colors::BTN_COPY))
-                {
-                    char tmp[64];
-                    snprintf(tmp, sizeof(tmp), "%016llX%016llX", (unsigned long long)qHi, (unsigned long long)qLo);
-                    ImGui::SetClipboardText(tmp);
-                }
+                    CopyText(qHex);
 
                 if (isEditing)
                 {
                     ImGui::TableSetColumnIndex(3);
                     char bid[16];
                     snprintf(bid, sizeof(bid), "改##v%d", i);
-                    if (UI::Btn(bid, {S(42), S(28)}, {0.4f, 0.3f, 0.15f, 1}))
-                    {
-                        bpParams_.editingField = regIndex;
-                        snprintf(bpParams_.regEditBuf, sizeof(bpParams_.regEditBuf),
-                                 "%016llX%016llX", (unsigned long long)qHi, (unsigned long long)qLo);
-                        char title[32];
-                        snprintf(title, sizeof(title), "修改 V%d (Hex)", i);
-                        ImGuiFloatingKeyboard::Open(bpParams_.regEditBuf, 63, title);
-                    }
-                    if (bpParams_.editingField == regIndex && !ImGuiFloatingKeyboard::IsVisible() && bpParams_.regEditBuf[0])
-                    {
-                        // 解析128位hex回写，超出128位时保留低128位。
-                        const char *hex = bpParams_.regEditBuf;
-                        int len = static_cast<int>(strlen(hex));
-                        if (len > 32)
-                        {
-                            hex += len - 32;
-                            len = 32;
-                        }
-                        char hiBuf[17] = {}, loBuf[17] = {};
-                        const int hiLen = std::max(0, len - 16);
-                        const int loLen = len - hiLen;
-                        if (hiLen > 0)
-                        {
-                            strncpy(hiBuf, hex, hiLen);
-                            hiBuf[hiLen] = '\0';
-                        }
-                        strncpy(loBuf, hex + hiLen, loLen);
-                        loBuf[loLen] = '\0';
-                        uint64_t hi = strtoull(hiBuf, nullptr, 16);
-                        uint64_t lo = strtoull(loBuf, nullptr, 16);
-                        MemUtils::HwbpWriteRegisterValue(bpParams_.editCopy, regIndex, (static_cast<__uint128_t>(hi) << 64) | lo);
-                        bpParams_.editingField = -1;
-                        bpParams_.regEditBuf[0] = 0;
-                    }
+                    drawRegisterEditButton(bid, regIndex, std::format("V{}", i), qHex, {S(42), S(28)});
                 }
                 ImGui::PopID();
             }
@@ -2027,9 +2004,9 @@ private:
             return 0;
         auto p = strstr(op, "#0X");
         if (p)
-            return strtoull(p + 1, nullptr, 16);
+            return ParseHexAddress(p + 1).value_or(0);
         p = strstr(op, "0X");
-        return p ? strtoull(p, nullptr, 16) : 0;
+        return p ? ParseHexAddress(p).value_or(0) : 0;
     }
 };
 
