@@ -28,10 +28,11 @@ if (-not (Test-Path -LiteralPath $NdkBuild)) {
 }
 
 $mkFiles = @(Get-ChildItem -Path $Root -Recurse -File -Filter $MkFileName |
+    Where-Object { $_.Directory.Name -ieq "jni" } |
     Sort-Object -Property FullName)
 
 if (-not $mkFiles) {
-    Write-Host ((Zh '\u5728 Root={0} \u4e0b\u672a\u627e\u5230 {1}') -f $Root, $MkFileName)
+    Write-Host ((Zh '\u5728 Root={0} \u4e0b\u672a\u627e\u5230 jni/{1}') -f $Root, $MkFileName)
     exit 1
 }
 
@@ -41,11 +42,13 @@ Write-Host ((Zh '\u5171\u627e\u5230 {0} \u4e2a {1}') -f $mkFiles.Count, $MkFileN
 $results = @()
 
 foreach ($mk in $mkFiles) {
-    $projectDir = $mk.Directory.FullName
+    $projectDir = $mk.Directory.Parent.FullName
+    $buildScript = Join-Path "jni" $mk.Name
+
     Write-Host ""
     Write-Host "============================================================"
     Write-Host ((Zh '\u9879\u76ee\u76ee\u5f55: {0}') -f $projectDir)
-    Write-Host ((Zh '\u6784\u5efa\u811a\u672c: {0}') -f $mk.Name)
+    Write-Host ((Zh '\u6784\u5efa\u811a\u672c: {0}') -f $buildScript)
 
     $ok = $false
     $exitCode = -1
@@ -53,14 +56,7 @@ foreach ($mk in $mkFiles) {
 
     Push-Location $projectDir
     try {
-        $args = @(
-            "NDK_PROJECT_PATH=."
-            "APP_BUILD_SCRIPT=./$($mk.Name)"
-            "APP_STL=c++_static"
-            "APP_ABI=arm64-v8a"
-            "APP_PLATFORM=android-24"
-            "-j$Jobs"
-        )
+        $args = @("-j$Jobs")
 
         & $NdkBuild @args
         $exitCode = $LASTEXITCODE
