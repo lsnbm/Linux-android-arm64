@@ -110,7 +110,7 @@ namespace
     std::optional<T> readScalarValue(std::uint64_t address)
     {
         T value{};
-        if (dr.Read(address, &value, sizeof(T)) != static_cast<int>(sizeof(T)))
+        if (dr->Read(address, &value, sizeof(T)) != static_cast<int>(sizeof(T)))
             return std::nullopt;
         return value;
     }
@@ -118,7 +118,7 @@ namespace
     template <typename T>
     bool writeScalarValue(std::uint64_t address, T value)
     {
-        return dr.Write<T>(address, value) == static_cast<int>(sizeof(T));
+        return dr->Write<T>(address, value) == static_cast<int>(sizeof(T));
     }
 
     std::uint64_t readHwbp64(Driver::hwbp_record &record, int reg)
@@ -224,53 +224,53 @@ namespace
     }
 
     // 解析硬件断点类型
-    std::optional<decltype(dr)::hwbp_type> parseBpTypeToken(std::string_view token)
+    std::optional<Driver::hwbp_type> parseBpTypeToken(std::string_view token)
     {
         const std::string t = toLowerAscii(token);
         if (t == "1" || t == "read" || t == "r" || t == "bp_read")
-            return decltype(dr)::HWBP_BREAKPOINT_R;
+            return Driver::HWBP_BREAKPOINT_R;
         if (t == "2" || t == "write" || t == "w" || t == "bp_write")
-            return decltype(dr)::HWBP_BREAKPOINT_W;
+            return Driver::HWBP_BREAKPOINT_W;
         if (t == "3" || t == "read_write" || t == "rw" || t == "bp_read_write")
-            return decltype(dr)::HWBP_BREAKPOINT_RW;
+            return Driver::HWBP_BREAKPOINT_RW;
         if (t == "4" || t == "execute" || t == "x" || t == "exec" || t == "bp_execute")
-            return decltype(dr)::HWBP_BREAKPOINT_X;
+            return Driver::HWBP_BREAKPOINT_X;
         return std::nullopt;
     }
 
     // 解析硬件断点作用线程范围
-    std::optional<decltype(dr)::hwbp_scope> parseBpScopeToken(std::string_view token)
+    std::optional<Driver::hwbp_scope> parseBpScopeToken(std::string_view token)
     {
         const std::string t = toLowerAscii(token);
         if (t == "0" || t == "main" || t == "main_thread")
-            return decltype(dr)::SCOPE_MAIN_THREAD;
+            return Driver::SCOPE_MAIN_THREAD;
         if (t == "1" || t == "other" || t == "other_threads")
-            return decltype(dr)::SCOPE_OTHER_THREADS;
+            return Driver::SCOPE_OTHER_THREADS;
         if (t == "2" || t == "all" || t == "all_threads")
-            return decltype(dr)::SCOPE_ALL_THREADS;
+            return Driver::SCOPE_ALL_THREADS;
         return std::nullopt;
     }
 
-    std::optional<decltype(dr)::hwbp_len> parseBpLengthValue(int length)
+    std::optional<Driver::hwbp_len> parseBpLengthValue(int length)
     {
         switch (length)
         {
         case 1:
-            return decltype(dr)::HWBP_BREAKPOINT_LEN_1;
+            return Driver::HWBP_BREAKPOINT_LEN_1;
         case 2:
-            return decltype(dr)::HWBP_BREAKPOINT_LEN_2;
+            return Driver::HWBP_BREAKPOINT_LEN_2;
         case 3:
-            return decltype(dr)::HWBP_BREAKPOINT_LEN_3;
+            return Driver::HWBP_BREAKPOINT_LEN_3;
         case 4:
-            return decltype(dr)::HWBP_BREAKPOINT_LEN_4;
+            return Driver::HWBP_BREAKPOINT_LEN_4;
         case 5:
-            return decltype(dr)::HWBP_BREAKPOINT_LEN_5;
+            return Driver::HWBP_BREAKPOINT_LEN_5;
         case 6:
-            return decltype(dr)::HWBP_BREAKPOINT_LEN_6;
+            return Driver::HWBP_BREAKPOINT_LEN_6;
         case 7:
-            return decltype(dr)::HWBP_BREAKPOINT_LEN_7;
+            return Driver::HWBP_BREAKPOINT_LEN_7;
         case 8:
-            return decltype(dr)::HWBP_BREAKPOINT_LEN_8;
+            return Driver::HWBP_BREAKPOINT_LEN_8;
         default:
             return std::nullopt;
         }
@@ -305,17 +305,17 @@ namespace
     }
 
     // 将硬件断点类型转换为文本标记
-    std::string_view bpTypeToToken(decltype(dr)::hwbp_type type)
+    std::string_view bpTypeToToken(Driver::hwbp_type type)
     {
         switch (type)
         {
-        case decltype(dr)::HWBP_BREAKPOINT_R:
+        case Driver::HWBP_BREAKPOINT_R:
             return "read";
-        case decltype(dr)::HWBP_BREAKPOINT_W:
+        case Driver::HWBP_BREAKPOINT_W:
             return "write";
-        case decltype(dr)::HWBP_BREAKPOINT_RW:
+        case Driver::HWBP_BREAKPOINT_RW:
             return "read_write";
-        case decltype(dr)::HWBP_BREAKPOINT_X:
+        case Driver::HWBP_BREAKPOINT_X:
             return "execute";
         default:
             return "unknown";
@@ -323,15 +323,15 @@ namespace
     }
 
     // 将硬件断点线程范围转换为文本标记
-    std::string_view bpScopeToToken(decltype(dr)::hwbp_scope scope)
+    std::string_view bpScopeToToken(Driver::hwbp_scope scope)
     {
         switch (scope)
         {
-        case decltype(dr)::SCOPE_MAIN_THREAD:
+        case Driver::SCOPE_MAIN_THREAD:
             return "main";
-        case decltype(dr)::SCOPE_OTHER_THREADS:
+        case Driver::SCOPE_OTHER_THREADS:
             return "other";
-        case decltype(dr)::SCOPE_ALL_THREADS:
+        case Driver::SCOPE_ALL_THREADS:
             return "all";
         default:
             return "unknown";
@@ -861,7 +861,7 @@ namespace
             const auto package = requiredString("package_name", "package_name");
             if (std::holds_alternative<json>(package))
                 return std::get<json>(package);
-            const int pid = dr.GetPid(std::get<std::string>(package));
+            const int pid = dr->GetPid(std::get<std::string>(package));
             if (pid <= 0)
                 return fail("未找到进程");
             return okData({{"pid", pid}});
@@ -874,31 +874,31 @@ namespace
                 return std::get<json>(pid);
             if (std::get<int>(pid) <= 0)
                 return fail("pid 参数无效");
-            dr.SetGlobalPid(std::get<int>(pid));
-            return okData({{"pid", dr.GetGlobalPid()}});
+            dr->SetGlobalPid(std::get<int>(pid));
+            return okData({{"pid", dr->GetGlobalPid()}});
         }
 
         if (op == "target.pid.current")
-            return okData({{"pid", dr.GetGlobalPid()}});
+            return okData({{"pid", dr->GetGlobalPid()}});
 
         if (op == "target.attach.package")
         {
             const auto package = requiredString("package_name", "package_name");
             if (std::holds_alternative<json>(package))
                 return std::get<json>(package);
-            const int pid = dr.GetPid(std::get<std::string>(package));
+            const int pid = dr->GetPid(std::get<std::string>(package));
             if (pid <= 0)
                 return fail("未找到进程");
-            dr.SetGlobalPid(pid);
+            dr->SetGlobalPid(pid);
             return okData({{"pid", pid}});
         }
 
         if (op == "memory.info.full")
         {
-            const int status = dr.GetMemoryInformation();
+            const int status = dr->GetMemoryInformation();
             if (status != 0)
                 return fail(std::format("刷新失败 status={}", status));
-            return okData(buildMemoryInfoJson(status, dr.GetMemoryInfoRef()));
+            return okData(buildMemoryInfoJson(status, dr->GetMemoryInfoRef()));
         }
 
         if (op == "module.resolve")
@@ -920,7 +920,7 @@ namespace
                 return fail("which 必须是 start 或 end");
 
             std::uint64_t address = 0;
-            if (!dr.GetModuleAddress(std::get<std::string>(moduleName), static_cast<short>(std::get<int>(segmentIndex)), &address, isStart))
+            if (!dr->GetModuleAddress(std::get<std::string>(moduleName), static_cast<short>(std::get<int>(segmentIndex)), &address, isStart))
                 return fail("未找到目标模块或段");
             return okData({{"address", address}, {"address_hex", std::format("0x{:X}", address)}});
         }
@@ -941,7 +941,7 @@ namespace
             if (!fuzzyMode.has_value())
                 return fail("mode 无效，支持: unknown/eq/gt/lt/inc/dec/changed/unchanged/range/pointer/string");
 
-            const int pid = dr.GetGlobalPid();
+            const int pid = dr->GetGlobalPid();
             if (pid <= 0)
                 return fail("全局PID未设置，请先执行 target.pid.set 或 target.attach.package");
 
@@ -1157,7 +1157,7 @@ namespace
                 return fail("mode 仅支持 module/manual/array");
             }
 
-            const int pid = dr.GetGlobalPid();
+            const int pid = dr->GetGlobalPid();
             if (pid <= 0)
                 return fail("全局PID未设置，请先执行 target.pid.set 或 target.attach.package");
             if (gBridgeState.pointerManager.isScanning())
@@ -1182,7 +1182,7 @@ namespace
 
         if (op == "breakpoint.info")
         {
-            const auto &info = dr.GetHwbpInfoRef();
+            const auto &info = dr->GetHwbpInfoRef();
             return okData(buildHwbpInfoJson(info));
         }
 
@@ -1204,7 +1204,7 @@ namespace
             if (std::holds_alternative<json>(length))
                 return std::get<json>(length);
 
-            const int pid = dr.GetGlobalPid();
+            const int pid = dr->GetGlobalPid();
             if (pid <= 0)
                 return fail("全局PID未设置，请先执行 target.pid.set 或 target.attach.package");
             const auto bpType = parseBpTypeToken(std::get<std::string>(type));
@@ -1217,7 +1217,7 @@ namespace
             const auto bpLength = parseBpLengthValue(clampedLength);
             if (!bpType.has_value() || !bpScope.has_value() || !bpLength.has_value())
                 return fail("断点参数无效，长度范围为 1-8");
-            const int status = dr.SetProcessHwbpRef(std::get<std::uint64_t>(address), *bpType, *bpScope, *bpLength);
+            const int status = dr->SetProcessHwbpRef(std::get<std::uint64_t>(address), *bpType, *bpScope, *bpLength);
             if (status != 0)
                 return fail(std::format("设置断点失败 status={}", status));
             gBridgeState.hwbpActive = true;
@@ -1233,7 +1233,7 @@ namespace
             if (!gBridgeState.hwbpActive)
                 return okData({{"active", false}, {"cleared", false}});
 
-            dr.RemoveProcessHwbpRef();
+            dr->RemoveProcessHwbpRef();
             gBridgeState.hwbpActive = false;
             gBridgeState.hwbpAddress = 0;
             gBridgeState.hwbpType.clear();
@@ -1249,8 +1249,8 @@ namespace
                 return std::get<json>(index);
             if (std::get<int>(index) < 0)
                 return fail("index 无效");
-            const auto &info = dr.GetHwbpInfoRef();
-            dr.RemoveHwbpRecord(std::get<int>(index));
+            const auto &info = dr->GetHwbpInfoRef();
+            dr->RemoveHwbpRecord(std::get<int>(index));
             return okData({{"record_count", info.record_count}});
         }
 
@@ -1268,7 +1268,7 @@ namespace
             const auto value = MemUtils::ParseUInt128(std::get<std::string>(valueText));
             if (!value.has_value())
                 return fail(std::format("operation={} 参数 value 无效", op));
-            const auto &info = dr.GetHwbpInfoRef();
+            const auto &info = dr->GetHwbpInfoRef();
             if (std::get<int>(index) < 0 || std::get<int>(index) >= info.record_count)
                 return fail("index 越界");
             auto copy = info.records[std::get<int>(index)];
@@ -1372,7 +1372,7 @@ namespace
             if (std::get<std::uint64_t>(size) == 0 || std::get<std::uint64_t>(size) > 4096)
                 return fail("size 范围 1-4096");
             std::vector<std::uint8_t> buffer(static_cast<std::size_t>(std::get<std::uint64_t>(size)));
-            const int readBytes = dr.Read(std::get<std::uint64_t>(address), buffer.data(), buffer.size());
+            const int readBytes = dr->Read(std::get<std::uint64_t>(address), buffer.data(), buffer.size());
             if (readBytes <= 0)
                 return fail(std::format("读取失败 status={}", readBytes));
             return okData({{"requested_size", std::get<std::uint64_t>(size)}, {"read_size", readBytes}, {"data_hex", bytesToHex(buffer.data(), static_cast<std::size_t>(readBytes))}});
@@ -1433,7 +1433,7 @@ namespace
             auto bytes = parseHexBytes(std::get<std::string>(dataHex));
             if (!bytes.has_value() || bytes->empty())
                 return fail("data_hex 无效");
-            const int writeBytes = dr.Write(std::get<std::uint64_t>(address), bytes->data(), bytes->size());
+            const int writeBytes = dr->Write(std::get<std::uint64_t>(address), bytes->data(), bytes->size());
             if (writeBytes != static_cast<int>(bytes->size()))
                 return fail(std::format("写入失败 status={}", writeBytes));
             return okData({{"size", bytes->size()}});

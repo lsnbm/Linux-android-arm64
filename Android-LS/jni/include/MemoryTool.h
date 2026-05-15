@@ -645,7 +645,7 @@ namespace MemUtils
         return DispatchType(type, [&]<typename T>() -> std::string
                             {
                                 T value{};
-                                if (dr.Read(addr, &value, sizeof(T)) != static_cast<int>(sizeof(T)))
+                                if (dr->Read(addr, &value, sizeof(T)) != static_cast<int>(sizeof(T)))
                                     return "??";
                                 return detail::ValueToString(value);
                             });
@@ -661,7 +661,7 @@ namespace MemUtils
         {
             std::string s(str);
             return DispatchType(type, [&]<typename T>() -> bool
-                                { return dr.Write<T>(addr, detail::StringToValue<T>(s)) == static_cast<int>(sizeof(T)); });
+                                { return dr->Write<T>(addr, detail::StringToValue<T>(s)) == static_cast<int>(sizeof(T)); });
         }
         catch (...)
         {
@@ -677,7 +677,7 @@ namespace MemUtils
             return "??";
 
         maxLen = std::clamp<size_t>(maxLen, 1, 256);
-        std::string value = dr.ReadString(addr, maxLen);
+        std::string value = dr->ReadString(addr, maxLen);
         for (char &ch : value)
         {
             unsigned char u = static_cast<unsigned char>(ch);
@@ -695,7 +695,7 @@ namespace MemUtils
 
         std::string temp(str);
         const auto size = temp.size() + 1;
-        return dr.Write(addr, temp.data(), size) == static_cast<int>(size);
+        return dr->Write(addr, temp.data(), size) == static_cast<int>(size);
     }
 
     inline std::string ReadAsPointerString(uintptr_t addr)
@@ -704,7 +704,7 @@ namespace MemUtils
         if (!addr)
             return "??";
         int64_t value = 0;
-        if (dr.Read(addr, &value, sizeof(value)) != static_cast<int>(sizeof(value)))
+        if (dr->Read(addr, &value, sizeof(value)) != static_cast<int>(sizeof(value)))
             return "??";
         return std::format("{:X}", Normalize(static_cast<uintptr_t>(value)));
     }
@@ -721,7 +721,7 @@ namespace MemUtils
             if (!parsed)
                 return false;
             const int64_t value = static_cast<int64_t>(*parsed);
-            return dr.Write<int64_t>(addr, value) == static_cast<int>(sizeof(value));
+            return dr->Write<int64_t>(addr, value) == static_cast<int>(sizeof(value));
         }
         catch (...)
         {
@@ -1137,7 +1137,7 @@ private:
                     {
                         size_t sz = std::min(static_cast<size_t>(reg.end - addr),
                                              Config::Constants::SCAN_BUFFER);
-                        int readBytes = dr.Read(addr, buf.data(), sz);
+                        int readBytes = dr->Read(addr, buf.data(), sz);
                         process(reg, buf.data(), addr,
                                 readBytes > 0 ? static_cast<size_t>(readBytes) : 0, sz);
                     }
@@ -1168,7 +1168,7 @@ private:
     template <typename T>
     void scanFirstUnknown(pid_t /*pid*/)
     {
-        auto scanRegs = dr.GetScanRegions();
+        auto scanRegs = dr->GetScanRegions();
         if (scanRegs.empty())
             return;
 
@@ -1216,7 +1216,7 @@ private:
     template <typename T>
     void scanFirst(pid_t /*pid*/, T target, Types::FuzzyMode mode)
     {
-        auto scanRegs = dr.GetScanRegions();
+        auto scanRegs = dr->GetScanRegions();
         if (scanRegs.empty())
             return;
 
@@ -1259,7 +1259,7 @@ private:
                     {
                         size_t sz = std::min(static_cast<size_t>(reg.end - addr),
                                              Config::Constants::SCAN_BUFFER);
-                        int readBytes = dr.Read(addr, buf.data(), sz);
+                        int readBytes = dr->Read(addr, buf.data(), sz);
                         if (readBytes <= 0) continue;
 
                         size_t usable = static_cast<size_t>(readBytes);
@@ -1362,7 +1362,7 @@ private:
         if (needle.empty())
             return;
 
-        auto scanRegs = dr.GetScanRegions();
+        auto scanRegs = dr->GetScanRegions();
         if (scanRegs.empty())
             return;
 
@@ -1412,7 +1412,7 @@ private:
 
                     for (uintptr_t addr = start; addr + patLen <= finish;) {
                         size_t readSize = std::min(static_cast<size_t>(finish - addr), Config::Constants::SCAN_BUFFER);
-                        int readBytes = dr.Read(addr, buf.data(), readSize);
+                        int readBytes = dr->Read(addr, buf.data(), readSize);
                         if (readBytes > 0) {
                             size_t usable = static_cast<size_t>(readBytes);
                             if (usable >= patLen) {
@@ -1476,7 +1476,7 @@ private:
                 size_t end = std::min(t * chunk + chunk, current.size());
                 for (size_t i = t * chunk; i < end && Config::g_Running; ++i) {
                     uintptr_t addr = current[i];
-                    int readBytes = dr.Read(addr, buf.data(), patLen);
+                    int readBytes = dr->Read(addr, buf.data(), patLen);
                     if (readBytes > 0 && static_cast<size_t>(readBytes) >= patLen &&
                         std::memcmp(buf.data(), needle.data(), patLen) == 0) {
                         myHits.push_back(addr);
@@ -1660,7 +1660,7 @@ public:
             }
         }
 
-        auto scanRegs = dr.GetScanRegions();
+        auto scanRegs = dr->GetScanRegions();
         if (!initStorage(valueSize_, scanRegs, false))
             return;
 
@@ -1946,7 +1946,7 @@ public:
             return;
         }
         std::ranges::fill(buffer_, 0);
-        const int readBytes = dr.Read(base_, buffer_.data(), buffer_.size());
+        const int readBytes = dr->Read(base_, buffer_.data(), buffer_.size());
         readSuccess_ = readBytes > 0;
         if (!readSuccess_)
         {
@@ -2171,7 +2171,7 @@ private:
         if (!out)
             return;
 
-        if (dr.Read(start, buf, len) <= 0)
+        if (dr->Read(start, buf, len) <= 0)
         {
             fclose(out);
             out = nullptr;
@@ -2270,7 +2270,7 @@ private:
     void filter_to_ranges_module(std::vector<std::vector<PtrDir>> &dirs, std::vector<PtrRange> &ranges, std::vector<PtrData *> &curr, int level, const std::string &filterModule)
     {
         std::unordered_set<PtrData *> matched;
-        const auto &info = dr.GetMemoryInfoRef();
+        const auto &info = dr->GetMemoryInfoRef();
         std::println("当前进程模块数量: {}", info.module_count);
 
         for (int mi = 0; mi < info.module_count; ++mi)
@@ -2322,7 +2322,7 @@ private:
         std::vector<FlatSeg> flatSegs;
         if (scanMode == BaseMode::Module)
         {
-            const auto &info = dr.GetMemoryInfoRef();
+            const auto &info = dr->GetMemoryInfoRef();
             for (int mi = 0; mi < info.module_count; ++mi)
             {
                 const auto &mod = info.modules[mi];
@@ -2567,7 +2567,7 @@ private:
     // 将指针树结果序列化写入文件。
     void write_bin_file(std::vector<std::vector<PtrDir *>> &contents, std::vector<PtrRange> &ranges, FILE *f, BaseMode scanMode, uintptr_t target, uintptr_t manualBase, uintptr_t arrayBase, size_t arrayCount)
     {
-        const auto &memInfo = dr.GetMemoryInfoRef();
+        const auto &memInfo = dr->GetMemoryInfoRef();
         BinHeader hdr{};
         strcpy(hdr.sign, ".bin pointer chain");
         hdr.size = sizeof(uintptr_t);
@@ -2600,7 +2600,7 @@ private:
                 sym.arrayIndex = r.arrayIndex;
 
                 uintptr_t objAddr = 0;
-                if (dr.Read(MemUtils::Normalize(r.arrayBase) + r.arrayIndex * sizeof(uintptr_t), &objAddr, sizeof(objAddr)) != static_cast<int>(sizeof(objAddr)))
+                if (dr->Read(MemUtils::Normalize(r.arrayBase) + r.arrayIndex * sizeof(uintptr_t), &objAddr, sizeof(objAddr)) != static_cast<int>(sizeof(objAddr)))
                     objAddr = 0;
                 sym.start = MemUtils::Normalize(objAddr);
                 char arrName[128];
@@ -2758,7 +2758,7 @@ public:
         std::println("=== 开始指针扫描 ===");
         std::println("目标: {:x}, 深度: {}, 偏移: {}", target, depth, maxOffset);
 
-        regions_ = dr.GetScanRegions();
+        regions_ = dr->GetScanRegions();
 
         for (auto &[rstart, rend] : regions_)
         {
@@ -2796,7 +2796,7 @@ public:
             {
                 uintptr_t ptr = 0;
 
-                if (dr.Read(arrayBase + i * sizeof(uintptr_t), &ptr, sizeof(ptr)) == static_cast<int>(sizeof(ptr)))
+                if (dr->Read(arrayBase + i * sizeof(uintptr_t), &ptr, sizeof(ptr)) == static_cast<int>(sizeof(ptr)))
                 {
                     ptr = MemUtils::Normalize(ptr);
                     if (MemUtils::IsValidAddr(ptr))

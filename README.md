@@ -525,9 +525,9 @@ inline hook 表：
 
 框架在模块代码段中预留：
 
-- `TRAMP_SLOT_COUNT = 4`
-- `TRAMP_WORDS = 48`
-- `TRAMP_BYTES = 192`
+- `TRAMP_SLOT_COUNT = 10`
+- `TRAMP_WORDS = 116`
+- `TRAMP_BYTES = 464`
 
 预留区初始填充 NOP，安装 hook 时会把对应槽位 patch 成完整跳板代码。这样跳板本身位于可执行代码段，不需要额外申请可执行内存。
 
@@ -538,14 +538,15 @@ inline hook 表：
 1. 栈上开辟 272 字节临时空间。
 2. 保存 X0-X30。
 3. 保存 NZCV 条件标志。
-4. 设置临时帧指针。
-5. 通过数据槽加载 `work_fn` 地址并 `blr x9` 调用工作函数。
-6. 恢复 NZCV。
-7. 恢复 X0-X30。
-8. 执行目标入口被覆盖的原始指令。
-9. 使用 `ret x16` 跳回 `target_addr + 4`。
+4. 按 `struct pt_regs` 前缀填充 `regs[0..30]`、`sp`、`pc`、`pstate`，其中 `pstate` 当前用于保存 NZCV。
+5. 设置临时帧指针，并把 `struct pt_regs *` 现场地址放入 X0。
+6. 通过数据槽加载 `work_fn` 地址并 `blr x9` 调用工作函数，工作函数签名为 `int work_fn(struct pt_regs *regs)`。
+7. `work_fn` 可读写 `regs->regs[0..30]`、`regs->sp`、`regs->pc` 和 `regs->pstate`。
+8. 无论 `work_fn` 返回值是什么，都会先按 `regs` 中的值恢复保存现场，因此 `regs->sp` 会写回真实 SP。
+9. `regs->pc` 保持为原入口地址时，`work_fn` 返回 0 会恢复现场、执行原始入口指令，再用已 patch 的 `b` 跳回 `target_addr + 4`；返回 1 会恢复现场后 `ret x30`，不再执行原函数入口。
+10. `regs->pc` 被改成其他地址时，会恢复现场后用 `ret x16` 跳到新的 `regs->pc`，让 PC 修改真实生效。
 
-这里使用 `ret x16` 而不是普通间接跳转，是为了适配启用 BTI 的 5 系以上内核场景，避免跳回函数中间地址时触发分支目标限制问题。
+动态 `regs->pc` 路径需要一个通用寄存器承载跳转目标，当前使用 X16；因此修改 PC 时，X16 会被用作最终跳转寄存器。普通继续执行路径仍会在执行原始入口指令前恢复 X16/X17。
 
 ### 10.4 安装流程
 

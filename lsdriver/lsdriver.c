@@ -212,15 +212,17 @@ static int ConnectThreadFunction(void *data)
 	return 0;
 }
 
-// do_exit 执行前的 inline hook 工作函数
-static void do_exit_hook_work(void)
+// do_exit 执行前的 inline hook 工作函数，返回 0 表示继续执行 do_exit
+static int do_exit_hook_work(struct pt_regs *regs)
 {
 	// 调用 do_exit 的进程就是当前正在运行并准备死去的进程 (current)
 	struct task_struct *task = current;
 
+	(void)regs;
+
 	// 只监听主线程的退出
 	if (!thread_group_leader(task))
-		return;
+		return 0;
 
 	// 匹配进程名
 	// Android 中 task->comm 最长只有 15 个字符，包名被截断
@@ -234,6 +236,7 @@ static void do_exit_hook_work(void)
 		v_touch_destroy();								 // 清理触摸
 		ProcessExit = false;							 // 标记用户进程已断开,前面read借用了ProcessExit，这里最后置为false，保证状态正确
 	}
+	return 0;
 }
 static int do_exit_init(void)
 {
