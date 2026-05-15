@@ -40,11 +40,12 @@ struct breakpoint_config
 struct breakpoint_config g_bp_config[BP_CONFIG_MAX];
 static bool g_task_run_monitor_started = false; // 防止重复安装断点和卸载断点
 
-// 执行断异常处理跳板工作函数
-static void work_trampoline_breakpoint(unsigned long unused, unsigned long esr, struct pt_regs *regs)
+// 执行断异常处理跳板工作函数，返回 0 表示继续执行原异常入口
+static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
 {
     int i;
     uint64_t ctrl;
+    struct pt_regs *regs = (struct pt_regs *)hook_regs->regs[2];
 
     /*
    这里说明一下为何可以这么做进行步过
@@ -91,13 +92,15 @@ static void work_trampoline_breakpoint(unsigned long unused, unsigned long esr, 
 
     ctrl = read_wb_reg(AARCH64_DBG_REG_BCR, 5);
     write_wb_reg(AARCH64_DBG_REG_BCR, 5, ctrl & ~0x1);
+    return 0;
 }
 
-// 访问断异常处理跳板工作函数
-static void work_trampoline_watchpoint(unsigned long addr, unsigned long esr, struct pt_regs *regs)
+// 访问断异常处理跳板工作函数，返回 0 表示继续执行原异常入口
+static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
 {
     int i;
     uint64_t ctrl;
+    struct pt_regs *regs = (struct pt_regs *)hook_regs->regs[2];
 
     for (i = 0; i < BP_CONFIG_MAX; i++)
     {
@@ -110,6 +113,7 @@ static void work_trampoline_watchpoint(unsigned long addr, unsigned long esr, st
 
     ctrl = read_wb_reg(AARCH64_DBG_REG_WCR, 3);
     write_wb_reg(AARCH64_DBG_REG_WCR, 3, ctrl & ~0x1);
+    return 0;
 }
 
 // 声明 hook 表

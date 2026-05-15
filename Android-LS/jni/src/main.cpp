@@ -4,10 +4,17 @@
 #include <cstdarg>
 #include <cstdint>
 #include <cstring>
+#include <csignal>
+#include <cstdio>
+#include <cstdlib>
+#include <fcntl.h>
 #include <functional>
 #include <future>
 #include <mutex>
 #include <optional>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 #include <vector>
 #include <span>
 
@@ -384,7 +391,7 @@ private:
         scanParams_.page = 0;
         auto type = scanParams_.dataType;
         auto mode = scanParams_.fuzzyMode;
-        auto pid = dr.GetGlobalPid();
+        auto pid = dr->GetGlobalPid();
         std::string valCopy(valueStr);
         double rangeMax = 0.0;
 
@@ -443,7 +450,7 @@ private:
     {
         auto p = ptrParams_;
         p.maxOffset = offsetValues_[selectedOffsetIdx_];
-        auto pid = dr.GetGlobalPid();
+        auto pid = dr->GetGlobalPid();
         enqueueBackgroundTask([=, this]
                               { ptrManager_.scan(pid, p.target, p.depth, p.maxOffset, p.useManual,
                                                  p.manualBase, p.useArray, p.arrayBase,
@@ -464,7 +471,7 @@ public:
             offsetValues_.push_back(i);
         }
         snprintf(buf_.page, sizeof(buf_.page), "%d", Config::g_ItemsPerPage.load());
-        if (int pid = dr.GetGlobalPid(); pid > 0)
+        if (int pid = dr->GetGlobalPid(); pid > 0)
             snprintf(buf_.pid, sizeof(buf_.pid), "%d", pid);
         SetInputBlocking(true);
     }
@@ -589,11 +596,11 @@ private:
             ImGui::SameLine();
             if (KeyboardValueReady(buf_.pid)) {
                 int pid = ParseIntOr(buf_.pid);
-                if (pid > 0 && pid != dr.GetGlobalPid())
-                    dr.SetGlobalPid(pid);
+                if (pid > 0 && pid != dr->GetGlobalPid())
+                    dr->SetGlobalPid(pid);
             }
             ImGui::SameLine();
-            if (UI::Btn("退出", {S(50), bh}, Colors::BTN_EXIT)) Config::g_Running = false; }, ImGuiWindowFlags_NoScrollbar);
+            if (UI::Btn("退出", {S(50), bh}, Colors::BTN_EXIT))_exit(0); }, ImGuiWindowFlags_NoScrollbar);
     }
 
     // ---- 内容区 ----
@@ -622,7 +629,7 @@ private:
                 ImVec4 c = state_.tab == i ? Colors::BTN_ACTIVE : Colors::BTN_INACTIVE;
                 if (UI::Btn(labels[i], {bw, h - S(14)}, c)) {
                     state_.tab = i;
-                    if (i == 3 || i == 5) dr.GetMemoryInformation();
+                    if (i == 3 || i == 5) dr->GetMemoryInformation();
                     if (i == 2 && memViewer_.base()) memViewer_.refresh();
                 }
             } }, ImGuiWindowFlags_NoScrollbar);
@@ -1017,7 +1024,7 @@ private:
                   buf_.moduleSearch, 63, "输入模块名进行搜索或Dump");
         UI::Space(S(4));
         if (UI::Btn("刷新模块", {w, S(48)}, Colors::BTN_TEAL))
-            dr.GetMemoryInformation();
+            dr->GetMemoryInformation();
         UI::Space(S(6));
         if (UI::Btn("Dump 模块 (保存至 /sdcard/dump/)", {w, S(48)}, Colors::BTN_PURPLE))
         {
@@ -1025,14 +1032,14 @@ private:
             {
                 std::string mod = buf_.moduleSearch;
                 Utils::GlobalPool.push([mod]
-                                       { dr.DumpModule(mod); });
+                                       { dr->DumpModule(mod); });
             }
         }
         UI::Space(S(6));
 
         if (ImGui::BeginChild("ModList", {0, 0}, false))
         {
-            const auto &info = dr.GetMemoryInfoRef();
+            const auto &info = dr->GetMemoryInfoRef();
             if (info.module_count == 0)
             {
                 UI::Text(Colors::HINT, "暂无模块");
@@ -1264,11 +1271,11 @@ private:
     {
         float w = ImGui::GetContentRegionAvail().x, bh = S(45);
         static const char *bpTypeLabels[] = {"读取", "写入", "读写", "执行"};
-        static constexpr decltype(dr)::hwbp_type bpTypeValues[] = {
-            decltype(dr)::HWBP_BREAKPOINT_R,
-            decltype(dr)::HWBP_BREAKPOINT_W,
-            decltype(dr)::HWBP_BREAKPOINT_RW,
-            decltype(dr)::HWBP_BREAKPOINT_X,
+        static constexpr Driver::hwbp_type bpTypeValues[] = {
+            Driver::HWBP_BREAKPOINT_R,
+            Driver::HWBP_BREAKPOINT_W,
+            Driver::HWBP_BREAKPOINT_RW,
+            Driver::HWBP_BREAKPOINT_X,
         };
         static const char *bpScopeLabels[] = {"仅主线程", "仅子线程", "全部线程"};
 
@@ -1276,7 +1283,7 @@ private:
         UI::Space(S(4));
 
         // 硬件信息
-        const auto &info = dr.GetHwbpInfoRef();
+        const auto &info = dr->GetHwbpInfoRef();
         UI::LabelValue(Colors::ADDR_CYAN, "执行断点寄存器: ", Colors::ADDR_GREEN,
                        "%llu", (unsigned long long)info.num_brps);
         ImGui::SameLine();
@@ -1315,12 +1322,12 @@ private:
             {
                 int len = std::clamp(ParseIntOr(buf_.bpLen), 1, 8);
                 bpParams_.address = *addr;
-                bpParams_.lenBytes = static_cast<decltype(dr)::hwbp_len>(len);
+                bpParams_.lenBytes = static_cast<Driver::hwbp_len>(len);
                 const int bpTypeIndex = std::clamp(bpParams_.bpType, 0, 3);
-                if (dr.SetProcessHwbpRef(*addr,
-                                         bpTypeValues[bpTypeIndex],
-                                         static_cast<decltype(dr)::hwbp_scope>(bpParams_.bpScope),
-                                         bpParams_.lenBytes) == 0)
+                if (dr->SetProcessHwbpRef(*addr,
+                                          bpTypeValues[bpTypeIndex],
+                                          static_cast<Driver::hwbp_scope>(bpParams_.bpScope),
+                                          bpParams_.lenBytes) == 0)
                     bpParams_.active = true;
             }
         }
@@ -1329,7 +1336,7 @@ private:
         ImGui::BeginDisabled(!bpParams_.active);
         if (UI::Btn("移除断点", {halfW, S(52)}, {0.5f, 0.15f, 0.15f, 1}))
         {
-            dr.RemoveProcessHwbpRef();
+            dr->RemoveProcessHwbpRef();
             bpParams_.active = false;
         }
         ImGui::EndDisabled();
@@ -1403,7 +1410,7 @@ private:
             ImGui::PopID();
         }
         if (deleteIdx >= 0)
-            dr.RemoveHwbpRecord(deleteIdx);
+            dr->RemoveHwbpRecord(deleteIdx);
     }
 
     void drawBpRecordDetail(const Driver::hwbp_record &rec, int r)
@@ -1608,7 +1615,7 @@ private:
     // 拷贝副本
     void beginEditRecord(int idx)
     {
-        const auto &info = dr.GetHwbpInfoRef();
+        const auto &info = dr->GetHwbpInfoRef();
         if (idx < 0 || idx >= info.record_count)
             return;
         bpParams_.editingRecordIdx = idx;
@@ -1618,7 +1625,7 @@ private:
     // 写回副本
     void applyRecordEdits(int idx)
     {
-        const auto &info = dr.GetHwbpInfoRef();
+        const auto &info = dr->GetHwbpInfoRef();
         if (idx < 0 || idx >= info.record_count)
             return;
         const_cast<Driver::hwbp_record &>(info.records[idx]) = bpParams_.editCopy;
@@ -2061,6 +2068,63 @@ int RunMemoryTool()
     return rc;
 }
 
+// 脱离终端后台运行
+static bool daemonize(const char *log_path)
+{
+    pid_t pid;
+
+    fflush(nullptr);
+
+    //  第一次 fork：让父进程退出，使子进程在后台运行
+    pid = fork();
+    if (pid < 0)
+        return false;
+    if (pid > 0)
+        _exit(EXIT_SUCCESS); // 父进程退出，不执行C++析构/atexit
+
+    //  创建新会话：子进程成为新会话的首进程，完全脱离控制终端
+    if (setsid() < 0)
+        _exit(EXIT_FAILURE);
+
+    //  忽略 SIGHUP 信号（可选，防止终端关闭时进程退出）
+    signal(SIGHUP, SIG_IGN);
+
+    // 第二次 fork：确保进程不是会话首进程，从而无法再次自动打开终端
+    pid = fork();
+    if (pid < 0)
+        _exit(EXIT_FAILURE);
+    if (pid > 0)
+        _exit(EXIT_SUCCESS);
+
+    //  修改文件权限掩码 (umask)
+    umask(0);
+
+    //  切换工作目录（防止占用卸载的分区）
+    chdir("/");
+
+    //  重定向标准输入、输出、错误
+    int devnull = open("/dev/null", O_RDONLY);
+    if (devnull != -1)
+    {
+        dup2(devnull, STDIN_FILENO);
+        if (devnull > STDERR_FILENO)
+            close(devnull);
+    }
+
+    int fd = open(log_path, O_WRONLY | O_CREAT | O_APPEND, 0666);
+    if (fd != -1)
+    {
+        // 将标准输出 (1) 定向到 fd
+        dup2(fd, STDOUT_FILENO);
+        // 将标准错误 (2) 定向到 fd
+        dup2(fd, STDERR_FILENO);
+
+        if (fd > STDERR_FILENO)
+            close(fd);
+    }
+    return true;
+}
+
 int main()
 {
 
@@ -2072,7 +2136,13 @@ int main()
 
     int rc = 1;
     int mode = 0;
-    if (!(std::cin >> mode))
+    bool c = (bool)(std::cin >> mode);
+
+    daemonize("/sdcard/log.txt");
+
+    dr = new Driver(1);
+
+    if (!c)
     {
         std::println(stderr, "[错误] 输入无效。");
     }
@@ -2092,6 +2162,8 @@ int main()
     {
         std::println(stderr, "[错误] 未知选项: {}", mode);
     }
+
+    delete dr;
 
     // 仅在 main 函数统一清理全局线程池。
     Utils::GlobalPool.force_stop();

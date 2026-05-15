@@ -49,7 +49,7 @@ inline int mainno()
     constexpr int WRITE_TARGET_VALUE = 1000;
 
     pid_t selfPid = getpid();
-    dr.SetGlobalPid(selfPid);
+    dr->SetGlobalPid(selfPid);
 
     std::println(stdout, "================================================================");
     std::println(stdout, "  驱动读写性能基准测试（连续 {} 轮，每轮 {} 个 int 元素）", ROUND_COUNT, TEST_COUNT);
@@ -100,7 +100,7 @@ inline int mainno()
             auto t0 = std::chrono::high_resolution_clock::now();
             for (int i = 0; i < TEST_COUNT; ++i)
             {
-                dr.NullIo();
+                dr->NullIo();
             }
             auto t1 = std::chrono::high_resolution_clock::now();
             auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
@@ -122,7 +122,7 @@ inline int mainno()
             for (int i = 0; i < TEST_COUNT; ++i)
             {
                 uint64_t currentAddr = testAddr + static_cast<uint64_t>(i * sizeof(int));
-                int readBytes = dr.Read(currentAddr, &readValues[static_cast<size_t>(i)], sizeof(int));
+                int readBytes = dr->Read(currentAddr, &readValues[static_cast<size_t>(i)], sizeof(int));
                 readByteCounts[static_cast<size_t>(i)] = readBytes;
                 if (readBytes > 0)
                     readTransferred += static_cast<size_t>(readBytes);
@@ -156,7 +156,7 @@ inline int mainno()
             for (int i = 0; i < TEST_COUNT; ++i)
             {
                 uint64_t currentAddr = testAddr + static_cast<uint64_t>(i * sizeof(int));
-                int writeBytes = dr.Write(currentAddr, &writeValues[static_cast<size_t>(i)], sizeof(int));
+                int writeBytes = dr->Write(currentAddr, &writeValues[static_cast<size_t>(i)], sizeof(int));
                 writeByteCounts[static_cast<size_t>(i)] = writeBytes;
                 if (writeBytes > 0)
                     writeTransferred += static_cast<size_t>(writeBytes);

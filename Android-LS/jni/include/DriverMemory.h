@@ -1143,7 +1143,7 @@ private: // 私有实现，外部无需关系
     }
 };
 
-Driver dr(1);
+Driver *dr = NULL;
 
 namespace SignatureScanner
 {
@@ -1153,7 +1153,7 @@ namespace SignatureScanner
         ??    — 通配符
         XXh   — 十六进制字节 (如 A1h FFh 00h)
 
-    【使用前提】外部已调用 dr.SetGlobalPid(pid) 设置目标进程
+    【使用前提】外部已调用 dr->SetGlobalPid(pid) 设置目标进程
 
     【三个核心功能】
         1. 找特征  ScanAddressSignature(addr, range)
@@ -1161,7 +1161,7 @@ namespace SignatureScanner
         3. 扫特征码 ScanSignature(pattern, range) / ScanSignatureFromFile()
     【调用方式】
         外部设置好 PID
-        dr.SetGlobalPid(pid);
+        dr->SetGlobalPid(pid);
 
         1. 找特征
         ScanAddressSignature(0x7A12345678, 100);
@@ -1295,7 +1295,7 @@ namespace SignatureScanner
             if (sig.empty())
                 return matches;
 
-            auto regions = dr.GetScanRegions();
+            auto regions = dr->GetScanRegions();
             if (regions.empty())
                 return matches;
 
@@ -1313,7 +1313,7 @@ namespace SignatureScanner
                     size_t readSize = std::min(static_cast<size_t>(rEnd - addr), SIG_BUFFER_SIZE);
                     if (readSize < sigSize)
                         break;
-                    if (dr.Read(addr, buffer.data(), readSize) <= 0)
+                    if (dr->Read(addr, buffer.data(), readSize) <= 0)
                         continue;
 
                     size_t searchEnd = readSize - sigSize;
@@ -1417,7 +1417,7 @@ namespace SignatureScanner
         SigElement sig;
         sig.bytes.resize(totalSize);
 
-        if (dr.Read(addr - range, sig.bytes.data(), totalSize) <= 0)
+        if (dr->Read(addr - range, sig.bytes.data(), totalSize) <= 0)
         {
             std::println(stderr, "[找特征] 读取失败: 0x{:X}", addr - range);
             return false;
@@ -1464,7 +1464,7 @@ namespace SignatureScanner
         size_t totalSize = static_cast<size_t>(range) * 2;
         std::vector<uint8_t> curData(totalSize);
 
-        if (dr.Read(addr - range, curData.data(), totalSize) <= 0)
+        if (dr->Read(addr - range, curData.data(), totalSize) <= 0)
         {
             std::println(stderr, "[过滤特征] 读取失败: 0x{:X}", addr - range);
             return result;
