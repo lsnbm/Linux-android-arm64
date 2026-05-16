@@ -15,8 +15,13 @@ namespace
     std::atomic_bool gRunning{true};
     std::atomic_uint64_t gClientSessionSeed{1};
     int gServerFd = -1;
-    LockManager gLockManager;
     std::mutex gRequestMutex;
+
+    LockManager &lockManager()
+    {
+        static LockManager manager;
+        return manager;
+    }
 
     struct SharedBridgeState
     {
@@ -30,7 +35,11 @@ namespace
         int hwbpLength = 0;
     };
 
-    SharedBridgeState gBridgeState;
+    SharedBridgeState &bridgeState()
+    {
+        static SharedBridgeState state;
+        return state;
+    }
 
     struct ClientSession
     {
@@ -549,12 +558,12 @@ namespace
         root["num_wrps"] = info.num_wrps;
         root["hit_addr"] = info.hit_addr;
         root["hit_addr_hex"] = std::format("0x{:X}", static_cast<std::uint64_t>(info.hit_addr));
-        root["active"] = gBridgeState.hwbpActive;
-        root["active_address"] = gBridgeState.hwbpAddress;
-        root["active_address_hex"] = std::format("0x{:X}", gBridgeState.hwbpAddress);
-        root["active_type"] = gBridgeState.hwbpType;
-        root["active_scope"] = gBridgeState.hwbpScope;
-        root["active_length"] = gBridgeState.hwbpLength;
+        root["active"] = bridgeState().hwbpActive;
+        root["active_address"] = bridgeState().hwbpAddress;
+        root["active_address_hex"] = std::format("0x{:X}", bridgeState().hwbpAddress);
+        root["active_type"] = bridgeState().hwbpType;
+        root["active_scope"] = bridgeState().hwbpScope;
+        root["active_length"] = bridgeState().hwbpLength;
         root["record_count"] = recordCount;
         root["records"] = json::array();
 
@@ -833,18 +842,18 @@ namespace
         auto scannerStateJson = [&]() -> json
         {
             return {
-                {"scanning", gBridgeState.memScanner.isScanning()},
-                {"progress", gBridgeState.memScanner.progress()},
-                {"count", gBridgeState.memScanner.count()},
+                {"scanning", bridgeState().memScanner.isScanning()},
+                {"progress", bridgeState().memScanner.progress()},
+                {"count", bridgeState().memScanner.count()},
             };
         };
 
         auto pointerStateJson = [&]() -> json
         {
             return {
-                {"scanning", gBridgeState.pointerManager.isScanning()},
-                {"progress", gBridgeState.pointerManager.scanProgress()},
-                {"count", gBridgeState.pointerManager.count()},
+                {"scanning", bridgeState().pointerManager.isScanning()},
+                {"progress", bridgeState().pointerManager.scanProgress()},
+                {"count", bridgeState().pointerManager.count()},
             };
         };
 
@@ -951,7 +960,7 @@ namespace
             {
                 if (valueToken.empty())
                     return fail("string 模式需要 value 参数");
-                gBridgeState.memScanner.scanString(pid, valueToken, isFirst);
+                bridgeState().memScanner.scanString(pid, valueToken, isFirst);
                 return okData(scannerStateJson());
             }
 
@@ -990,7 +999,7 @@ namespace
                         return fail("value 参数无效");
                     target = *parsedValue;
                 }
-                gBridgeState.memScanner.scan<T>(pid, target, *fuzzyMode, isFirst, rangeMax);
+                bridgeState().memScanner.scan<T>(pid, target, *fuzzyMode, isFirst, rangeMax);
                 return okData(scannerStateJson()); });
         }
 
@@ -999,7 +1008,7 @@ namespace
 
         if (op == "scan.clear")
         {
-            gBridgeState.memScanner.clear();
+            bridgeState().memScanner.clear();
             return okData(scannerStateJson());
         }
 
@@ -1023,12 +1032,12 @@ namespace
             if (!stringType && !dataType.has_value())
                 return fail("value_type 参数无效");
 
-            const auto page = gBridgeState.memScanner.getPage(static_cast<size_t>(std::get<std::uint64_t>(start)), static_cast<size_t>(std::get<std::uint64_t>(count)));
+            const auto page = bridgeState().memScanner.getPage(static_cast<size_t>(std::get<std::uint64_t>(start)), static_cast<size_t>(std::get<std::uint64_t>(count)));
             json payload;
             payload["start"] = std::get<std::uint64_t>(start);
             payload["request_count"] = std::get<std::uint64_t>(count);
             payload["result_count"] = page.size();
-            payload["total_count"] = gBridgeState.memScanner.count();
+            payload["total_count"] = bridgeState().memScanner.count();
             payload["type"] = std::get<std::string>(type);
             payload["items"] = json::array();
             for (const auto addr : page)
@@ -1053,10 +1062,10 @@ namespace
                 const auto format = parseViewFormatToken(viewFormat);
                 if (!format.has_value())
                     return fail("view_format 无效，支持: hex/hex64/i8/i16/i32/i64/f32/f64/disasm");
-                gBridgeState.memViewer.setFormat(*format);
+                bridgeState().memViewer.setFormat(*format);
             }
-            gBridgeState.memViewer.open(static_cast<uintptr_t>(std::get<std::uint64_t>(address)));
-            return okData({{"base", static_cast<std::uint64_t>(gBridgeState.memViewer.base())}, {"format", viewFormatToToken(gBridgeState.memViewer.format())}, {"read", gBridgeState.memViewer.readSuccess()}});
+            bridgeState().memViewer.open(static_cast<uintptr_t>(std::get<std::uint64_t>(address)));
+            return okData({{"base", static_cast<std::uint64_t>(bridgeState().memViewer.base())}, {"format", viewFormatToToken(bridgeState().memViewer.format())}, {"read", bridgeState().memViewer.readSuccess()}});
         }
 
         if (op == "viewer.move")
@@ -1064,7 +1073,7 @@ namespace
             const auto lines = requiredInt("lines", "lines");
             if (std::holds_alternative<json>(lines))
                 return std::get<json>(lines);
-            std::size_t step = Types::GetViewSize(gBridgeState.memViewer.format());
+            std::size_t step = Types::GetViewSize(bridgeState().memViewer.format());
             const std::string stepToken = optionalString("step");
             if (!stepToken.empty())
             {
@@ -1073,8 +1082,8 @@ namespace
                     return fail("step 参数无效");
                 step = static_cast<std::size_t>(*parsedStep);
             }
-            gBridgeState.memViewer.move(std::get<int>(lines), step);
-            return okData({{"base", static_cast<std::uint64_t>(gBridgeState.memViewer.base())}, {"read", gBridgeState.memViewer.readSuccess()}});
+            bridgeState().memViewer.move(std::get<int>(lines), step);
+            return okData({{"base", static_cast<std::uint64_t>(bridgeState().memViewer.base())}, {"read", bridgeState().memViewer.readSuccess()}});
         }
 
         if (op == "viewer.offset")
@@ -1082,9 +1091,9 @@ namespace
             const auto offset = requiredString("offset", "offset");
             if (std::holds_alternative<json>(offset))
                 return std::get<json>(offset);
-            if (!gBridgeState.memViewer.applyOffset(std::get<std::string>(offset)))
+            if (!bridgeState().memViewer.applyOffset(std::get<std::string>(offset)))
                 return fail("offset 参数无效");
-            return okData({{"base", static_cast<std::uint64_t>(gBridgeState.memViewer.base())}, {"read", gBridgeState.memViewer.readSuccess()}});
+            return okData({{"base", static_cast<std::uint64_t>(bridgeState().memViewer.base())}, {"read", bridgeState().memViewer.readSuccess()}});
         }
 
         if (op == "viewer.set_format")
@@ -1095,15 +1104,15 @@ namespace
             const auto format = parseViewFormatToken(std::get<std::string>(viewFormat));
             if (!format.has_value())
                 return fail("view_format 无效，支持: hex/hex64/i8/i16/i32/i64/f32/f64/disasm");
-            gBridgeState.memViewer.setFormat(*format);
-            return okData({{"format", viewFormatToToken(gBridgeState.memViewer.format())}});
+            bridgeState().memViewer.setFormat(*format);
+            return okData({{"format", viewFormatToToken(bridgeState().memViewer.format())}});
         }
 
         if (op == "viewer.snapshot")
         {
-            if (gBridgeState.memViewer.format() == Types::ViewFormat::Disasm)
-                gBridgeState.memViewer.waitDisasm();
-            return okData(buildViewerSnapshotJson(gBridgeState.memViewer));
+            if (bridgeState().memViewer.format() == Types::ViewFormat::Disasm)
+                bridgeState().memViewer.waitDisasm();
+            return okData(buildViewerSnapshotJson(bridgeState().memViewer));
         }
 
         if (op == "pointer.status")
@@ -1160,23 +1169,23 @@ namespace
             const int pid = dr->GetGlobalPid();
             if (pid <= 0)
                 return fail("全局PID未设置，请先执行 target.pid.set 或 target.attach.package");
-            if (gBridgeState.pointerManager.isScanning())
+            if (bridgeState().pointerManager.isScanning())
                 return fail("当前已有指针扫描任务在运行");
 
             const std::string moduleFilter = optionalString("module_filter");
-            gBridgeState.pointerManager.scan(pid, static_cast<uintptr_t>(std::get<std::uint64_t>(target)), std::get<int>(depth), std::get<int>(maxOffset), useManual, static_cast<uintptr_t>(manualBase), useArray, static_cast<uintptr_t>(arrayBase), arrayCount, moduleFilter);
+            bridgeState().pointerManager.scan(pid, static_cast<uintptr_t>(std::get<std::uint64_t>(target)), std::get<int>(depth), std::get<int>(maxOffset), useManual, static_cast<uintptr_t>(manualBase), useArray, static_cast<uintptr_t>(arrayBase), arrayCount, moduleFilter);
             return okData(pointerStateJson());
         }
 
         if (op == "pointer.merge")
         {
-            gBridgeState.pointerManager.MergeBins();
+            bridgeState().pointerManager.MergeBins();
             return okData(pointerStateJson());
         }
 
         if (op == "pointer.export")
         {
-            gBridgeState.pointerManager.ExportToTxt();
+            bridgeState().pointerManager.ExportToTxt();
             return okData(pointerStateJson());
         }
 
@@ -1188,7 +1197,7 @@ namespace
 
         if (op == "breakpoint.set")
         {
-            if (gBridgeState.hwbpActive)
+            if (bridgeState().hwbpActive)
                 return fail("断点已激活，请先执行 breakpoint.clear");
 
             const auto address = requiredUInt64("address", "address");
@@ -1220,25 +1229,25 @@ namespace
             const int status = dr->SetProcessHwbpRef(std::get<std::uint64_t>(address), *bpType, *bpScope, *bpLength);
             if (status != 0)
                 return fail(std::format("设置断点失败 status={}", status));
-            gBridgeState.hwbpActive = true;
-            gBridgeState.hwbpAddress = std::get<std::uint64_t>(address);
-            gBridgeState.hwbpType = std::string(bpTypeToToken(*bpType));
-            gBridgeState.hwbpScope = std::string(bpScopeToToken(*bpScope));
-            gBridgeState.hwbpLength = clampedLength;
-            return okData({{"status", status}, {"active", true}, {"address", gBridgeState.hwbpAddress}, {"address_hex", std::format("0x{:X}", gBridgeState.hwbpAddress)}, {"type", gBridgeState.hwbpType}, {"scope", gBridgeState.hwbpScope}, {"length", gBridgeState.hwbpLength}});
+            bridgeState().hwbpActive = true;
+            bridgeState().hwbpAddress = std::get<std::uint64_t>(address);
+            bridgeState().hwbpType = std::string(bpTypeToToken(*bpType));
+            bridgeState().hwbpScope = std::string(bpScopeToToken(*bpScope));
+            bridgeState().hwbpLength = clampedLength;
+            return okData({{"status", status}, {"active", true}, {"address", bridgeState().hwbpAddress}, {"address_hex", std::format("0x{:X}", bridgeState().hwbpAddress)}, {"type", bridgeState().hwbpType}, {"scope", bridgeState().hwbpScope}, {"length", bridgeState().hwbpLength}});
         }
 
         if (op == "breakpoint.clear")
         {
-            if (!gBridgeState.hwbpActive)
+            if (!bridgeState().hwbpActive)
                 return okData({{"active", false}, {"cleared", false}});
 
             dr->RemoveProcessHwbpRef();
-            gBridgeState.hwbpActive = false;
-            gBridgeState.hwbpAddress = 0;
-            gBridgeState.hwbpType.clear();
-            gBridgeState.hwbpScope.clear();
-            gBridgeState.hwbpLength = 0;
+            bridgeState().hwbpActive = false;
+            bridgeState().hwbpAddress = 0;
+            bridgeState().hwbpType.clear();
+            bridgeState().hwbpScope.clear();
+            bridgeState().hwbpLength = 0;
             return okData({{"active", false}, {"cleared", true}});
         }
 
@@ -1341,8 +1350,8 @@ namespace
             const auto dataType = parseDataTypeToken(std::get<std::string>(valueType));
             if (!dataType.has_value())
                 return fail("value_type 无效");
-            gLockManager.lock(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), *dataType, std::get<std::string>(value));
-            return okData({{"locked", gLockManager.isLocked(static_cast<uintptr_t>(std::get<std::uint64_t>(address)))}});
+            lockManager().lock(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), *dataType, std::get<std::string>(value));
+            return okData({{"locked", lockManager().isLocked(static_cast<uintptr_t>(std::get<std::uint64_t>(address)))}});
         }
 
         if (op == "lock.unset" || op == "lock.status")
@@ -1351,13 +1360,13 @@ namespace
             if (std::holds_alternative<json>(address))
                 return std::get<json>(address);
             if (op == "lock.unset")
-                gLockManager.unlock(static_cast<uintptr_t>(std::get<std::uint64_t>(address)));
-            return okData({{"locked", gLockManager.isLocked(static_cast<uintptr_t>(std::get<std::uint64_t>(address)))}});
+                lockManager().unlock(static_cast<uintptr_t>(std::get<std::uint64_t>(address)));
+            return okData({{"locked", lockManager().isLocked(static_cast<uintptr_t>(std::get<std::uint64_t>(address)))}});
         }
 
         if (op == "lock.clear")
         {
-            gLockManager.clear();
+            lockManager().clear();
             return ok();
         }
 
