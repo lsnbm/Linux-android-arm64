@@ -1,3 +1,5 @@
+// 感谢qq:1277981260(花开富贵)
+
 #ifndef HIDE_PROCESS_H
 #define HIDE_PROCESS_H
 

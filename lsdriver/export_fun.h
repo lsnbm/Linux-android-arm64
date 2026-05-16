@@ -47,7 +47,7 @@ __attribute__((no_sanitize("cfi"))) static unsigned long generic_kallsyms_lookup
 如果是 6.1+ 内核，不存在 __cfi_slowpath，
 
 所以有好人给了一个5系的解决代码给我，所以5系就不用下面纯汇编进行间接调用了
-下面bypass_cfi由https://github.com/wangchuan2009提供，处理运行时校验函数来过5系cfi
+感谢bypass_cfi由https://github.com/wangchuan2009(忘川)，处理运行时校验函数来过5系cfi
 */
 
 int (*fn_aarch64_insn_patch_text_nosync)(void *addr, uint32_t insn);
@@ -203,36 +203,35 @@ static inline pte_t *get_user_pte(struct mm_struct *mm, uint64_t vaddr)
 // 编码一条b指令
 static int arm64_make_b(unsigned long from, unsigned long to, uint32_t *insn)
 {
-    int64_t offset = (int64_t)to - (int64_t)from;
+        int64_t offset = (int64_t)to - (int64_t)from;
 
-    if (offset < -(1LL << 27) || offset > ((1LL << 27) - 4))
-        return -ERANGE;
+        if (offset < -(1LL << 27) || offset > ((1LL << 27) - 4))
+                return -ERANGE;
 
-    *insn = 0x14000000 | ((offset >> 2) & 0x03FFFFFF);
-    return 0;
+        *insn = 0x14000000 | ((offset >> 2) & 0x03FFFFFF);
+        return 0;
 }
 
 // 释放一批通过GUP获取的page *;避免使用 put_page() 把 page_pinner 拉进来。
 static void release_gup_pages(struct page **pages, int nr)
 {
-	typedef void (*release_pages_t)(struct page **pages, int nr);
-	static release_pages_t fn_release_pages;
+        typedef void (*release_pages_t)(struct page **pages, int nr);
+        static release_pages_t fn_release_pages;
 
-	if (!pages || nr <= 0)
-		return;
+        if (!pages || nr <= 0)
+                return;
 
-	if (!fn_release_pages)
-		fn_release_pages = (release_pages_t)generic_kallsyms_lookup_name("release_pages");
+        if (!fn_release_pages)
+                fn_release_pages = (release_pages_t)generic_kallsyms_lookup_name("release_pages");
 
-	if (!fn_release_pages)
-	{
-		pr_debug("严重错误！无法找到 release_pages，跳过 %d 个页引用回收\n", nr);
-		return;
-	}
+        if (!fn_release_pages)
+        {
+                pr_debug("严重错误！无法找到 release_pages，跳过 %d 个页引用回收\n", nr);
+                return;
+        }
 
-	fn_release_pages(pages, nr);
+        fn_release_pages(pages, nr);
 }
-
 
 struct execmem_private_header
 {
