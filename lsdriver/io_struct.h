@@ -183,11 +183,11 @@ struct hwbp_info
     struct hwbp_record records[0x100]; // 记录不同 PC 触发状态的数组
 };
 
-#define MAX_MODULES 512
-#define MAX_SCAN_REGIONS 4096
+#define MAX_MODULES 1024
+#define MAX_SCAN_REGIONS 16534
 
 #define MOD_NAME_LEN 256
-#define MAX_SEGS_PER_MODULE 256
+#define MAX_SEGS_PER_MODULE 10
 
 struct segment_info
 {

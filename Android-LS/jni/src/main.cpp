@@ -600,7 +600,7 @@ private:
                     dr->SetGlobalPid(pid);
             }
             ImGui::SameLine();
-            if (UI::Btn("退出", {S(50), bh}, Colors::BTN_EXIT))_exit(0); }, ImGuiWindowFlags_NoScrollbar);
+            if (UI::Btn("退出", {S(50), bh}, Colors::BTN_EXIT))Config::g_Running=false; }, ImGuiWindowFlags_NoScrollbar);
     }
 
     // ---- 内容区 ----
@@ -2138,15 +2138,26 @@ int main()
     int mode = 0;
     bool c = (bool)(std::cin >> mode);
 
-    daemonize("/sdcard/log.txt");
-
-    dr = new Driver(1);
-
     if (!c)
     {
         std::println(stderr, "[错误] 输入无效。");
+        return rc;
     }
-    else if (mode == 1)
+    if (mode < 1 || mode > 3)
+    {
+        std::println(stderr, "[错误] 未知选项: {}", mode);
+        return rc;
+    }
+
+    if (!daemonize("/sdcard/log.txt"))
+    {
+        std::println(stderr, "[错误] 后台化失败。");
+        return rc;
+    }
+
+    dr = new Driver(mode == 2);
+
+    if (mode == 1)
     {
         rc = mainno();
     }
@@ -2158,12 +2169,8 @@ int main()
     {
         rc = tcp_server();
     }
-    else
-    {
-        std::println(stderr, "[错误] 未知选项: {}", mode);
-    }
-
     delete dr;
+    dr = nullptr;
 
     // 仅在 main 函数统一清理全局线程池。
     Utils::GlobalPool.force_stop();
