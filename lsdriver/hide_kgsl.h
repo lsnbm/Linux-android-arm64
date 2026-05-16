@@ -1,3 +1,5 @@
+// 感谢https://github.com/LinYuFlower(林雨)
+
 #ifndef HIDE_KGSL_H
 #define HIDE_KGSL_H
 
