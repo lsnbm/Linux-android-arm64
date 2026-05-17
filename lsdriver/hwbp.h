@@ -1693,7 +1693,6 @@ static inline int set_process_hwbp(pid_t pid, struct hwbp_info *info)
         bp_config.points[i].bl = info->points[i].bl;
         bp_config.points[i].bs = info->points[i].bs;
         bp_config.points[i].addr = info->points[i].hit_addr;
-        bp_config.points[i].slot = -1;
     }
 
     bp_config.on_hit = sample_hbp_handler;

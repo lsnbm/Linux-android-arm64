@@ -4,6 +4,7 @@
 #include <linux/memory.h>
 #include <linux/stop_machine.h>
 #include <linux/version.h>
+#include <linux/sched.h>
 #include <asm/cacheflush.h>
 #include <asm/debug-monitors.h>
 #include <asm/insn.h>
@@ -14,7 +15,6 @@
 #include "inline_hook_frame.h"
 
 #define BP_CONFIG_MAX 16
-#define AARCH64_DBG_CTRL_TYPE_MASK (0x3 << 3)
 
 struct breakpoint_point
 {
@@ -22,7 +22,6 @@ struct breakpoint_point
     enum hwbp_len bl;   // 断点长度
     enum hwbp_scope bs; // 断点作用线程范围
     uint64_t addr;      // 断点地址
-    int slot;           // 被分配的槽位
 };
 
 struct breakpoint_config
@@ -249,17 +248,15 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
             {
                 struct breakpoint_point *point = &g_bp_config[i].points[j];
 
-                if (point->slot != slot)
-                    continue;
-
                 // 地址不相等跳过
                 if (hw_breakpoint_parse(point, 0, &info) ||
                     info.address != addr)
                     continue;
 
-                // 地址相等和控制码相等才派发
-                if ((encode_ctrl_reg(info.ctrl) & AARCH64_DBG_CTRL_TYPE_MASK) ==
-                    (ctrl & AARCH64_DBG_CTRL_TYPE_MASK))
+                // 地址相等、控制码相等且当前槽位启用才派发
+                if ((ctrl & 0x1) &&
+                    ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) == (ctrl & ~0x1ULL)) &&
+                    g_bp_config[i].pid == current->tgid)
                 {
                     // 传递当前观点索引
                     g_bp_config[i].hit_point_index = j;
@@ -301,15 +298,13 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
             {
                 struct breakpoint_point *point = &g_bp_config[i].points[j];
 
-                if (point->slot != slot)
-                    continue;
-
                 if (hw_breakpoint_parse(point, 0, &info) ||
                     info.address != addr)
                     continue;
 
-                if ((encode_ctrl_reg(info.ctrl) & AARCH64_DBG_CTRL_TYPE_MASK) ==
-                    (ctrl & AARCH64_DBG_CTRL_TYPE_MASK))
+                if ((ctrl & 0x1) &&
+                    ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) == (ctrl & ~0x1ULL)) &&
+                    g_bp_config[i].pid == current->tgid)
                 {
                     g_bp_config[i].hit_point_index = j;
                     g_bp_config[i].on_hit(regs, &g_bp_config[i]);
@@ -367,6 +362,33 @@ static void probe_sched_switch(void *data, bool preempt,
         }
     }
 
+    /*
+    prev现在正在跑、准备离开 CPU 的 task
+    CPU 从目标线程组切到别的线程组时，清掉当前 CPU 上残留的断点寄存器，避免断点漏到别的进程里。
+    同线程组内相互切换，不要清理，下面线程组内只要有一个task切换就重复安装上断点防止被关掉
+    */
+    if (prev_slot >= 0 && prev->tgid != next->tgid)
+    {
+        if (prev->pid == prev->tgid)
+        {
+            pr_debug("目标进程的主线程被切换走: pid=%d comm=%s cpu=%d\n", prev->pid, prev->comm, raw_smp_processor_id());
+        }
+        else
+        {
+            pr_debug("目标进程的子线程被切换走: pid=%d comm=%s cpu=%d\n", prev->pid, prev->comm, raw_smp_processor_id());
+        }
+
+        for (i = 0; i < num_brps; i++)
+            write_wb_reg(AARCH64_DBG_REG_BCR, i, 0);
+
+        for (i = 0; i < num_wrps; i++)
+            write_wb_reg(AARCH64_DBG_REG_WCR, i, 0);
+
+        if (next_slot < 0)
+            // 线程组被切走cpu进行关闭OS+开启硬件调试
+            disable_hardware_debug_on_cpu(NULL);
+    }
+
     // 目标进程的线程组被切入(线程组id就是进程的pid)
     if (next_slot >= 0)
     {
@@ -391,8 +413,7 @@ static void probe_sched_switch(void *data, bool preempt,
         {
             struct breakpoint_point *point = &g_bp_config[next_slot].points[i];
             struct arch_hw_breakpoint info;
-
-            point->slot = -1;
+            int reg_slot;
 
             // 为空的观点不设置
             if (point->addr == 0)
@@ -408,75 +429,30 @@ static void probe_sched_switch(void *data, bool preempt,
                 if (brp_slot >= num_brps)
                     continue;
 
-                point->slot = brp_slot++;
+                reg_slot = brp_slot++;
+                // 执行地址寄存器
+                write_wb_reg(AARCH64_DBG_REG_BVR, reg_slot, info.address);
+                // 执行控制寄存器
+                //"| 0x1"表示立即生效,
+                //"& ~0x1"表示写入的寄存器配置，但是禁用不生效
+                //"0"给控制寄存器清0，就删除了断点
+                write_wb_reg(AARCH64_DBG_REG_BCR, reg_slot, encode_ctrl_reg(info.ctrl) | 0x1);
             }
             else
             {
                 if (wrp_slot >= num_wrps)
                     continue;
 
-                point->slot = wrp_slot++;
-            }
-
-            // 根据断点类型进行分发
-            if (info.ctrl.type == ARM_BREAKPOINT_EXECUTE)
-            {
-                // 执行地址寄存器
-                write_wb_reg(AARCH64_DBG_REG_BVR, point->slot, info.address);
-                // 执行控制寄存器
-                //"| 0x1"表示立即生效,
-                //"& ~0x1"表示写入的寄存器配置，但是禁用不生效
-                //"0"给控制寄存器请0，就删除了断点
-                write_wb_reg(AARCH64_DBG_REG_BCR, point->slot, encode_ctrl_reg(info.ctrl) | 0x1);
-                // write_wb_reg(AARCH64_DBG_REG_BCR, point->slot, encode_ctrl_reg(info.ctrl) & ~0x1);
-            }
-            else
-            {
+                reg_slot = wrp_slot++;
                 // 访问地址寄存器
-                write_wb_reg(AARCH64_DBG_REG_WVR, point->slot, info.address);
+                write_wb_reg(AARCH64_DBG_REG_WVR, reg_slot, info.address);
                 // 访问控制寄存器
                 //"| 0x1"表示立即生效,
                 //"& ~0x1"表示写入的寄存器配置，但是禁用不生效
-                //"0"给控制寄存器请0就删除了断点
-                write_wb_reg(AARCH64_DBG_REG_WCR, point->slot, encode_ctrl_reg(info.ctrl) | 0x1);
-                // write_wb_reg(AARCH64_DBG_REG_WCR, point->slot, encode_ctrl_reg(info.ctrl) & ~0x1);
+                //"0"给控制寄存器清0就删除了断点
+                write_wb_reg(AARCH64_DBG_REG_WCR, reg_slot, encode_ctrl_reg(info.ctrl) | 0x1);
             }
         }
-    }
-
-    if (prev_slot >= 0)
-    {
-        if (prev->pid == prev->tgid)
-        {
-            pr_debug("目标进程的主线程被切换走: pid=%d comm=%s cpu=%d\n", prev->pid, prev->comm, raw_smp_processor_id());
-        }
-        else
-        {
-            pr_debug("目标进程的子线程被切换走: pid=%d comm=%s cpu=%d\n", prev->pid, prev->comm, raw_smp_processor_id());
-        }
-
-        // 遍历所有观点的槽位卸载出cpu,并删除分配的槽位
-        for (i = 0; i < BP_CONFIG_MAX; i++)
-        {
-            struct breakpoint_point *point = &g_bp_config[prev_slot].points[i];
-            struct arch_hw_breakpoint info;
-
-            if (point->slot < 0)
-                continue;
-
-            if (hw_breakpoint_parse(point, 0, &info))
-                continue;
-
-            if (info.ctrl.type == ARM_BREAKPOINT_EXECUTE)
-                write_wb_reg(AARCH64_DBG_REG_BCR, point->slot, 0);
-            else
-                write_wb_reg(AARCH64_DBG_REG_WCR, point->slot, 0);
-
-            point->slot = -1;
-        }
-
-        // task被切出cpu进行管全局调试+上锁OS
-        disable_hardware_debug_on_cpu(NULL);
     }
 }
 
@@ -486,11 +462,37 @@ static int start_task_run_monitor(struct breakpoint_config bp_config)
     int ret;
     int i;
     int slot = -1;
+    int existing_slot = -1;
 
     if (bp_config.pid <= 0)
     {
         pr_debug("pid error\n");
         return -EINVAL;
+    }
+
+    for (i = 0; i < BP_CONFIG_MAX; i++)
+    {
+        if (g_bp_config[i].pid == bp_config.pid)
+        {
+            existing_slot = i;
+            break;
+        }
+    }
+
+    if (existing_slot >= 0)
+    {
+        if (g_task_run_monitor_started)
+        {
+            for (i = 0; i < num_brps; i++)
+                write_wb_reg(AARCH64_DBG_REG_BCR, i, 0);
+
+            for (i = 0; i < num_wrps; i++)
+                write_wb_reg(AARCH64_DBG_REG_WCR, i, 0);
+        }
+
+        g_bp_config[existing_slot] = bp_config;
+        pr_debug("monitor config updated, target tgid=%d slot=%d\n", bp_config.pid, existing_slot);
+        return 0;
     }
 
     for (i = 0; i < BP_CONFIG_MAX; i++)
@@ -554,6 +556,15 @@ static void stop_task_run_monitor(struct breakpoint_config bp_config)
 
     if (bp_config.pid <= 0)
         return;
+
+    if (g_task_run_monitor_started)
+    {
+        for (i = 0; i < num_brps; i++)
+            write_wb_reg(AARCH64_DBG_REG_BCR, i, 0);
+
+        for (i = 0; i < num_wrps; i++)
+            write_wb_reg(AARCH64_DBG_REG_WCR, i, 0);
+    }
 
     for (i = 0; i < BP_CONFIG_MAX; i++)
     {
