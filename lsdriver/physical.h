@@ -589,14 +589,4 @@ static inline int _process_memory_rw(enum sm_req_op op, pid_t pid, uint64_t vadd
     return (bytes_done == 0) ? status : (int)bytes_done;
 }
 
-/* ---------- 对外接口 ---------- */
-static inline int read_process_memory(pid_t pid, uint64_t vaddr, void *buffer, size_t size)
-{
-    return _process_memory_rw(op_r, pid, vaddr, buffer, size);
-}
-static inline int write_process_memory(pid_t pid, uint64_t vaddr, void *buffer, size_t size)
-{
-    return _process_memory_rw(op_w, pid, vaddr, buffer, size);
-}
-
 #endif // PHYSICAL_H

@@ -172,6 +172,7 @@ class TcpTestWindow(QWidget):
         self.hwbp_edit_original: dict[str, str] = {}
         self.hwbp_edit_values: dict[str, str] = {}
         self.hwbp_edit_dirty_fields: set[str] = set()
+        self.hwbp_point_rows: list[dict[str, object]] = []
         self.live_refresh_timer = QTimer(self)
         self.live_refresh_timer.setInterval(1000)
         self.live_refresh_timer.timeout.connect(self.on_live_refresh_tick)
@@ -779,37 +780,29 @@ class TcpTestWindow(QWidget):
         summary_row.addWidget(self.hwbp_num_brps_label)
         self.hwbp_num_wrps_label = QLabel("hwbp_info.num_wrps: 0")
         summary_row.addWidget(self.hwbp_num_wrps_label)
-        self.hwbp_hit_addr_label = QLabel("hwbp_info.hit_addr: 0x0")
-        summary_row.addWidget(self.hwbp_hit_addr_label, 1)
+        self.hwbp_points_label = QLabel("hwbp_info.points: []")
+        self.hwbp_points_label.setWordWrap(True)
+        summary_row.addWidget(self.hwbp_points_label, 1)
         config_layout.addLayout(summary_row)
 
-        config_row = QHBoxLayout()
-        config_row.setSpacing(10)
-        config_row.addWidget(QLabel("断点地址"))
-        self.hwbp_addr_input = QLineEdit("0x0")
-        self.hwbp_addr_input.setPlaceholderText("例如 0x7A12345678")
-        config_row.addWidget(self.hwbp_addr_input, 1)
+        config_layout.addWidget(QLabel("points"))
+        self.hwbp_points_container = QWidget(self.breakpoint_page)
+        self.hwbp_points_layout = QVBoxLayout(self.hwbp_points_container)
+        self.hwbp_points_layout.setContentsMargins(0, 0, 0, 0)
+        self.hwbp_points_layout.setSpacing(6)
+        config_layout.addWidget(self.hwbp_points_container)
+        self._add_hwbp_point_row()
 
-        config_row.addWidget(QLabel("类型"))
-        self.hwbp_type_combo = QComboBox()
-        self.hwbp_type_combo.addItem("BP_READ", "1")
-        self.hwbp_type_combo.addItem("BP_WRITE", "2")
-        self.hwbp_type_combo.addItem("BP_READ_WRITE", "3")
-        self.hwbp_type_combo.addItem("BP_EXECUTE", "4")
-        config_row.addWidget(self.hwbp_type_combo)
-
-        config_row.addWidget(QLabel("范围"))
-        self.hwbp_scope_combo = QComboBox()
-        self.hwbp_scope_combo.addItem("SCOPE_MAIN_THREAD", "0")
-        self.hwbp_scope_combo.addItem("SCOPE_OTHER_THREADS", "1")
-        self.hwbp_scope_combo.addItem("SCOPE_ALL_THREADS", "2")
-        config_row.addWidget(self.hwbp_scope_combo)
-
-        config_row.addWidget(QLabel("长度"))
-        self.hwbp_len_input = QLineEdit("4")
-        self.hwbp_len_input.setMaximumWidth(80)
-        config_row.addWidget(self.hwbp_len_input)
-        config_layout.addLayout(config_row)
+        point_action_row = QHBoxLayout()
+        point_action_row.setSpacing(10)
+        self.hwbp_add_point_button = QPushButton("添加point")
+        self.hwbp_add_point_button.clicked.connect(self._add_hwbp_point_row)
+        point_action_row.addWidget(self.hwbp_add_point_button)
+        self.hwbp_remove_point_button = QPushButton("删除point")
+        self.hwbp_remove_point_button.clicked.connect(self._remove_hwbp_point_row)
+        point_action_row.addWidget(self.hwbp_remove_point_button)
+        point_action_row.addStretch(1)
+        config_layout.addLayout(point_action_row)
 
         action_row = QHBoxLayout()
         action_row.setSpacing(10)
@@ -840,6 +833,88 @@ class TcpTestWindow(QWidget):
         self.hwbp_tree.currentItemChanged.connect(self.on_hwbp_tree_current_item_changed)
         self.hwbp_tree.itemDoubleClicked.connect(self.on_hwbp_tree_item_double_clicked)
         result_layout.addWidget(self.hwbp_tree, 1)
+
+    def _add_hwbp_point_row(self) -> None:
+        if len(self.hwbp_point_rows) >= 16:
+            return
+
+        row_widget = QWidget(self.breakpoint_page)
+        row_layout = QHBoxLayout(row_widget)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(8)
+
+        label = QLabel(f"P{len(self.hwbp_point_rows)}")
+        label.setMinimumWidth(28)
+        row_layout.addWidget(label)
+
+        addr_input = QLineEdit()
+        addr_input.setPlaceholderText("0x7A12345678")
+        row_layout.addWidget(addr_input, 1)
+
+        type_combo = QComboBox()
+        type_combo.addItem("BP_READ", "read")
+        type_combo.addItem("BP_WRITE", "write")
+        type_combo.addItem("BP_READ_WRITE", "read_write")
+        type_combo.addItem("BP_EXECUTE", "execute")
+        type_combo.setCurrentIndex(3)
+        row_layout.addWidget(type_combo)
+
+        scope_combo = QComboBox()
+        scope_combo.addItem("SCOPE_MAIN_THREAD", "main")
+        scope_combo.addItem("SCOPE_OTHER_THREADS", "other")
+        scope_combo.addItem("SCOPE_ALL_THREADS", "all")
+        scope_combo.setCurrentIndex(2)
+        row_layout.addWidget(scope_combo)
+
+        len_combo = QComboBox()
+        for length in range(1, 9):
+            len_combo.addItem(f"{length}字节", length)
+        len_combo.setCurrentIndex(3)
+        row_layout.addWidget(len_combo)
+
+        remove_button = QPushButton("删除")
+        remove_button.clicked.connect(lambda _checked=False, widget=row_widget: self._remove_hwbp_point_row(widget))
+        row_layout.addWidget(remove_button)
+
+        self.hwbp_point_rows.append(
+            {
+                "widget": row_widget,
+                "label": label,
+                "addr": addr_input,
+                "type": type_combo,
+                "scope": scope_combo,
+                "length": len_combo,
+                "remove": remove_button,
+            }
+        )
+        self.hwbp_points_layout.addWidget(row_widget)
+        self._renumber_hwbp_point_rows()
+        self._apply_hwbp_active_state()
+
+    def _remove_hwbp_point_row(self, widget: QWidget | None = None) -> None:
+        if len(self.hwbp_point_rows) <= 1:
+            return
+
+        remove_index = len(self.hwbp_point_rows) - 1
+        if widget is not None:
+            for i, row in enumerate(self.hwbp_point_rows):
+                if row.get("widget") is widget:
+                    remove_index = i
+                    break
+
+        row = self.hwbp_point_rows.pop(remove_index)
+        row_widget = row.get("widget")
+        if isinstance(row_widget, QWidget):
+            self.hwbp_points_layout.removeWidget(row_widget)
+            row_widget.deleteLater()
+        self._renumber_hwbp_point_rows()
+        self._apply_hwbp_active_state()
+
+    def _renumber_hwbp_point_rows(self) -> None:
+        for i, row in enumerate(self.hwbp_point_rows):
+            label = row.get("label")
+            if isinstance(label, QLabel):
+                label.setText(f"P{i}")
 
     def _build_signature_page(self) -> None:
         layout = self._create_page_layout(
@@ -1093,7 +1168,7 @@ class TcpTestWindow(QWidget):
         self.pointer_status_label.setText("扫描状态: 未连接")
         self.hwbp_num_brps_label.setText("hwbp_info.num_brps: 0")
         self.hwbp_num_wrps_label.setText("hwbp_info.num_wrps: 0")
-        self.hwbp_hit_addr_label.setText("hwbp_info.hit_addr: 0x0")
+        self.hwbp_points_label.setText("hwbp_info.points: []")
         self.browser_cache_base = 0
         self.browser_cache_data = b""
         self.browser_current_addr = 0
@@ -1246,6 +1321,37 @@ class TcpTestWindow(QWidget):
             except ValueError:
                 return default
         return default
+
+    def _collect_hwbp_points(self) -> list[dict[str, object]]:
+        points: list[dict[str, object]] = []
+        for row_index, row in enumerate(self.hwbp_point_rows):
+            addr_input = row.get("addr")
+            type_combo = row.get("type")
+            scope_combo = row.get("scope")
+            len_combo = row.get("length")
+            if not isinstance(addr_input, QLineEdit) or not isinstance(type_combo, QComboBox) or not isinstance(scope_combo, QComboBox) or not isinstance(len_combo, QComboBox):
+                continue
+            addr_text = addr_input.text().strip()
+            try:
+                address = int(addr_text, 0)
+            except ValueError as exc:
+                raise ValueError(f"P{row_index} 地址格式无效") from exc
+            if address <= 0:
+                raise ValueError(f"P{row_index} 地址必须大于 0")
+            length = int(len_combo.currentData())
+            points.append(
+                {
+                    "address": f"0x{address:X}",
+                    "bp_type": str(type_combo.currentData()),
+                    "bp_scope": str(scope_combo.currentData()),
+                    "length": length,
+                }
+            )
+        if not points:
+            raise ValueError("至少需要 1 个 point")
+        if len(points) > 16:
+            raise ValueError("points 最多 16 个")
+        return points
 
     @staticmethod
     def _format_addr(value: object) -> str:
@@ -1809,10 +1915,13 @@ class TcpTestWindow(QWidget):
 
             for rec in rec_list:
                 idx = self._safe_int(rec.get("index"), -1)
+                point_index = self._safe_int(rec.get("point_index"), -1)
+                point_record_index = self._safe_int(rec.get("point_record_index"), -1)
                 hit_count = self._safe_int(rec.get("hit_count"), 0)
                 rw_text = self._decode_hwbp_rw_text(rec)
                 ops_summary = self._hwbp_ops_summary(rec)
-                summary_item = QTreeWidgetItem([f"[{idx}] 命中 {hit_count} 次  |  类型 {rw_text}  |  掩码 {ops_summary}"])
+                point_text = f"point {point_index}:{point_record_index}" if point_index >= 0 and point_record_index >= 0 else "point ?"
+                summary_item = QTreeWidgetItem([f"[{idx}] {point_text}  |  命中 {hit_count} 次  |  类型 {rw_text}  |  掩码 {ops_summary}"])
                 summary_item.setData(0, Qt.UserRole, idx)
                 top.addChild(summary_item)
 
@@ -1901,15 +2010,31 @@ class TcpTestWindow(QWidget):
     def _render_hwbp_info(self, info: dict) -> None:
         num_brps = self._safe_int(info.get("num_brps"), 0)
         num_wrps = self._safe_int(info.get("num_wrps"), 0)
-        hit_addr = self._safe_int(info.get("hit_addr"), 0)
         self.hwbp_active = bool(info.get("active", self.hwbp_active))
-        active_addr = self._safe_int(info.get("active_address"), 0)
         self.hwbp_num_brps_label.setText(f"hwbp_info.num_brps: {num_brps}")
         self.hwbp_num_wrps_label.setText(f"hwbp_info.num_wrps: {num_wrps}")
+        points_raw = info.get("points")
+        points = points_raw if isinstance(points_raw, list) else []
+        point_parts: list[str] = []
+        for point in points:
+            if not isinstance(point, dict):
+                continue
+            hit_addr = self._safe_int(point.get("hit_addr"), 0)
+            if hit_addr <= 0:
+                continue
+            point_index = self._safe_int(point.get("index"), len(point_parts))
+            point_type = str(point.get("type", "unknown"))
+            point_scope = str(point.get("scope", "unknown"))
+            point_len = self._safe_int(point.get("length"), 0)
+            point_records = self._safe_int(point.get("record_count"), 0)
+            point_parts.append(
+                f"[{point_index}] 0x{hit_addr:X} {point_type}/{point_scope}/len{point_len}/records{point_records}"
+            )
+        points_text = "; ".join(point_parts) if point_parts else "[]"
         if self.hwbp_active:
-            self.hwbp_hit_addr_label.setText(f"hwbp_info.hit_addr: 0x{hit_addr:X}  active: 0x{active_addr:X}")
+            self.hwbp_points_label.setText(f"hwbp_info.points: {points_text}  active: true")
         else:
-            self.hwbp_hit_addr_label.setText(f"hwbp_info.hit_addr: 0x{hit_addr:X}  active: false")
+            self.hwbp_points_label.setText(f"hwbp_info.points: {points_text}  active: false")
         self._apply_hwbp_active_state()
         records_raw = info.get("records")
         records = records_raw if isinstance(records_raw, list) else []
@@ -1924,6 +2049,18 @@ class TcpTestWindow(QWidget):
             self.hwbp_set_button.setEnabled(not self.hwbp_active)
         if hasattr(self, "hwbp_remove_button"):
             self.hwbp_remove_button.setEnabled(self.hwbp_active)
+        if hasattr(self, "hwbp_add_point_button"):
+            self.hwbp_add_point_button.setEnabled((not self.hwbp_active) and len(self.hwbp_point_rows) < 16)
+        if hasattr(self, "hwbp_remove_point_button"):
+            self.hwbp_remove_point_button.setEnabled((not self.hwbp_active) and len(self.hwbp_point_rows) > 1)
+        for row in getattr(self, "hwbp_point_rows", []):
+            for key in ("addr", "type", "scope", "length"):
+                widget = row.get(key)
+                if isinstance(widget, QWidget):
+                    widget.setEnabled(not self.hwbp_active)
+            remove_button = row.get("remove")
+            if isinstance(remove_button, QPushButton):
+                remove_button.setEnabled((not self.hwbp_active) and len(self.hwbp_point_rows) > 1)
 
     @staticmethod
     def _format_sig_result(data: dict) -> str:
@@ -3197,28 +3334,14 @@ class TcpTestWindow(QWidget):
             QMessageBox.information(self, "提示", "断点已激活，请先移除当前断点。")
             return
 
-        addr_text = self.hwbp_addr_input.text().strip()
-        len_text = self.hwbp_len_input.text().strip()
-        type_data = self.hwbp_type_combo.currentData()
-        scope_data = self.hwbp_scope_combo.currentData()
         try:
-            addr = int(addr_text, 0)
-        except ValueError:
-            QMessageBox.warning(self, "输入提示", "断点地址格式无效。")
+            points = self._collect_hwbp_points()
+        except ValueError as exc:
+            QMessageBox.warning(self, "输入提示", str(exc))
             return
-        try:
-            length = int(len_text, 10)
-        except ValueError:
-            length = 1
-        if addr <= 0:
-            QMessageBox.warning(self, "输入提示", "断点地址必须大于 0。")
-            return
-        length = max(1, min(8, length))
-        bp_type = str(type_data) if type_data is not None else "1"
-        bp_scope = str(scope_data) if scope_data is not None else "0"
         response = self._request_ok(
             "breakpoint.set",
-            {"address": f"0x{addr:X}", "bp_type": bp_type, "bp_scope": bp_scope, "length": length},
+            {"points": points},
             error_title="设置失败",
             status_on_error="设置硬件断点失败",
         )
@@ -3226,7 +3349,7 @@ class TcpTestWindow(QWidget):
             return
         self.hwbp_active = True
         self._apply_hwbp_active_state()
-        self._set_status("设置硬件断点成功")
+        self._set_status(f"设置硬件断点成功: {len(points)} 个 points")
         self.on_hwbp_refresh(silent=True)
 
     def on_hwbp_remove_all(self) -> None:

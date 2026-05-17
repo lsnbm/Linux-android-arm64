@@ -173,14 +173,23 @@ struct hwbp_record
     __uint128_t q30, q31;
 };
 
-// 存储整体命中信息
-struct hwbp_info
+// 单个观点地址结构
+struct hwbp_point
 {
-    uint64_t num_brps;                 // 执行断点的数量
-    uint64_t num_wrps;                 // 访问断点的数量
+    enum hwbp_type bt;                 // 断点类型
+    enum hwbp_len bl;                  // 断点长度
+    enum hwbp_scope bs;                // 断点作用线程范围
     uint64_t hit_addr;                 // 监控的地址
     int record_count;                  // 当前已记录的不同 PC 数量
     struct hwbp_record records[0x100]; // 记录不同 PC 触发状态的数组
+};
+
+// 存储整体命中信息
+struct hwbp_info
+{
+    uint64_t num_brps;            // 执行断点的数量
+    uint64_t num_wrps;            // 访问断点的数量
+    struct hwbp_point points[16]; // 多个观点地址
 };
 
 #define MAX_MODULES 1024
@@ -219,6 +228,20 @@ struct memory_info
     struct region_info regions[MAX_SCAN_REGIONS]; // 可扫描内存区域 (rw-p, 排除特殊区域)
 };
 
+struct virtual_input
+{
+    int POSITION_X, POSITION_Y; // 初始化触摸时返回的屏幕维度
+    int slot;                   // 触摸槽位
+    int x, y;                   // 触摸坐标
+};
+
+struct memory_rw
+{
+    uint64_t rw_addr;            // 读写的地址
+    uint8_t user_buffer[0x1000]; // 物理标准页大小的数据缓存区
+    int size;                    // 读写的大小
+};
+
 enum sm_req_op
 {
     op_o, // 空调用
@@ -247,26 +270,16 @@ struct req_obj
     enum sm_req_op op; // shared memory请求操作类型
     int status;        // 操作状态
 
-    // 内存读取
-    int pid;
-    uint64_t target_addr;
-    int size;
-    uint8_t user_buffer[0x1000]; // 物理标准页大小
+    int pid; // 当前派发指定的pid
 
-    // 进程内存信息
+    // 进程内存读写信息
+    struct memory_rw rw_info;
+    // 进程虚拟内存信息
     struct memory_info mem_info;
-
-    enum hwbp_type bt;        // 断点类型
-    enum hwbp_len bl;         // 断点长度
-    enum hwbp_scope bs;       // 断点作用线程范围
-    struct hwbp_info bp_info; // 断点信息
-
-    // 初始化触摸时返回的屏幕维度
-    int POSITION_X, POSITION_Y;
-    // 触摸槽位
-    int slot;
-    // 触摸坐标
-    int x, y;
+    // 虚拟触摸信息
+    struct virtual_input vinput_info;
+    // 断点信息
+    struct hwbp_info bp_info;
 };
 
 #endif // IO_STRUCT_H

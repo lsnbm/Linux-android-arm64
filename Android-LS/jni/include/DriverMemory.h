@@ -44,21 +44,6 @@
 #define PAGE_SIZE 4096
 class Driver
 {
-public:                // 外部初始化
-    Driver(bool touch) // 为真开启触摸
-    {
-        InitCommunication();
-        if (touch)
-        {
-            InitTouch();
-        }
-    }
-
-    ~Driver()
-    {
-        // ExitKernel();
-    }
-
 public: // 共有结构体和锁
         // 轻量高性能自旋锁
     class SpinLock
@@ -258,14 +243,23 @@ public: // 共有结构体和锁
         __uint128_t q30, q31;
     };
 
-    // 存储整体命中信息
-    struct hwbp_info
+    // 单个观点地址结构
+    struct hwbp_point
     {
-        uint64_t num_brps;                 // 执行断点的数量
-        uint64_t num_wrps;                 // 访问断点的数量
+        enum hwbp_type bt;                 // 断点类型
+        enum hwbp_len bl;                  // 断点长度
+        enum hwbp_scope bs;                // 断点作用线程范围
         uint64_t hit_addr;                 // 监控的地址
         int record_count;                  // 当前已记录的不同 PC 数量
         struct hwbp_record records[0x100]; // 记录不同 PC 触发状态的数组
+    };
+
+    // 存储整体命中信息
+    struct hwbp_info
+    {
+        uint64_t num_brps;            // 执行断点的数量
+        uint64_t num_wrps;            // 访问断点的数量
+        struct hwbp_point points[16]; // 多个观点地址
     };
 
 #define MAX_MODULES 1024
@@ -304,6 +298,20 @@ public: // 共有结构体和锁
         struct region_info regions[MAX_SCAN_REGIONS]; // 可扫描内存区域 (rw-p, 排除特殊区域)
     };
 
+    struct virtual_input
+    {
+        int POSITION_X, POSITION_Y; // 初始化触摸时返回的屏幕维度
+        int slot;                   // 触摸槽位
+        int x, y;                   // 触摸坐标
+    };
+
+    struct memory_rw
+    {
+        uint64_t rw_addr;            // 读写的地址
+        uint8_t user_buffer[0x1000]; // 物理标准页大小的数据缓存区
+        int size;                    // 读写的大小
+    };
+
     enum sm_req_op
     {
         op_o, // 空调用
@@ -332,27 +340,32 @@ public: // 共有结构体和锁
         enum sm_req_op op; // shared memory请求操作类型
         int status;        // 操作状态
 
-        // 内存读取
-        int pid;
-        uint64_t target_addr;
-        int size;
-        uint8_t user_buffer[0x1000]; // 物理标准页大小
+        int pid; // 当前派发指定的pid
 
-        // 进程内存信息
+        // 进程内存读写信息
+        struct memory_rw rw_info;
+        // 进程虚拟内存信息
         struct memory_info mem_info;
-
-        enum hwbp_type bt;        // 断点类型
-        enum hwbp_len bl;         // 断点长度
-        enum hwbp_scope bs;       // 断点作用线程范围
-        struct hwbp_info bp_info; // 断点信息
-
-        // 初始化触摸时返回的屏幕维度
-        int POSITION_X, POSITION_Y;
-        // 触摸槽位
-        int slot;
-        // 触摸坐标
-        int x, y;
+        // 虚拟触摸信息
+        struct virtual_input vinput_info;
+        // 断点信息
+        struct hwbp_info bp_info;
     };
+
+public:                // 外部初始化
+    Driver(bool touch) // 为真开启触摸
+    {
+        InitCommunication();
+        if (touch)
+        {
+            InitTouch();
+        }
+    }
+
+    ~Driver()
+    {
+        // ExitKernel();
+    }
 
 public:
     void NullIo()
@@ -616,50 +629,50 @@ public: // 外部获取内存信息
         return regions;
     }
 
-    /*
-    问题:
-    在 Android/Linux 中，PC 指向的代码地址不一定都来自 libxxx.so 这类
-    文件映射模块。除了 linker 正常加载的 ELF 代码段以外，进程也可以在
-    运行时通过 mmap/mprotect/memfd/ashmem/devzero 等方式创建一块可执行内存，然后把机器码写入这块内存并跳转执行。
-
-    这种区域在 /proc/<pid>/maps 不会显示为某个 so 文件路径，
-    而可能显示为:
-        [anon:xxx]
-        /dev/zero (deleted)
-        /memfd:jit-cache (deleted)
-        /dev/ashmem/xxx (deleted)
-    或者没有路径名的匿名映射，驱动进行了排除dev路径和模块外的匿名内存
-
-    常见来源包括:
-    1. JIT / 脚本引擎 / VM 动态代码缓存
-        运行时生成 ARM64 机器码，写入 mmap 出来的内存，再赋予可执行权限
-        或者使用 RW/X 双映射方式执行。
-
-    2. 壳 / 保护 / 热更新代码
-        真实代码可能被加密保存在文件、资源或网络数据中，运行时解密后写入
-        匿名可执行内存，再通过跳转、回调、函数指针等方式进入执行。
-
-3. 手动 ELF Loader / 自定义 Linker
-   程序不一定调用系统 dlopen 加载核心代码，而是自己解析 ELF:
-       - 解析 ELF Header / Program Header
-       - mmap 映射 PT_LOAD 段
-       - 处理重定位
-       - 修复 GOT/PLT
-       - 处理符号解析
-       - 调用 init_array / 构造函数
-   这种情况下，代码虽然逻辑上来自某个 ELF，但在 maps 中可能没有原始
-   so 文件路径，因此无法按普通模块名归属。
-
-4. Hook /  跳板
-   Hook 框架或保护代码可能申请一小段可执行内存，用来存放跳板指令、桩代码或中转逻辑。
-
-注意:
-  这种区域地址位置受 ASLR、mmap 分配策略、内存碎片等因素影响。
-  权限是 rwx / rwxs，说明该区域同时可写可执行，通常更像动态代码、JIT 代码、解密代码或跳板代码。
-*/
+    // dump指定模块
     bool DumpModule(std::string_view moduleName)
     {
+        /*
+        问题:
+        在 Android/Linux 中，PC 指向的代码地址不一定都来自 libxxx.so 这类
+        文件映射模块。除了 linker 正常加载的 ELF 代码段以外，进程也可以在
+        运行时通过 mmap/mprotect/memfd/ashmem/devzero 等方式创建一块可执行内存，然后把机器码写入这块内存并跳转执行。
 
+        这种区域在 /proc/<pid>/maps 不会显示为某个 so 文件路径，
+        而可能显示为:
+            [anon:xxx]
+            /dev/zero (deleted)
+            /memfd:jit-cache (deleted)
+            /dev/ashmem/xxx (deleted)
+        或者没有路径名的匿名映射，驱动进行了排除dev路径和模块外的匿名内存
+
+        常见来源包括:
+        1. JIT / 脚本引擎 / VM 动态代码缓存
+            运行时生成 ARM64 机器码，写入 mmap 出来的内存，再赋予可执行权限
+            或者使用 RW/X 双映射方式执行。
+
+        2. 壳 / 保护 / 热更新代码
+            真实代码可能被加密保存在文件、资源或网络数据中，运行时解密后写入
+            匿名可执行内存，再通过跳转、回调、函数指针等方式进入执行。
+
+    3. 手动 ELF Loader / 自定义 Linker
+       程序不一定调用系统 dlopen 加载核心代码，而是自己解析 ELF:
+           - 解析 ELF Header / Program Header
+           - mmap 映射 PT_LOAD 段
+           - 处理重定位
+           - 修复 GOT/PLT
+           - 处理符号解析
+           - 调用 init_array / 构造函数
+       这种情况下，代码虽然逻辑上来自某个 ELF，但在 maps 中可能没有原始
+       so 文件路径，因此无法按普通模块名归属。
+
+    4. Hook /  跳板
+       Hook 框架或保护代码可能申请一小段可执行内存，用来存放跳板指令、桩代码或中转逻辑。
+
+    注意:
+      这种区域地址位置受 ASLR、mmap 分配策略、内存碎片等因素影响。
+      权限是 rwx / rwxs，说明该区域同时可写可执行，通常更像动态代码、JIT 代码、解密代码或跳板代码。
+    */
         // 判断是否是需要修正地址的动态标签
         auto IsRelocatableDynamicTag = [](uint64_t tag) -> bool
         {
@@ -880,10 +893,10 @@ public: // 外部硬件断点接口
         GetHwbpInfo();
         return req->bp_info;
     }
-    // 设置断点
-    int SetProcessHwbpRef(uint64_t target_addr, hwbp_type bt, hwbp_scope bs, hwbp_len bl)
+    // 设置多个断点地址
+    int SetProcessHwbpRef(std::span<const hwbp_point> points)
     {
-        return SetProcessHwbp(target_addr, bt, bs, bl);
+        return SetProcessHwbp(points);
     }
     // 删除断点
     void RemoveProcessHwbpRef()
@@ -894,13 +907,25 @@ public: // 外部硬件断点接口
     // 删除指定索引内容
     void RemoveHwbpRecord(int index)
     {
-        if (index < 0 || index >= req->bp_info.record_count)
+        if (index < 0)
             return;
-        const int tail_count = req->bp_info.record_count - index - 1;
-        if (tail_count > 0)
-            __builtin_memmove(&req->bp_info.records[index], &req->bp_info.records[index + 1], static_cast<size_t>(tail_count) * sizeof(hwbp_record));
-        req->bp_info.record_count--;
-        __builtin_memset(&req->bp_info.records[req->bp_info.record_count], 0, sizeof(hwbp_record));
+
+        int flat_index = 0;
+        for (auto &point : req->bp_info.points)
+        {
+            if (index >= flat_index && index < flat_index + point.record_count)
+            {
+                const int local_index = index - flat_index;
+                const int tail_count = point.record_count - local_index - 1;
+                if (tail_count > 0)
+                    __builtin_memmove(&point.records[local_index], &point.records[local_index + 1], static_cast<size_t>(tail_count) * sizeof(hwbp_record));
+                point.record_count--;
+                __builtin_memset(&point.records[point.record_count], 0, sizeof(hwbp_record));
+                return;
+            }
+
+            flat_index += point.record_count;
+        }
     }
 
 private: // 私有实现，外部无需关系
@@ -964,13 +989,13 @@ private: // 私有实现，外部无需关系
                 size_t chunk = (size - processed > 0x1000) ? 0x1000 : (size - processed);
                 req->op = op_r;
                 req->pid = global_pid;
-                req->target_addr = addr + processed;
-                req->size = chunk;
+                req->rw_info.rw_addr = addr + processed;
+                req->rw_info.size = chunk;
                 IoCommitAndWait();
 
                 if (req->status <= 0)
                     return req->status;
-                __builtin_memcpy((uint8_t *)buffer + processed, req->user_buffer, chunk);
+                __builtin_memcpy((uint8_t *)buffer + processed, req->rw_info.user_buffer, chunk);
                 processed += chunk;
             }
             return req->status;
@@ -979,8 +1004,8 @@ private: // 私有实现，外部无需关系
         // 小数据快速通道
         req->op = op_r;
         req->pid = global_pid;
-        req->target_addr = addr;
-        req->size = size;
+        req->rw_info.rw_addr = addr;
+        req->rw_info.size = size;
 
         IoCommitAndWait();
 
@@ -992,19 +1017,19 @@ private: // 私有实现，外部无需关系
         switch (size)
         {
         case 1:
-            __builtin_memcpy(buffer, req->user_buffer, 1);
+            __builtin_memcpy(buffer, req->rw_info.user_buffer, 1);
             break;
         case 2:
-            __builtin_memcpy(buffer, req->user_buffer, 2);
+            __builtin_memcpy(buffer, req->rw_info.user_buffer, 2);
             break;
         case 4:
-            __builtin_memcpy(buffer, req->user_buffer, 4);
+            __builtin_memcpy(buffer, req->rw_info.user_buffer, 4);
             break;
         case 8:
-            __builtin_memcpy(buffer, req->user_buffer, 8);
+            __builtin_memcpy(buffer, req->rw_info.user_buffer, 8);
             break;
         default:
-            __builtin_memcpy(buffer, req->user_buffer, size);
+            __builtin_memcpy(buffer, req->rw_info.user_buffer, size);
             break;
         }
 
@@ -1024,9 +1049,9 @@ private: // 私有实现，外部无需关系
                 size_t chunk = (size - processed > 0x1000) ? 0x1000 : (size - processed);
                 req->op = op_w;
                 req->pid = global_pid;
-                req->target_addr = addr + processed;
-                req->size = chunk;
-                __builtin_memcpy(req->user_buffer, (uint8_t *)buffer + processed, chunk);
+                req->rw_info.rw_addr = addr + processed;
+                req->rw_info.size = chunk;
+                __builtin_memcpy(req->rw_info.user_buffer, (uint8_t *)buffer + processed, chunk);
                 IoCommitAndWait();
 
                 if (req->status <= 0)
@@ -1039,25 +1064,25 @@ private: // 私有实现，外部无需关系
         // 小数据快速通道
         req->op = op_w;
         req->pid = global_pid;
-        req->target_addr = addr;
-        req->size = size;
+        req->rw_info.rw_addr = addr;
+        req->rw_info.size = size;
 
         switch (size)
         {
         case 1:
-            __builtin_memcpy(req->user_buffer, buffer, 1);
+            __builtin_memcpy(req->rw_info.user_buffer, buffer, 1);
             break;
         case 2:
-            __builtin_memcpy(req->user_buffer, buffer, 2);
+            __builtin_memcpy(req->rw_info.user_buffer, buffer, 2);
             break;
         case 4:
-            __builtin_memcpy(req->user_buffer, buffer, 4);
+            __builtin_memcpy(req->rw_info.user_buffer, buffer, 4);
             break;
         case 8:
-            __builtin_memcpy(req->user_buffer, buffer, 8);
+            __builtin_memcpy(req->rw_info.user_buffer, buffer, 8);
             break;
         default:
-            __builtin_memcpy(req->user_buffer, buffer, size);
+            __builtin_memcpy(req->rw_info.user_buffer, buffer, size);
             break;
         }
 
@@ -1082,31 +1107,31 @@ private: // 私有实现，外部无需关系
         std::scoped_lock<SpinLock> lock(m_mutex);
 
         // 下面代码绝对不要使用整数除法
-        if (screenW <= 0 || screenH <= 0 || req->POSITION_X <= 0 || req->POSITION_Y <= 0)
+        if (screenW <= 0 || screenH <= 0 || req->vinput_info.POSITION_X <= 0 || req->vinput_info.POSITION_Y <= 0)
             return;
 
         req->op = op;
-        req->slot = slot;
+        req->vinput_info.slot = slot;
         // 浮点运算提到前面，保持清晰
         double normX = static_cast<double>(x) / screenW;
         double normY = static_cast<double>(y) / screenH;
 
         // 横竖屏映射逻辑
-        if (screenW > screenH && req->POSITION_X < req->POSITION_Y)
+        if (screenW > screenH && req->vinput_info.POSITION_X < req->vinput_info.POSITION_Y)
         {
             // 右侧充电口模式
-            req->x = static_cast<int>((1.0 - normY) * req->POSITION_X);
-            req->y = static_cast<int>(normX * req->POSITION_Y);
+            req->vinput_info.x = static_cast<int>((1.0 - normY) * req->vinput_info.POSITION_X);
+            req->vinput_info.y = static_cast<int>(normX * req->vinput_info.POSITION_Y);
 
             // 左侧充电口模式
-            // req->x = static_cast<int>((double)y / screenH * req->POSITION_X);
-            // req->y = static_cast<int>((1.0 - (double)x / screenW) * req->POSITION_Y);
+            // req->vinput_info.x = static_cast<int>((double)y / screenH * req->vinput_info.POSITION_X);
+            // req->vinput_info.y = static_cast<int>((1.0 - (double)x / screenW) * req->vinput_info.POSITION_Y);
         }
         else
         {
             // 正常映射
-            req->x = static_cast<int>(normX * req->POSITION_X);
-            req->y = static_cast<int>(normY * req->POSITION_Y);
+            req->vinput_info.x = static_cast<int>(normX * req->vinput_info.POSITION_X);
+            req->vinput_info.y = static_cast<int>(normY * req->vinput_info.POSITION_Y);
         }
 
         IoCommitAndWait();
@@ -1120,16 +1145,21 @@ private: // 私有实现，外部无需关系
         IoCommitAndWait();
     }
 
-    // 设置进程断点(断点只要触发驱动就会向hwbp_info写值，外部获取引用循环读取就行)
-    int SetProcessHwbp(uint64_t target_addr, hwbp_type bt, hwbp_scope bs, hwbp_len bl = HWBP_BREAKPOINT_LEN_8)
+    // 设置进程多地址断点(断点只要触发驱动就会向hwbp_info写值，外部获取引用循环读取就行)
+    int SetProcessHwbp(std::span<const hwbp_point> points)
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
         req->op = op_set_process_hwbp;
         req->pid = global_pid;
-        req->target_addr = target_addr;
-        req->bt = bt;
-        req->bl = bl;
-        req->bs = bs;
+        __builtin_memset(req->bp_info.points, 0, sizeof(req->bp_info.points));
+        const size_t count = std::min(points.size(), std::size(req->bp_info.points));
+        for (size_t i = 0; i < count; ++i)
+        {
+            req->bp_info.points[i].hit_addr = points[i].hit_addr;
+            req->bp_info.points[i].bt = points[i].bt;
+            req->bp_info.points[i].bl = points[i].bl;
+            req->bp_info.points[i].bs = points[i].bs;
+        }
         IoCommitAndWait();
         return req->status;
     }

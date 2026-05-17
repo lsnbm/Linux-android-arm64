@@ -13,13 +13,25 @@
 #include "arm64_reg.h"
 #include "inline_hook_frame.h"
 
-struct breakpoint_config
+#define BP_CONFIG_MAX 16
+#define AARCH64_DBG_CTRL_TYPE_MASK (0x3 << 3)
+
+struct breakpoint_point
 {
-    pid_t pid;          // 目标进程 pid
     enum hwbp_type bt;  // 断点类型
     enum hwbp_len bl;   // 断点长度
     enum hwbp_scope bs; // 断点作用线程范围
     uint64_t addr;      // 断点地址
+    int slot;           // 被分配的槽位
+};
+
+struct breakpoint_config
+{
+    pid_t pid; // 目标进程 pid
+
+    // 多个地址观点
+    struct breakpoint_point points[BP_CONFIG_MAX];
+    int hit_point_index; // 命中时的观点索引，用于传递给回调进行快速派发
 
     // 触发回调，命中时调用
     // regs: 命中时的寄存器现场 self: 指向本结构体自身，方便回调访问配置信息
@@ -36,107 +48,26 @@ struct breakpoint_config
 既然使用全局指针传递上下文，那么<统一>使用传递的全局上下文，不在使用附带参数
 内核很多子系统的做法也一样
 */
-#define BP_CONFIG_MAX 16
 struct breakpoint_config g_bp_config[BP_CONFIG_MAX];
 static bool g_task_run_monitor_started = false; // 防止重复安装断点和卸载断点
+int num_brps, num_wrps;                         // 硬件执行和访问槽位总数
 
-// 执行断异常处理跳板工作函数，返回 0 表示继续执行原异常入口
-static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
-{
-    int i;
-    uint64_t ctrl;
-    struct pt_regs *regs = (struct pt_regs *)hook_regs->regs[2];
-
-    /*
-   这里说明一下为何可以这么做进行步过
-       现在代码安装断点的方式是线程被调度到cpu上就写入对应的cpu寄存器进行断点，调度走就清空控制寄存器删除断点，这样就实现了断点跟着task走
-       但是呢这里的异常回调我们关闭寄存器了进行步过后，要是线程一直运行没有被调度，断点就不会被重新打开对不对!
-
-       其实不用担心这个不会被调度问题，因为我实际测试下面这种代码
-       while (1){a++;}
-       这种只进行纯!算数运算!的进程才70%不会被调度走一直运行，下面有说原因
-       所以一个正常的用户使用的进程,绝对不会出现这个整个进程的线程组都在无限算数运算
-
-       一个正常进程100%会出现下面情况，这些情况都会导致被调度走，一旦线程组中有task被调度都能收到并重新安装好因步过关闭的断点
-       1.当前任务主动睡眠，           不怎么出现;                             sleep() / nanosleep() / msleep()...
-       2.阻塞 IO 操作，               必出现，    网络请求和系统调用和日志之类的;  printf()/ read() / recv() / send() / connect() / accept()....
-       3.锁竞争会触发调度，           几乎必出现， 多线程下非常常见对资源的保护;                  std::mutex / std::shared_mutex / std::spinlock...
-       4.时间片到了CFS 抢占，         必出现，     调度器的核心机制，不过要等时间片，很久才会调度
-       5.高优先级任务被唤醒会触发抢占，必出现，    不过要等被抢占，不怎么会被调度
-       6.硬件中断，                   必出现，    不过中断时内核可能不会运行抢占任务，不确定会不会被调度
-       7.page fault 缺页，            可能出现，  访问的虚拟地址会没有对应的物理页会触发一次，因为访问了会常驻了，很久才会调度
-       8.新task创建，                 不怎么出现，就创建一次长期运行
-       9.图形渲染提交画面，            几乎必出现，opengl/vulkan 之类的渲染提交
-       10.等等等太多了，我就只知道这一部分
-       所以放心在异常回调关断步过
-       */
-
-    /*
-    这里先实时读取了执行控制寄存器配置，并只修改了bit 0 enabled是否启用位
-    为何不直接清空的原因就是
-        用户态如果也用perf下断，原本的硬件 debug 异常入口需要控制寄存器中的len/type/privilege
-        由于 BCR/WCR 被清空，原硬件 debug 异常入口无法通过 BVR/BCR 或 WVR/WCR 匹配到
-        对应的 perf_event owner，也就不会执行 perf_bp_event() 和后续disable + single-step + restore 的步过状态机。
-        硬件debug异常分发直接结束并返回已处理
-
-      结果是：硬件debug异常分发结束了，但 perf子系统没有收到这次命中的信息和步过闭环，状态机推进异常就死了
-    */
-    for (i = 0; i < BP_CONFIG_MAX; i++)
-    {
-        if (g_bp_config[i].pid > 0 && g_bp_config[i].on_hit)
-        {
-            g_bp_config[i].on_hit(regs, &g_bp_config[i]);
-            break;
-        }
-    }
-
-    ctrl = read_wb_reg(AARCH64_DBG_REG_BCR, 5);
-    write_wb_reg(AARCH64_DBG_REG_BCR, 5, ctrl & ~0x1);
-    return 0;
-}
-
-// 访问断异常处理跳板工作函数，返回 0 表示继续执行原异常入口
-static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
-{
-    int i;
-    uint64_t ctrl;
-    struct pt_regs *regs = (struct pt_regs *)hook_regs->regs[2];
-
-    for (i = 0; i < BP_CONFIG_MAX; i++)
-    {
-        if (g_bp_config[i].pid > 0 && g_bp_config[i].on_hit)
-        {
-            g_bp_config[i].on_hit(regs, &g_bp_config[i]);
-            break;
-        }
-    }
-
-    ctrl = read_wb_reg(AARCH64_DBG_REG_WCR, 3);
-    write_wb_reg(AARCH64_DBG_REG_WCR, 3, ctrl & ~0x1);
-    return 0;
-}
-
-// 声明 hook 表
-static struct hook_entry g_hooks[] = {
-    HOOK_ENTRY("breakpoint_handler", work_trampoline_breakpoint),
-    HOOK_ENTRY("watchpoint_handler", work_trampoline_watchpoint),
-};
 /*
  把外部断点参数转换成ARM架构内部格式，并完成基础检测/修正。
  这里只处理用户态断点（EL0）场景。
  在32位的task和per-cpu 场景不能按compat处理，要=0
  */
-static int hw_breakpoint_parse(struct breakpoint_config *cfg, bool is_compat, struct arch_hw_breakpoint *hw)
+static int hw_breakpoint_parse(struct breakpoint_point *point, bool is_compat, struct arch_hw_breakpoint *hw)
 {
     uint64_t alignment_mask, offset;
 
-    if (!cfg || !hw)
+    if (!point || !hw)
         return -EINVAL;
 
     memset(hw, 0, sizeof(*hw));
 
     // 类型转换：对应 arch_build_bp_info()
-    switch (cfg->bt)
+    switch (point->bt)
     {
     case HW_BREAKPOINT_X:
         hw->ctrl.type = ARM_BREAKPOINT_EXECUTE;
@@ -155,7 +86,7 @@ static int hw_breakpoint_parse(struct breakpoint_config *cfg, bool is_compat, st
     }
 
     // 长度转换：对应 arch_build_bp_info()
-    switch (cfg->bl)
+    switch (point->bl)
     {
     case HW_BREAKPOINT_LEN_1:
         hw->ctrl.len = ARM_BREAKPOINT_LEN_1;
@@ -203,7 +134,7 @@ static int hw_breakpoint_parse(struct breakpoint_config *cfg, bool is_compat, st
     }
 
     // 地址初始值：对应 arch_build_bp_info()
-    hw->address = cfg->addr;
+    hw->address = point->addr;
 
     // 权限：这里只做用户态断点
     hw->ctrl.privilege = AARCH64_BREAKPOINT_EL0;
@@ -254,6 +185,150 @@ static int hw_breakpoint_parse(struct breakpoint_config *cfg, bool is_compat, st
     return 0;
 }
 
+// 执行断异常处理跳板工作函数，返回 0 表示继续执行原异常入口
+static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
+{
+    int i;
+    int j;
+    int slot;
+    uint64_t addr;
+    uint64_t ctrl;
+    struct arch_hw_breakpoint info;
+    struct pt_regs *regs = (struct pt_regs *)hook_regs->regs[2];
+
+    /*
+   这里说明一下为何可以这么做进行步过
+       现在代码安装断点的方式是线程被调度到cpu上就写入对应的cpu寄存器进行断点，调度走就清空控制寄存器删除断点，这样就实现了断点跟着task走
+       但是呢这里的异常回调我们关闭寄存器了进行步过后，要是线程一直运行没有被调度，断点就不会被重新打开对不对!
+
+       其实不用担心这个不会被调度问题，因为我实际测试下面这种代码
+       while (1){a++;}
+       这种只进行纯!算数运算!的进程才70%不会被调度走一直运行，下面有说原因
+       所以一个正常的用户使用的进程,绝对不会出现这个整个进程的线程组都在无限算数运算
+
+       一个正常进程100%会出现下面情况，这些情况都会导致被调度走，一旦线程组中有task被调度都能收到并重新安装好因步过关闭的断点
+       1.当前任务主动睡眠，           不怎么出现;                             sleep() / nanosleep() / msleep()...
+       2.阻塞 IO 操作，               必出现，    网络请求和系统调用和日志之类的;  printf()/ read() / recv() / send() / connect() / accept()....
+       3.锁竞争会触发调度，           几乎必出现， 多线程下非常常见对资源的保护;                  std::mutex / std::shared_mutex / std::spinlock...
+       4.时间片到了CFS 抢占，         必出现，     调度器的核心机制，不过要等时间片，很久才会调度
+       5.高优先级任务被唤醒会触发抢占，必出现，    不过要等被抢占，不怎么会被调度
+       6.硬件中断，                   必出现，    不过中断时内核可能不会运行抢占任务，不确定会不会被调度
+       7.page fault 缺页，            可能出现，  访问的虚拟地址会没有对应的物理页会触发一次，因为访问了会常驻了，很久才会调度
+       8.新task创建，                 不怎么出现，就创建一次长期运行
+       9.图形渲染提交画面，            几乎必出现，opengl/vulkan 之类的渲染提交
+       10.等等等太多了，我就只知道这一部分
+       所以放心在异常回调关断步过
+       */
+
+    /*
+    这里先实时读取了执行控制寄存器配置，并只修改了bit 0 enabled是否启用位
+    为何不直接清空的原因就是
+        用户态如果也用perf下断，原本的硬件 debug 异常入口需要控制寄存器中的len/type/privilege
+        由于 BCR/WCR 被清空，原硬件 debug 异常入口无法通过 BVR/BCR 或 WVR/WCR 匹配到
+        对应的 perf_event owner，也就不会执行 perf_bp_event() 和后续disable + single-step + restore 的步过状态机。
+        硬件debug异常分发直接结束并返回已处理
+
+      结果是：硬件debug异常分发结束了，但 perf子系统没有收到这次命中的信息和步过闭环，状态机推进异常就死了
+    */
+
+    for (slot = 0; slot < num_brps; slot++)
+    {
+        // 获取当前cpu的指定槽位寄存器
+        addr = read_wb_reg(AARCH64_DBG_REG_BVR, slot);
+        ctrl = read_wb_reg(AARCH64_DBG_REG_BCR, slot);
+
+        // 派发异常信息给不同配置
+        for (i = 0; i < BP_CONFIG_MAX; i++)
+        {
+            if (g_bp_config[i].pid <= 0 ||
+                !g_bp_config[i].on_hit)
+                continue;
+
+            // 根据不同观点派发
+            for (j = 0; j < BP_CONFIG_MAX; j++)
+            {
+                struct breakpoint_point *point = &g_bp_config[i].points[j];
+
+                if (point->slot != slot)
+                    continue;
+
+                // 地址不相等跳过
+                if (hw_breakpoint_parse(point, 0, &info) ||
+                    info.address != addr)
+                    continue;
+
+                // 地址相等和控制码相等才派发
+                if ((encode_ctrl_reg(info.ctrl) & AARCH64_DBG_CTRL_TYPE_MASK) ==
+                    (ctrl & AARCH64_DBG_CTRL_TYPE_MASK))
+                {
+                    // 传递当前观点索引
+                    g_bp_config[i].hit_point_index = j;
+                    g_bp_config[i].on_hit(regs, &g_bp_config[i]);
+                    // 这里只禁用配置
+                    write_wb_reg(AARCH64_DBG_REG_BCR, slot, ctrl & ~0x1);
+                    return 0;
+                }
+            }
+        }
+    }
+
+    return 0;
+}
+
+// 访问断异常处理跳板工作函数，返回 0 表示继续执行原异常入口
+static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
+{
+    int i;
+    int j;
+    int slot;
+    uint64_t addr;
+    uint64_t ctrl;
+    struct arch_hw_breakpoint info;
+    struct pt_regs *regs = (struct pt_regs *)hook_regs->regs[2];
+
+    for (slot = 0; slot < num_wrps; slot++)
+    {
+        addr = read_wb_reg(AARCH64_DBG_REG_WVR, slot);
+        ctrl = read_wb_reg(AARCH64_DBG_REG_WCR, slot);
+
+        for (i = 0; i < BP_CONFIG_MAX; i++)
+        {
+            if (g_bp_config[i].pid <= 0 ||
+                !g_bp_config[i].on_hit)
+                continue;
+
+            for (j = 0; j < BP_CONFIG_MAX; j++)
+            {
+                struct breakpoint_point *point = &g_bp_config[i].points[j];
+
+                if (point->slot != slot)
+                    continue;
+
+                if (hw_breakpoint_parse(point, 0, &info) ||
+                    info.address != addr)
+                    continue;
+
+                if ((encode_ctrl_reg(info.ctrl) & AARCH64_DBG_CTRL_TYPE_MASK) ==
+                    (ctrl & AARCH64_DBG_CTRL_TYPE_MASK))
+                {
+                    g_bp_config[i].hit_point_index = j;
+                    g_bp_config[i].on_hit(regs, &g_bp_config[i]);
+                    write_wb_reg(AARCH64_DBG_REG_WCR, slot, ctrl & ~0x1);
+                    return 0;
+                }
+            }
+        }
+    }
+
+    return 0;
+}
+
+// 声明 hook 表
+static struct hook_entry g_hooks[] = {
+    HOOK_ENTRY("breakpoint_handler", work_trampoline_breakpoint),
+    HOOK_ENTRY("watchpoint_handler", work_trampoline_watchpoint),
+};
+
 // 线程切换回调,6.1系是分水岭，内核整体上下区别变化大，encode_ctrl_reg是控制码转ARM架构内部格式
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
 static void probe_sched_switch(void *data, bool preempt,
@@ -270,9 +345,10 @@ static void probe_sched_switch(void *data, bool preempt,
     int next_slot = -1;
     int prev_slot = -1;
 
-    //检查切入切走的进程pid是否在断点配置设置
+    // 检查切入的进程pid是否在断点配置中设置
     for (i = 0; i < BP_CONFIG_MAX; i++)
     {
+        // 找到了对应的配置
         if (g_bp_config[i].pid == next->tgid)
         {
             next_slot = i;
@@ -280,8 +356,10 @@ static void probe_sched_switch(void *data, bool preempt,
         }
     }
 
+    // 切走的
     for (i = 0; i < BP_CONFIG_MAX; i++)
     {
+        // 找到配置
         if (g_bp_config[i].pid == prev->tgid)
         {
             prev_slot = i;
@@ -292,6 +370,9 @@ static void probe_sched_switch(void *data, bool preempt,
     // 目标进程的线程组被切入(线程组id就是进程的pid)
     if (next_slot >= 0)
     {
+        int brp_slot = 0;
+        int wrp_slot = 0;
+
         // 线程id==线程组id就是主线程,否则子线程
         if (next->pid == next->tgid)
         {
@@ -305,32 +386,61 @@ static void probe_sched_switch(void *data, bool preempt,
         // task被切入到cpu进行解锁OS+开启硬件调试
         enable_hardware_debug_on_cpu(NULL);
 
-        // 把断点描述信息转化为arm架构内部格式
-        struct arch_hw_breakpoint info;
-        hw_breakpoint_parse(&g_bp_config[next_slot], 0, &info);
+        // 遍历所有观点分配槽位安装进cpu
+        for (i = 0; i < BP_CONFIG_MAX; i++)
+        {
+            struct breakpoint_point *point = &g_bp_config[next_slot].points[i];
+            struct arch_hw_breakpoint info;
 
-        // 根据断点类型进行分发
-        if (info.ctrl.type == ARM_BREAKPOINT_EXECUTE)
-        {
-            // 执行地址寄存器
-            write_wb_reg(AARCH64_DBG_REG_BVR, 5, info.address);
-            // 执行控制寄存器
-            //"| 0x1"表示立即生效,
-            //"& ~0x1"表示写入的寄存器配置，但是禁用不生效
-            //"0"给控制寄存器请0，就删除了断点
-            write_wb_reg(AARCH64_DBG_REG_BCR, 5, encode_ctrl_reg(info.ctrl) | 0x1);
-            // write_wb_reg(AARCH64_DBG_REG_BCR, 5, encode_ctrl_reg(info.ctrl) & ~0x1);
-        }
-        else
-        {
-            // 访问地址寄存器
-            write_wb_reg(AARCH64_DBG_REG_WVR, 3, info.address);
-            // 访问控制寄存器
-            //"| 0x1"表示立即生效,
-            //"& ~0x1"表示写入的寄存器配置，但是禁用不生效
-            //"0"给控制寄存器请0就删除了断点
-            write_wb_reg(AARCH64_DBG_REG_WCR, 3, encode_ctrl_reg(info.ctrl) | 0x1);
-            // write_wb_reg(AARCH64_DBG_REG_WCR, 3, encode_ctrl_reg(info.ctrl) & ~0x1);
+            point->slot = -1;
+
+            // 为空的观点不设置
+            if (point->addr == 0)
+                continue;
+
+            // 把观点的断点描述信息转化为arm架构内部格式
+            if (hw_breakpoint_parse(point, 0, &info))
+                continue;
+
+            // 根据不同观点类型分配不同槽位
+            if (info.ctrl.type == ARM_BREAKPOINT_EXECUTE)
+            {
+                if (brp_slot >= num_brps)
+                    continue;
+
+                point->slot = brp_slot++;
+            }
+            else
+            {
+                if (wrp_slot >= num_wrps)
+                    continue;
+
+                point->slot = wrp_slot++;
+            }
+
+            // 根据断点类型进行分发
+            if (info.ctrl.type == ARM_BREAKPOINT_EXECUTE)
+            {
+                // 执行地址寄存器
+                write_wb_reg(AARCH64_DBG_REG_BVR, point->slot, info.address);
+                // 执行控制寄存器
+                //"| 0x1"表示立即生效,
+                //"& ~0x1"表示写入的寄存器配置，但是禁用不生效
+                //"0"给控制寄存器请0，就删除了断点
+                write_wb_reg(AARCH64_DBG_REG_BCR, point->slot, encode_ctrl_reg(info.ctrl) | 0x1);
+                // write_wb_reg(AARCH64_DBG_REG_BCR, point->slot, encode_ctrl_reg(info.ctrl) & ~0x1);
+            }
+            else
+            {
+                // 访问地址寄存器
+                write_wb_reg(AARCH64_DBG_REG_WVR, point->slot, info.address);
+                // 访问控制寄存器
+                //"| 0x1"表示立即生效,
+                //"& ~0x1"表示写入的寄存器配置，但是禁用不生效
+                //"0"给控制寄存器请0就删除了断点
+                write_wb_reg(AARCH64_DBG_REG_WCR, point->slot, encode_ctrl_reg(info.ctrl) | 0x1);
+                // write_wb_reg(AARCH64_DBG_REG_WCR, point->slot, encode_ctrl_reg(info.ctrl) & ~0x1);
+            }
         }
     }
 
@@ -345,9 +455,25 @@ static void probe_sched_switch(void *data, bool preempt,
             pr_debug("目标进程的子线程被切换走: pid=%d comm=%s cpu=%d\n", prev->pid, prev->comm, raw_smp_processor_id());
         }
 
-        // 请0执行控制寄存器和访问控制寄存器
-        write_wb_reg(AARCH64_DBG_REG_BCR, 5, 0);
-        write_wb_reg(AARCH64_DBG_REG_WCR, 3, 0);
+        // 遍历所有观点的槽位卸载出cpu,并删除分配的槽位
+        for (i = 0; i < BP_CONFIG_MAX; i++)
+        {
+            struct breakpoint_point *point = &g_bp_config[prev_slot].points[i];
+            struct arch_hw_breakpoint info;
+
+            if (point->slot < 0)
+                continue;
+
+            if (hw_breakpoint_parse(point, 0, &info))
+                continue;
+
+            if (info.ctrl.type == ARM_BREAKPOINT_EXECUTE)
+                write_wb_reg(AARCH64_DBG_REG_BCR, point->slot, 0);
+            else
+                write_wb_reg(AARCH64_DBG_REG_WCR, point->slot, 0);
+
+            point->slot = -1;
+        }
 
         // task被切出cpu进行管全局调试+上锁OS
         disable_hardware_debug_on_cpu(NULL);
@@ -401,6 +527,7 @@ static int start_task_run_monitor(struct breakpoint_config bp_config)
         return ret;
     }
 
+    // 安装线程切换回调
     ret = register_trace_sched_switch(probe_sched_switch, NULL);
     if (ret)
     {
@@ -409,6 +536,10 @@ static int start_task_run_monitor(struct breakpoint_config bp_config)
         inline_hook_remove(g_hooks);
         return ret;
     }
+
+    // 总数也是只获取一次
+    num_brps = get_brps_num();
+    num_wrps = get_wrps_num();
 
     g_task_run_monitor_started = true;
     pr_debug("monitor start, target tgid=%d slot=%d\n", bp_config.pid, slot);

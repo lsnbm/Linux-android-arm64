@@ -140,6 +140,52 @@ namespace
         return static_cast<std::uint32_t>(MemUtils::HwbpReadRegisterValue(record, reg));
     }
 
+    int clampHwbpRecordCount(int count)
+    {
+        if (count < 0)
+            return 0;
+        if (count > 0x100)
+            return 0x100;
+        return count;
+    }
+
+    Driver::hwbp_record *findHwbpRecordByFlatIndex(Driver::hwbp_info &info, int index, int *pointIndex = nullptr, int *pointRecordIndex = nullptr)
+    {
+        if (index < 0)
+            return nullptr;
+
+        int flatIndex = 0;
+        int currentPointIndex = 0;
+        for (auto &point : info.points)
+        {
+            const int recordCount = clampHwbpRecordCount(point.record_count);
+            if (index < flatIndex + recordCount)
+            {
+                const int localIndex = index - flatIndex;
+                if (pointIndex)
+                    *pointIndex = currentPointIndex;
+                if (pointRecordIndex)
+                    *pointRecordIndex = localIndex;
+                return &point.records[localIndex];
+            }
+
+            flatIndex += recordCount;
+            ++currentPointIndex;
+        }
+
+        return nullptr;
+    }
+
+    int getHwbpTotalRecordCount(const Driver::hwbp_info &info)
+    {
+        int total = 0;
+        for (const auto &point : info.points)
+        {
+            total += clampHwbpRecordCount(point.record_count);
+        }
+        return total;
+    }
+
     // 解析有符号64位整数
     std::optional<std::int64_t> parseInt64(std::string_view text)
     {
@@ -544,72 +590,90 @@ namespace
     json buildHwbpInfoJson(const auto &info)
     {
         json root;
-        int recordCount = info.record_count;
-        if (recordCount < 0)
-        {
-            recordCount = 0;
-        }
-        else if (recordCount > 0x100)
-        {
-            recordCount = 0x100;
-        }
+        int recordCount = 0;
+        std::uint64_t hitAddr = 0;
 
         root["num_brps"] = info.num_brps;
         root["num_wrps"] = info.num_wrps;
-        root["hit_addr"] = info.hit_addr;
-        root["hit_addr_hex"] = std::format("0x{:X}", static_cast<std::uint64_t>(info.hit_addr));
         root["active"] = bridgeState().hwbpActive;
         root["active_address"] = bridgeState().hwbpAddress;
         root["active_address_hex"] = std::format("0x{:X}", bridgeState().hwbpAddress);
         root["active_type"] = bridgeState().hwbpType;
         root["active_scope"] = bridgeState().hwbpScope;
         root["active_length"] = bridgeState().hwbpLength;
-        root["record_count"] = recordCount;
+        root["points"] = json::array();
         root["records"] = json::array();
 
-        for (int i = 0; i < recordCount; ++i)
+        int pointIndex = 0;
+        for (const auto &point : info.points)
         {
-            auto &rec = const_cast<Driver::hwbp_record &>(info.records[i]);
-            json item;
-            item["index"] = i;
-            MemUtils::HwbpRequestAll(rec);
-            const auto pc = readHwbp64(rec, Driver::IDX_PC);
-            const auto hitCount = readHwbp64(rec, Driver::IDX_HIT_COUNT);
-            const auto lr = readHwbp64(rec, Driver::IDX_LR);
-            const auto sp = readHwbp64(rec, Driver::IDX_SP);
-            const auto origX0 = readHwbp64(rec, Driver::IDX_ORIG_X0);
-            const auto syscallNo = readHwbp64(rec, Driver::IDX_SYSCALLNO);
-            const auto pstate = readHwbp64(rec, Driver::IDX_PSTATE);
-            const auto fpsr = readHwbp32(rec, Driver::IDX_FPSR);
-            const auto fpcr = readHwbp32(rec, Driver::IDX_FPCR);
-            item["mask"] = json::array();
-            for (int m = 0; m < 18; ++m)
+            const int pointRecordCount = clampHwbpRecordCount(point.record_count);
+            if (hitAddr == 0 && point.hit_addr != 0)
+                hitAddr = point.hit_addr;
+
+            json pointItem;
+            pointItem["index"] = pointIndex;
+            pointItem["hit_addr"] = point.hit_addr;
+            pointItem["hit_addr_hex"] = std::format("0x{:X}", static_cast<std::uint64_t>(point.hit_addr));
+            pointItem["type"] = std::string(bpTypeToToken(point.bt));
+            pointItem["scope"] = std::string(bpScopeToToken(point.bs));
+            pointItem["length"] = static_cast<int>(point.bl);
+            pointItem["record_count"] = pointRecordCount;
+            root["points"].push_back(std::move(pointItem));
+
+            for (int i = 0; i < pointRecordCount; ++i)
             {
-                item["mask"].push_back(rec.mask[m]);
+                auto &rec = const_cast<Driver::hwbp_record &>(point.records[i]);
+                json item;
+                item["index"] = recordCount;
+                item["point_index"] = pointIndex;
+                item["point_record_index"] = i;
+                MemUtils::HwbpRequestAll(rec);
+                const auto pc = readHwbp64(rec, Driver::IDX_PC);
+                const auto hitCount = readHwbp64(rec, Driver::IDX_HIT_COUNT);
+                const auto lr = readHwbp64(rec, Driver::IDX_LR);
+                const auto sp = readHwbp64(rec, Driver::IDX_SP);
+                const auto origX0 = readHwbp64(rec, Driver::IDX_ORIG_X0);
+                const auto syscallNo = readHwbp64(rec, Driver::IDX_SYSCALLNO);
+                const auto pstate = readHwbp64(rec, Driver::IDX_PSTATE);
+                const auto fpsr = readHwbp32(rec, Driver::IDX_FPSR);
+                const auto fpcr = readHwbp32(rec, Driver::IDX_FPCR);
+                item["mask"] = json::array();
+                for (int m = 0; m < 18; ++m)
+                {
+                    item["mask"].push_back(rec.mask[m]);
+                }
+                item["pc"] = pc;
+                item["pc_hex"] = std::format("0x{:X}", static_cast<std::uint64_t>(pc));
+                item["hit_count"] = hitCount;
+                item["lr"] = lr;
+                item["sp"] = sp;
+                item["orig_x0"] = origX0;
+                item["syscallno"] = syscallNo;
+                item["pstate"] = pstate;
+                for (int reg = 0; reg < 30; ++reg)
+                {
+                    item[std::format("x{}", reg)] = readHwbp64(rec, Driver::IDX_X0 + reg);
+                }
+                for (int reg = 0; reg < 32; ++reg)
+                {
+                    const auto qreg = MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_Q0 + reg);
+                    json qitem = {{"lo", static_cast<std::uint64_t>(qreg)},
+                                  {"hi", static_cast<std::uint64_t>(qreg >> 64)}};
+                    item[std::format("q{}", reg)] = std::move(qitem);
+                }
+                item["fpsr"] = fpsr;
+                item["fpcr"] = fpcr;
+                root["records"].push_back(std::move(item));
+                ++recordCount;
             }
-            item["pc"] = pc;
-            item["pc_hex"] = std::format("0x{:X}", static_cast<std::uint64_t>(pc));
-            item["hit_count"] = hitCount;
-            item["lr"] = lr;
-            item["sp"] = sp;
-            item["orig_x0"] = origX0;
-            item["syscallno"] = syscallNo;
-            item["pstate"] = pstate;
-            for (int reg = 0; reg < 30; ++reg)
-            {
-                item[std::format("x{}", reg)] = readHwbp64(rec, Driver::IDX_X0 + reg);
-            }
-            for (int reg = 0; reg < 32; ++reg)
-            {
-                const auto qreg = MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_Q0 + reg);
-                json qitem = {{"lo", static_cast<std::uint64_t>(qreg)},
-                              {"hi", static_cast<std::uint64_t>(qreg >> 64)}};
-                item[std::format("q{}", reg)] = std::move(qitem);
-            }
-            item["fpsr"] = fpsr;
-            item["fpcr"] = fpcr;
-            root["records"].push_back(std::move(item));
+
+            ++pointIndex;
         }
+
+        root["hit_addr"] = hitAddr;
+        root["hit_addr_hex"] = std::format("0x{:X}", hitAddr);
+        root["record_count"] = recordCount;
 
         return root;
     }
@@ -1200,41 +1264,116 @@ namespace
             if (bridgeState().hwbpActive)
                 return fail("断点已激活，请先执行 breakpoint.clear");
 
-            const auto address = requiredUInt64("address", "address");
-            const auto type = requiredString("bp_type", "bp_type");
-            const auto scope = requiredString("bp_scope", "bp_scope");
-            const auto length = requiredInt("length", "length");
-            if (std::holds_alternative<json>(address))
-                return std::get<json>(address);
-            if (std::holds_alternative<json>(type))
-                return std::get<json>(type);
-            if (std::holds_alternative<json>(scope))
-                return std::get<json>(scope);
-            if (std::holds_alternative<json>(length))
-                return std::get<json>(length);
-
             const int pid = dr->GetGlobalPid();
             if (pid <= 0)
                 return fail("全局PID未设置，请先执行 target.pid.set 或 target.attach.package");
-            const auto bpType = parseBpTypeToken(std::get<std::string>(type));
-            const auto bpScope = parseBpScopeToken(std::get<std::string>(scope));
-            int clampedLength = std::get<int>(length);
-            if (clampedLength < 1)
-                clampedLength = 1;
-            else if (clampedLength > 8)
-                clampedLength = 8;
-            const auto bpLength = parseBpLengthValue(clampedLength);
-            if (!bpType.has_value() || !bpScope.has_value() || !bpLength.has_value())
-                return fail("断点参数无效，长度范围为 1-8");
-            const int status = dr->SetProcessHwbpRef(std::get<std::uint64_t>(address), *bpType, *bpScope, *bpLength);
+
+            const auto pointsIt = params.find("points");
+            if (pointsIt == params.end() || !pointsIt->is_array() || pointsIt->empty())
+                return fail("operation=breakpoint.set 缺少参数 points");
+
+            auto parseUInt64Value = [&](const json &value) -> std::optional<std::uint64_t>
+            {
+                if (value.is_number_unsigned())
+                    return value.get<std::uint64_t>();
+                if (value.is_number_integer())
+                {
+                    const auto signedValue = value.get<std::int64_t>();
+                    return signedValue >= 0 ? std::optional<std::uint64_t>(static_cast<std::uint64_t>(signedValue)) : std::nullopt;
+                }
+                if (value.is_string())
+                    return parseUInt64(value.get<std::string>());
+                return std::nullopt;
+            };
+
+            auto parseIntValue = [&](const json &value) -> std::optional<int>
+            {
+                if (value.is_number_integer())
+                    return value.get<int>();
+                if (value.is_string())
+                    return parseInt(value.get<std::string>());
+                return std::nullopt;
+            };
+
+            auto parseStringValue = [&](const json &value) -> std::optional<std::string>
+            {
+                if (value.is_string())
+                    return value.get<std::string>();
+                if (value.is_number_integer())
+                    return std::format("{}", value.get<std::int64_t>());
+                if (value.is_number_unsigned())
+                    return std::format("{}", value.get<std::uint64_t>());
+                return std::nullopt;
+            };
+
+            std::vector<Driver::hwbp_point> points;
+            points.reserve(std::min<std::size_t>(pointsIt->size(), 16));
+            for (const auto &pointJson : *pointsIt)
+            {
+                if (!pointJson.is_object())
+                    return fail("points 中存在无效断点配置");
+
+                const auto addressIt = pointJson.find("address");
+                const auto typeIt = pointJson.find("bp_type");
+                const auto scopeIt = pointJson.find("bp_scope");
+                const auto lengthIt = pointJson.find("length");
+                if (addressIt == pointJson.end() || typeIt == pointJson.end() || scopeIt == pointJson.end() || lengthIt == pointJson.end())
+                    return fail("points 中每个断点都需要 address/bp_type/bp_scope/length");
+
+                const auto address = parseUInt64Value(*addressIt);
+                const auto typeToken = parseStringValue(*typeIt);
+                const auto scopeToken = parseStringValue(*scopeIt);
+                const auto lengthValue = parseIntValue(*lengthIt);
+                if (!address.has_value() || *address == 0 || !typeToken.has_value() || !scopeToken.has_value() || !lengthValue.has_value())
+                    return fail("points 中存在无效断点参数");
+
+                int clampedLength = *lengthValue;
+                if (clampedLength < 1)
+                    clampedLength = 1;
+                else if (clampedLength > 8)
+                    clampedLength = 8;
+
+                const auto bpType = parseBpTypeToken(*typeToken);
+                const auto bpScope = parseBpScopeToken(*scopeToken);
+                const auto bpLength = parseBpLengthValue(clampedLength);
+                if (!bpType.has_value() || !bpScope.has_value() || !bpLength.has_value())
+                    return fail("points 中存在无效断点参数，长度范围为 1-8");
+
+                Driver::hwbp_point point{};
+                point.hit_addr = *address;
+                point.bt = *bpType;
+                point.bs = *bpScope;
+                point.bl = *bpLength;
+                points.push_back(point);
+                if (points.size() >= 16)
+                    break;
+            }
+
+            if (points.empty())
+                return fail("points 为空");
+
+            const int status = dr->SetProcessHwbpRef(std::span<const Driver::hwbp_point>(points.data(), points.size()));
             if (status != 0)
                 return fail(std::format("设置断点失败 status={}", status));
             bridgeState().hwbpActive = true;
-            bridgeState().hwbpAddress = std::get<std::uint64_t>(address);
-            bridgeState().hwbpType = std::string(bpTypeToToken(*bpType));
-            bridgeState().hwbpScope = std::string(bpScopeToToken(*bpScope));
-            bridgeState().hwbpLength = clampedLength;
-            return okData({{"status", status}, {"active", true}, {"address", bridgeState().hwbpAddress}, {"address_hex", std::format("0x{:X}", bridgeState().hwbpAddress)}, {"type", bridgeState().hwbpType}, {"scope", bridgeState().hwbpScope}, {"length", bridgeState().hwbpLength}});
+            bridgeState().hwbpAddress = points.front().hit_addr;
+            bridgeState().hwbpType = points.size() == 1 ? std::string(bpTypeToToken(points.front().bt)) : "multi";
+            bridgeState().hwbpScope = points.size() == 1 ? std::string(bpScopeToToken(points.front().bs)) : "multi";
+            bridgeState().hwbpLength = points.size() == 1 ? static_cast<int>(points.front().bl) : 0;
+
+            json outPoints = json::array();
+            for (std::size_t i = 0; i < points.size(); ++i)
+            {
+                outPoints.push_back({
+                    {"index", i},
+                    {"address", points[i].hit_addr},
+                    {"address_hex", std::format("0x{:X}", points[i].hit_addr)},
+                    {"type", std::string(bpTypeToToken(points[i].bt))},
+                    {"scope", std::string(bpScopeToToken(points[i].bs))},
+                    {"length", static_cast<int>(points[i].bl)},
+                });
+            }
+            return okData({{"status", status}, {"active", true}, {"point_count", points.size()}, {"points", std::move(outPoints)}});
         }
 
         if (op == "breakpoint.clear")
@@ -1259,8 +1398,10 @@ namespace
             if (std::get<int>(index) < 0)
                 return fail("index 无效");
             const auto &info = dr->GetHwbpInfoRef();
+            if (std::get<int>(index) >= getHwbpTotalRecordCount(info))
+                return fail("index 越界");
             dr->RemoveHwbpRecord(std::get<int>(index));
-            return okData({{"record_count", info.record_count}});
+            return okData({{"record_count", getHwbpTotalRecordCount(info)}});
         }
 
         if (op == "breakpoint.record.update")
@@ -1277,14 +1418,17 @@ namespace
             const auto value = MemUtils::ParseUInt128(std::get<std::string>(valueText));
             if (!value.has_value())
                 return fail(std::format("operation={} 参数 value 无效", op));
-            const auto &info = dr->GetHwbpInfoRef();
-            if (std::get<int>(index) < 0 || std::get<int>(index) >= info.record_count)
+            auto &info = const_cast<Driver::hwbp_info &>(dr->GetHwbpInfoRef());
+            int pointIndex = -1;
+            int pointRecordIndex = -1;
+            auto *record = findHwbpRecordByFlatIndex(info, std::get<int>(index), &pointIndex, &pointRecordIndex);
+            if (!record)
                 return fail("index 越界");
-            auto copy = info.records[std::get<int>(index)];
+            auto copy = *record;
             if (!MemUtils::AssignHwbpRecordField(copy, std::get<std::string>(field), *value))
                 return fail("field 无效");
-            const_cast<Driver::hwbp_record &>(info.records[std::get<int>(index)]) = copy;
-            return okData({{"index", std::get<int>(index)}, {"field", std::get<std::string>(field)}, {"value_hex", MemUtils::FormatUInt128Hex(*value)}});
+            *record = copy;
+            return okData({{"index", std::get<int>(index)}, {"point_index", pointIndex}, {"point_record_index", pointRecordIndex}, {"field", std::get<std::string>(field)}, {"value_hex", MemUtils::FormatUInt128Hex(*value)}});
         }
 
         if (op == "signature.scan_address")

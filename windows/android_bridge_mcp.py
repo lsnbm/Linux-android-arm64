@@ -452,21 +452,32 @@ def android_breakpoint_list() -> dict[str, Any]:
 
 
 @mcp.tool()
-def android_breakpoint_set(address: int | str, bp_type: int | str, bp_scope: int | str, length: int) -> dict[str, Any]:
-    """Create a hardware breakpoint on the current target process."""
+def android_breakpoint_set(points: list[dict[str, Any]]) -> dict[str, Any]:
+    """Create hardware breakpoints on the current target process from hwbp_point-style configs."""
     current = _call_bridge_operation("breakpoint.info")
     data = current.get("data")
     if isinstance(data, dict) and bool(data.get("active", False)):
         raise BridgeError("hardware breakpoint is already active; call android_breakpoint_clear_all first")
-    clamped_length = max(1, min(8, int(length)))
+
+    normalized_points: list[dict[str, Any]] = []
+    for point in points:
+        if not isinstance(point, dict):
+            raise ValueError("points must contain objects with address, bp_type, bp_scope, length")
+        clamped_length = max(1, min(8, int(point["length"])))
+        normalized_points.append(
+            {
+                "address": format_address(point["address"]),
+                "bp_type": point["bp_type"],
+                "bp_scope": point["bp_scope"],
+                "length": clamped_length,
+            }
+        )
+    if not normalized_points:
+        raise ValueError("points must not be empty")
+
     return _call_bridge_operation(
         "breakpoint.set",
-        {
-            "address": format_address(address),
-            "bp_type": bp_type,
-            "bp_scope": bp_scope,
-            "length": clamped_length,
-        },
+        {"points": normalized_points},
     )
 
 
@@ -770,13 +781,19 @@ TOOL_META: dict[str, dict[str, Any]] = {
     },
     "android_breakpoint_set": {
         "group": "Breakpoints",
-        "use_when": "Create one hardware breakpoint.",
-        "example": {"address": "0x12345678", "bp_type": "read", "bp_scope": "main", "length": 4},
+        "use_when": "Create one or more hardware breakpoints.",
+        "example": {
+            "points": [
+                {"address": "0x12345678", "bp_type": "read", "bp_scope": "main", "length": 4},
+                {"address": "0x123456F0", "bp_type": "write", "bp_scope": "all", "length": 8},
+            ]
+        },
         "parameter_notes": {
-            "address": "Target instruction/data address.",
-            "bp_type": "Service token: read/write/read_write/execute. Numeric tokens 1/2/3/4 are also accepted.",
-            "bp_scope": "Service token: main/other/all. Numeric tokens 0/1/2 are also accepted.",
-            "length": "Breakpoint length in bytes, 1..8.",
+            "points": "List of hwbp_point configs. Each item needs address, bp_type, bp_scope, length.",
+            "points[].address": "Target instruction/data address.",
+            "points[].bp_type": "Service token: read/write/read_write/execute. Numeric tokens 1/2/3/4 are also accepted.",
+            "points[].bp_scope": "Service token: main/other/all. Numeric tokens 0/1/2 are also accepted.",
+            "points[].length": "Breakpoint length in bytes, 1..8.",
         },
         "result_notes": "Creates breakpoint; record update requires existing record index.",
     },

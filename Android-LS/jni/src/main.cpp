@@ -12,6 +12,7 @@
 #include <future>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -226,9 +227,18 @@ private:
 
     struct BpParams
     {
+        struct PointRow
+        {
+            char addr[32] = {};
+            int type = 3;
+            int scope = 2;
+            int len = 4;
+        };
+
+        PointRow points[16];
+        int configPointCount = 1;
         uintptr_t address = 0;
-        int bpType = 0, bpScope = 2;
-        Driver::hwbp_len lenBytes = Driver::HWBP_BREAKPOINT_LEN_4;
+        int pointCount = 0;
         bool active = false;
 
         int editingRecordIdx = -1;    // 正在编辑哪条记录
@@ -250,7 +260,7 @@ private:
         char modify[64] = {}, memOffset[32] = {}, resultOffset[32] = {}, moduleSearch[64] = {};
         char ptrTarget[32] = {}, arrayBase[32] = {}, arrayCount[16] = "100", filterModule[64] = {};
         char sigScanAddr[32] = {}, sigVerifyAddr[32] = {};
-        char viewAddr[32] = {}, bpAddr[32] = {}, bpLen[16] = "4";
+        char viewAddr[32] = {};
     } buf_;
 
     struct State
@@ -261,7 +271,8 @@ private:
         ImVec2 floatPos = {50, 200}, dragOffset = {}, dragStartMouse = {};
         bool showType = false, showMode = false, showDepth = false,
              showOffset = false, showScale = false, showFormat = false;
-        bool showBpType = false, showBpScope = false;
+        bool showBpType = false, showBpScope = false, showBpLen = false;
+        int bpPopupPoint = -1;
     } state_;
 
     float S(float v) const { return style_.S(v); }
@@ -333,6 +344,43 @@ private:
         bpParams_.editingField = -1;
         bpParams_.regEditBuf[0] = 0;
         return true;
+    }
+
+    std::vector<Driver::hwbp_point> buildHwbpPointsFromRows()
+    {
+        static constexpr Driver::hwbp_type typeValues[] = {
+            Driver::HWBP_BREAKPOINT_R,
+            Driver::HWBP_BREAKPOINT_W,
+            Driver::HWBP_BREAKPOINT_RW,
+            Driver::HWBP_BREAKPOINT_X,
+        };
+        static constexpr Driver::hwbp_scope scopeValues[] = {
+            Driver::SCOPE_MAIN_THREAD,
+            Driver::SCOPE_OTHER_THREADS,
+            Driver::SCOPE_ALL_THREADS,
+        };
+
+        std::vector<Driver::hwbp_point> points;
+        const int count = std::clamp(bpParams_.configPointCount, 1, 16);
+        points.reserve(count);
+        for (int i = 0; i < count; ++i)
+        {
+            const auto addr = ParseHexAddress(bpParams_.points[i].addr);
+            if (!addr.has_value())
+                return {};
+
+            const int typeIndex = std::clamp(bpParams_.points[i].type, 0, 3);
+            const int scopeIndex = std::clamp(bpParams_.points[i].scope, 0, 2);
+            const int len = std::clamp(bpParams_.points[i].len, 1, 8);
+
+            Driver::hwbp_point point{};
+            point.hit_addr = *addr;
+            point.bt = typeValues[typeIndex];
+            point.bs = scopeValues[scopeIndex];
+            point.bl = static_cast<Driver::hwbp_len>(len);
+            points.push_back(point);
+        }
+        return points;
     }
 
     void drawRegisterEditButton(const char *buttonId, int regIndex, std::string_view name,
@@ -1270,14 +1318,6 @@ private:
     void drawBreakpointTab()
     {
         float w = ImGui::GetContentRegionAvail().x, bh = S(45);
-        static const char *bpTypeLabels[] = {"读取", "写入", "读写", "执行"};
-        static constexpr Driver::hwbp_type bpTypeValues[] = {
-            Driver::HWBP_BREAKPOINT_R,
-            Driver::HWBP_BREAKPOINT_W,
-            Driver::HWBP_BREAKPOINT_RW,
-            Driver::HWBP_BREAKPOINT_X,
-        };
-        static const char *bpScopeLabels[] = {"仅主线程", "仅子线程", "全部线程"};
 
         UI::Text(Colors::TITLE, "━━ 硬件断点 ━━");
         UI::Space(S(4));
@@ -1295,22 +1335,50 @@ private:
         UI::Space(S(6));
 
         // 配置
-        ImGui::Text("断点地址:");
-        UI::KbBtn(buf_.bpAddr, "点击输入Hex地址", {w, bh}, buf_.bpAddr, 31, "断点地址(Hex)");
-        UI::Space(S(4));
-
-        ImGui::Text("断点类型:");
-        if (ImGui::Button(bpTypeLabels[bpParams_.bpType], {w, bh}))
-            state_.showBpType = true;
-        UI::Space(S(4));
-
-        ImGui::Text("线程范围:");
-        if (ImGui::Button(bpScopeLabels[bpParams_.bpScope], {w, bh}))
-            state_.showBpScope = true;
-        UI::Space(S(4));
-
-        ImGui::Text("监控长度(字节):");
-        UI::KbBtn(buf_.bpLen, "4", {w, bh}, buf_.bpLen, 15, "监控字节数");
+        static const char *bpTypeLabels[] = {"读取", "写入", "读写", "执行"};
+        static const char *bpScopeLabels[] = {"主线程", "子线程", "全部"};
+        static const char *bpLenLabels[] = {"1字节", "2字节", "3字节", "4字节", "5字节", "6字节", "7字节", "8字节"};
+        ImGui::Text("points:");
+        float addrW = std::max(S(120), w - S(222));
+        float typeW = S(58), scopeW = S(58), lenW = S(66);
+        for (int i = 0; i < bpParams_.configPointCount; ++i)
+        {
+            auto &row = bpParams_.points[i];
+            ImGui::PushID(i);
+            UI::Text(Colors::LABEL, "P%d", i);
+            ImGui::SameLine();
+            UI::KbBtn(row.addr, "地址", {addrW, bh}, row.addr, 31, "断点地址(Hex)");
+            ImGui::SameLine();
+            if (UI::Btn(bpTypeLabels[std::clamp(row.type, 0, 3)], {typeW, bh}, Colors::BTN_BLUE))
+            {
+                state_.bpPopupPoint = i;
+                state_.showBpType = true;
+            }
+            ImGui::SameLine();
+            if (UI::Btn(bpScopeLabels[std::clamp(row.scope, 0, 2)], {scopeW, bh}, Colors::BTN_TEAL))
+            {
+                state_.bpPopupPoint = i;
+                state_.showBpScope = true;
+            }
+            ImGui::SameLine();
+            if (UI::Btn(bpLenLabels[std::clamp(row.len, 1, 8) - 1], {lenW, bh}, Colors::BTN_ORANGE))
+            {
+                state_.bpPopupPoint = i;
+                state_.showBpLen = true;
+            }
+            UI::Space(S(4));
+            ImGui::PopID();
+        }
+        float rowBtnW = (w - S(8)) / 2;
+        ImGui::BeginDisabled(bpParams_.configPointCount >= 16 || bpParams_.active);
+        if (UI::Btn("添加point", {rowBtnW, S(38)}, Colors::BTN_BLUE))
+            ++bpParams_.configPointCount;
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(bpParams_.configPointCount <= 1 || bpParams_.active);
+        if (UI::Btn("删除point", {rowBtnW, S(38)}, Colors::BTN_RED))
+            --bpParams_.configPointCount;
+        ImGui::EndDisabled();
         UI::Space(S(8));
 
         // 操作按钮
@@ -1318,16 +1386,12 @@ private:
         ImGui::BeginDisabled(bpParams_.active);
         if (UI::Btn("设置断点", {halfW, S(52)}, Colors::BTN_GREEN))
         {
-            if (auto addr = ParseHexAddress(buf_.bpAddr))
+            auto points = buildHwbpPointsFromRows();
+            if (!points.empty())
             {
-                int len = std::clamp(ParseIntOr(buf_.bpLen), 1, 8);
-                bpParams_.address = *addr;
-                bpParams_.lenBytes = static_cast<Driver::hwbp_len>(len);
-                const int bpTypeIndex = std::clamp(bpParams_.bpType, 0, 3);
-                if (dr->SetProcessHwbpRef(*addr,
-                                          bpTypeValues[bpTypeIndex],
-                                          static_cast<Driver::hwbp_scope>(bpParams_.bpScope),
-                                          bpParams_.lenBytes) == 0)
+                bpParams_.address = points.front().hit_addr;
+                bpParams_.pointCount = static_cast<int>(points.size());
+                if (dr->SetProcessHwbpRef(std::span<const Driver::hwbp_point>(points.data(), points.size())) == 0)
                     bpParams_.active = true;
             }
         }
@@ -1338,15 +1402,19 @@ private:
         {
             dr->RemoveProcessHwbpRef();
             bpParams_.active = false;
+            bpParams_.pointCount = 0;
         }
         ImGui::EndDisabled();
 
         UI::Space(S(8));
         bpParams_.active
-            ? UI::Text(Colors::OK, "● 断点已激活  地址: 0x%lX", bpParams_.address)
+            ? UI::Text(Colors::OK, "● 断点已激活  地址数: %d  首地址: 0x%lX", bpParams_.pointCount, bpParams_.address)
             : UI::Text(Colors::HINT, "○ 断点未激活");
-        if (info.hit_addr)
-            UI::Text(Colors::ADDR_CYAN, "监控地址: 0x%llX", (unsigned long long)info.hit_addr);
+        for (const auto &point : info.points)
+        {
+            if (point.hit_addr)
+                UI::Text(Colors::ADDR_CYAN, "监控地址: 0x%llX", (unsigned long long)point.hit_addr);
+        }
 
         UI::Space(S(8));
         ImGui::Separator();
@@ -1354,7 +1422,11 @@ private:
         UI::Text(Colors::TITLE, "━━ 命中信息 ━━");
         UI::Space(S(4));
 
-        if (info.record_count > 0)
+        int totalRecordCount = 0;
+        for (const auto &point : info.points)
+            totalRecordCount += point.record_count;
+
+        if (totalRecordCount > 0)
             drawBpRecords(info, w);
         else
             UI::Text(Colors::HINT, "暂无命中记录");
@@ -1363,51 +1435,61 @@ private:
     void drawBpRecords(const Driver::hwbp_info &info, float w)
     {
         uint64_t totalHits = 0;
-        for (int r = 0; r < info.record_count; ++r)
+        int totalRecordCount = 0;
+        for (const auto &point : info.points)
         {
-            auto &rec = const_cast<Driver::hwbp_record &>(info.records[r]);
-            MemUtils::HwbpRequestAll(rec);
-            totalHits += HwbpRead64(rec, Driver::IDX_HIT_COUNT);
+            for (int r = 0; r < point.record_count; ++r)
+            {
+                auto &rec = const_cast<Driver::hwbp_record &>(point.records[r]);
+                MemUtils::HwbpRequestAll(rec);
+                totalHits += HwbpRead64(rec, Driver::IDX_HIT_COUNT);
+                totalRecordCount++;
+            }
         }
-        UI::Text(Colors::WARN, "不同PC数: %d  总命中: %llu", info.record_count, (unsigned long long)totalHits);
+        UI::Text(Colors::WARN, "不同PC数: %d  总命中: %llu", totalRecordCount, (unsigned long long)totalHits);
         UI::Space(S(6));
 
-        static bool expandState[0x100] = {};
+        static bool expandState[16 * 0x100] = {};
         int deleteIdx = -1;
+        int flatIndex = 0;
 
-        for (int r = 0; r < info.record_count; ++r)
+        for (int p = 0; p < 16; ++p)
         {
-            auto &rec = const_cast<Driver::hwbp_record &>(info.records[r]);
-            const auto pc = HwbpRead64(rec, Driver::IDX_PC);
-            const auto hitCount = HwbpRead64(rec, Driver::IDX_HIT_COUNT);
-            ImGui::PushID(r);
-            float btnW = S(55), expandW = S(45);
-
-            // 摘要行
-            UI::Text({0.7f, 0.85f, 1, 1}, "[%d]", r);
-            ImGui::SameLine();
-            UI::Text(Colors::ADDR_GREEN, "PC:0x%llX", (unsigned long long)pc);
-            ImGui::SameLine();
-            UI::Text(Colors::WARN, "x%llu", (unsigned long long)hitCount);
-
-            ImGui::SameLine(w - btnW);
-            if (UI::Btn("删除", {btnW, S(32)}, {0.6f, 0.15f, 0.15f, 1}))
-                deleteIdx = r;
-            ImGui::SameLine(w - btnW - expandW - S(4));
-            if (UI::Btn(expandState[r] ? "收起" : "展开", {expandW, S(32)}, {0.2f, 0.3f, 0.45f, 1}))
-                expandState[r] = !expandState[r];
-
-            if (expandState[r])
+            const auto &point = info.points[p];
+            for (int r = 0; r < point.record_count; ++r, ++flatIndex)
             {
-                ImGui::Indent(S(8));
-                drawBpRecordDetail(rec, r);
-                ImGui::Unindent(S(8));
-            }
+                auto &rec = const_cast<Driver::hwbp_record &>(point.records[r]);
+                const auto pc = HwbpRead64(rec, Driver::IDX_PC);
+                const auto hitCount = HwbpRead64(rec, Driver::IDX_HIT_COUNT);
+                ImGui::PushID(flatIndex);
+                float btnW = S(55), expandW = S(45);
 
-            UI::Space(S(4));
-            ImGui::Separator();
-            UI::Space(S(4));
-            ImGui::PopID();
+                // 摘要行
+                UI::Text({0.7f, 0.85f, 1, 1}, "[%d:%d]", p, r);
+                ImGui::SameLine();
+                UI::Text(Colors::ADDR_GREEN, "PC:0x%llX", (unsigned long long)pc);
+                ImGui::SameLine();
+                UI::Text(Colors::WARN, "x%llu", (unsigned long long)hitCount);
+
+                ImGui::SameLine(w - btnW);
+                if (UI::Btn("删除", {btnW, S(32)}, {0.6f, 0.15f, 0.15f, 1}))
+                    deleteIdx = flatIndex;
+                ImGui::SameLine(w - btnW - expandW - S(4));
+                if (UI::Btn(expandState[flatIndex] ? "收起" : "展开", {expandW, S(32)}, {0.2f, 0.3f, 0.45f, 1}))
+                    expandState[flatIndex] = !expandState[flatIndex];
+
+                if (expandState[flatIndex])
+                {
+                    ImGui::Indent(S(8));
+                    drawBpRecordDetail(rec, flatIndex);
+                    ImGui::Unindent(S(8));
+                }
+
+                UI::Space(S(4));
+                ImGui::Separator();
+                UI::Space(S(4));
+                ImGui::PopID();
+            }
         }
         if (deleteIdx >= 0)
             dr->RemoveHwbpRecord(deleteIdx);
@@ -1616,21 +1698,40 @@ private:
     void beginEditRecord(int idx)
     {
         const auto &info = dr->GetHwbpInfoRef();
-        if (idx < 0 || idx >= info.record_count)
+        if (idx < 0)
             return;
-        bpParams_.editingRecordIdx = idx;
-        bpParams_.editCopy = info.records[idx]; // 完整拷贝
-        bpParams_.editingField = -1;
+        int flatIndex = 0;
+        for (const auto &point : info.points)
+        {
+            if (idx >= flatIndex && idx < flatIndex + point.record_count)
+            {
+                bpParams_.editingRecordIdx = idx;
+                bpParams_.editCopy = point.records[idx - flatIndex]; // 完整拷贝
+                bpParams_.editingField = -1;
+                return;
+            }
+            flatIndex += point.record_count;
+        }
     }
     // 写回副本
     void applyRecordEdits(int idx)
     {
         const auto &info = dr->GetHwbpInfoRef();
-        if (idx < 0 || idx >= info.record_count)
+        if (idx < 0)
             return;
-        const_cast<Driver::hwbp_record &>(info.records[idx]) = bpParams_.editCopy;
-        bpParams_.editingRecordIdx = -1;
-        bpParams_.editingField = -1;
+        int flatIndex = 0;
+        for (const auto &pointConst : info.points)
+        {
+            auto &point = const_cast<Driver::hwbp_point &>(pointConst);
+            if (idx >= flatIndex && idx < flatIndex + point.record_count)
+            {
+                point.records[idx - flatIndex] = bpParams_.editCopy;
+                bpParams_.editingRecordIdx = -1;
+                bpParams_.editingField = -1;
+                return;
+            }
+            flatIndex += point.record_count;
+        }
     }
 
     // ================================================================
@@ -1684,17 +1785,31 @@ private:
             if (fmt != oldFmt)
                 memViewer_.setFormat(fmt);
         }
-        if (state_.showBpType)
+        if (state_.bpPopupPoint >= 0 && state_.bpPopupPoint < bpParams_.configPointCount)
         {
-            static const char *items[] = {"读取", "写入", "读写", "执行"};
-            doSelector("断点类型", &state_.showBpType, items, 4, &bpParams_.bpType);
+            auto &row = bpParams_.points[state_.bpPopupPoint];
+            if (state_.showBpType)
+            {
+                static const char *items[] = {"读取", "写入", "读写", "执行"};
+                int selected = std::clamp(row.type, 0, 3);
+                doSelector("断点类型", &state_.showBpType, items, 4, &selected);
+                row.type = selected;
+            }
+            if (state_.showBpScope)
+            {
+                static const char *items[] = {"主线程", "子线程", "全部"};
+                int selected = std::clamp(row.scope, 0, 2);
+                doSelector("线程范围", &state_.showBpScope, items, 3, &selected);
+                row.scope = selected;
+            }
+            if (state_.showBpLen)
+            {
+                static const char *items[] = {"1字节", "2字节", "3字节", "4字节", "5字节", "6字节", "7字节", "8字节"};
+                int selected = std::clamp(row.len, 1, 8) - 1;
+                doSelector("监控长度", &state_.showBpLen, items, 8, &selected);
+                row.len = selected + 1;
+            }
         }
-        if (state_.showBpScope)
-        {
-            static const char *items[] = {"仅主线程", "仅子线程", "全部线程"};
-            doSelector("线程范围", &state_.showBpScope, items, 3, &bpParams_.bpScope);
-        }
-
         // 深度选择
         if (state_.showDepth)
         {

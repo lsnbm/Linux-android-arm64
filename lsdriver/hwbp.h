@@ -1136,43 +1136,40 @@
 //     pr_debug("所有注册的硬件断点已清理完毕\n");
 // }
 
-// 获取断点寄存器信息
-static inline void get_hw_breakpoint_info(struct hwbp_info *info)
-{
-    info->num_brps = get_brps_num();
-    info->num_wrps = get_wrps_num();
-    // pr_debug("CPU 支持的硬件执行断点 (BRPs) 数量: %llu\n", info->num_brps);
-    // pr_debug("CPU 支持的硬件访问断点 (WRPs) 数量: %llu\n", info->num_wrps);
-}
-
 struct breakpoint_config bp_config;
 
 // 断点触发回调函数
 static inline void sample_hbp_handler(struct pt_regs *regs, struct breakpoint_config *self)
 {
+    struct hwbp_point *point;
     struct hwbp_record *rec = NULL;
     int i;
-    // 直接从配置属性中获取原始断点地址
-    self->bp_info->hit_addr = self->addr;
+
+    if (!regs || !self || !self->bp_info ||
+        self->hit_point_index < 0 ||
+        self->hit_point_index >= BP_CONFIG_MAX)
+        return;
+
+    point = &self->bp_info->points[self->hit_point_index];
 
     // 唯一的一次查找：查找当前 PC 是否记录过
-    for (i = 0; i < self->bp_info->record_count; i++)
+    for (i = 0; i < point->record_count; i++)
     {
-        if (self->bp_info->records[i].pc == regs->pc)
+        if (point->records[i].pc == regs->pc)
         {
-            rec = &self->bp_info->records[i];
+            rec = &point->records[i];
             break;
         }
     }
     // 如果是新 PC 且空间足够，存储到下一个槽位
-    if (!rec && self->bp_info->record_count < 0x100)
+    if (!rec && point->record_count < 0x100)
     {
-        rec = &self->bp_info->records[self->bp_info->record_count];
+        rec = &point->records[point->record_count];
         rec->pc = regs->pc;
         // 新槽位所有寄存器的mask默认读取
         for (i = IDX_PC; i < MAX_REG_COUNT; i++)
             HWBP_SET_MASK(rec, i, HWBP_OP_READ);
-        self->bp_info->record_count++;
+        point->record_count++;
     }
 
     // 用空间换时间，用循环+if或者switch方式都增加复杂度，要处理每个寄存器枚举索引的不同方式，直接平铺易于理解和轻微性能提升
@@ -1674,18 +1671,31 @@ static inline void sample_hbp_handler(struct pt_regs *regs, struct breakpoint_co
     }
 }
 
-static inline int set_process_hwbp(pid_t pid, uint64_t addr, enum hwbp_type type, enum hwbp_len len, enum hwbp_scope scope, struct hwbp_info *info)
+static inline int set_process_hwbp(pid_t pid, struct hwbp_info *info)
 {
     int ret;
+    int i;
 
     if (pid <= 0 || !info)
         return -EINVAL;
 
+    memset(&bp_config, 0, sizeof(bp_config));
     bp_config.pid = pid;
-    bp_config.bt = type;
-    bp_config.bl = len;
-    bp_config.bs = scope;
-    bp_config.addr = addr;
+    bp_config.hit_point_index = -1;
+
+    // 遍历所有观点进行安装
+    for (i = 0; i < BP_CONFIG_MAX; i++)
+    {
+        if (info->points[i].hit_addr == 0)
+            continue;
+
+        bp_config.points[i].bt = info->points[i].bt;
+        bp_config.points[i].bl = info->points[i].bl;
+        bp_config.points[i].bs = info->points[i].bs;
+        bp_config.points[i].addr = info->points[i].hit_addr;
+        bp_config.points[i].slot = -1;
+    }
+
     bp_config.on_hit = sample_hbp_handler;
     bp_config.bp_info = info;
 

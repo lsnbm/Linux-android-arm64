@@ -54,27 +54,26 @@ static int DispatchThreadFunction(void *data)
 				case op_o:
 					break;
 				case op_r:
-					req->status = read_process_memory(req->pid, req->target_addr, req->user_buffer, req->size);
-					break;
 				case op_w:
-					req->status = write_process_memory(req->pid, req->target_addr, req->user_buffer, req->size);
+					req->status = _process_memory_rw(req->op, req->pid, req->rw_info.rw_addr, &req->rw_info.user_buffer, req->rw_info.size);
 					break;
 				case op_m:
 					req->status = enum_process_memory(req->pid, &req->mem_info);
 					break;
+				case op_init_touch:
+					req->status = v_touch_init(&req->vinput_info.POSITION_X, &req->vinput_info.POSITION_Y);
+					break;
 				case op_down:
 				case op_move:
 				case op_up:
-					v_touch_event(req->op, req->slot, req->x, req->y);
-					break;
-				case op_init_touch:
-					req->status = v_touch_init(&req->POSITION_X, &req->POSITION_Y);
+					v_touch_event(req->op, req->vinput_info.slot, req->vinput_info.x, req->vinput_info.y);
 					break;
 				case op_brps_weps_info:
-					get_hw_breakpoint_info(&req->bp_info);
+					req->bp_info.num_brps = get_brps_num(); // pr_debug("CPU 支持的硬件执行断点 (BRPs) 数量: %llu\n", info->num_brps);
+					req->bp_info.num_wrps = get_wrps_num(); // pr_debug("CPU 支持的硬件访问断点 (WRPs) 数量: %llu\n", info->num_wrps);
 					break;
 				case op_set_process_hwbp:
-					req->status = set_process_hwbp(req->pid, req->target_addr, req->bt, req->bl, req->bs, &req->bp_info);
+					req->status = set_process_hwbp(req->pid, &req->bp_info);
 					break;
 				case op_remove_process_hwbp:
 					remove_process_hwbp();
@@ -232,9 +231,9 @@ static int do_exit_hook_work(struct pt_regs *regs)
 		pr_debug("【进程监听】检测到 LS 进程即将退出！PID: %d, 进程名(comm): %s\n", task->pid, task->comm);
 
 		// 相应处理
-		read_process_memory(666666, 1, &ProcessExit, 1); // 主动调用一下释放缓存的mm
-		v_touch_destroy();								 // 清理触摸
-		ProcessExit = false;							 // 标记用户进程已断开,前面read借用了ProcessExit，这里最后置为false，保证状态正确
+		_process_memory_rw(op_r, 666666, 1, &ProcessExit, 1); // 主动调用一下释放缓存的mm
+		v_touch_destroy();									  // 清理触摸
+		ProcessExit = false;								  // 标记用户进程已断开,前面read借用了ProcessExit，这里最后置为false，保证状态正确
 	}
 	return 0;
 }
