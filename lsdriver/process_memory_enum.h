@@ -83,11 +83,29 @@ Modifier's View :
 
 // VMA 权限检查宏
 #define VMA_PERM_MASK (VM_READ | VM_WRITE | VM_EXEC)
-#define VMA_IS_RX(vma) (((vma)->vm_flags & VMA_PERM_MASK) == (VM_READ | VM_EXEC))  // r-x
-#define VMA_IS_RO(vma) (((vma)->vm_flags & VMA_PERM_MASK) == VM_READ)              // r--
-#define VMA_IS_RW(vma) (((vma)->vm_flags & VMA_PERM_MASK) == (VM_READ | VM_WRITE)) // rw-
+#define VMA_IS_RX(vma) (((vma)->vm_flags & VMA_PERM_MASK) == (VM_READ | VM_EXEC))             // r-x
+#define VMA_IS_RO(vma) (((vma)->vm_flags & VMA_PERM_MASK) == VM_READ)                         // r--
+#define VMA_IS_RW(vma) (((vma)->vm_flags & VMA_PERM_MASK) == (VM_READ | VM_WRITE))            // rw-
+#define VMA_IS_RWX(vma) (((vma)->vm_flags & VMA_PERM_MASK) == (VM_READ | VM_WRITE | VM_EXEC)) // rwx
 
 #define VMA_IS_RWP(vma) (VMA_IS_RW(vma) && !((vma)->vm_flags & VM_SHARED)) // rw-p (私有)
+
+static inline bool module_is_anon_rwx(const struct module_info *m)
+{
+    return __builtin_strncmp(m->name, "anon:", 5) == 0 ||
+           __builtin_strncmp(m->name, "rwx", 3) == 0 ||
+           __builtin_strncmp(m->name, "[anon:rwx", 9) == 0 ||
+           __builtin_strncmp(m->name, "[rwx", 4) == 0;
+}
+
+static inline const char *get_vma_anon_label(struct vm_area_struct *vma)
+{
+#ifdef CONFIG_ANON_VMA_NAME
+    return vma->anon_name ? vma->anon_name->name : NULL;
+#else
+    return NULL;
+#endif
+}
 
 static inline int find_or_add_module(struct module_info *modules, int *module_count, const uint8_t *name)
 {
@@ -126,18 +144,27 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
     bool excluded, mod_accepted;
 
     /*
-    开始解释:为何我白名单把/dev/加入到模块列表了
+    开始解释:为何我根据权限把内存页加入到模块列表
     正常运行情况下:编译好的静态代码就放在模块里面，运行时加载到内存并分配文件映射型代码
-    被保护隐藏的代码:
-            我发现目标程序会用mmap通过open("/dev/zero")映射 /dev/zero 设备文件，
-            来获取一段初始全为 0 的、可读、可写、可执行的共享虚拟内存，vma和maps显示/dev/zero (deleted)
-            现在不需要获取文件描述符了，现代的mmap支持无设备描述符映射，
-            但是创建的内存页映射来源在vma和maps显示的还是/dev/zero (deleted)
-            并使用mprotect来修改权限，并在代码页上下页修改为无任何权限的保护页
-            具体maps显示如下:
+    被保护隐藏的代码:都使用mmap映射
+            映射共享映射页(rwxs),vma和maps显示 /dev/zero (deleted)
+            映射匿名私有映射页(rwxp),vma和maps显示 [anon:xxx]
+        情况1:
+            mmap直接分配一个或多个共享映射页(rwxs)
+            或先 mmap 一段匿名 RW 内存，再通过 mprotect 修改为 RWX，并在代码页上下页修改为无任何权限的保护页
+            具体 maps 显示如下:
             7f2a90000000-7f2a90001000 ---s 00000000 00:01 3321       /dev/zero (deleted)
             7f2a90001000-7f2a90002000 rwxs 00001000 00:01 3321       /dev/zero (deleted)
             7f2a90002000-7f2a90003000 ---s 00002000 00:01 3321       /dev/zero (deleted)
+            也有可能目标程序会用mmap通过open("/dev/zero")映射 /dev/zero 设备文件
+
+        情况2:
+            mmap 直接分配一个或多个私有可执行页(rwxp)
+            或先 mmap 一段匿名 RW 内存，再通过 mprotect 修改为 RWX。
+            这类 vma 没有 vm_file，maps 中一般显示为匿名区间，
+            具体 maps 显示如下:
+            72e7870000-72e7961000 rwxp 00000000 00:00 0              [anon:objects_external_alloc]
+
     还有这个存放代码的动态内存几乎是mmap分配的，不会出现malloc分配内存来存放代码
     不用malloc有这些原因:
             1.mprotect要求起始地址必须是页的整数倍(4kb页对齐), malloc 是8字节或 16 字节对齐不满足,必须手动计算页边界，或者使用 posix_memalign,mmap分配的天然页对齐
@@ -146,11 +173,11 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
               但在这里观察都是rwxs-p全部给上
             3.mprotect按页生效，对10字节改权限，内核也会把10 字节所在的整个 4KB 页面全部改掉
               malloc内存可能和其他数据内存共享4KB页 ，改权限会意外导致程序其他部分异常，mmap按页分配安全
-    所以加上/dev可以
+    所以现在按页权限收集 RWX 特殊模块:
         1.libso[0]+静态指针或函数地址偏移，
         2.libso[bss]+静态指针偏移
-        3./dev/zero (deleted)+静态指针或函数地址偏移
-        4.直接dump/dev/zero (deleted)内存字节就可获取释放到内存中代码
+        3.[anon:rwxp]/[rwxs:/dev/zero]+动态代码偏移
+        4.直接dump RWX 特殊模块内存字节就可获取释放到内存中的动态代码
 
     这里在说一下这个模块内的静态指针偏移
         众所周知一个二进制文件在linux下要求ELF格式，在windows下要求PE格式
@@ -176,11 +203,12 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
         目标一样，区别就是起始地址不同，相对偏移根据起始地址位置进行变化
         */
 
-    // 白名单(用于收集模块地址)，只搜集...开头虚拟地址区间
+    // 白名单(用于收集文件模块地址)，只搜集...开头虚拟地址区间。
+    // 动态代码段不再依赖 /dev/zero 路径识别，而是按 RWX 权限单独收集为伪模块。
     static const char *const mod_include_prefixes[] = {
-        "/data/", "/dev/", NULL};
+        "/data/", NULL};
 
-    // 黑名单(用于收集可扫描内存地址)，排除...开头的虚拟地址区间, 这里排除了dev,扫指针会需要定位到.data.bss指针，上面没排除/dev,用户态接口获取可扫描内存时会主动把模块和可扫描区域地址统一压入为可扫描区域返回，所以这里排除dev不影响扫指针需要.data.bss中的指针地址
+    // 黑名单(用于收集可扫描内存地址)，排除...开头的虚拟地址区间
     static const char *const excl_prefixes[] = {
         "/dev/", "/system/", "/vendor/", "/apex/", NULL};
     // 黑名单(用于收集可扫描内存地址)，排除指定关键字的虚拟地址区间
@@ -235,24 +263,74 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
         /* ========== 模块收集 ========== */
 
         /*
-         * BSS 检测条件：
-         *   - 无文件映射（匿名页）
-         *   - 含写权限（VM_WRITE）即可，不强求可读。
-         *     反作弊会将 BSS 权限故意设为 -w-p（只写无读），
-         *     原先的 VMA_IS_RW 宏要求同时具备读写，导致此类 BSS 被漏掉。
-         *   - 与上一个 VMA 首尾严格相连（vm_start == prev->vm_end）
-         *   - 上一个 VMA 属于我们正在追踪的模块（last_mod_idx >= 0）
+        RWX 代码段优先作为伪模块暴露，不依赖文件路径。
+        匿名映射 rwxp/rwxs: [anon:objects_external_alloc]
+        共享映射 rwxs: /dev/zero (deleted)
+        */
+        if (VMA_IS_RWX(vma))
+        {
+            char rwx_name[MOD_NAME_LEN];
+            const char *kind = (vma->vm_flags & VM_SHARED) ? "rwxs" : "rwxp";
+
+            if (vma->vm_file)
+            {
+                path = d_path(&vma->vm_file->f_path, path_buf, PATH_MAX);
+                if (!IS_ERR(path))
+                    scnprintf(rwx_name, sizeof(rwx_name), "%s:%s:%llx-%llx",
+                              kind, path,
+                              (unsigned long long)vma->vm_start,
+                              (unsigned long long)vma->vm_end);
+                else
+                    scnprintf(rwx_name, sizeof(rwx_name), "anon:%s:%llx-%llx",
+                              kind,
+                              (unsigned long long)vma->vm_start,
+                              (unsigned long long)vma->vm_end);
+            }
+            else
+            {
+                const char *anon_label = get_vma_anon_label(vma);
+                if (anon_label && anon_label[0])
+                    scnprintf(rwx_name, sizeof(rwx_name), "anon:%s", anon_label);
+                else
+                    scnprintf(rwx_name, sizeof(rwx_name), "anon:%s:%llx-%llx",
+                              kind,
+                              (unsigned long long)vma->vm_start,
+                              (unsigned long long)vma->vm_end);
+            }
+
+            last_mod_idx = find_or_add_module(info->modules, &info->module_count, (const uint8_t *)rwx_name);
+            if (last_mod_idx >= 0)
+                add_seg(&info->modules[last_mod_idx], 0, current_prot, vma->vm_start, vma->vm_end);
+
+            /*
+             RWX 特殊模块单独暴露，不参与 BSS 续接。
+             否则紧跟其后的匿名 RW 页会被误挂成该模块的 index=-1 段。
+            */
+            last_mod_idx = -1;
+        }
+
+        /*
+         BSS 检测条件：
+            无文件映射（匿名页）
+            含写权限（VM_WRITE）即可，不强求可读。
+            反作弊会将 BSS 权限故意设为 -w-p（只写无读），
+            原先的 VMA_IS_RW 宏要求同时具备读写，导致此类 BSS 被漏掉。
+            与上一个 VMA 首尾严格相连（vm_start == prev->vm_end）
+            上一个 VMA 属于我们正在追踪的模块（last_mod_idx >= 0）
          */
-        if (prev && !vma->vm_file && vma->vm_start == prev->vm_end &&
-            (vma->vm_flags & VM_WRITE) && last_mod_idx >= 0)
+        else if (prev && !vma->vm_file && vma->vm_start == prev->vm_end && (vma->vm_flags & VM_WRITE) && last_mod_idx >= 0)
         {
             add_seg(&info->modules[last_mod_idx], -1, current_prot, vma->vm_start, vma->vm_end);
             /*
-             * BSS 收集后继续保持 last_mod_idx 有效。
-             * 这样如果 BSS 后面紧跟着更多匿名 RW 碎片（极少见但存在），
-             * 也能被一并归入同一模块。
+            BSS 收集后继续保持 last_mod_idx 有效。
+            这样如果 BSS 后面紧跟着更多匿名 RW 碎片（极少见但存在），
+            也能被一并归入同一模块。
              */
         }
+
+        /*
+        普通so的文件映射收集
+        */
         else if (vma->vm_file)
         {
             last_mod_idx = -1;
@@ -263,8 +341,7 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
                 mod_accepted = false;
                 for (i = 0; mod_include_prefixes[i]; i++)
                 {
-                    if (__builtin_strncmp(path, mod_include_prefixes[i],
-                                          __builtin_strlen(mod_include_prefixes[i])) == 0)
+                    if (__builtin_strncmp(path, mod_include_prefixes[i], __builtin_strlen(mod_include_prefixes[i])) == 0)
                     {
                         mod_accepted = true;
                         break;
@@ -282,6 +359,7 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
         }
         else
         {
+            // 断开当前 VMA 和上一个模块的关联，防止后面的匿名内存被误认为是上一个模块的 BSS/尾部段。
             last_mod_idx = -1;
         }
 
@@ -343,107 +421,104 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
     mmap_read_unlock(mm);
 
     /*
-     * =========================================================================================
-     * 反作弊 VMA 碎裂与诱饵对抗机制
-     * =========================================================================================
-     *
-     * 【第一阶段：理想状态下的纯净内存布局 (原生 ELF 加载)】
-     *
-     * 当 Android 原生加载一个 libil2cpp.so 时，内存布局连续且规律。
-     * 现代 64 位 Android（LLVM/Clang 编译）出于安全考虑，至少产生以下几个连续段：
-     *
-     *   PT_LOAD[0] (r--)  : ELF Header + 只读数据（.rodata、.eh_frame 等），真实基址起点。
-     *   PT_LOAD[1] (r-x)  : .text 代码段，核心逻辑所在。
-     *   PT_LOAD[2] (rw-)  : .data.rel.ro + RELRO 安全页，写完重定位后锁为只读的数据。
-     *   PT_LOAD[3] (rw-)  : .data 全局变量段。
-     *   BSS        (-w-/rw-) : 尾部额外分配的匿名读写内存（零初始化全局变量）。
-     *
-     * 即便没有反作弊，最纯净的环境也自然产生 [RO -> RX -> RW -> RW -> RW(anon)] 的天然区段。
-     *
-     * 【第二阶段：顶级反作弊的四重攻击手段】
-     *
-     *   攻击一：VMA 碎裂
-     *   反作弊高频调用 mprotect() Hook 游戏函数，内核被迫将原本一整块 RX 代码段
-     *   "劈碎"成几十甚至上百个细碎 VMA，部分页被改为 RWX 混合权限，
-     *   彻底打乱原本连贯的天然区段。
-     *
-     *   攻击二：远端假诱饵
-     *   反作弊在距离真实模块上百 MB 远的极低地址（如 0x6e32250000）凭空 mmap()
-     *   一块假内存，命名为 libil2cpp.so，权限设为 RO。
-     *   常规合并算法会误把假地址当成模块基址，导致读取指针全部失效。
-     *
-     *   攻击三：prot 权限污染
-     *   代码段内部散布着少量 RWX 碎片（反作弊自身的 trampoline hook 页）。
-     *   若在缝合阶段对权限做 OR 合并，RWX 碎片的 W 位会"传染"整个代码段，
-     *   使本该是 RX 的代码段最终呈现为 RWX，干扰上层对段类型的判断。
-     *
-     *   攻击四：BSS 权限异化
-     *   反作弊将 BSS 段的权限故意设为 -w-p（只写，无读权限）。
-     *   若 BSS 检测逻辑要求 VM_READ|VM_WRITE，则此类 BSS 完全不可见，
-     *   导致上层计算出的模块尾部地址偏短，BSS 内的全局变量无法定位。
-     *
-     * 【第三阶段：七步对抗算法】
-     *
-     *   步骤 1：纯物理排序
-     *   无视所有权限和假象，按物理起始地址绝对升序排列所有碎片。
-     *   应对极端的反作弊内核级乱序映射干扰。
-     *
-     *   步骤 2：改进版体积聚类 (寻找生命主干)
-     *   ARM64 寻址限制要求真实 .so 内存紧凑相连。遍历碎片，相邻块缝隙超过
-     *   16MB (0x1000000) 即视为"内存断层"，划分不同群落。
-     *   累加每个群落的真实映射体积（严防重叠映射导致体积虚高），
-     *   体积最大、最丰满的群落即为真实的 .so 本体。
-     *
-     *   步骤 3：物理抹杀假诱饵 + BSS 豁免保留
-     *   锁定真实本体的 [best_base, best_end] 范围，剔除范围外的假诱饵碎片。
-     *   豁免：index==-1 的匿名 BSS 段即便 end 超出 best_end，
-     *   只要 start 在 best_end 附近（≤ 0x3000，一个 guard 页的余量），
-     *   就视为合法的本体尾部延伸，保留并动态扩展 best_end。
-     *   这直接解决了 反作弊 将 BSS 权限设为 -w-p 后尾部被误杀的问题。
-     *
-     *   步骤 4：严谨拓扑标记 (核心：破解权限篡改)
-     *   寻找天然的"防波堤"：向后扫描找到第一个"纯原生数据段 (有W无X)"。
-     *   在 Header 和第一个数据段之间的所有碎片，无论现在权限是 RO 还是 RWX，
-     *   物理拓扑上必定属于"核心代码段"，强制内部标签重置为 0(RX)。
-     *   跨过数据段后恢复原生判定，绝不越界吞噬。
-     *   内部临时标签约定：1=RO(头部), 0=RX(代码), 2=RW(数据), -1=BSS(保持不变)
-     *
-     *   步骤 4.5：强制规范化 prot (消除权限污染)
-     *   反作弊的 RWX hook 页在步骤 4 中已被正确归入代码段（index=0），
-     *   但其 W 位仍残留在 prot 字段中。
-     *   此步骤根据步骤 4 确立的权威拓扑标签，强制覆写每个碎片的 prot：
-     *     index=1(Header/RELRO) → prot=1(R)
-     *     index=0(Code)         → prot=5(RX)
-     *     index=2(Data)         → prot=3(RW)
-     *     index=-1(BSS)         → prot=3(RW)
-     *   彻底断绝 prot 污染，使对外输出的 prot 与原生 ELF 加载完全一致。
-     *
-     *   步骤 5：拉链式精准缝合 (还原原生边界)
-     *   遍历洗白后的碎片，仅当相邻碎片【首尾绝对相连】且【拓扑标签一致】时，
-     *   进行无缝拉链式融合。天然的段边界（如 RX→RO、RO→RW）自然断开保留。
-     *   缝合时不再合并 prot（步骤 4.5 已完成规范化，此处无需再动）。
-     *
-     *   步骤 6：最终 Index 序列化
-     *   给缝合后的完美区段重新发放 0, 1, 2, 3... 的连续 Index，BSS 保留 -1。
-     *
-     * 【最终结果】：
-     * 无论反作弊怎么切分、放诱饵、异化权限，跑完此算法后，
-     * 产出结果与干净手机上的原生 ELF 映射 1:1 完全一致。
-     *
-     * 典型输出（libil2cpp.so，保护环境）：
-     *   seg[0] index=0  prot=1(R)  → PT_LOAD[0] ELF Header
-     *   seg[1] index=1  prot=5(RX) → PT_LOAD[1] .text 代码段
-     *   seg[2] index=2  prot=3(RW) → PT_LOAD[2] .data.rel.ro
-     *   seg[3] index=3  prot=1(R)  → RELRO 只读页
-     *   seg[4] index=4  prot=3(RW) → PT_LOAD[3] .data
-     *   seg[5] index=-1 prot=3(RW) → BSS (原始权限 -w-p，已被规范化)
-     *   seg[6] index=5  prot=5(RX) → PT_LOAD[4]
-     *   seg[7] index=6  prot=3(RW) → PT_LOAD[5]
-     *   seg[8] index=7  prot=3(RW) → PT_LOAD[6]
-     *
-     * 外部调用：Base = info->modules[X].segs[0].start，即可获取绝对真实基址。
-     * =========================================================================================
-     */
+     =========================================================================================
+     反作弊 VMA 碎裂与诱饵对抗机制
+     =========================================================================================
+
+    【第一阶段：理想状态下的纯净内存布局 (原生 ELF 加载)】
+
+      当 Android 原生加载一个 libil2cpp.so 时，内存布局连续且规律。
+      现代 64 位 Android（LLVM/Clang 编译）出于安全考虑，至少产生以下几个连续段：
+        PT_LOAD[0] (r--)  : ELF Header + 只读数据（.rodata、.eh_frame 等），真实基址起点。
+        PT_LOAD[1] (r-x)  : .text 代码段，核心逻辑所在。
+        PT_LOAD[2] (rw-)  : .data.rel.ro + RELRO 安全页，写完重定位后锁为只读的数据。
+        PT_LOAD[3] (rw-)  : .data 全局变量段。
+        BSS        (-w-/rw-) : 尾部额外分配的匿名读写内存（零初始化全局变量）。
+
+      即便没有反作弊，最纯净的环境也自然产生 [RO -> RX -> RW -> RW -> RW(anon)] 的天然区段。
+
+    【第二阶段：反作弊的多层保护】
+
+    保护一：VMA 碎裂
+        反作弊调用 mprotect() Hook 游戏函数，内核被迫将原本一整块 RX 代码段
+        "劈碎"成几十甚至上百个细碎 VMA，部分页被改为 RWX 混合权限，
+        彻底打乱原本连贯的天然区段。
+
+    保护二：远端假诱饵
+        反作弊在距离真实模块上百 MB 远的极低地址（如 0x6e32250000）凭空 mmap()
+        一块假内存，命名为 libil2cpp.so，权限设为 RO。
+        常规合并算法会误把假地址当成模块基址，导致读取指针全部失效。
+
+    保护三：prot 权限污染
+        代码段内部散布着少量 RWX 碎片（反作弊自身的 trampoline hook 页）。
+        若在缝合阶段对权限做 OR 合并，RWX 碎片的 W 位会"传染"整个代码段，
+        使本该是 RX 的代码段最终呈现为 RWX，干扰上层对段类型的判断。
+
+    保护四：BSS 权限异化
+       反作弊将 BSS 段的权限故意设为 -w-p（只写，无读权限）。并碎裂BSS段，或分配虚假bss段
+
+
+    【第三阶段：对抗算法】
+
+    步骤 1：纯物理排序
+        无视所有权限和假象，按物理起始地址绝对升序排列所有碎片。
+        应对极端的乱序映射干扰。
+
+    步骤 2：改进版体积聚类 (寻找生命主干)
+        ARM64 寻址限制要求真实 .so 内存紧凑相连。遍历碎片，相邻块缝隙超过
+        16MB (0x1000000) 即视为"内存断层"，划分不同群落。
+        累加每个群落的真实映射体积（严防重叠映射导致体积虚高），
+        体积最大的群落即为真实的 .so 本体。
+
+    步骤 3：物理抹杀假诱饵 + BSS 豁免保留
+        锁定真实本体的 [best_base, best_end] 范围，剔除范围外的假诱饵碎片。
+        豁免：index==-1 的匿名 BSS 段即便 end 超出 best_end，
+        只要 start 在 best_end 附近（≤ 0x3000，一个 guard 页的余量），
+        就视为合法的本体尾部延伸，保留并动态扩展 best_end。
+        这直接解决了 反作弊 将 BSS 权限设为 -w-p 后尾部被误杀的问题。
+
+    步骤 4：严谨拓扑标记 (破解权限篡改)
+        寻找天然的"防波堤"：向后扫描找到第一个"纯原生数据段 (有W无X)"。
+        在 Header 和第一个数据段之间的所有碎片，无论现在权限是 RO 还是 RWX，
+        物理拓扑上必定属于"核心代码段"，强制内部标签重置为 0(RX)。
+        跨过数据段后恢复原生判定，不越界吞噬。
+        内部临时标签约定：1=RO(头部), 0=RX(代码), 2=RW(数据), -1=BSS(保持不变)
+
+    步骤 5：强制规范化 prot (消除权限污染)
+        反作弊的 RWX hook 页在步骤 4 中已被正确归入代码段（index=0），
+        但其 W 位仍残留在 prot 字段中。
+        此步骤根据步骤 4 确立的权威拓扑标签，强制覆写每个碎片的 prot：
+          index=1(Header/RELRO) → prot=1(R)
+          index=0(Code)         → prot=5(RX)
+          index=2(Data)         → prot=3(RW)
+          index=-1(BSS)         → prot=3(RW)
+        彻底断绝 prot 污染，使对外输出的 prot 与原生 ELF 加载完全一致。
+
+    步骤 6：拉链式缝合 (还原原生边界)
+       遍历洗白后的碎片，仅当相邻碎片【首尾绝对相连】且【拓扑标签一致】时，
+       进行无缝拉链式融合。天然的段边界（如 RX→RO、RO→RW）自然断开保留。
+       缝合时不再合并 prot（步骤 5 已完成规范化，此处无需再动）。
+
+    步骤 7：最终 Index 序列化
+       给缝合后的完美区段重新发放 0, 1, 2, 3... 的连续 Index，BSS 保留 -1。
+
+     【最终】：
+      无论反作弊怎么切分、放诱饵、异化权限，跑完后，
+      产出结果与干净手机上的原生 ELF 映射 差不多一致。
+
+    典型输出（libil2cpp.so，保护环境）：
+      seg[0] index=0  prot=1(R)  → PT_LOAD[0] ELF Header
+      seg[1] index=1  prot=5(RX) → PT_LOAD[1] .text 代码段
+      seg[2] index=2  prot=3(RW) → PT_LOAD[2] .data.rel.ro
+      seg[3] index=3  prot=1(R)  → RELRO 只读页
+      seg[4] index=4  prot=3(RW) → PT_LOAD[3] .data
+      seg[5] index=-1 prot=3(RW) → BSS (原始权限 -w-p，已被规范化)
+      seg[6] index=5  prot=5(RX) → PT_LOAD[4]
+      seg[7] index=6  prot=3(RW) → PT_LOAD[5]
+      seg[8] index=7  prot=3(RW) → PT_LOAD[6]
+      Base = info->modules[X].segs[0].start，即可获取真实基址。
+    =========================================================================================
+    */
 
     for (i = 0; i < info->module_count; i++)
     {
@@ -451,7 +526,14 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
 
         if (m->seg_count > 0)
         {
-            /* --- 步骤 1：纯物理地址排序 --- */
+            /*
+            匿名 RWX 伪模块不是 ELF 文件段，不参与下面的 so 段聚类、
+            拓扑标记和 prot 规范化，否则 rwxp/rwxs 会被洗成 r-x。
+            */
+            if (module_is_anon_rwx(m))
+                continue;
+
+            /* 步骤 1：纯物理地址排序 */
             for (int x = 1; x < m->seg_count; x++)
             {
                 struct segment_info key = m->segs[x];
@@ -464,7 +546,7 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
                 m->segs[y + 1] = key;
             }
 
-            /* --- 步骤 2：改进版体积聚类 (寻找生命主干) --- */
+            /* 步骤 2：体积聚类 (寻找生命主干)  */
             uint64_t current_base = m->segs[0].start;
             uint64_t current_end = m->segs[0].end;
             uint64_t current_volume = m->segs[0].end - m->segs[0].start;
@@ -506,13 +588,13 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
                 best_end = current_end;
             }
 
-            /* --- 步骤 3：物理抹杀假诱饵 + BSS 豁免保留 --- */
+            /* 步骤 3：物理抹杀假诱饵 + BSS 豁免保留  */
             /*
-             * 常规判定：碎片必须完整落在 [best_base, best_end] 内。
-             * BSS 豁免：index==-1 的匿名段，start 在 best_end 附近（≤0x3000）
-             * 即视为本体尾部延伸，保留并动态扩展 best_end，
-             * 防止后续 BSS 碎片因 end 超界而被误杀。
-             */
+            常规判定：碎片必须完整落在 [best_base, best_end] 内。
+            BSS 豁免：index==-1 的匿名段，start 在 best_end 附近（≤0x3000）
+            即视为本体尾部延伸，保留并动态扩展 best_end，
+            防止后续 BSS 碎片因 end 超界而被误杀。
+            */
             int valid_count = 0;
             for (j = 0; j < m->seg_count; j++)
             {
@@ -578,12 +660,12 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
                 }
             }
 
-            /* --- 步骤 4.5：强制规范化 prot (消除反作弊权限污染) --- */
             /*
-             * 步骤 4 已建立权威拓扑标签，此处根据标签反推标准 prot，
-             * 同时修正 BSS 的 -w-p 异常权限为标准 RW。
-             * 缝合阶段（步骤 5）不再需要合并 prot。
-             */
+            步骤 5：强制规范化 prot (消除反作弊权限污染)
+            前面步骤 4 已建立权威拓扑标签，此处根据标签反推标准 prot，
+            同时修正 BSS 的 -w-p 异常权限为标准 RW。
+            缝合阶段（步骤 5）不再需要合并 prot。
+            */
             for (j = 0; j < m->seg_count; j++)
             {
                 switch (m->segs[j].index)
@@ -603,7 +685,7 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
                 }
             }
 
-            /* --- 步骤 5：拉链式精准缝合 --- */
+            /*  步骤 6：拉链式缝合  */
             int out_idx = 0;
             for (j = 1; j < m->seg_count; j++)
             {
@@ -625,7 +707,7 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
             }
             m->seg_count = out_idx + 1;
 
-            /* --- 步骤 6：最终 Index 序列化 --- */
+            /* 步骤 7：最终 Index 序列化  */
             seq = 0;
             for (j = 0; j < m->seg_count; j++)
             {
