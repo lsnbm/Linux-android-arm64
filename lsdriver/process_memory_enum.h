@@ -288,6 +288,11 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
             }
             else
             {
+                /*
+                根据anon_label标签把两个不同地址的动态代码段合并成同一伪模块
+                并按内存地址顺序排序
+                没有做每个 VMA 都是独立的伪模块
+                */
                 const char *anon_label = get_vma_anon_label(vma);
                 if (anon_label && anon_label[0])
                     scnprintf(rwx_name, sizeof(rwx_name), "anon:%s", anon_label);

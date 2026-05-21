@@ -18,7 +18,6 @@ from PySide6.QtGui import QMouseEvent, QTextCursor, QWheelEvent
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
-    QDialog,
     QFrame,
     QHBoxLayout,
     QInputDialog,
@@ -332,136 +331,38 @@ class TcpTestWindow(QWidget):
         self._build_settings_page()
         self._log("客户端已启动。")
         self._set_connection_ui(False)
-        self._show_connect_login_dialog()
 
     def _build_connection_panel(self, root: QVBoxLayout) -> None:
         card = self._create_card("panelCard")
         root.addWidget(card)
 
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(14, 12, 14, 12)
+        layout = QHBoxLayout(card)
+        layout.setContentsMargins(10, 8, 10, 8)
         layout.setSpacing(8)
 
-        heading_row = QHBoxLayout()
-        heading_row.setSpacing(8)
         title = QLabel("连接")
         title.setObjectName("sectionTitle")
-        heading_row.addWidget(title)
-        heading_row.addStretch(1)
+        layout.addWidget(title)
 
         self.scan_device_button = QPushButton("扫描设备")
         self.scan_device_button.clicked.connect(self.on_scan_lan_devices)
-        heading_row.addWidget(self.scan_device_button)
-        layout.addLayout(heading_row)
+        layout.addWidget(self.scan_device_button)
 
-        device_row = QHBoxLayout()
-        device_row.setSpacing(10)
-        device_row.addWidget(QLabel("局域网设备"))
         self.device_combo = QComboBox()
         self.device_combo.setEditable(False)
         self.device_combo.addItem("请点击“扫描设备”获取列表", "")
-        device_row.addWidget(self.device_combo, 1)
+        self.device_combo.setMinimumWidth(260)
+        layout.addWidget(self.device_combo, 1)
 
-        device_row.addWidget(QLabel("端口"))
+        layout.addWidget(QLabel("端口"))
         self.port_input = QLineEdit(str(DEFAULT_PORT))
-        self.port_input.setPlaceholderText("请输入目标端口")
-        self.port_input.setMaximumWidth(120)
-        device_row.addWidget(self.port_input)
+        self.port_input.setPlaceholderText("端口")
+        self.port_input.setFixedWidth(78)
+        layout.addWidget(self.port_input)
 
         self.test_button = QPushButton("连接到设备")
         self.test_button.clicked.connect(self.on_toggle_connection)
-        device_row.addWidget(self.test_button)
-        layout.addLayout(device_row)
-
-    def _show_connect_login_dialog(self) -> None:
-        if self._is_connected():
-            return
-
-        dialog = QDialog(self)
-        dialog.setWindowTitle("连接到设备")
-        dialog.setModal(True)
-        dialog.resize(540, 220)
-
-        layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(18, 16, 18, 14)
-        layout.setSpacing(10)
-
-        card = self._create_card("panelCard")
-        card.setParent(dialog)
-        card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(18, 16, 18, 16)
-        card_layout.setSpacing(12)
-        layout.addWidget(card)
-
-        device_row = QHBoxLayout()
-        device_row.addWidget(QLabel("局域网设备"))
-        device_combo = QComboBox()
-        device_combo.addItem("请点击“扫描设备”获取列表", "")
-        device_row.addWidget(device_combo, 1)
-        scan_button = QPushButton("扫描设备")
-        device_row.addWidget(scan_button)
-        card_layout.addLayout(device_row)
-
-        port_row = QHBoxLayout()
-        port_row.addWidget(QLabel("端口"))
-        port_input = QLineEdit(str(DEFAULT_PORT))
-        port_input.setMaximumWidth(140)
-        port_row.addWidget(port_input)
-        port_row.addStretch(1)
-        card_layout.addLayout(port_row)
-
-        status_label = QLabel("未连接")
-        status_label.setObjectName("sectionHint")
-        card_layout.addWidget(status_label)
-
-        btn_row = QHBoxLayout()
-        btn_row.addStretch(1)
-        cancel_btn = QPushButton("取消")
-        connect_btn = QPushButton("连接并进入")
-        btn_row.addWidget(cancel_btn)
-        btn_row.addWidget(connect_btn)
-        layout.addLayout(btn_row)
-
-        def on_scan() -> None:
-            scan_button.setEnabled(False)
-            status_label.setText("正在扫描局域网设备，请稍候...")
-            QApplication.processEvents()
-            try:
-                devices = self._discover_lan_devices()
-            except Exception as exc:  # noqa: BLE001
-                devices = []
-                status_label.setText(f"扫描失败: {exc}")
-            else:
-                device_combo.clear()
-                if not devices:
-                    device_combo.addItem("未发现设备，请确认同网段后重试", "")
-                    status_label.setText("扫描完成：未发现设备")
-                else:
-                    for ip_text, mac_text in devices:
-                        device_combo.addItem(f"{ip_text}    [{mac_text}]", ip_text)
-                    status_label.setText(f"扫描完成：发现 {len(devices)} 台设备")
-            scan_button.setEnabled(True)
-
-        def on_connect() -> None:
-            host_data = device_combo.currentData()
-            host = str(host_data).strip() if host_data is not None else ""
-            self.device_combo.clear()
-            if host:
-                self.device_combo.addItem(host, host)
-                self.device_combo.setCurrentIndex(0)
-            self.port_input.setText(port_input.text().strip())
-            self._connect_device()
-            if self._is_connected():
-                dialog.accept()
-            else:
-                status_label.setText(self.status_label.text())
-
-        scan_button.clicked.connect(on_scan)
-        connect_btn.clicked.connect(on_connect)
-        cancel_btn.clicked.connect(dialog.reject)
-
-        if dialog.exec() != QDialog.Accepted and not self._is_connected():
-            QTimer.singleShot(0, self.close)
+        layout.addWidget(self.test_button)
 
     def _is_pointer_tab_active(self) -> bool:
         return self.tabs.currentWidget() is self.pointer_page
@@ -1027,7 +928,7 @@ class TcpTestWindow(QWidget):
         )
         card, card_layout = self._create_section_card(parent=self.settings_page)
         layout.addWidget(card, 1)
-        tip = QLabel("设置页已留空。请先在顶部连接到设备后再使用其它页面功能。")
+        tip = QLabel("设置页已留空。设备扫描和连接在顶部控制栏完成。")
         tip.setWordWrap(True)
         card_layout.addWidget(tip)
         card_layout.addStretch(1)
@@ -1065,13 +966,9 @@ class TcpTestWindow(QWidget):
         return self.bridge_session.is_connected()
 
     def _set_feature_gate(self, connected: bool) -> None:
-        # 未连接时，仅保留“设置页”可操作。
+        # 断开后保留所有页面可见，方便继续查看已获取的数据。
         for i in range(self.tabs.count()):
-            page = self.tabs.widget(i)
-            enabled = connected or (page is self.settings_page)
-            self.tabs.setTabEnabled(i, enabled)
-        if not connected and self.tabs.currentWidget() is not self.settings_page:
-            self.tabs.setCurrentWidget(self.settings_page)
+            self.tabs.setTabEnabled(i, True)
         self.pid_input.setEnabled(connected)
         self.sync_pid_button.setEnabled(connected)
 
@@ -1161,19 +1058,6 @@ class TcpTestWindow(QWidget):
         self.pointer_scan_running = False
         self.pointer_status_request_inflight = False
         self.hwbp_refresh_inflight = False
-        self.hwbp_active = False
-        self.hwbp_selected_index = None
-        self._clear_hwbp_edit_state()
-        self.global_pid_label.setText("--")
-        self.pointer_status_label.setText("扫描状态: 未连接")
-        self.hwbp_num_brps_label.setText("hwbp_info.num_brps: 0")
-        self.hwbp_num_wrps_label.setText("hwbp_info.num_wrps: 0")
-        self.hwbp_points_label.setText("hwbp_info.points: []")
-        self.browser_cache_base = 0
-        self.browser_cache_data = b""
-        self.browser_current_addr = 0
-        self.hwbp_tree.clear()
-        self._apply_hwbp_active_state()
         if reason:
             self._set_status(reason)
 

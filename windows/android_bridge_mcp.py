@@ -191,7 +191,7 @@ def android_connection() -> dict[str, Any]:
 
 @mcp.resource("android://guide")
 def android_guide() -> dict[str, Any]:
-    """Return minimal AI tool guide with workflow, limits, parameters, results, and examples."""
+    """Return concise AI tool usage docs with purpose, parameters, and examples."""
     return _build_ai_guide_payload()
 
 
@@ -279,7 +279,7 @@ def android_target_current() -> dict[str, Any]:
 
 @mcp.tool()
 def android_memory_regions() -> dict[str, Any]:
-    """Fetch module and segment information for the current target process."""
+    """Fetch module and segment information only; scan regions are not returned to MCP clients."""
     return _strip_scan_regions(_call_bridge_operation("memory.info.full"))
 
 
@@ -514,18 +514,15 @@ def android_breakpoint_record_update(index: int, field: str, value: int | str) -
 
 @mcp.tool()
 def android_help(topic: str = "all") -> dict[str, Any]:
-    """Return minimal tool docs for AI clients. topic can be all/<tool_name>."""
+    """Return minimal tool docs for AI clients. topic can be 'all' or an exact tool name."""
     topic_token = str(topic).strip().lower() or "all"
     guide = _build_ai_guide_payload()
     if topic_token == "all":
         return guide
     selected = [item for item in guide["tools"] if str(item.get("name", "")).lower() == topic_token]
     if selected:
-        return {
-            "topic": "tool",
-            "tool": selected[0],
-        }
-    raise ValueError(f"unknown topic: {topic}. use all/<tool_name>")
+        return {"tools": [selected[0]]}
+    raise ValueError(f"unknown topic: {topic}. use 'all' or an exact tool name")
 
 
 def _normalize_http_path(path: str) -> str:
@@ -643,7 +640,7 @@ TOOL_META: dict[str, dict[str, Any]] = {
     },
     "android_memory_regions": {
         "group": "Target Selection",
-        "use_when": "Query loaded modules and module segments for address planning.",
+        "use_when": "Get loaded module list and segment ranges for address planning; scan regions are not returned.",
         "example": {},
         "parameter_notes": {},
         "result_notes": "MCP returns modules only; scan regions are intentionally omitted to keep AI payloads small.",
@@ -665,8 +662,8 @@ TOOL_META: dict[str, dict[str, Any]] = {
         "example": {"value_type": "i32", "mode": "eq", "value": "1234"},
         "parameter_notes": {
             "value_type": "i8/i16/i32/i64/f32/f64.",
-            "mode": "unknown/eq/gt/lt/inc/dec/changed/unchanged/range/pointer.",
-            "value": "Required unless mode=unknown.",
+            "mode": "unknown/eq/gt/lt/inc/dec/changed/unchanged/range/pointer/string.",
+            "value": "Required unless mode=unknown. For string mode, pass the text to scan.",
             "range_max": "Optional range bound, used for range mode.",
         },
         "result_notes": "Starts (or refreshes) scanner state and returns immediate status.",
@@ -826,7 +823,7 @@ TOOL_META: dict[str, dict[str, Any]] = {
         "group": "Docs",
         "use_when": "Fetch tool usage docs directly from tool channel.",
         "example": {"topic": "android_memory_view_open"},
-        "parameter_notes": {"topic": "all/<tool_name>."},
+        "parameter_notes": {"topic": "'all' or an exact tool name."},
         "result_notes": "Returns minimal tool usage docs.",
     },
 }
@@ -895,7 +892,6 @@ def _build_tool_catalog() -> list[dict[str, Any]]:
                 "purpose": str(meta.get("use_when", "") or tool.description or ""),
                 "parameters": _build_tool_parameter_docs(tool.parameters, parameter_notes),
                 "example": dict(meta.get("example", {})) if isinstance(meta.get("example"), dict) else meta.get("example", {}),
-                "result": str(meta.get("result_notes", "")),
             }
         )
     return catalog
@@ -914,8 +910,8 @@ def _render_tool_guide(tool_catalog: list[dict[str, Any]]) -> str:
             sections.extend(
                 [
                     f"- {tool['name']}",
-                    f"  作用: {tool.get('purpose', '')}",
-                    "  参数说明:",
+                    f"  工作作用: {tool.get('purpose', '')}",
+                    "  参数:",
                 ]
             )
             parameters = tool.get("parameters", [])
@@ -935,29 +931,13 @@ def _render_tool_guide(tool_catalog: list[dict[str, Any]]) -> str:
                     sections.append(fragment)
             else:
                 sections.append("  - 无")
-            if tool.get("result"):
-                sections.append(f"  返回: {tool.get('result', '')}")
             sections.append(f"  调用示例: {example_text}")
         sections.append("")
     return "\n".join(sections).strip()
 
 
 def _build_ai_guide_payload() -> dict[str, Any]:
-    return {
-        "workflow": [
-            "configure_android_bridge",
-            "connect_android_bridge",
-            "android_bridge_ping",
-            "android_target_attach_package or android_target_set_pid",
-            "call task-specific tools",
-        ],
-        "limits": {
-            "android_memory_regions": "MCP returns modules only; scan regions stay available to backend/Windows UI.",
-            "android_memory_scan_results": "count is capped at 200.",
-            "android_memory_view_read": "returns one shared 100-byte cache; disasm adds decoded lines from that cache.",
-        },
-        "tools": _build_tool_catalog(),
-    }
+    return {"tools": _build_tool_catalog()}
 
 
 def _build_connection_steps(runtime: dict[str, Any]) -> str:
@@ -1033,7 +1013,7 @@ def _build_config_html(runtime: dict[str, Any]) -> str:
     guide_text = "\n\n".join(
         [
             "NativeTcpBridge MCP Tool Guide",
-            "仅包含: 工具作用 / 参数说明 / 返回说明 / 调用示例",
+            "仅包含: 工作作用 / 参数 / 调用示例",
             f"{_render_tool_guide(tool_catalog)}",
         ]
     )

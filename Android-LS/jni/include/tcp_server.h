@@ -968,10 +968,8 @@ namespace
 
         if (op == "memory.info.full")
         {
-            const int status = dr->GetMemoryInformation();
-            if (status != 0)
-                return fail(std::format("刷新失败 status={}", status));
-            return okData(buildMemoryInfoJson(status, dr->GetMemoryInfoRef()));
+            const auto &info = dr->GetMemoryInfoRef();
+            return okData(buildMemoryInfoJson(0, info));
         }
 
         if (op == "module.resolve")

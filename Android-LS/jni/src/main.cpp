@@ -677,7 +677,8 @@ private:
                 ImVec4 c = state_.tab == i ? Colors::BTN_ACTIVE : Colors::BTN_INACTIVE;
                 if (UI::Btn(labels[i], {bw, h - S(14)}, c)) {
                     state_.tab = i;
-                    if (i == 3 || i == 5) dr->GetMemoryInformation();
+                    if (i == 3 || i == 5) dr->GetMemoryInfoRef();
+                    if (i == 6) dr->GetHwbpInfoRef();
                     if (i == 2 && memViewer_.base()) memViewer_.refresh();
                 }
             } }, ImGuiWindowFlags_NoScrollbar);
@@ -1072,7 +1073,7 @@ private:
                   buf_.moduleSearch, 63, "输入模块名进行搜索或Dump");
         UI::Space(S(4));
         if (UI::Btn("刷新模块", {w, S(48)}, Colors::BTN_TEAL))
-            dr->GetMemoryInformation();
+            dr->GetMemoryInfoRef();
         UI::Space(S(6));
         if (UI::Btn("Dump 模块 (保存至 /sdcard/dump/)", {w, S(48)}, Colors::BTN_PURPLE))
         {

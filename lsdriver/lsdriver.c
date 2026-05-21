@@ -22,6 +22,7 @@
 #include "process_memory_enum.h"
 #include "hide_process.h"
 #include "hide_kgsl.h"
+#include "get_decrypt_params.h"
 
 static struct req_obj *req = NULL;
 

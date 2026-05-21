@@ -456,25 +456,6 @@ public: // 外部读写接口
         return "";
     }
 
-    std::string ReadWString(uintptr_t address, size_t length)
-    {
-        if (length <= 0 || length > 1024)
-            return "";
-        std::vector<char16_t> buffer(length);
-        if (Read(address, buffer.data(), length * sizeof(char16_t)) > 0)
-        {
-            std::string result;
-            for (size_t i = 0; i < length; ++i)
-            {
-                if (buffer[i] == 0)
-                    break;
-                result.push_back(buffer[i] < 128 ? static_cast<char>(buffer[i]) : '?');
-            }
-            return result;
-        }
-        return "";
-    }
-
     template <typename T>
     int Write(uint64_t address, const T &value)
     {
@@ -500,15 +481,14 @@ public: // 外部触摸接口
     void TouchUp(int slot) { HandleTouchEvent(sm_req_op::op_up, slot, 1, 1, 1, 1); }
 
 public: // 外部获取内存信息
-    // 获取进程内存信息(刷新)
-    int GetMemoryInformation()
-    {
-        return GetMemoryInfo();
-    }
-
     // 获取内部结构体实例 内部成员调用不需要显示使用this指针，隐式this
-    const memory_info &GetMemoryInfoRef() const
+    const memory_info &GetMemoryInfoRef()
     {
+        if (GetMemoryInfo() != 0)
+        {
+            std::println("获取内存信息失败!!!");
+            __builtin_memset(&req->mem_info, 0, sizeof(req->mem_info));
+        }
         return req->mem_info;
     }
 
@@ -684,12 +664,6 @@ public: // 外部获取内存信息
                    tag == 0x60000011 /* DT_ANDROID_RELA */ ||
                    tag == 0x60000012 /* DT_ANDROID_REL_OFFSET */;
         };
-
-        if (GetMemoryInformation() != 0)
-        {
-            std::println(stderr, "[-] Dump: 驱动获取内存信息失败");
-            return false;
-        }
 
         const auto &info = GetMemoryInfoRef();
         const module_info *targetMod = nullptr;
