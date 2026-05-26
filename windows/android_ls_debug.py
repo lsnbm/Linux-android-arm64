@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QSplitter,
     QTabWidget,
     QTextEdit,
@@ -56,6 +57,18 @@ HWBP_OP_LABELS = {
     "0": "未设置",
     "1": "读取",
     "2": "写入",
+}
+HWBP_POINT_TYPE_LABELS = {
+    0: "未设置",
+    1: "读取",
+    2: "写入",
+    3: "读写",
+    4: "执行",
+}
+HWBP_SCOPE_LABELS = {
+    0: "主线程",
+    1: "子线程",
+    2: "全部",
 }
 HWBP_MAX_REG_COUNT = 71
 HWBP_REG_INDEX = {
@@ -167,10 +180,6 @@ class TcpTestWindow(QWidget):
         self.hwbp_info_data: dict | None = None
         self.hwbp_active = False
         self.hwbp_selected_index: int | None = None
-        self.hwbp_editing_index: int | None = None
-        self.hwbp_edit_original: dict[str, str] = {}
-        self.hwbp_edit_values: dict[str, str] = {}
-        self.hwbp_edit_dirty_fields: set[str] = set()
         self.hwbp_point_rows: list[dict[str, object]] = []
         self.live_refresh_timer = QTimer(self)
         self.live_refresh_timer.setInterval(1000)
@@ -195,12 +204,7 @@ class TcpTestWindow(QWidget):
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(10)
 
-        title = QLabel(title_text)
-        title.setObjectName("sectionTitle")
-        layout.addWidget(title)
-
-        # 工具型界面默认隐藏页面说明文案，保留紧凑布局。
-        _ = hint_text
+        _ = (title_text, hint_text)
         return layout
 
     def _create_section_card(
@@ -233,64 +237,96 @@ class TcpTestWindow(QWidget):
 
     def _build_header_panel(self, root: QVBoxLayout) -> None:
         hero_card = self._create_card("heroCard")
-        hero_layout = QHBoxLayout(hero_card)
-        hero_layout.setContentsMargins(12, 8, 12, 8)
-        hero_layout.setSpacing(10)
+        hero_layout = QVBoxLayout(hero_card)
+        hero_layout.setContentsMargins(10, 6, 10, 6)
+        hero_layout.setSpacing(6)
+
+        status_row = QHBoxLayout()
+        status_row.setContentsMargins(0, 0, 0, 0)
+        status_row.setSpacing(8)
 
         self.connection_badge = QLabel("未连接")
         self.connection_badge.setObjectName("connectionBadge")
         self._update_connection_badge(False)
+        status_row.addWidget(self.connection_badge)
 
         self.global_pid_label = QLabel("--")
         self.global_pid_label.setObjectName("metricValue")
-        self.global_pid_label.setMinimumWidth(60)
-
-        session_info_layout = QHBoxLayout()
-        session_info_layout.setContentsMargins(0, 0, 0, 0)
-        session_info_layout.setSpacing(10)
+        self.global_pid_label.setMinimumWidth(50)
         pid_prefix = QLabel("PID")
         pid_prefix.setObjectName("metricTitle")
-        session_info_layout.addWidget(self.connection_badge)
-        session_info_layout.addWidget(pid_prefix)
-        session_info_layout.addWidget(self.global_pid_label)
+        status_row.addWidget(pid_prefix)
+        status_row.addWidget(self.global_pid_label)
 
         self.status_label = QLabel("客户端已启动")
         self.status_label.setObjectName("statusText")
         self.status_label.setWordWrap(False)
-        self.status_label.setMinimumWidth(220)
+        self.status_label.setMinimumWidth(180)
+        self.status_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
         status_prefix = QLabel("状态")
         status_prefix.setObjectName("metricTitle")
-        session_info_layout.addWidget(status_prefix)
-        session_info_layout.addWidget(self.status_label)
+        status_row.addWidget(status_prefix)
+        status_row.addWidget(self.status_label)
 
         pid_input_prefix = QLabel("PID / 包名")
         pid_input_prefix.setObjectName("metricTitle")
-        session_info_layout.addWidget(pid_input_prefix)
+        status_row.addWidget(pid_input_prefix)
 
         self.pid_input = QLineEdit()
         self.pid_input.setPlaceholderText("例如 12345 或 me.hd.ggtutorial")
-        self.pid_input.setMinimumWidth(280)
+        self.pid_input.setMinimumWidth(260)
+        self.pid_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.pid_input.returnPressed.connect(self.on_sync_pid)
-        session_info_layout.addWidget(self.pid_input, 1)
+        status_row.addWidget(self.pid_input, 1)
 
         self.sync_pid_button = QPushButton("同步 PID")
         self.sync_pid_button.clicked.connect(self.on_sync_pid)
-        session_info_layout.addWidget(self.sync_pid_button)
+        status_row.addWidget(self.sync_pid_button)
 
-        hero_layout.addLayout(session_info_layout, 1)
+        connection_row = QHBoxLayout()
+        connection_row.setContentsMargins(0, 0, 0, 0)
+        connection_row.setSpacing(8)
+
+        self.scan_device_button = QPushButton("扫描设备")
+        self.scan_device_button.clicked.connect(self.on_scan_lan_devices)
+        connection_row.addWidget(self.scan_device_button)
+
+        self.device_combo = QComboBox()
+        self.device_combo.setEditable(True)
+        self.device_combo.addItem("", "")
+        self.device_combo.setCurrentText("")
+        if self.device_combo.lineEdit() is not None:
+            self.device_combo.lineEdit().setPlaceholderText("输入设备 IP，或点击扫描设备")
+            self.device_combo.lineEdit().returnPressed.connect(self.on_toggle_connection)
+        self.device_combo.setMinimumWidth(320)
+        self.device_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        connection_row.addWidget(self.device_combo, 1)
+
+        port_label = QLabel("端口")
+        port_label.setObjectName("metricTitle")
+        connection_row.addWidget(port_label)
+
+        self.port_input = QLineEdit(str(DEFAULT_PORT))
+        self.port_input.setPlaceholderText("端口")
+        self.port_input.setFixedWidth(78)
+        connection_row.addWidget(self.port_input)
+
+        self.test_button = QPushButton("连接到设备")
+        self.test_button.clicked.connect(self.on_toggle_connection)
+        connection_row.addWidget(self.test_button)
+        hero_layout.addLayout(connection_row)
+        hero_layout.addLayout(status_row)
 
         root.addWidget(hero_card)
 
     def _setup_ui(self) -> None:
         self._apply_window_style()
         root = QVBoxLayout(self)
-        root.setContentsMargins(18, 18, 18, 14)
-        root.setSpacing(14)
+        root.setContentsMargins(12, 10, 12, 10)
+        root.setSpacing(8)
 
         self._build_header_panel(root)
-
-        self._build_connection_panel(root)
 
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
@@ -331,38 +367,6 @@ class TcpTestWindow(QWidget):
         self._build_settings_page()
         self._log("客户端已启动。")
         self._set_connection_ui(False)
-
-    def _build_connection_panel(self, root: QVBoxLayout) -> None:
-        card = self._create_card("panelCard")
-        root.addWidget(card)
-
-        layout = QHBoxLayout(card)
-        layout.setContentsMargins(10, 8, 10, 8)
-        layout.setSpacing(8)
-
-        title = QLabel("连接")
-        title.setObjectName("sectionTitle")
-        layout.addWidget(title)
-
-        self.scan_device_button = QPushButton("扫描设备")
-        self.scan_device_button.clicked.connect(self.on_scan_lan_devices)
-        layout.addWidget(self.scan_device_button)
-
-        self.device_combo = QComboBox()
-        self.device_combo.setEditable(False)
-        self.device_combo.addItem("请点击“扫描设备”获取列表", "")
-        self.device_combo.setMinimumWidth(260)
-        layout.addWidget(self.device_combo, 1)
-
-        layout.addWidget(QLabel("端口"))
-        self.port_input = QLineEdit(str(DEFAULT_PORT))
-        self.port_input.setPlaceholderText("端口")
-        self.port_input.setFixedWidth(78)
-        layout.addWidget(self.port_input)
-
-        self.test_button = QPushButton("连接到设备")
-        self.test_button.clicked.connect(self.on_toggle_connection)
-        layout.addWidget(self.test_button)
 
     def _is_pointer_tab_active(self) -> bool:
         return self.tabs.currentWidget() is self.pointer_page
@@ -669,7 +673,7 @@ class TcpTestWindow(QWidget):
         layout = self._create_page_layout(
             self.breakpoint_page,
             "硬件断点",
-            "上方负责配置与寄存器写入，下方查看按 PC 折叠后的断点记录。",
+            "上方负责配置与寄存器写入，下方按 hit_addr / records 查看断点记录。",
         )
 
         config_card, config_layout = self._create_section_card("断点配置", parent=self.breakpoint_page)
@@ -726,13 +730,12 @@ class TcpTestWindow(QWidget):
         layout.addWidget(result_card, 1)
 
         self.hwbp_tree = QTreeWidget()
-        self.hwbp_tree.setHeaderLabels(["断点记录（按 PC 折叠）"])
+        self.hwbp_tree.setHeaderLabels(["断点树（hit_addr / records）"])
         self.hwbp_tree.setUniformRowHeights(True)
         self.hwbp_tree.setAlternatingRowColors(True)
         self.hwbp_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.hwbp_tree.customContextMenuRequested.connect(self.on_hwbp_tree_context_menu)
         self.hwbp_tree.currentItemChanged.connect(self.on_hwbp_tree_current_item_changed)
-        self.hwbp_tree.itemDoubleClicked.connect(self.on_hwbp_tree_item_double_clicked)
         result_layout.addWidget(self.hwbp_tree, 1)
 
     def _add_hwbp_point_row(self) -> None:
@@ -975,6 +978,13 @@ class TcpTestWindow(QWidget):
     def _discover_lan_devices(self) -> list[tuple[str, str]]:
         return [(device.host, device.mac) for device in discover_lan_devices()]
 
+    def _current_device_host_text(self) -> str:
+        host_data = self.device_combo.currentData()
+        host = str(host_data).strip() if host_data else ""
+        if host:
+            return host
+        return self.device_combo.currentText().strip()
+
     def _finish_scan_lan_devices(self, devices: list[tuple[str, str]], previous_ip: str, error_text: str | None = None) -> None:
         self.device_combo.clear()
 
@@ -993,6 +1003,9 @@ class TcpTestWindow(QWidget):
             self.device_combo.setCurrentIndex(selected_index)
             self._set_status(f"扫描完成：发现 {len(devices)} 台设备")
 
+        if previous_ip and not any(previous_ip == self.device_combo.itemData(i) for i in range(self.device_combo.count())):
+            self.device_combo.setCurrentText(previous_ip)
+
         self.is_scanning = False
         self.scan_device_button.setEnabled(True)
 
@@ -1007,7 +1020,7 @@ class TcpTestWindow(QWidget):
 
         self.is_scanning = True
         self.scan_device_button.setEnabled(False)
-        previous_ip = self.device_combo.currentData() if self.device_combo.count() > 0 else ""
+        previous_ip = self._current_device_host_text()
         self.device_combo.clear()
         self.device_combo.addItem("正在扫描局域网设备，请稍候...", "")
         self._set_status("正在扫描局域网设备，请稍候...")
@@ -1024,10 +1037,9 @@ class TcpTestWindow(QWidget):
         threading.Thread(target=worker, daemon=True).start()
 
     def _parse_endpoint(self) -> tuple[str, int] | None:
-        host_data = self.device_combo.currentData()
-        host = str(host_data).strip() if host_data is not None else ""
+        host = self._current_device_host_text()
         if not host:
-            QMessageBox.warning(self, "输入提示", "请先扫描并选择局域网设备。")
+            QMessageBox.warning(self, "输入提示", "请输入设备 IP，或先扫描并选择局域网设备。")
             return None
 
         port_text = self.port_input.text().strip()
@@ -1465,98 +1477,141 @@ class TcpTestWindow(QWidget):
             current = current.parent()
         return None
 
-    def _extract_hwbp_group_pc_from_tree_item(self, item: QTreeWidgetItem | None) -> int | None:
+    def _extract_hwbp_point_index_from_tree_item(self, item: QTreeWidgetItem | None) -> int | None:
         current = item
         while current is not None:
             data = current.data(0, Qt.UserRole + 1)
             if data is not None:
                 try:
-                    pc = int(str(data), 10)
+                    point_index = int(str(data), 10)
                 except (TypeError, ValueError):
-                    pc = -1
-                if pc >= 0:
-                    return pc
+                    point_index = -1
+                if point_index >= 0:
+                    return point_index
             current = current.parent()
         return None
 
-    def _build_hwbp_group_payload(self, pc: int) -> dict | None:
-        if pc < 0 or not isinstance(self.hwbp_info_data, dict):
+    def _hwbp_info_struct(self) -> dict | None:
+        if not isinstance(self.hwbp_info_data, dict):
             return None
-        records_raw = self.hwbp_info_data.get("records")
-        records = records_raw if isinstance(records_raw, list) else []
-        matched_records = [
-            record
-            for record in records
-            if isinstance(record, dict) and self._safe_int(record.get("pc"), -1) == pc
-        ]
-        if not matched_records:
+        hwbp_info = self.hwbp_info_data.get("hwbp_info")
+        return hwbp_info if isinstance(hwbp_info, dict) else None
+
+    def _hwbp_points_raw(self) -> list[object]:
+        hwbp_info = self._hwbp_info_struct()
+        if hwbp_info is None:
+            return []
+        points_raw = hwbp_info.get("points")
+        return points_raw if isinstance(points_raw, list) else []
+
+    @staticmethod
+    def _hwbp_point_records(point: dict) -> list[dict]:
+        records_raw = point.get("records")
+        if not isinstance(records_raw, list):
+            return []
+        return [record for record in records_raw if isinstance(record, dict)]
+
+    def _hwbp_point_record_count(self, point: dict) -> int:
+        records = self._hwbp_point_records(point)
+        record_count = self._safe_int(point.get("record_count"), -1)
+        if record_count < 0:
+            record_count = len(records)
+        if record_count <= 0 and records:
+            record_count = len(records)
+        return min(len(records), record_count)
+
+    def _build_hwbp_point_payload(self, point_index: int) -> dict | None:
+        points_raw = self._hwbp_points_raw()
+        if point_index < 0 or point_index >= len(points_raw):
             return None
+        point_info = points_raw[point_index]
+        if not isinstance(point_info, dict):
+            return None
+
+        matched_records = self._hwbp_point_records(point_info)[: self._hwbp_point_record_count(point_info)]
         total_hit = sum(self._safe_int(record.get("hit_count"), 0) for record in matched_records)
-        type_tags = sorted({self._decode_hwbp_rw_text(record) for record in matched_records})
         return {
-            "pc": pc,
-            "pc_hex": f"0x{pc:X}",
+            "point_index": point_index,
+            "point": dict(point_info),
             "record_count": len(matched_records),
             "total_hit_count": total_hit,
-            "types": type_tags,
             "records": matched_records,
+            "hit_addr": self._safe_int(point_info.get("hit_addr"), 0),
         }
 
     def _hwbp_record_index_exists(self, index: int) -> bool:
-        if index < 0 or not isinstance(self.hwbp_info_data, dict):
+        if index < 0:
             return False
-        records_raw = self.hwbp_info_data.get("records")
-        records = records_raw if isinstance(records_raw, list) else []
-        return any(
-            isinstance(record, dict) and self._safe_int(record.get("index"), -1) == index
-            for record in records
-        )
-
-    def _extract_single_hwbp_index_from_group(self, item: QTreeWidgetItem | None) -> int | None:
-        group_pc = self._extract_hwbp_group_pc_from_tree_item(item)
-        group_payload = self._build_hwbp_group_payload(group_pc if group_pc is not None else -1)
-        if group_payload is None:
-            return None
-
-        records_raw = group_payload.get("records")
-        records = records_raw if isinstance(records_raw, list) else []
-        indices = {
-            self._safe_int(record.get("index"), -1)
-            for record in records
-            if isinstance(record, dict) and self._safe_int(record.get("index"), -1) >= 0
-        }
-        if len(indices) != 1:
-            return None
-        return next(iter(indices))
+        return self._get_hwbp_record_by_index(index) is not None
 
     def _get_hwbp_record_by_index(self, index: int) -> dict | None:
-        if index < 0 or not isinstance(self.hwbp_info_data, dict):
+        if index < 0:
             return None
-        records_raw = self.hwbp_info_data.get("records")
-        records = records_raw if isinstance(records_raw, list) else []
-        for record in records:
-            if isinstance(record, dict) and self._safe_int(record.get("index"), -1) == index:
-                return record
+        points_raw = self._hwbp_points_raw()
+        flat_index = 0
+        for point in points_raw:
+            if not isinstance(point, dict):
+                continue
+            records = self._hwbp_point_records(point)
+            record_count = self._hwbp_point_record_count(point)
+            if index < flat_index + record_count:
+                local_index = index - flat_index
+                if 0 <= local_index < len(records):
+                    return records[local_index]
+                return None
+            flat_index += record_count
         return None
 
-    def _hwbp_record_field_values(self, record: dict) -> dict[str, str]:
-        values: dict[str, str] = {}
-        pc = self._safe_int(record.get("pc"), 0)
-        for field_name in HWBP_BASE_FIELDS:
-            if field_name in record:
-                values[field_name] = f"0x{self._safe_int(record.get(field_name), 0):X}"
-        if "pc" not in values:
-            values["pc"] = f"0x{pc:X}"
+    def _hwbp_record_indices_for_point(self, point_index: int) -> list[int]:
+        if point_index < 0:
+            return []
+        points_raw = self._hwbp_points_raw()
+        flat_index = 0
+        for idx, point in enumerate(points_raw):
+            if not isinstance(point, dict):
+                continue
+            records = self._hwbp_point_records(point)
+            record_count = self._hwbp_point_record_count(point)
+            if idx == point_index:
+                return list(range(flat_index + record_count - 1, flat_index - 1, -1))
+            flat_index += record_count
+        return []
 
-        regs = self._hwbp_xregs(record)
-        for reg_idx, reg_val in enumerate(regs[:30]):
-            values[f"x{reg_idx}"] = f"0x{self._safe_int(reg_val, 0):X}"
+    def _remove_hwbp_records(self, indices: list[int]) -> list[int]:
+        valid_indices = sorted({idx for idx in indices if idx >= 0}, reverse=True)
+        deleted_indices: list[int] = []
+        failed_indices: list[int] = []
+        for idx in valid_indices:
+            response = self._request_ok(
+                "breakpoint.record.remove",
+                {"index": idx},
+                error_title="删除失败",
+                warn=False,
+            )
+            if response is None:
+                failed_indices.append(idx)
+                continue
+            deleted_indices.append(idx)
+        self.on_hwbp_refresh(silent=True)
+        if failed_indices:
+            failed_text = ", ".join(str(idx) for idx in failed_indices)
+            QMessageBox.warning(self, "删除失败", f"部分 record 删除失败: {failed_text}")
+        return deleted_indices
 
-        qregs = self._hwbp_qregs(record)
-        for reg_idx, qreg_val in enumerate(qregs[:32]):
-            hi, lo = self._hwbp_qreg_parts(qreg_val)
-            values[f"q{reg_idx}"] = f"0x{hi:016X}{lo:016X}"
-        return values
+    def _remove_hwbp_point(self, point_payload: dict) -> None:
+        point_index = self._safe_int(point_payload.get("point_index"), -1)
+        indices = self._hwbp_record_indices_for_point(point_index)
+        if not indices:
+            QMessageBox.warning(self, "删除失败", "当前 point 下没有可删除的 hwbp_record。")
+            return
+
+        deleted_indices = self._remove_hwbp_records(indices)
+        point = point_payload.get("point")
+        point_data = point if isinstance(point, dict) else {}
+        hit_addr = self._safe_int(point_data.get("hit_addr"), 0)
+        self._set_status(
+            f"已删除 point[{point_index}] 0x{hit_addr:X} 下的 {len(deleted_indices)} 条 record"
+        )
 
     @staticmethod
     def _parse_hwbp_hex_value(value_text: str, field_name: str) -> int | None:
@@ -1580,92 +1635,15 @@ class TcpTestWindow(QWidget):
             return f"0x{value & 0xFFFFFFFF:X}"
         return f"0x{value & ((1 << 64) - 1):X}"
 
-    def _apply_hwbp_edit_state(self) -> None:
-        return
-
-    def _clear_hwbp_edit_state(self) -> None:
-        self.hwbp_editing_index = None
-        self.hwbp_edit_original = {}
-        self.hwbp_edit_values = {}
-        self.hwbp_edit_dirty_fields = set()
-        self._apply_hwbp_edit_state()
-
-    def _begin_hwbp_edit_for_index(self, index: int) -> bool:
-        record = self._get_hwbp_record_by_index(index)
-        if record is None:
-            return False
-        values = self._hwbp_record_field_values(record)
-        self.hwbp_editing_index = index
-        self.hwbp_edit_original = dict(values)
-        self.hwbp_edit_values = dict(values)
-        self.hwbp_edit_dirty_fields = set()
-        self.hwbp_selected_index = index
-        self._apply_hwbp_edit_state()
-        return True
-
-    def _hwbp_effective_value_text(self, index: int, field_name: str, current_text: str) -> str:
-        if self.hwbp_editing_index == index and field_name in self.hwbp_edit_values:
-            return self.hwbp_edit_values[field_name]
-        return current_text
-
-    def _hwbp_value_display_text(self, index: int, field_name: str, current_text: str) -> str:
-        if self.hwbp_editing_index == index and field_name in self.hwbp_edit_dirty_fields:
-            new_text = self.hwbp_edit_values.get(field_name, current_text)
-            return f"{current_text} -> {new_text}  [待应用]"
-        return current_text
-
     def _refresh_hwbp_tree_from_cache(self) -> None:
-        if not isinstance(self.hwbp_info_data, dict):
+        hwbp_info = self._hwbp_info_struct()
+        if hwbp_info is None:
             return
-        records_raw = self.hwbp_info_data.get("records")
-        records = records_raw if isinstance(records_raw, list) else []
-        self._render_hwbp_tree(records)
-
-    def _remove_hwbp_group(self, group_payload: dict) -> None:
-        records_raw = group_payload.get("records")
-        records = records_raw if isinstance(records_raw, list) else []
-        indices = sorted(
-            {
-                self._safe_int(record.get("index"), -1)
-                for record in records
-                if isinstance(record, dict) and self._safe_int(record.get("index"), -1) >= 0
-            },
-            reverse=True,
-        )
-        if not indices:
-            QMessageBox.warning(self, "删除失败", "当前折叠下没有可删除的 hwbp_record。")
-            return
-
-        success_count = 0
-        failed_indices: list[int] = []
-        for idx in indices:
-            response = self._request_ok(
-                "breakpoint.record.remove",
-                {"index": idx},
-                error_title="删除失败",
-                warn=False,
-            )
-            if response is not None:
-                success_count += 1
-            else:
-                failed_indices.append(idx)
-
-        self.on_hwbp_refresh(silent=True)
-
-        pc = self._safe_int(group_payload.get("pc"), 0)
-        if failed_indices:
-            failed_text = ", ".join(str(idx) for idx in failed_indices)
-            QMessageBox.warning(self, "删除失败", f"折叠删除未完全成功，失败索引: {failed_text}")
-            self._set_status(f"已删除 PC 0x{pc:X} 折叠中的 {success_count} 条，失败 {len(failed_indices)} 条")
-            return
-
-        self._set_status(f"已删除 PC 0x{pc:X} 折叠，共 {success_count} 条记录")
+        self._render_hwbp_tree(hwbp_info)
 
     def _get_selected_hwbp_index(self) -> int | None:
         current_item = self.hwbp_tree.currentItem()
         index = self._extract_hwbp_index_from_tree_item(current_item)
-        if index is None:
-            index = self._extract_single_hwbp_index_from_group(current_item)
         if index is not None:
             self.hwbp_selected_index = index
             return index
@@ -1753,6 +1731,19 @@ class TcpTestWindow(QWidget):
         value = TcpTestWindow._safe_int(qreg, 0)
         return ((value >> 64) & ((1 << 64) - 1), value & ((1 << 64) - 1))
 
+    @staticmethod
+    def _hwbp_point_type_label(point: dict) -> str:
+        return HWBP_POINT_TYPE_LABELS.get(TcpTestWindow._safe_int(point.get("bt"), 0), "未知")
+
+    @staticmethod
+    def _hwbp_point_scope_label(point: dict) -> str:
+        return HWBP_SCOPE_LABELS.get(TcpTestWindow._safe_int(point.get("bs"), 0), "未知")
+
+    @staticmethod
+    def _hwbp_point_length_text(point: dict) -> str:
+        length = TcpTestWindow._safe_int(point.get("bl"), 0)
+        return f"{length}字节" if length > 0 else "未知"
+
     def _decode_hwbp_rw_text(self, rec: dict) -> str:
         read_count, write_count = self._hwbp_mask_counts(rec)
         if write_count and read_count:
@@ -1763,51 +1754,113 @@ class TcpTestWindow(QWidget):
             return "读取"
         return "未知"
 
-    def _render_hwbp_tree(self, records: list[dict]) -> None:
-        prev_expanded_pc: set[int] = set()
+    def _render_hwbp_tree(self, hwbp_info: dict) -> None:
+        prev_expanded_points: set[int] = set()
+        prev_expanded_records_dirs: set[int] = set()
+        prev_expanded_records: set[int] = set()
         for i in range(self.hwbp_tree.topLevelItemCount()):
-            top_item = self.hwbp_tree.topLevelItem(i)
-            if top_item is None or not top_item.isExpanded():
+            point_item = self.hwbp_tree.topLevelItem(i)
+            if point_item is None or not point_item.isExpanded():
                 continue
-            pc_val = self._safe_int(top_item.data(0, Qt.UserRole + 1), -1)
-            if pc_val >= 0:
-                prev_expanded_pc.add(pc_val)
+            point_index = self._safe_int(point_item.data(0, Qt.UserRole + 1), -1)
+            if point_index >= 0:
+                prev_expanded_points.add(point_index)
+            for j in range(point_item.childCount()):
+                records_dir = point_item.child(j)
+                if records_dir is None or not records_dir.isExpanded():
+                    continue
+                records_point_index = self._safe_int(records_dir.data(0, Qt.UserRole + 1), -1)
+                if records_point_index >= 0:
+                    prev_expanded_records_dirs.add(records_point_index)
+                for k in range(records_dir.childCount()):
+                    record_item = records_dir.child(k)
+                    if record_item is None or not record_item.isExpanded():
+                        continue
+                    record_index = self._safe_int(record_item.data(0, Qt.UserRole), -1)
+                    if record_index >= 0:
+                        prev_expanded_records.add(record_index)
         had_previous_items = self.hwbp_tree.topLevelItemCount() > 0
         old_scroll = self.hwbp_tree.verticalScrollBar().value()
 
         self.hwbp_tree.clear()
-        if not records:
-            empty_item = QTreeWidgetItem(["暂无 hwbp_record 命中记录"])
+        points_raw = hwbp_info.get("points")
+        if not isinstance(points_raw, list):
+            points_raw = []
+        point_infos = [point for point in points_raw if isinstance(point, dict)]
+        if not point_infos:
+            empty_item = QTreeWidgetItem(["暂无 hit_addr 目录"])
             self.hwbp_tree.addTopLevelItem(empty_item)
             return
 
-        grouped: dict[int, list[dict]] = {}
-        for rec in records:
-            pc = self._safe_int(rec.get("pc"), 0)
-            grouped.setdefault(pc, []).append(rec)
+        point_flat_starts: dict[int, int] = {}
+        flat_index = 0
+        for point_index, point in enumerate(points_raw):
+            if not isinstance(point, dict):
+                continue
+            point_flat_starts[point_index] = flat_index
+            flat_index += self._hwbp_point_record_count(point)
 
-        for pc, rec_list in sorted(grouped.items(), key=lambda kv: kv[0]):
-            total_hit = sum(self._safe_int(r.get("hit_count"), 0) for r in rec_list)
-            type_tags = sorted({self._decode_hwbp_rw_text(r) for r in rec_list})
-            type_text = "/".join(type_tags) if type_tags else "未知"
-            top = QTreeWidgetItem(
-                [f"PC 0x{pc:X}  |  记录 {len(rec_list)} 条  |  总命中 {total_hit}  |  触发类型 {type_text}"]
+        visible_points: list[tuple[int, dict, list[dict]]] = []
+        for point_index, point in enumerate(points_raw):
+            if not isinstance(point, dict):
+                continue
+            hit_addr = self._safe_int(point.get("hit_addr"), 0)
+            if point_index < 0 or hit_addr <= 0:
+                continue
+            rec_list = self._hwbp_point_records(point)[: self._hwbp_point_record_count(point)]
+            visible_points.append((point_index, point, rec_list))
+
+        visible_points.sort(
+            key=lambda item: (
+                self._safe_int(item[1].get("hit_addr"), 0),
+                self._safe_int(item[0], 0),
             )
-            top.setData(0, Qt.UserRole + 1, pc)
-            self.hwbp_tree.addTopLevelItem(top)
-            top.setExpanded((not had_previous_items) or (pc in prev_expanded_pc))
+        )
 
-            for rec in rec_list:
-                idx = self._safe_int(rec.get("index"), -1)
-                point_index = self._safe_int(rec.get("point_index"), -1)
-                point_record_index = self._safe_int(rec.get("point_record_index"), -1)
+        if not visible_points:
+            empty_item = QTreeWidgetItem(["暂无 hit_addr 目录"])
+            self.hwbp_tree.addTopLevelItem(empty_item)
+            return
+
+        for point_index, point, rec_list in visible_points:
+            hit_addr = self._safe_int(point.get("hit_addr"), 0)
+            point_type = self._hwbp_point_type_label(point)
+            point_scope = self._hwbp_point_scope_label(point)
+            point_len = self._hwbp_point_length_text(point)
+            point_hit_total = sum(self._safe_int(rec.get("hit_count"), 0) for rec in rec_list)
+            point_record_count = len(rec_list)
+            point_flat_start = point_flat_starts.get(point_index, 0)
+
+            top = QTreeWidgetItem(
+                [
+                    f"0x{hit_addr:X}  |  point[{point_index}]  |  records {point_record_count}  |  总命中 {point_hit_total}  |  {point_type}/{point_scope}/{point_len}"
+                ]
+            )
+            top.setData(0, Qt.UserRole + 1, point_index)
+            self.hwbp_tree.addTopLevelItem(top)
+            top.setExpanded((not had_previous_items) or (point_index in prev_expanded_points))
+
+            records_dir = QTreeWidgetItem([f"records  |  {point_record_count} 条"])
+            records_dir.setData(0, Qt.UserRole + 1, point_index)
+            top.addChild(records_dir)
+            records_dir.setExpanded((not had_previous_items) or (point_index in prev_expanded_records_dirs))
+
+            for point_record_index, rec in enumerate(rec_list):
+                record_flat_index = point_flat_start + point_record_index
                 hit_count = self._safe_int(rec.get("hit_count"), 0)
+                pc = self._safe_int(rec.get("pc"), 0)
                 rw_text = self._decode_hwbp_rw_text(rec)
                 ops_summary = self._hwbp_ops_summary(rec)
-                point_text = f"point {point_index}:{point_record_index}" if point_index >= 0 and point_record_index >= 0 else "point ?"
-                summary_item = QTreeWidgetItem([f"[{idx}] {point_text}  |  命中 {hit_count} 次  |  类型 {rw_text}  |  掩码 {ops_summary}"])
-                summary_item.setData(0, Qt.UserRole, idx)
-                top.addChild(summary_item)
+
+                record_item = QTreeWidgetItem(
+                    [
+                        f"PC 0x{pc:X}  |  point[{point_index}:{point_record_index}]  |  命中 {hit_count} 次  |  类型 {rw_text}  |  掩码 {ops_summary}"
+                    ]
+                )
+                record_item.setData(0, Qt.UserRole, record_flat_index)
+                record_item.setData(0, Qt.UserRole + 1, point_index)
+                records_dir.addChild(record_item)
+                record_item.setExpanded((not had_previous_items) or (record_flat_index in prev_expanded_records))
 
                 lr = self._safe_int(rec.get("lr"), 0)
                 sp = self._safe_int(rec.get("sp"), 0)
@@ -1827,14 +1880,12 @@ class TcpTestWindow(QWidget):
                     ("fpcr", "FPCR", f"0x{fpcr:X}"),
                 )
                 for field_name, label, value_text in base_fields:
-                    effective_text = self._hwbp_effective_value_text(idx, field_name, value_text)
-                    display_text = self._hwbp_value_display_text(idx, field_name, value_text)
-                    top.addChild(
+                    record_item.addChild(
                         self._make_hwbp_field_item(
-                            idx,
+                            record_flat_index,
                             field_name,
-                            effective_text,
-                            f"  {label}: {display_text}  [{self._hwbp_reg_op(rec, field_name)}]",
+                            value_text,
+                            f"  {label}: {value_text}  [{self._hwbp_reg_op(rec, field_name)}]",
                         )
                     )
 
@@ -1842,49 +1893,68 @@ class TcpTestWindow(QWidget):
                 if isinstance(mask_raw, list) and mask_raw:
                     mask_text = " ".join(f"{self._safe_int(byte, 0) & 0xFF:02X}" for byte in mask_raw[:18])
                     mask_item = QTreeWidgetItem([f"  MASK: {mask_text}"])
-                    mask_item.setData(0, Qt.UserRole, idx)
-                    top.addChild(mask_item)
+                    mask_item.setData(0, Qt.UserRole, record_flat_index)
+                    mask_item.setData(0, Qt.UserRole + 1, point_index)
+                    record_item.addChild(mask_item)
 
                 regs = self._hwbp_xregs(rec)
                 regs_title = QTreeWidgetItem(["  寄存器快照 X0~X29"])
-                regs_title.setData(0, Qt.UserRole, idx)
-                top.addChild(regs_title)
+                regs_title.setData(0, Qt.UserRole, record_flat_index)
+                regs_title.setData(0, Qt.UserRole + 1, point_index)
+                record_item.addChild(regs_title)
                 for reg_idx, reg_val in enumerate(regs):
                     reg_hex = self._safe_int(reg_val, 0)
                     field_name = f"x{reg_idx}"
                     value_text = f"0x{reg_hex:X}"
-                    effective_text = self._hwbp_effective_value_text(idx, field_name, value_text)
-                    display_text = self._hwbp_value_display_text(idx, field_name, value_text)
-                    top.addChild(self._make_hwbp_field_item(idx, field_name, effective_text, f"    X{reg_idx}: {display_text}  [{self._hwbp_reg_op(rec, field_name)}]"))
+                    record_item.addChild(
+                        self._make_hwbp_field_item(
+                            record_flat_index,
+                            field_name,
+                            value_text,
+                            f"    X{reg_idx}: {value_text}  [{self._hwbp_reg_op(rec, field_name)}]",
+                        )
+                    )
 
                 qregs = self._hwbp_qregs(rec)
                 if qregs:
                     qregs_title = QTreeWidgetItem(["  SIMD 寄存器快照 Q0~Q31"])
-                    qregs_title.setData(0, Qt.UserRole, idx)
-                    top.addChild(qregs_title)
+                    qregs_title.setData(0, Qt.UserRole, record_flat_index)
+                    qregs_title.setData(0, Qt.UserRole + 1, point_index)
+                    record_item.addChild(qregs_title)
                     for reg_idx, qreg_val in enumerate(qregs):
                         hi, lo = self._hwbp_qreg_parts(qreg_val)
                         field_name = f"q{reg_idx}"
                         qreg_hex = f"0x{hi:016X}{lo:016X}"
                         qreg_display = f"0x{hi:016X}_{lo:016X}"
-                        effective_text = self._hwbp_effective_value_text(idx, field_name, qreg_hex)
-                        display_text = self._hwbp_value_display_text(idx, field_name, qreg_display)
-                        top.addChild(self._make_hwbp_field_item(idx, field_name, effective_text, f"    Q{reg_idx}: {display_text}  [{self._hwbp_reg_op(rec, field_name)}]"))
+                        record_item.addChild(
+                            self._make_hwbp_field_item(
+                                record_flat_index,
+                                field_name,
+                                qreg_hex,
+                                f"    Q{reg_idx}: {qreg_display}  [{self._hwbp_reg_op(rec, field_name)}]",
+                            )
+                        )
 
                 if self._hwbp_mask_counts(rec)[1] > 0:
                     write_title = QTreeWidgetItem(["  写入寄存器候选"])
-                    write_title.setData(0, Qt.UserRole, idx)
-                    top.addChild(write_title)
+                    write_title.setData(0, Qt.UserRole, record_flat_index)
+                    write_title.setData(0, Qt.UserRole + 1, point_index)
+                    record_item.addChild(write_title)
                     x0_val = self._safe_int(regs[0], 0) if len(regs) > 0 else 0
                     x1_val = self._safe_int(regs[1], 0) if len(regs) > 1 else 0
                     x0_text = f"0x{x0_val:X}"
                     x1_text = f"0x{x1_val:X}"
-                    top.addChild(self._make_hwbp_field_item(idx, "x0", self._hwbp_effective_value_text(idx, "x0", x0_text), f"    候选写入值(X0): {self._hwbp_value_display_text(idx, 'x0', x0_text)}"))
-                    top.addChild(self._make_hwbp_field_item(idx, "x1", self._hwbp_effective_value_text(idx, "x1", x1_text), f"    候选写入地址(X1): {self._hwbp_value_display_text(idx, 'x1', x1_text)}"))
+                    record_item.addChild(
+                        self._make_hwbp_field_item(record_flat_index, "x0", x0_text, f"    候选写入值(X0): {x0_text}")
+                    )
+                    record_item.addChild(
+                        self._make_hwbp_field_item(record_flat_index, "x1", x1_text, f"    候选写入地址(X1): {x1_text}")
+                    )
 
                 separator = QTreeWidgetItem([""])
-                separator.setData(0, Qt.UserRole, idx)
-                top.addChild(separator)
+                separator.setData(0, Qt.UserRole, record_flat_index)
+                separator.setData(0, Qt.UserRole + 1, point_index)
+                record_item.addChild(separator)
 
         self.hwbp_tree.resizeColumnToContents(0)
         self.hwbp_tree.verticalScrollBar().setValue(
@@ -1892,27 +1962,29 @@ class TcpTestWindow(QWidget):
         )
 
     def _render_hwbp_info(self, info: dict) -> None:
-        num_brps = self._safe_int(info.get("num_brps"), 0)
-        num_wrps = self._safe_int(info.get("num_wrps"), 0)
+        hwbp_info = info.get("hwbp_info")
+        if not isinstance(hwbp_info, dict):
+            hwbp_info = {}
         self.hwbp_active = bool(info.get("active", self.hwbp_active))
+        num_brps = self._safe_int(hwbp_info.get("num_brps"), 0)
+        num_wrps = self._safe_int(hwbp_info.get("num_wrps"), 0)
         self.hwbp_num_brps_label.setText(f"hwbp_info.num_brps: {num_brps}")
         self.hwbp_num_wrps_label.setText(f"hwbp_info.num_wrps: {num_wrps}")
-        points_raw = info.get("points")
+        points_raw = hwbp_info.get("points")
         points = points_raw if isinstance(points_raw, list) else []
         point_parts: list[str] = []
-        for point in points:
+        for point_index, point in enumerate(points):
             if not isinstance(point, dict):
                 continue
             hit_addr = self._safe_int(point.get("hit_addr"), 0)
             if hit_addr <= 0:
                 continue
-            point_index = self._safe_int(point.get("index"), len(point_parts))
-            point_type = str(point.get("type", "unknown"))
-            point_scope = str(point.get("scope", "unknown"))
-            point_len = self._safe_int(point.get("length"), 0)
-            point_records = self._safe_int(point.get("record_count"), 0)
+            point_type = self._hwbp_point_type_label(point)
+            point_scope = self._hwbp_point_scope_label(point)
+            point_len = self._hwbp_point_length_text(point)
+            point_records = self._hwbp_point_record_count(point)
             point_parts.append(
-                f"[{point_index}] 0x{hit_addr:X} {point_type}/{point_scope}/len{point_len}/records{point_records}"
+                f"[{point_index}] 0x{hit_addr:X} {point_type}/{point_scope}/{point_len}/records{point_records}"
             )
         points_text = "; ".join(point_parts) if point_parts else "[]"
         if self.hwbp_active:
@@ -1920,13 +1992,9 @@ class TcpTestWindow(QWidget):
         else:
             self.hwbp_points_label.setText(f"hwbp_info.points: {points_text}  active: false")
         self._apply_hwbp_active_state()
-        records_raw = info.get("records")
-        records = records_raw if isinstance(records_raw, list) else []
         if self.hwbp_selected_index is not None and not self._hwbp_record_index_exists(self.hwbp_selected_index):
             self.hwbp_selected_index = None
-        if self.hwbp_editing_index is not None and not self._hwbp_record_index_exists(self.hwbp_editing_index):
-            self._clear_hwbp_edit_state()
-        self._render_hwbp_tree(records)
+        self._render_hwbp_tree(hwbp_info)
 
     def _apply_hwbp_active_state(self) -> None:
         if hasattr(self, "hwbp_set_button"):
@@ -3253,10 +3321,10 @@ class TcpTestWindow(QWidget):
         if current is None:
             return
         index = self._extract_hwbp_index_from_tree_item(current)
-        if index is None:
-            index = self._extract_single_hwbp_index_from_group(current)
         if index is not None:
             self.hwbp_selected_index = index
+        elif self._extract_hwbp_point_index_from_tree_item(current) is not None:
+            self.hwbp_selected_index = None
 
     def _edit_hwbp_tree_item_value(self, item: QTreeWidgetItem | None) -> None:
         if item is None:
@@ -3274,16 +3342,11 @@ class TcpTestWindow(QWidget):
         if index < 0:
             QMessageBox.warning(self, "输入提示", "记录索引不能小于 0。")
             return
-
-        if self.hwbp_editing_index is None:
-            if not self._begin_hwbp_edit_for_index(index):
-                QMessageBox.warning(self, "输入提示", "选中的 hwbp_record 已不存在，请刷新后重试。")
-                return
-        elif self.hwbp_editing_index != index:
-            QMessageBox.warning(self, "输入提示", f"当前正在编辑 hwbp_record[{self.hwbp_editing_index}]，请先应用或取消。")
+        if not self._hwbp_record_index_exists(index):
+            QMessageBox.warning(self, "输入提示", "选中的 hwbp_record 已不存在，请刷新后重试。")
             return
 
-        current_value = self.hwbp_edit_values.get(field_name, str(item.data(0, Qt.UserRole + 3) or "0x0"))
+        current_value = str(item.data(0, Qt.UserRole + 3) or "0x0")
         value_text, accepted = QInputDialog.getText(
             self,
             "修改寄存器",
@@ -3299,48 +3362,16 @@ class TcpTestWindow(QWidget):
             return
 
         formatted_value = self._format_hwbp_edit_value(field_name, value)
-        self.hwbp_edit_values[field_name] = formatted_value
-        if formatted_value == self.hwbp_edit_original.get(field_name, ""):
-            self.hwbp_edit_dirty_fields.discard(field_name)
-        else:
-            self.hwbp_edit_dirty_fields.add(field_name)
-        self._apply_hwbp_edit_state()
-        self._refresh_hwbp_tree_from_cache()
-        self._set_status(f"已修改副本 hwbp_record[{index}].{field_name}，右键应用写回")
-
-    def on_hwbp_tree_item_double_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
-        self._edit_hwbp_tree_item_value(item)
-
-    def on_hwbp_apply_edit(self) -> None:
-        if self.hwbp_editing_index is None:
+        response = self._request_ok(
+            "breakpoint.record.update",
+            {"index": index, "field": field_name, "value": formatted_value},
+            error_title="写入失败",
+        )
+        if response is None:
             return
-        if not self.hwbp_edit_dirty_fields:
-            self._clear_hwbp_edit_state()
-            self._set_status("没有寄存器改动需要应用")
-            return
-
-        index = self.hwbp_editing_index
-        for field_name in sorted(self.hwbp_edit_dirty_fields):
-            value_text = self.hwbp_edit_values.get(field_name, "")
-            response = self._request_ok(
-                "breakpoint.record.update",
-                {"index": index, "field": field_name, "value": value_text},
-                error_title="写入失败",
-            )
-            if response is None:
-                return
-
-        changed_count = len(self.hwbp_edit_dirty_fields)
-        self._clear_hwbp_edit_state()
-        self._set_status(f"已应用 hwbp_record[{index}] 的 {changed_count} 处寄存器改动")
+        self.hwbp_selected_index = index
+        self._set_status(f"已修改 hwbp_record[{index}].{field_name} = {formatted_value}")
         self.on_hwbp_refresh(silent=True)
-
-    def on_hwbp_cancel_edit(self) -> None:
-        if self.hwbp_editing_index is None:
-            return
-        index = self.hwbp_editing_index
-        self._clear_hwbp_edit_state()
-        self._set_status(f"已取消编辑 hwbp_record[{index}]")
 
     def on_hwbp_tree_context_menu(self, pos) -> None:
         item = self.hwbp_tree.itemAt(pos)
@@ -3349,30 +3380,29 @@ class TcpTestWindow(QWidget):
         if item is not None:
             self.hwbp_tree.setCurrentItem(item)
         item_index = self._extract_hwbp_index_from_tree_item(item)
-        if item_index is None:
-            item_index = self._extract_single_hwbp_index_from_group(item)
+        point_index = self._extract_hwbp_point_index_from_tree_item(item)
         item_field = str(item.data(0, Qt.UserRole + 2)).strip() if item is not None and item.data(0, Qt.UserRole + 2) is not None else ""
-        group_pc = self._extract_hwbp_group_pc_from_tree_item(item)
-        group_payload = self._build_hwbp_group_payload(group_pc if group_pc is not None else -1)
+        point_payload = None
+        record_payload = None
+        if item_index is not None:
+            record_payload = self._get_hwbp_record_by_index(item_index)
+        if record_payload is None and point_index is not None:
+            point_payload = self._build_hwbp_point_payload(point_index)
 
         menu = QMenu(self.hwbp_tree)
         edit_value_action = None
-        apply_edit_action = None
-        cancel_edit_action = None
+        copy_json_action = None
+        delete_action = None
         if item_field:
             edit_value_action = menu.addAction("修改寄存器值")
-        if self.hwbp_editing_index is not None and item_index == self.hwbp_editing_index:
-            if self.hwbp_edit_dirty_fields:
-                apply_edit_action = menu.addAction(f"应用当前记录修改 ({len(self.hwbp_edit_dirty_fields)} 项)")
-            cancel_edit_action = menu.addAction("取消当前记录修改")
-        if edit_value_action is not None or apply_edit_action is not None or cancel_edit_action is not None:
+        if record_payload is not None:
+            copy_json_action = menu.addAction("复制当前记录完整JSON")
+            delete_action = menu.addAction("删除当前 record")
+        elif point_payload is not None:
+            copy_json_action = menu.addAction("复制当前 point 完整JSON")
+            delete_action = menu.addAction("删除当前 point")
+        if edit_value_action is not None or copy_json_action is not None or delete_action is not None:
             menu.addSeparator()
-        copy_json_action = menu.addAction("复制当前折叠完整JSON")
-        delete_action = menu.addAction("删除当前折叠页")
-
-        if group_payload is None:
-            copy_json_action.setEnabled(False)
-            delete_action.setEnabled(False)
 
         action = menu.exec(self.hwbp_tree.mapToGlobal(pos))
         if action is None:
@@ -3381,23 +3411,26 @@ class TcpTestWindow(QWidget):
         if action == edit_value_action:
             self._edit_hwbp_tree_item_value(item)
             return
-        if action == apply_edit_action:
-            self.on_hwbp_apply_edit()
-            return
-        if action == cancel_edit_action:
-            self.on_hwbp_cancel_edit()
-            self._refresh_hwbp_tree_from_cache()
-            return
         if action == copy_json_action:
-            if group_payload is None:
-                return
-            QApplication.clipboard().setText(json.dumps(group_payload, ensure_ascii=False, indent=2))
-            self._set_status(f"已复制 PC 0x{group_payload['pc']:X} 折叠 JSON")
+            if record_payload is not None:
+                QApplication.clipboard().setText(json.dumps(record_payload, ensure_ascii=False, indent=2))
+                self._set_status(f"已复制 record[{item_index}] JSON")
+            elif point_payload is not None:
+                QApplication.clipboard().setText(json.dumps(point_payload, ensure_ascii=False, indent=2))
+                self._set_status(f"已复制 point[{point_index}] JSON")
             return
-        if action != delete_action or group_payload is None:
+        if action != delete_action:
             return
 
-        self._remove_hwbp_group(group_payload)
+        if record_payload is not None and item_index is not None:
+            deleted_indices = self._remove_hwbp_records([item_index])
+            if item_index in deleted_indices:
+                self._set_status(f"已删除 record[{item_index}]")
+            else:
+                self._set_status(f"record[{item_index}] 删除失败")
+            return
+        if point_payload is not None:
+            self._remove_hwbp_point(point_payload)
 
     def _refresh_hwbp_info_live(self) -> None:
         if not self._is_breakpoint_tab_active():

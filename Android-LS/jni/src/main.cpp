@@ -241,10 +241,9 @@ private:
         int pointCount = 0;
         bool active = false;
 
-        int editingRecordIdx = -1;    // 正在编辑哪条记录
-        Driver::hwbp_record editCopy; // 副本
+        int editingRecordIdx = -1;
         char regEditBuf[64] = {};
-        int editingField = -1; // 正在编辑哪个字段
+        int editingField = -1;
     } bpParams_;
 
     std::vector<std::string> offsetLabels_;
@@ -325,8 +324,26 @@ private:
         ImGui::SetClipboardText(temp.c_str());
     }
 
-    void openRegisterEdit(int regIndex, std::string_view name, std::string_view hexValue)
+    Driver::hwbp_record *findHwbpRecordByFlatIndex(int recordIndex)
     {
+        if (recordIndex < 0)
+            return nullptr;
+
+        auto &info = const_cast<Driver::hwbp_info &>(dr->GetHwbpInfoRef());
+        int flatIndex = 0;
+        for (auto &point : info.points)
+        {
+            const int recordCount = std::clamp(point.record_count, 0, 0x100);
+            if (recordIndex >= flatIndex && recordIndex < flatIndex + recordCount)
+                return &point.records[recordIndex - flatIndex];
+            flatIndex += recordCount;
+        }
+        return nullptr;
+    }
+
+    void openRegisterEdit(int recordIndex, int regIndex, std::string_view name, std::string_view hexValue)
+    {
+        bpParams_.editingRecordIdx = recordIndex;
         bpParams_.editingField = regIndex;
         std::snprintf(bpParams_.regEditBuf, sizeof(bpParams_.regEditBuf),
                       "%.*s", static_cast<int>(std::min(hexValue.size(), sizeof(bpParams_.regEditBuf) - 1)), hexValue.data());
@@ -334,13 +351,18 @@ private:
         ImGuiFloatingKeyboard::Open(bpParams_.regEditBuf, 63, title.c_str());
     }
 
-    bool commitRegisterEdit(int regIndex)
+    bool commitRegisterEdit(int recordIndex, int regIndex)
     {
-        if (bpParams_.editingField != regIndex || !KeyboardValueReady(bpParams_.regEditBuf))
+        if (bpParams_.editingRecordIdx != recordIndex || bpParams_.editingField != regIndex ||
+            !KeyboardValueReady(bpParams_.regEditBuf))
             return false;
 
-        MemUtils::HwbpWriteRegisterValue(bpParams_.editCopy, regIndex,
-                                         MemUtils::ParseUInt128(bpParams_.regEditBuf, 16).value_or(0));
+        if (const auto value = MemUtils::ParseUInt128(bpParams_.regEditBuf, 16); value.has_value())
+        {
+            if (auto *record = findHwbpRecordByFlatIndex(recordIndex))
+                MemUtils::HwbpWriteRegisterValue(*record, regIndex, *value);
+        }
+        bpParams_.editingRecordIdx = -1;
         bpParams_.editingField = -1;
         bpParams_.regEditBuf[0] = 0;
         return true;
@@ -383,12 +405,12 @@ private:
         return points;
     }
 
-    void drawRegisterEditButton(const char *buttonId, int regIndex, std::string_view name,
+    void drawRegisterEditButton(const char *buttonId, int recordIndex, int regIndex, std::string_view name,
                                 std::string_view hexValue, ImVec2 size)
     {
         if (UI::Btn(buttonId, size, {0.4f, 0.3f, 0.15f, 1}))
-            openRegisterEdit(regIndex, name, hexValue);
-        commitRegisterEdit(regIndex);
+            openRegisterEdit(recordIndex, regIndex, name, hexValue);
+        commitRegisterEdit(recordIndex, regIndex);
     }
 
     void collectFinishedTasks()
@@ -1424,10 +1446,15 @@ private:
         UI::Space(S(4));
 
         int totalRecordCount = 0;
+        bool hasHitAddrPoint = false;
         for (const auto &point : info.points)
-            totalRecordCount += point.record_count;
+        {
+            totalRecordCount += std::clamp(point.record_count, 0, 0x100);
+            if (point.hit_addr)
+                hasHitAddrPoint = true;
+        }
 
-        if (totalRecordCount > 0)
+        if (hasHitAddrPoint)
             drawBpRecords(info, w);
         else
             UI::Text(Colors::HINT, "暂无命中记录");
@@ -1436,10 +1463,14 @@ private:
     void drawBpRecords(const Driver::hwbp_info &info, float w)
     {
         uint64_t totalHits = 0;
+        int totalPointCount = 0;
         int totalRecordCount = 0;
         for (const auto &point : info.points)
         {
-            for (int r = 0; r < point.record_count; ++r)
+            const int recordCount = std::clamp(point.record_count, 0, 0x100);
+            if (point.hit_addr)
+                totalPointCount++;
+            for (int r = 0; r < recordCount; ++r)
             {
                 auto &rec = const_cast<Driver::hwbp_record &>(point.records[r]);
                 MemUtils::HwbpRequestAll(rec);
@@ -1447,81 +1478,131 @@ private:
                 totalRecordCount++;
             }
         }
-        UI::Text(Colors::WARN, "不同PC数: %d  总命中: %llu", totalRecordCount, (unsigned long long)totalHits);
+        UI::Text(Colors::WARN, "point数: %d  record数: %d  总命中: %llu",
+                 totalPointCount, totalRecordCount, (unsigned long long)totalHits);
         UI::Space(S(6));
 
-        static bool expandState[16 * 0x100] = {};
-        int deleteIdx = -1;
+        static bool pointExpandState[16] = {};
+        static bool recordsExpandState[16] = {};
+        static bool recordExpandState[16 * 0x100] = {};
+        int deleteRecordIdx = -1;
+        int deletePointStart = -1;
+        int deletePointCount = 0;
         int flatIndex = 0;
 
         for (int p = 0; p < 16; ++p)
         {
             const auto &point = info.points[p];
-            for (int r = 0; r < point.record_count; ++r, ++flatIndex)
+            const int recordCount = std::clamp(point.record_count, 0, 0x100);
+            const int pointFlatStart = flatIndex;
+            if (!point.hit_addr)
+            {
+                flatIndex += recordCount;
+                continue;
+            }
+
+            uint64_t pointHits = 0;
+            for (int r = 0; r < recordCount; ++r)
             {
                 auto &rec = const_cast<Driver::hwbp_record &>(point.records[r]);
-                const auto pc = HwbpRead64(rec, Driver::IDX_PC);
-                const auto hitCount = HwbpRead64(rec, Driver::IDX_HIT_COUNT);
-                ImGui::PushID(flatIndex);
-                float btnW = S(55), expandW = S(45);
+                pointHits += HwbpRead64(rec, Driver::IDX_HIT_COUNT);
+            }
 
-                // 摘要行
-                UI::Text({0.7f, 0.85f, 1, 1}, "[%d:%d]", p, r);
+            ImGui::PushID(p);
+            const float deletePointW = S(78);
+            const float expandPointW = S(55);
+            UI::Text(Colors::ADDR_CYAN, "hit_addr:0x%llX  point[%d]  records:%d  总命中:%llu",
+                     (unsigned long long)point.hit_addr, p, recordCount, (unsigned long long)pointHits);
+            ImGui::SameLine(w - deletePointW);
+            if (UI::Btn("删point", {deletePointW, S(32)}, Colors::BTN_DEL))
+            {
+                deletePointStart = pointFlatStart;
+                deletePointCount = recordCount;
+            }
+            ImGui::SameLine(w - deletePointW - expandPointW - S(4));
+            if (UI::Btn(pointExpandState[p] ? "收起" : "展开", {expandPointW, S(32)}, Colors::BTN_BLUE))
+                pointExpandState[p] = !pointExpandState[p];
+
+            if (pointExpandState[p])
+            {
+                ImGui::Indent(S(8));
+                UI::Text(Colors::TITLE, "records");
                 ImGui::SameLine();
-                UI::Text(Colors::ADDR_GREEN, "PC:0x%llX", (unsigned long long)pc);
-                ImGui::SameLine();
-                UI::Text(Colors::WARN, "x%llu", (unsigned long long)hitCount);
+                if (UI::Btn(recordsExpandState[p] ? "收起##records" : "展开##records",
+                            {S(80), S(30)}, Colors::BTN_TEAL))
+                    recordsExpandState[p] = !recordsExpandState[p];
 
-                ImGui::SameLine(w - btnW);
-                if (UI::Btn("删除", {btnW, S(32)}, {0.6f, 0.15f, 0.15f, 1}))
-                    deleteIdx = flatIndex;
-                ImGui::SameLine(w - btnW - expandW - S(4));
-                if (UI::Btn(expandState[flatIndex] ? "收起" : "展开", {expandW, S(32)}, {0.2f, 0.3f, 0.45f, 1}))
-                    expandState[flatIndex] = !expandState[flatIndex];
-
-                if (expandState[flatIndex])
+                if (recordsExpandState[p])
                 {
                     ImGui::Indent(S(8));
-                    drawBpRecordDetail(rec, flatIndex);
+                    if (recordCount <= 0)
+                    {
+                        UI::Text(Colors::HINT, "暂无 record");
+                    }
+                    for (int r = 0; r < recordCount; ++r)
+                    {
+                        const int recordFlatIndex = pointFlatStart + r;
+                        auto &rec = const_cast<Driver::hwbp_record &>(point.records[r]);
+                        const auto pc = HwbpRead64(rec, Driver::IDX_PC);
+                        const auto hitCount = HwbpRead64(rec, Driver::IDX_HIT_COUNT);
+                        ImGui::PushID(recordFlatIndex);
+                        const float deleteRecordW = S(72);
+                        const float expandRecordW = S(55);
+
+                        UI::Text({0.7f, 0.85f, 1, 1}, "record[%d:%d]  PC:0x%llX  命中:%llu",
+                                 p, r, (unsigned long long)pc, (unsigned long long)hitCount);
+                        ImGui::SameLine(w - deleteRecordW);
+                        if (UI::Btn("删record", {deleteRecordW, S(32)}, Colors::BTN_DEL))
+                            deleteRecordIdx = recordFlatIndex;
+                        ImGui::SameLine(w - deleteRecordW - expandRecordW - S(4));
+                        if (UI::Btn(recordExpandState[recordFlatIndex] ? "收起" : "展开",
+                                    {expandRecordW, S(32)}, {0.2f, 0.3f, 0.45f, 1}))
+                            recordExpandState[recordFlatIndex] = !recordExpandState[recordFlatIndex];
+
+                        if (recordExpandState[recordFlatIndex])
+                        {
+                            ImGui::Indent(S(8));
+                            drawBpRecordDetail(rec, recordFlatIndex);
+                            ImGui::Unindent(S(8));
+                        }
+
+                        UI::Space(S(4));
+                        ImGui::Separator();
+                        UI::Space(S(4));
+                        ImGui::PopID();
+                    }
                     ImGui::Unindent(S(8));
                 }
 
-                UI::Space(S(4));
-                ImGui::Separator();
-                UI::Space(S(4));
-                ImGui::PopID();
+                ImGui::Unindent(S(8));
             }
+
+            UI::Space(S(4));
+            ImGui::Separator();
+            UI::Space(S(4));
+            ImGui::PopID();
+            flatIndex += recordCount;
         }
-        if (deleteIdx >= 0)
-            dr->RemoveHwbpRecord(deleteIdx);
+        if (deleteRecordIdx >= 0)
+        {
+            dr->RemoveHwbpRecord(deleteRecordIdx);
+            bpParams_.editingRecordIdx = -1;
+            bpParams_.editingField = -1;
+        }
+        if (deletePointStart >= 0 && deletePointCount > 0)
+        {
+            for (int i = deletePointCount - 1; i >= 0; --i)
+                dr->RemoveHwbpRecord(deletePointStart + i);
+            bpParams_.editingRecordIdx = -1;
+            bpParams_.editingField = -1;
+        }
     }
 
     void drawBpRecordDetail(const Driver::hwbp_record &rec, int r)
     {
-        bool isEditing = (bpParams_.editingRecordIdx == r);
-        // 编辑模式下显示副本，否则显示原始
-        auto &show = isEditing ? bpParams_.editCopy : const_cast<Driver::hwbp_record &>(rec);
+        auto &show = const_cast<Driver::hwbp_record &>(rec);
 
-        // 编辑/应用/取消
-        if (!isEditing)
-        {
-            if (UI::Btn("编辑寄存器", {S(120), S(32)}, {0.3f, 0.4f, 0.2f, 1}))
-                beginEditRecord(r);
-        }
-        else
-        {
-            if (UI::Btn("应用", {S(70), S(32)}, Colors::BTN_GREEN))
-                applyRecordEdits(r);
-            ImGui::SameLine();
-            if (UI::Btn("取消", {S(60), S(32)}, Colors::BTN_RED))
-            {
-                bpParams_.editingRecordIdx = -1;
-                bpParams_.editingField = -1;
-            }
-        }
-        UI::Space(S(4));
-
-        // 通用：显示一行寄存器，编辑模式下多一个"改"按钮
+        // 通用：显示一行寄存器，点击"改"后输入 Hex 并立即写回
         // fieldId: 0~29=X0~X29, 30=LR, 31=SP, 32=PC, 33=PSTATE, 34=ORIG_X0, 35=SYSCALLNO
         auto regLine = [&](const char *name, int regIndex)
         {
@@ -1537,12 +1618,9 @@ private:
             if (UI::Btn(id, {S(50), S(28)}, Colors::BTN_COPY))
                 CopyText(hex);
 
-            if (isEditing)
-            {
-                ImGui::SameLine();
-                snprintf(id, sizeof(id), "改##%s%d", name, r);
-                drawRegisterEditButton(id, regIndex, name, hex, {S(40), S(28)});
-            }
+            ImGui::SameLine();
+            snprintf(id, sizeof(id), "改##%s%d", name, r);
+            drawRegisterEditButton(id, r, regIndex, name, hex, {S(40), S(28)});
         };
 
         regLine("PC", Driver::IDX_PC);
@@ -1556,14 +1634,15 @@ private:
         const auto origX0 = HwbpRead64(show, Driver::IDX_ORIG_X0);
         const auto hitCount = HwbpRead64(show, Driver::IDX_HIT_COUNT);
         UI::Text(Colors::LABEL, "PSTATE:  0x%llX", (unsigned long long)pstate);
-        if (isEditing)
-        {
-            ImGui::SameLine();
-            drawRegisterEditButton("改##pst", Driver::IDX_PSTATE, "PSTATE", Hex64(pstate), {S(40), S(28)});
-        }
+        ImGui::SameLine();
+        drawRegisterEditButton("改##pst", r, Driver::IDX_PSTATE, "PSTATE", Hex64(pstate), {S(40), S(28)});
 
         UI::Text(Colors::LABEL, "SYSCALL: %llu", (unsigned long long)syscallno);
+        ImGui::SameLine();
+        drawRegisterEditButton("改##syscall", r, Driver::IDX_SYSCALLNO, "SYSCALL", Hex64(syscallno), {S(40), S(28)});
         UI::Text(Colors::LABEL, "ORIG_X0: 0x%llX", (unsigned long long)origX0);
+        ImGui::SameLine();
+        drawRegisterEditButton("改##origx0", r, Driver::IDX_ORIG_X0, "ORIG_X0", Hex64(origX0), {S(40), S(28)});
         UI::Text(Colors::WARN, "命中次数: %llu", (unsigned long long)hitCount);
         UI::Space(S(6));
 
@@ -1572,15 +1651,13 @@ private:
         UI::Space(S(4));
         char tableId[32];
         snprintf(tableId, sizeof(tableId), "Regs##%d", r);
-        int cols = isEditing ? 4 : 3;
         ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, {S(4), S(4)});
-        if (ImGui::BeginTable(tableId, cols, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
+        if (ImGui::BeginTable(tableId, 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
         {
             ImGui::TableSetupColumn("寄存器", ImGuiTableColumnFlags_WidthFixed, S(55));
             ImGui::TableSetupColumn("值", ImGuiTableColumnFlags_WidthStretch);
             ImGui::TableSetupColumn("复制", ImGuiTableColumnFlags_WidthFixed, S(50));
-            if (isEditing)
-                ImGui::TableSetupColumn("改", ImGuiTableColumnFlags_WidthFixed, S(50));
+            ImGui::TableSetupColumn("改", ImGuiTableColumnFlags_WidthFixed, S(50));
             ImGui::TableHeadersRow();
 
             for (int i = 0; i < 30; ++i)
@@ -1601,13 +1678,10 @@ private:
                 if (UI::Btn("复制", {S(42), S(28)}, Colors::BTN_COPY))
                     CopyText(regHex);
 
-                if (isEditing)
-                {
-                    ImGui::TableSetColumnIndex(3);
-                    char bid[16];
-                    snprintf(bid, sizeof(bid), "改##x%d", i);
-                    drawRegisterEditButton(bid, regIndex, std::format("X{}", i), regHex, {S(42), S(28)});
-                }
+                ImGui::TableSetColumnIndex(3);
+                char bid[16];
+                snprintf(bid, sizeof(bid), "改##x%d", i);
+                drawRegisterEditButton(bid, r, regIndex, std::format("X{}", i), regHex, {S(42), S(28)});
                 ImGui::PopID();
             }
             ImGui::EndTable();
@@ -1634,12 +1708,9 @@ private:
             if (UI::Btn(id, {S(50), S(28)}, Colors::BTN_COPY))
                 CopyText(hex);
 
-            if (isEditing)
-            {
-                ImGui::SameLine();
-                snprintf(id, sizeof(id), "改##%s%d", name, r);
-                drawRegisterEditButton(id, regIndex, name, hex, {S(40), S(28)});
-            }
+            ImGui::SameLine();
+            snprintf(id, sizeof(id), "改##%s%d", name, r);
+            drawRegisterEditButton(id, r, regIndex, name, hex, {S(40), S(28)});
         };
 
         fpCtrlLine("FPSR", Driver::IDX_FPSR);
@@ -1649,15 +1720,13 @@ private:
         // V0~V31 表格
         char vtblId[32];
         snprintf(vtblId, sizeof(vtblId), "VRegs##%d", r);
-        int vcols = isEditing ? 4 : 3;
         ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, {S(4), S(4)});
-        if (ImGui::BeginTable(vtblId, vcols, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
+        if (ImGui::BeginTable(vtblId, 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
         {
             ImGui::TableSetupColumn("寄存器", ImGuiTableColumnFlags_WidthFixed, S(55));
             ImGui::TableSetupColumn("值", ImGuiTableColumnFlags_WidthStretch);
             ImGui::TableSetupColumn("复制", ImGuiTableColumnFlags_WidthFixed, S(50));
-            if (isEditing)
-                ImGui::TableSetupColumn("改", ImGuiTableColumnFlags_WidthFixed, S(50));
+            ImGui::TableSetupColumn("改", ImGuiTableColumnFlags_WidthFixed, S(50));
             ImGui::TableHeadersRow();
 
             for (int i = 0; i < 32; ++i)
@@ -1681,58 +1750,15 @@ private:
                 if (UI::Btn("复制", {S(42), S(28)}, Colors::BTN_COPY))
                     CopyText(qHex);
 
-                if (isEditing)
-                {
-                    ImGui::TableSetColumnIndex(3);
-                    char bid[16];
-                    snprintf(bid, sizeof(bid), "改##v%d", i);
-                    drawRegisterEditButton(bid, regIndex, std::format("V{}", i), qHex, {S(42), S(28)});
-                }
+                ImGui::TableSetColumnIndex(3);
+                char bid[16];
+                snprintf(bid, sizeof(bid), "改##v%d", i);
+                drawRegisterEditButton(bid, r, regIndex, std::format("V{}", i), qHex, {S(42), S(28)});
                 ImGui::PopID();
             }
             ImGui::EndTable();
         }
         ImGui::PopStyleVar();
-    }
-
-    // 拷贝副本
-    void beginEditRecord(int idx)
-    {
-        const auto &info = dr->GetHwbpInfoRef();
-        if (idx < 0)
-            return;
-        int flatIndex = 0;
-        for (const auto &point : info.points)
-        {
-            if (idx >= flatIndex && idx < flatIndex + point.record_count)
-            {
-                bpParams_.editingRecordIdx = idx;
-                bpParams_.editCopy = point.records[idx - flatIndex]; // 完整拷贝
-                bpParams_.editingField = -1;
-                return;
-            }
-            flatIndex += point.record_count;
-        }
-    }
-    // 写回副本
-    void applyRecordEdits(int idx)
-    {
-        const auto &info = dr->GetHwbpInfoRef();
-        if (idx < 0)
-            return;
-        int flatIndex = 0;
-        for (const auto &pointConst : info.points)
-        {
-            auto &point = const_cast<Driver::hwbp_point &>(pointConst);
-            if (idx >= flatIndex && idx < flatIndex + point.record_count)
-            {
-                point.records[idx - flatIndex] = bpParams_.editCopy;
-                bpParams_.editingRecordIdx = -1;
-                bpParams_.editingField = -1;
-                return;
-            }
-            flatIndex += point.record_count;
-        }
     }
 
     // ================================================================

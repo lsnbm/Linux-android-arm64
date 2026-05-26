@@ -167,8 +167,6 @@ def _strip_scan_regions(response: dict[str, Any]) -> dict[str, Any]:
     slim_response = dict(response)
     slim_response["data"] = slim_data
     return slim_response
-
-
 mcp = FastMCP(
     "NativeTcpBridge Android MCP",
     host=DEFAULT_MCP_BIND_HOST,
@@ -447,7 +445,7 @@ def android_memory_view_read() -> dict[str, Any]:
 
 @mcp.tool()
 def android_breakpoint_list() -> dict[str, Any]:
-    """List the current hardware breakpoint state and saved breakpoint records."""
+    """List hardware breakpoint state using the raw nested hwbp_info payload."""
     return _call_bridge_operation("breakpoint.info")
 
 
@@ -771,10 +769,10 @@ TOOL_META: dict[str, dict[str, Any]] = {
     },
     "android_breakpoint_list": {
         "group": "Breakpoints",
-        "use_when": "Inspect active breakpoint info and saved records.",
+        "use_when": "Inspect active breakpoint info and traverse data.hwbp_info.points[].records[] in point order.",
         "example": {},
         "parameter_notes": {},
-        "result_notes": "records may be empty if no hit record exists.",
+        "result_notes": "Returns raw breakpoint.info payload with nested hwbp_info.points[].records[]; flat record indexes are derived by traversing points then records in order.",
     },
     "android_breakpoint_set": {
         "group": "Breakpoints",
@@ -805,15 +803,15 @@ TOOL_META: dict[str, dict[str, Any]] = {
         "group": "Breakpoints",
         "use_when": "Delete one saved breakpoint record entry.",
         "example": {"index": 0},
-        "parameter_notes": {"index": "Valid index from android_breakpoint_list.data.records."},
-        "result_notes": "Fails with index out of range when records is empty.",
+        "parameter_notes": {"index": "Flat record index obtained by traversing android_breakpoint_list.data.hwbp_info.points[].records[] in order."},
+        "result_notes": "Use descending record indexes to delete a whole point.",
     },
     "android_breakpoint_record_update": {
         "group": "Breakpoints",
         "use_when": "Patch one register field in a saved breakpoint record; this enables the write mask for that register.",
         "example": {"index": 0, "field": "x0", "value": "0x12345678"},
         "parameter_notes": {
-            "index": "Valid existing record index.",
+            "index": "Flat record index obtained by traversing android_breakpoint_list.data.hwbp_info.points[].records[] in order.",
             "field": "pc/hit_count/lr/sp/pstate/orig_x0/syscallno/fpsr/fpcr/x0~x29/q0~q31, op.<field> for write-mask control, or mask0~mask17.",
             "value": "Number or hex string. Register writes set HWBP_OP_WRITE before updating the struct field.",
         },

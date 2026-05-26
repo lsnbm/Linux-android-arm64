@@ -612,228 +612,99 @@ public: // 外部获取内存信息
     // dump指定模块
     bool DumpModule(std::string_view moduleName)
     {
-        /*
-        问题:
-        在 Android/Linux 中，PC 指向的代码地址不一定都来自 libxxx.so 这类
-        文件映射模块。除了 linker 正常加载的 ELF 代码段以外，进程也可以在
-        运行时通过 mmap/mprotect/memfd/ashmem/devzero 等方式创建一块可执行内存，然后把机器码写入这块内存并跳转执行。
-
-        这种区域在 /proc/<pid>/maps 不会显示为某个 so 文件路径，
-        而可能显示为:
-            [anon:xxx]
-            /dev/zero (deleted)
-            /memfd:jit-cache (deleted)
-            /dev/ashmem/xxx (deleted)
-        或者没有路径名的匿名映射，驱动进行了排除dev路径和模块外的匿名内存
-
-        常见来源包括:
-        1. JIT / 脚本引擎 / VM 动态代码缓存
-            运行时生成 ARM64 机器码，写入 mmap 出来的内存，再赋予可执行权限
-            或者使用 RW/X 双映射方式执行。
-
-        2. 壳 / 保护 / 热更新代码
-            真实代码可能被加密保存在文件、资源或网络数据中，运行时解密后写入
-            匿名可执行内存，再通过跳转、回调、函数指针等方式进入执行。
-
-    3. 手动 ELF Loader / 自定义 Linker
-       程序不一定调用系统 dlopen 加载核心代码，而是自己解析 ELF:
-           - 解析 ELF Header / Program Header
-           - mmap 映射 PT_LOAD 段
-           - 处理重定位
-           - 修复 GOT/PLT
-           - 处理符号解析
-           - 调用 init_array / 构造函数
-       这种情况下，代码虽然逻辑上来自某个 ELF，但在 maps 中可能没有原始
-       so 文件路径，因此无法按普通模块名归属。
-
-    4. Hook /  跳板
-       Hook 框架或保护代码可能申请一小段可执行内存，用来存放跳板指令、桩代码或中转逻辑。
-
-    注意:
-      这种区域地址位置受 ASLR、mmap 分配策略、内存碎片等因素影响。
-      权限是 rwx / rwxs，说明该区域同时可写可执行，通常更像动态代码、JIT 代码、解密代码或跳板代码。
-    */
-        // 判断是否是需要修正地址的动态标签
-        auto IsRelocatableDynamicTag = [](uint64_t tag) -> bool
+        if (moduleName.empty())
         {
-            return tag == DT_PLTGOT || tag == DT_HASH || tag == DT_STRTAB ||
-                   tag == DT_SYMTAB || tag == DT_RELA || tag == DT_INIT ||
-                   tag == DT_FINI || tag == DT_REL || tag == DT_JMPREL ||
-                   tag == DT_INIT_ARRAY || tag == DT_FINI_ARRAY || tag == DT_GNU_HASH ||
-                   tag == 0x6000000F /* DT_ANDROID_REL */ ||
-                   tag == 0x60000011 /* DT_ANDROID_RELA */ ||
-                   tag == 0x60000012 /* DT_ANDROID_REL_OFFSET */;
+            std::println(stderr, "[-] Dump: 模块名为空");
+            return false;
+        }
+
+        struct DumpSegment
+        {
+            short index;
+            uint64_t start;
+            uint64_t end;
         };
 
         const auto &info = GetMemoryInfoRef();
-        const module_info *targetMod = nullptr;
+        std::vector<DumpSegment> dumpSegs;
+        int matchedModuleCount = 0;
 
+        // moduleName 使用包含匹配: 只要模块完整路径里包含该字符串，就收集该模块的所有有效区段。
+        // 如果名称过短，可能同时匹配多个模块，最终会把这些模块的区段一起按地址顺序写出。
         for (int i = 0; i < info.module_count; ++i)
         {
             const auto &mod = info.modules[i];
             std::string_view fullPath(mod.name);
 
-            if (fullPath.ends_with(moduleName))
+            if (fullPath.find(moduleName) == std::string_view::npos)
+                continue;
+
+            matchedModuleCount++;
+            for (int j = 0; j < mod.seg_count; ++j)
             {
-                if (fullPath.length() == moduleName.length() ||
-                    fullPath[fullPath.length() - moduleName.length() - 1] == '/')
-                {
-                    targetMod = &mod;
-                    break;
-                }
+                const auto &seg = mod.segs[j];
+                if (seg.start >= seg.end)
+                    continue;
+                dumpSegs.push_back({seg.index, seg.start, seg.end});
             }
         }
 
-        if (!targetMod)
+        if (dumpSegs.empty())
         {
-            std::println(stderr, "[-] Dump: 未找到模块 '{}'", moduleName);
+            std::println(stderr, "[-] Dump: 未找到模块 '{}' 或模块没有有效区段", moduleName);
             return false;
         }
 
+        // 只保证收集到的区段按内存地址从低到高排列。
+        // 输出文件是区段数据直接拼接，不按 baseAddr 展开，也不为模块地址空洞补 0。
+        std::sort(dumpSegs.begin(), dumpSegs.end(), [](const DumpSegment &a, const DumpSegment &b)
+                  {
+                      if (a.start != b.start)
+                          return a.start < b.start;
+                      if (a.end != b.end)
+                          return a.end < b.end;
+                      return a.index < b.index;
+                  });
+
         // 确定模块的内存跨度
-        uint64_t baseAddr = ~0ULL;
+        uint64_t baseAddr = dumpSegs.front().start;
         uint64_t maxEnd = 0;
 
-        for (int i = 0; i < targetMod->seg_count; ++i)
+        for (const auto &seg : dumpSegs)
         {
-            const auto &seg = targetMod->segs[i];
             if (seg.start < baseAddr)
                 baseAddr = seg.start;
             if (seg.end > maxEnd)
                 maxEnd = seg.end;
         }
 
-        uint64_t imageSize = maxEnd - baseAddr;
+        uint64_t spanSize = maxEnd - baseAddr;
+        uint64_t dumpSize = 0;
         constexpr uint64_t MAX_DUMP_SIZE = 1024ULL * 1024 * 500; // 500MB 防御 OOM
 
-        if (baseAddr >= maxEnd || baseAddr == ~0ULL || imageSize == 0 || imageSize > MAX_DUMP_SIZE)
+        for (const auto &seg : dumpSegs)
         {
-            std::println(stderr, "[-] Dump: 模块边界无效或跨度过大 (0x{:X} 字节)", imageSize);
+            uint64_t segSize = seg.end - seg.start;
+            if (dumpSize > MAX_DUMP_SIZE - segSize)
+            {
+                std::println(stderr, "[-] Dump: 模块区段总大小过大");
+                return false;
+            }
+            dumpSize += segSize;
+        }
+
+        if (baseAddr >= maxEnd || baseAddr == ~0ULL || spanSize == 0 || dumpSize == 0 || dumpSize > MAX_DUMP_SIZE)
+        {
+            std::println(stderr, "[-] Dump: 模块边界无效或大小过大 (0x{:X} 字节)", dumpSize);
             return false;
         }
 
         std::println(stdout, "[*] 模块: {}", moduleName);
+        std::println(stdout, "[*] 匹配模块: {} 个, 区段: {} 个", matchedModuleCount, dumpSegs.size());
         std::println(stdout, "[*] 基址: 0x{:X}", baseAddr);
         std::println(stdout, "[*] 结束: 0x{:X}", maxEnd);
-        std::println(stdout, "[*] 跨度: 0x{:X} ({} MB)", imageSize, imageSize / 1024 / 1024);
-
-        // 分配缓冲区 (默认全 0，完美兼容 BSS 和 PROT_NONE 空白页)
-        std::vector<uint8_t> image(imageSize, 0);
-
-        // 分层内存读取
-        size_t totalRead = 0;
-        size_t failedPages = 0;
-
-        for (int i = 0; i < targetMod->seg_count; ++i)
-        {
-            const auto &seg = targetMod->segs[i];
-            if (seg.start >= seg.end)
-                continue;
-
-            uint64_t segOffset = seg.start - baseAddr;
-            uint64_t segSize = seg.end - seg.start;
-
-            // 尝试一次性读取整个内存段提高速度
-            if (KReadProcessMemory(seg.start, image.data() + segOffset, segSize) > 0)
-            {
-                totalRead += segSize;
-            }
-            else
-            {
-                // 如果整段读取失败（中间有保护页或未分配页），降级为分页扫描抢救
-                for (uint64_t off = 0; off < segSize; off += PAGE_SIZE)
-                {
-                    size_t toRead = std::min((uint64_t)PAGE_SIZE, segSize - off);
-                    if (KReadProcessMemory(seg.start + off, image.data() + segOffset + off, toRead) > 0)
-                    {
-                        totalRead += toRead;
-                    }
-                    else
-                    {
-                        failedPages++; // 读取失败的页保持为 0x00，不影响整体结构
-                    }
-                }
-            }
-        }
-        std::println(stdout, "[*] 读取完成: 成功 0x{:X} 字节, 失败 {} 页", totalRead, failedPages);
-
-        // ELF 修复
-        if (totalRead >= sizeof(Elf64_Ehdr))
-        {
-            Elf64_Ehdr *ehdr = reinterpret_cast<Elf64_Ehdr *>(image.data());
-
-            if (__builtin_memcmp(ehdr->e_ident, ELFMAG, SELFMAG) == 0 && ehdr->e_ident[EI_CLASS] == ELFCLASS64)
-            {
-                std::println(stdout, "[*] ELF 虚拟基址: 0x0 (1:1 内存映射展开)");
-
-                // 抹除无效的 Section Headers
-                ehdr->e_shoff = 0;
-                ehdr->e_shnum = 0;
-                ehdr->e_shstrndx = SHN_UNDEF;
-
-                // 验证 Phdr 偏移是否在安全范围内
-                if (ehdr->e_phoff + (ehdr->e_phnum * sizeof(Elf64_Phdr)) <= imageSize)
-                {
-                    Elf64_Phdr *phdrs = reinterpret_cast<Elf64_Phdr *>(image.data() + ehdr->e_phoff);
-                    Elf64_Phdr *dynPhdr = nullptr;
-
-                    std::println(stdout, "[*] 修复 ELF Program Headers ({} 个)...", ehdr->e_phnum);
-
-                    // 修复 Program Headers 映射
-                    int load_idx = 1;
-                    for (int i = 0; i < ehdr->e_phnum; ++i)
-                    {
-                        Elf64_Phdr &ph = phdrs[i];
-
-                        if (ph.p_type == PT_LOAD)
-                        {
-                            uint64_t old_offset = ph.p_offset;
-                            uint64_t old_filesz = ph.p_filesz;
-
-                            // 强制 1:1 映射并展开 BSS
-                            ph.p_offset = ph.p_vaddr;
-                            ph.p_filesz = ph.p_memsz;
-
-                            std::println(stdout, "  LOAD[{}]: vaddr=0x{:X}  offset: 0x{:X} -> 0x{:X}  filesz: 0x{:X} -> 0x{:X}  memsz=0x{:X}",
-                                         load_idx++, ph.p_vaddr, old_offset, ph.p_offset, old_filesz, ph.p_filesz, ph.p_memsz);
-                        }
-                        else if (ph.p_type == PT_DYNAMIC)
-                        {
-                            dynPhdr = &ph;
-                            ph.p_offset = ph.p_vaddr;
-                            ph.p_filesz = ph.p_memsz;
-                        }
-                    }
-
-                    //  修复 PT_DYNAMIC (恢复导入/导出/字符串表)
-                    if (dynPhdr && (dynPhdr->p_offset + dynPhdr->p_filesz <= imageSize))
-                    {
-                        Elf64_Dyn *dynTable = reinterpret_cast<Elf64_Dyn *>(image.data() + dynPhdr->p_offset);
-                        size_t dynCount = dynPhdr->p_filesz / sizeof(Elf64_Dyn);
-
-                        for (size_t i = 0; i < dynCount; ++i)
-                        {
-                            if (dynTable[i].d_tag == DT_NULL)
-                                break;
-
-                            // 还原被 Linker 加上基址的绝对地址指针
-                            if (IsRelocatableDynamicTag(dynTable[i].d_tag))
-                            {
-                                if (dynTable[i].d_un.d_ptr >= baseAddr && dynTable[i].d_un.d_ptr < maxEnd)
-                                {
-                                    dynTable[i].d_un.d_ptr -= baseAddr;
-                                }
-                            }
-                        }
-                        std::println(stdout, "[*] ELF 修复完成 (PT_DYNAMIC 符号表已重建)");
-                    }
-                }
-            }
-            else
-            {
-                std::println(stderr, "[-] 警告: ELF Magic 校验失败，可能是头部被反Dump抹除，保存原始数据");
-            }
-        }
+        std::println(stdout, "[*] 地址跨度: 0x{:X} ({} MB)", spanSize, spanSize / 1024 / 1024);
+        std::println(stdout, "[*] 输出大小: 0x{:X} ({} MB)", dumpSize, dumpSize / 1024 / 1024);
 
         mkdir("/sdcard/dump", 0777); // 忽略已存在错误
 
@@ -848,13 +719,42 @@ public: // 外部获取内存信息
             return false;
         }
 
-        fwrite(image.data(), 1, imageSize, fp);
+        std::vector<uint8_t> page(PAGE_SIZE, 0);
+        size_t totalRead = 0;
+        size_t failedPages = 0;
+
+        for (const auto &seg : dumpSegs)
+        {
+            for (uint64_t addr = seg.start; addr < seg.end; addr += PAGE_SIZE)
+            {
+                size_t toRead = static_cast<size_t>(std::min<uint64_t>(PAGE_SIZE, seg.end - addr));
+                std::fill(page.begin(), page.begin() + toRead, 0);
+
+                if (KReadProcessMemory(addr, page.data(), toRead) > 0)
+                {
+                    totalRead += toRead;
+                }
+                else
+                {
+                    failedPages++;
+                }
+
+                if (fwrite(page.data(), 1, toRead, fp) != toRead)
+                {
+                    std::println(stderr, "[-] Dump: 写入文件失败 {} ({})", outPath, std::strerror(errno));
+                    fclose(fp);
+                    return false;
+                }
+            }
+        }
+
         fclose(fp);
+        std::println(stdout, "[*] 读取完成: 成功 0x{:X} 字节, 失败 {} 页", totalRead, failedPages);
 
         std::println(stdout, "[+] ==========================================");
         std::println(stdout, "[+] Dump 完成!");
         std::println(stdout, "[+] 路径: {}", outPath);
-        std::println(stdout, "[+] 大小: 0x{:X} ({} MB)", imageSize, imageSize / 1024 / 1024);
+        std::println(stdout, "[+] 大小: 0x{:X} ({} MB)", dumpSize, dumpSize / 1024 / 1024);
         std::println(stdout, "[+] ==========================================");
 
         return true;

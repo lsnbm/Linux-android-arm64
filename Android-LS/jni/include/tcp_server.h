@@ -590,67 +590,48 @@ namespace
     json buildHwbpInfoJson(const auto &info)
     {
         json root;
-        int recordCount = 0;
-        std::uint64_t hitAddr = 0;
-
-        root["num_brps"] = info.num_brps;
-        root["num_wrps"] = info.num_wrps;
         root["active"] = bridgeState().hwbpActive;
         root["active_address"] = bridgeState().hwbpAddress;
         root["active_address_hex"] = std::format("0x{:X}", bridgeState().hwbpAddress);
         root["active_type"] = bridgeState().hwbpType;
         root["active_scope"] = bridgeState().hwbpScope;
         root["active_length"] = bridgeState().hwbpLength;
-        root["points"] = json::array();
-        root["records"] = json::array();
 
-        int pointIndex = 0;
+        json hwbpInfo;
+        hwbpInfo["num_brps"] = info.num_brps;
+        hwbpInfo["num_wrps"] = info.num_wrps;
+        hwbpInfo["points"] = json::array();
+
         for (const auto &point : info.points)
         {
             const int pointRecordCount = clampHwbpRecordCount(point.record_count);
-            if (hitAddr == 0 && point.hit_addr != 0)
-                hitAddr = point.hit_addr;
-
             json pointItem;
-            pointItem["index"] = pointIndex;
+            pointItem["bt"] = static_cast<int>(point.bt);
+            pointItem["bl"] = static_cast<int>(point.bl);
+            pointItem["bs"] = static_cast<int>(point.bs);
             pointItem["hit_addr"] = point.hit_addr;
-            pointItem["hit_addr_hex"] = std::format("0x{:X}", static_cast<std::uint64_t>(point.hit_addr));
-            pointItem["type"] = std::string(bpTypeToToken(point.bt));
-            pointItem["scope"] = std::string(bpScopeToToken(point.bs));
-            pointItem["length"] = static_cast<int>(point.bl);
             pointItem["record_count"] = pointRecordCount;
-            root["points"].push_back(std::move(pointItem));
+            pointItem["records"] = json::array();
 
             for (int i = 0; i < pointRecordCount; ++i)
             {
                 auto &rec = const_cast<Driver::hwbp_record &>(point.records[i]);
                 json item;
-                item["index"] = recordCount;
-                item["point_index"] = pointIndex;
-                item["point_record_index"] = i;
                 MemUtils::HwbpRequestAll(rec);
-                const auto pc = readHwbp64(rec, Driver::IDX_PC);
-                const auto hitCount = readHwbp64(rec, Driver::IDX_HIT_COUNT);
-                const auto lr = readHwbp64(rec, Driver::IDX_LR);
-                const auto sp = readHwbp64(rec, Driver::IDX_SP);
-                const auto origX0 = readHwbp64(rec, Driver::IDX_ORIG_X0);
-                const auto syscallNo = readHwbp64(rec, Driver::IDX_SYSCALLNO);
-                const auto pstate = readHwbp64(rec, Driver::IDX_PSTATE);
-                const auto fpsr = readHwbp32(rec, Driver::IDX_FPSR);
-                const auto fpcr = readHwbp32(rec, Driver::IDX_FPCR);
                 item["mask"] = json::array();
                 for (int m = 0; m < 18; ++m)
                 {
                     item["mask"].push_back(rec.mask[m]);
                 }
-                item["pc"] = pc;
-                item["pc_hex"] = std::format("0x{:X}", static_cast<std::uint64_t>(pc));
-                item["hit_count"] = hitCount;
-                item["lr"] = lr;
-                item["sp"] = sp;
-                item["orig_x0"] = origX0;
-                item["syscallno"] = syscallNo;
-                item["pstate"] = pstate;
+                item["hit_count"] = readHwbp64(rec, Driver::IDX_HIT_COUNT);
+                item["pc"] = readHwbp64(rec, Driver::IDX_PC);
+                item["lr"] = readHwbp64(rec, Driver::IDX_LR);
+                item["sp"] = readHwbp64(rec, Driver::IDX_SP);
+                item["orig_x0"] = readHwbp64(rec, Driver::IDX_ORIG_X0);
+                item["syscallno"] = readHwbp64(rec, Driver::IDX_SYSCALLNO);
+                item["pstate"] = readHwbp64(rec, Driver::IDX_PSTATE);
+                item["fpsr"] = readHwbp32(rec, Driver::IDX_FPSR);
+                item["fpcr"] = readHwbp32(rec, Driver::IDX_FPCR);
                 for (int reg = 0; reg < 30; ++reg)
                 {
                     item[std::format("x{}", reg)] = readHwbp64(rec, Driver::IDX_X0 + reg);
@@ -662,19 +643,13 @@ namespace
                                   {"hi", static_cast<std::uint64_t>(qreg >> 64)}};
                     item[std::format("q{}", reg)] = std::move(qitem);
                 }
-                item["fpsr"] = fpsr;
-                item["fpcr"] = fpcr;
-                root["records"].push_back(std::move(item));
-                ++recordCount;
+                pointItem["records"].push_back(std::move(item));
             }
 
-            ++pointIndex;
+            hwbpInfo["points"].push_back(std::move(pointItem));
         }
 
-        root["hit_addr"] = hitAddr;
-        root["hit_addr_hex"] = std::format("0x{:X}", hitAddr);
-        root["record_count"] = recordCount;
-
+        root["hwbp_info"] = std::move(hwbpInfo);
         return root;
     }
 
