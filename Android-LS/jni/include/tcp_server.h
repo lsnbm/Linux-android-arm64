@@ -14,8 +14,24 @@ namespace
     constexpr int kListenBacklog = 32;
     std::atomic_bool gRunning{true};
     std::atomic_uint64_t gClientSessionSeed{1};
-    int gServerFd = -1;
+    std::atomic_int gServerFd{-1};
     std::mutex gRequestMutex;
+
+    void CloseTcpServerFd()
+    {
+        const int serverFd = gServerFd.exchange(-1, std::memory_order_acq_rel);
+        if (serverFd >= 0)
+        {
+            shutdown(serverFd, SHUT_RDWR);
+            close(serverFd);
+        }
+    }
+
+    void StopTcpServer()
+    {
+        gRunning.store(false, std::memory_order_release);
+        CloseTcpServerFd();
+    }
 
     LockManager &lockManager()
     {
@@ -1680,6 +1696,7 @@ namespace
 // 程序入口：初始化服务并处理客户端请求。
 int tcp_server()
 {
+    gRunning.store(true, std::memory_order_release);
 
     const int serverFd = socket(AF_INET, SOCK_STREAM, 0);
     if (serverFd < 0)
@@ -1687,13 +1704,13 @@ int tcp_server()
         printErrno("创建套接字失败");
         return 1;
     }
-    gServerFd = serverFd;
+    gServerFd.store(serverFd, std::memory_order_release);
 
     constexpr int enableReuse = 1;
     if (setsockopt(serverFd, SOL_SOCKET, SO_REUSEADDR, &enableReuse, sizeof(enableReuse)) < 0)
     {
         printErrno("设置套接字选项失败");
-        close(serverFd);
+        CloseTcpServerFd();
         return 1;
     }
 
@@ -1705,14 +1722,14 @@ int tcp_server()
     if (bind(serverFd, reinterpret_cast<sockaddr *>(&address), sizeof(address)) < 0)
     {
         printErrno("绑定端口失败");
-        close(serverFd);
+        CloseTcpServerFd();
         return 1;
     }
 
     if (listen(serverFd, kListenBacklog) < 0)
     {
         printErrno("开始监听失败");
-        close(serverFd);
+        CloseTcpServerFd();
         return 1;
     }
 
@@ -1740,11 +1757,7 @@ int tcp_server()
         }
     }
 
-    if (gServerFd >= 0)
-    {
-        close(gServerFd);
-        gServerFd = -1;
-    }
+    CloseTcpServerFd();
 
     std::println("服务端已退出。");
     return 0;

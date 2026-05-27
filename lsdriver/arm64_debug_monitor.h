@@ -2,6 +2,7 @@
 #include <linux/kernel.h>
 #include <linux/kallsyms.h>
 #include <linux/memory.h>
+#include <linux/smp.h>
 #include <linux/stop_machine.h>
 #include <linux/version.h>
 #include <linux/sched.h>
@@ -50,6 +51,20 @@ struct breakpoint_config
 struct breakpoint_config g_bp_config[BP_CONFIG_MAX];
 static bool g_task_run_monitor_started = false; // 防止重复安装断点和卸载断点
 int num_brps, num_wrps;                         // 硬件执行和访问槽位总数
+
+// 清理当前cpu 寄存器
+static void clear_hwbp_regs_on_cpu(void *unused)
+{
+    int i;
+
+    (void)unused;
+
+    for (i = 0; i < num_brps; i++)
+        write_wb_reg(AARCH64_DBG_REG_BCR, i, 0);
+
+    for (i = 0; i < num_wrps; i++)
+        write_wb_reg(AARCH64_DBG_REG_WCR, i, 0);
+}
 
 /*
  把外部断点参数转换成ARM架构内部格式，并完成基础检测/修正。
@@ -552,6 +567,7 @@ static int start_task_run_monitor(struct breakpoint_config bp_config)
 static void stop_task_run_monitor(struct breakpoint_config bp_config)
 {
     int i;
+    int cpu;
     bool has_config = false;
 
     if (bp_config.pid <= 0)
@@ -559,11 +575,9 @@ static void stop_task_run_monitor(struct breakpoint_config bp_config)
 
     if (g_task_run_monitor_started)
     {
-        for (i = 0; i < num_brps; i++)
-            write_wb_reg(AARCH64_DBG_REG_BCR, i, 0);
-
-        for (i = 0; i < num_wrps; i++)
-            write_wb_reg(AARCH64_DBG_REG_WCR, i, 0);
+        // 遍历所有在线 CPU，清理寄存器
+        for_each_online_cpu(cpu)
+            smp_call_function_single(cpu, clear_hwbp_regs_on_cpu, NULL, 1);
     }
 
     for (i = 0; i < BP_CONFIG_MAX; i++)
