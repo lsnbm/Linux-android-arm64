@@ -44,6 +44,7 @@ static int DispatchThreadFunction(void *data)
 
 				// 不保存中断+恢复中断状态，这里强行关闭所有中断，后续在强行打开所有
 				asm volatile("msr daifset, #0xf\n" ::: "memory");
+				asm volatile("msr daifclr, #0xf\n" ::: "memory");
 
 				req->kernel = false; // 清除请求标志
 
@@ -88,7 +89,6 @@ static int DispatchThreadFunction(void *data)
 				}
 
 				req->user = true; // 通知用户层完成
-				asm volatile("msr daifclr, #0xf\n" ::: "memory");
 			}
 			else
 			{
