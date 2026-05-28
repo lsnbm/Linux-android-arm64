@@ -52,20 +52,6 @@ struct breakpoint_config g_bp_config[BP_CONFIG_MAX];
 static bool g_task_run_monitor_started = false; // 防止重复安装断点和卸载断点
 int num_brps, num_wrps;                         // 硬件执行和访问槽位总数
 
-// 清理当前cpu 寄存器
-static void clear_hwbp_regs_on_cpu(void *unused)
-{
-    int i;
-
-    (void)unused;
-
-    for (i = 0; i < num_brps; i++)
-        write_wb_reg(AARCH64_DBG_REG_BCR, i, 0);
-
-    for (i = 0; i < num_wrps; i++)
-        write_wb_reg(AARCH64_DBG_REG_WCR, i, 0);
-}
-
 /*
  把外部断点参数转换成ARM架构内部格式，并完成基础检测/修正。
  这里只处理用户态断点（EL0）场景。
@@ -197,6 +183,97 @@ static int hw_breakpoint_parse(struct breakpoint_point *point, bool is_compat, s
     hw->ctrl.len <<= offset;
 
     return 0;
+}
+
+// 禁用当前 CPU 上的硬件断点/观察点控制寄存器，保留原有配置位
+static void clear_hwbp_regs_on_cpu(void *data)
+{
+    int i;
+    int cfg_index;
+    int point_index;
+    uint32_t ctrl;
+    uint32_t expected_ctrl;
+    uint64_t addr;
+    struct arch_hw_breakpoint info;
+    bool should_disable;
+
+    (void)data;
+
+    for (i = 0; i < num_brps; i++)
+    {
+        addr = read_wb_reg(AARCH64_DBG_REG_BVR, i);
+        ctrl = read_wb_reg(AARCH64_DBG_REG_BCR, i);
+
+        if (!(ctrl & 0x1) || addr == 0)
+            continue;
+
+        should_disable = false;
+        for (cfg_index = 0; cfg_index < BP_CONFIG_MAX; cfg_index++)
+        {
+            if (g_bp_config[cfg_index].pid <= 0 ||
+                !g_bp_config[cfg_index].on_hit)
+                continue;
+
+            for (point_index = 0; point_index < BP_CONFIG_MAX; point_index++)
+            {
+                struct breakpoint_point *point = &g_bp_config[cfg_index].points[point_index];
+
+                if (point->addr == 0 ||
+                    point->bt != HW_BREAKPOINT_X ||
+                    hw_breakpoint_parse(point, 0, &info) ||
+                    info.ctrl.type != ARM_BREAKPOINT_EXECUTE ||
+                    info.address != addr)
+                    continue;
+
+                expected_ctrl = encode_ctrl_reg(info.ctrl);
+                if ((expected_ctrl & ~0x1) != (ctrl & ~0x1))
+                    continue;
+
+                should_disable = true;
+            }
+        }
+
+        if (should_disable)
+            write_wb_reg(AARCH64_DBG_REG_BCR, i, ctrl & ~0x1);
+    }
+
+    for (i = 0; i < num_wrps; i++)
+    {
+        addr = read_wb_reg(AARCH64_DBG_REG_WVR, i);
+        ctrl = read_wb_reg(AARCH64_DBG_REG_WCR, i);
+
+        if (!(ctrl & 0x1) || addr == 0)
+            continue;
+
+        should_disable = false;
+        for (cfg_index = 0; cfg_index < BP_CONFIG_MAX; cfg_index++)
+        {
+            if (g_bp_config[cfg_index].pid <= 0 ||
+                !g_bp_config[cfg_index].on_hit)
+                continue;
+
+            for (point_index = 0; point_index < BP_CONFIG_MAX; point_index++)
+            {
+                struct breakpoint_point *point = &g_bp_config[cfg_index].points[point_index];
+
+                if (point->addr == 0 ||
+                    point->bt == HW_BREAKPOINT_X ||
+                    hw_breakpoint_parse(point, 0, &info) ||
+                    info.ctrl.type == ARM_BREAKPOINT_EXECUTE ||
+                    info.address != addr)
+                    continue;
+
+                expected_ctrl = encode_ctrl_reg(info.ctrl);
+                if ((expected_ctrl & ~0x1) != (ctrl & ~0x1))
+                    continue;
+
+                should_disable = true;
+            }
+        }
+
+        if (should_disable)
+            write_wb_reg(AARCH64_DBG_REG_WCR, i, ctrl & ~0x1);
+    }
 }
 
 // 执行断异常处理跳板工作函数，返回 0 表示继续执行原异常入口
@@ -549,9 +626,12 @@ static int start_task_run_monitor(struct breakpoint_config bp_config)
     if (ret)
     {
         pr_debug("register_trace_sched_switch failed: %d\n", ret);
-        memset(&g_bp_config[slot], 0, sizeof(g_bp_config[slot]));
-        inline_hook_remove(g_hooks);
-        return ret;
+
+        // 这里安装失败也不要进行清理和返回失败
+        // 因为是安装过了删除的时候下面没有注销而已，重复安装就会失败，不过已经是安装成功了的会生效
+        // memset(&g_bp_config[slot], 0, sizeof(g_bp_config[slot]));
+        // inline_hook_remove(g_hooks);
+        // return ret;
     }
 
     // 总数也是只获取一次
@@ -606,8 +686,14 @@ static void stop_task_run_monitor(struct breakpoint_config bp_config)
     // 初始化hook和注册过回调才允许清理
     if (g_task_run_monitor_started)
     {
-        // 逆序清理
-        unregister_trace_sched_switch(probe_sched_switch, NULL);
+
+        /*
+        不要进行注销线程切换回调，实测发现目标进程运行时注销会导致
+        目标进程的所有线程全部停止，具体不清除是什么原因
+        这样导致只能把目标进程放在后台，主动暂停了目标进程的运行，在切回目标进程才能正常跑下去
+        奇怪的是线程回调注销的是全局所有线程调度监听，但就只有想要断点目标进程被卡主，奇怪
+        */
+        // unregister_trace_sched_switch(probe_sched_switch, NULL);
         pr_debug("monitor stop\n");
         inline_hook_remove(g_hooks);
         g_task_run_monitor_started = false;

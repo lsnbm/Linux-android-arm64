@@ -445,13 +445,13 @@ def android_memory_view_read() -> dict[str, Any]:
 
 @mcp.tool()
 def android_breakpoint_list() -> dict[str, Any]:
-    """List hardware breakpoint state using the raw nested hwbp_info payload."""
+    """List hardware breakpoint state; each hwbp_info.points[] item owns its own records[]."""
     return _call_bridge_operation("breakpoint.info")
 
 
 @mcp.tool()
 def android_breakpoint_set(points: list[dict[str, Any]]) -> dict[str, Any]:
-    """Create hardware breakpoints on the current target process from hwbp_point-style configs."""
+    """Create hardware breakpoints from hwbp_point-style configs; hit records are grouped under each point."""
     current = _call_bridge_operation("breakpoint.info")
     data = current.get("data")
     if isinstance(data, dict) and bool(data.get("active", False)):
@@ -769,10 +769,10 @@ TOOL_META: dict[str, dict[str, Any]] = {
     },
     "android_breakpoint_list": {
         "group": "Breakpoints",
-        "use_when": "Inspect active breakpoint info and traverse data.hwbp_info.points[].records[] in point order.",
+        "use_when": "Inspect active breakpoint info. hwbp_info.points[] is the monitored-address list; every point owns an independent records[] array.",
         "example": {},
         "parameter_notes": {},
-        "result_notes": "Returns raw breakpoint.info payload with nested hwbp_info.points[].records[]; flat record indexes are derived by traversing points then records in order.",
+        "result_notes": "Returns raw breakpoint.info payload. Each point is one configured address/type/scope/length, and point.records[] stores records for different hit PCs under that point. Flat record indexes are derived by traversing points then each point.records[] in order.",
     },
     "android_breakpoint_set": {
         "group": "Breakpoints",
@@ -784,13 +784,13 @@ TOOL_META: dict[str, dict[str, Any]] = {
             ]
         },
         "parameter_notes": {
-            "points": "List of hwbp_point configs. Each item needs address, bp_type, bp_scope, length.",
+            "points": "List of hwbp_point configs. Each item creates one hwbp_info.points[] entry, and later hits for that address are recorded in that point's own records[] array.",
             "points[].address": "Target instruction/data address.",
             "points[].bp_type": "Service token: read/write/read_write/execute. Numeric tokens 1/2/3/4 are also accepted.",
             "points[].bp_scope": "Service token: main/other/all. Numeric tokens 0/1/2 are also accepted.",
             "points[].length": "Breakpoint length in bytes, 1..8.",
         },
-        "result_notes": "Creates breakpoint; record update requires existing record index.",
+        "result_notes": "Creates one or more point entries. Record update/remove requires an existing flat record index from android_breakpoint_list.",
     },
     "android_breakpoint_clear_all": {
         "group": "Breakpoints",
@@ -803,7 +803,7 @@ TOOL_META: dict[str, dict[str, Any]] = {
         "group": "Breakpoints",
         "use_when": "Delete one saved breakpoint record entry.",
         "example": {"index": 0},
-        "parameter_notes": {"index": "Flat record index obtained by traversing android_breakpoint_list.data.hwbp_info.points[].records[] in order."},
+        "parameter_notes": {"index": "Flat record index obtained by traversing android_breakpoint_list.data.hwbp_info.points[], then each point.records[], in order."},
         "result_notes": "Use descending record indexes to delete a whole point.",
     },
     "android_breakpoint_record_update": {
@@ -811,7 +811,7 @@ TOOL_META: dict[str, dict[str, Any]] = {
         "use_when": "Patch one register field in a saved breakpoint record; this enables the write mask for that register.",
         "example": {"index": 0, "field": "x0", "value": "0x12345678"},
         "parameter_notes": {
-            "index": "Flat record index obtained by traversing android_breakpoint_list.data.hwbp_info.points[].records[] in order.",
+            "index": "Flat record index obtained by traversing android_breakpoint_list.data.hwbp_info.points[], then each point.records[], in order.",
             "field": "pc/hit_count/lr/sp/pstate/orig_x0/syscallno/fpsr/fpcr/x0~x29/q0~q31, op.<field> for write-mask control, or mask0~mask17.",
             "value": "Number or hex string. Register writes set HWBP_OP_WRITE before updating the struct field.",
         },
