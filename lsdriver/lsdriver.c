@@ -185,7 +185,8 @@ static int ConnectThreadFunction(void *data)
 				}
 
 				// 成功 get_user_pages_remote 持有页面引用，只需释放 mm
-				ProcessExit = true;				  // 标记用户进程已连接
+				ProcessExit = true;	
+							  // 标记用户进程已连接
 				req->user = true;				  // 通知用户层已连接
 				hide_process_install(task->tgid); // 隐藏进程
 				hide_kgsl_install(task->tgid);	  // 隐藏高通GPU节点
@@ -302,25 +303,20 @@ static void hide_kthread(struct task_struct *task)
 {
 	if (!task)
 		return;
-
 	// 下面detach_pid_func隐藏没问题，但是线程运行起来没身份会立马死机，现在无法解决
-	typedef void (*detach_pid_t)(struct task_struct *task, enum pid_type type);
-	detach_pid_t detach_pid_func;
-	detach_pid_func = (detach_pid_t)generic_kallsyms_lookup_name("detach_pid");
-	if (detach_pid_func)
-	{
+	void (*detach_pid)(struct task_struct *task, enum pid_type type);
 
-		// detach_pid_func(chf, PIDTYPE_PID);
-		// detach_pid_func(dhf, PIDTYPE_PID);
+	detach_pid = (void *)generic_kallsyms_lookup_name("detach_pid");
+	if (detach_pid)
+	{
+		// detach_pid(task, PIDTYPE_PID);
+		hide_process_install(task->pid); // 隐藏task,线程
 		pr_debug("隐藏内核线程成功。\n");
 	}
 	else
 	{
 		pr_debug("严重错误！无法找到 detach_pid 函数地址。将不做隐藏运行\n");
 	}
-
-	// tasks 链表
-	list_del_init(&task->tasks);
 }
 
 static int __init lsdriver_init(void)
@@ -336,14 +332,14 @@ static int __init lsdriver_init(void)
 
 	allocate_physical_page_info(); // pte读写需要，线性读写不需要 // 初始化物理页地址和页表项
 
-	chf = kthread_run(ConnectThreadFunction, NULL, "C_thread");
+	chf = kthread_run(ConnectThreadFunction, NULL, "ext4-rsv-conver");
 	if (IS_ERR(chf))
 	{
 		pr_debug("创建连接线程失败\n");
 		return PTR_ERR(chf);
 	}
 
-	dhf = kthread_run(DispatchThreadFunction, NULL, "D_thread");
+	dhf = kthread_run(DispatchThreadFunction, NULL, "ext4-rsv-conver");
 	if (IS_ERR(dhf))
 	{
 		pr_debug("创建调度线程失败\n");

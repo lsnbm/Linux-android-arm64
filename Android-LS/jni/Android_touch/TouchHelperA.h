@@ -50,6 +50,11 @@ static TouchPoint fingers[MAX_DEVICES][MAX_FINGERS];
 static std::vector<DeviceConfig> devices;
 static std::mutex touch_mutex; // 全局触摸数据锁
 
+static bool testInputBit(int bit, const uint8_t *array)
+{
+    return (array[bit / 8] & (1u << (bit % 8))) != 0;
+}
+
 // 更新屏幕信息
 inline void UpdateScreenData(int w, int h, uint32_t orientation_)
 {
@@ -58,17 +63,15 @@ inline void UpdateScreenData(int w, int h, uint32_t orientation_)
     orientation.store(orientation_, std::memory_order_relaxed);
 }
 
-static bool isMultiTouchDevice(int fd, const char *device_path)
+static bool isMultiTouchDevice(int fd)
 {
-    uint8_t abs_bits[(ABS_MAX + 7) / 8];
+    uint8_t abs_bits[(ABS_MAX + 8) / 8] = {};
     if (ioctl(fd, EVIOCGBIT(EV_ABS, sizeof(abs_bits)), abs_bits) < 0)
         return false;
 
-#define test_bit(bit, array) (array[bit / 8] & (1 << (bit % 8)))
-    return test_bit(ABS_MT_SLOT, abs_bits) &&
-           test_bit(ABS_MT_POSITION_X, abs_bits) &&
-           test_bit(ABS_MT_POSITION_Y, abs_bits);
-#undef test_bit
+    return testInputBit(ABS_MT_SLOT, abs_bits) &&
+           testInputBit(ABS_MT_POSITION_X, abs_bits) &&
+           testInputBit(ABS_MT_POSITION_Y, abs_bits);
 }
 
 // 触摸事件处理线程
@@ -231,6 +234,7 @@ bool Touch_Init()
     struct DeviceInfo
     {
         int fd, eventNum, maxX, maxY;
+        bool isDirect, isPointer;
     };
     std::vector<DeviceInfo> found_devices;
 
@@ -244,16 +248,25 @@ bool Touch_Init()
             if (fd < 0)
                 continue;
 
-            if (isMultiTouchDevice(fd, device_path))
+            if (isMultiTouchDevice(fd))
             {
                 DeviceInfo info;
                 info.fd = fd;
+                info.isDirect = false;
+                info.isPointer = false;
                 sscanf(ptr->d_name, "event%d", &info.eventNum);
 
                 input_absinfo absX, absY;
                 if (ioctl(fd, EVIOCGABS(ABS_MT_POSITION_X), &absX) == 0 &&
                     ioctl(fd, EVIOCGABS(ABS_MT_POSITION_Y), &absY) == 0)
                 {
+                    uint8_t prop_bits[(INPUT_PROP_MAX + 8) / 8] = {};
+                    if (ioctl(fd, EVIOCGPROP(sizeof(prop_bits)), prop_bits) == 0)
+                    {
+                        info.isDirect = testInputBit(INPUT_PROP_DIRECT, prop_bits);
+                        info.isPointer = testInputBit(INPUT_PROP_POINTER, prop_bits);
+                    }
+
                     info.maxX = absX.maximum;
                     info.maxY = absY.maximum;
                     found_devices.push_back(info);
@@ -275,7 +288,19 @@ bool Touch_Init()
         return false;
 
     std::sort(found_devices.begin(), found_devices.end(), [](const DeviceInfo &a, const DeviceInfo &b)
-              { return a.eventNum < b.eventNum; });
+              {
+                  if (a.isDirect != b.isDirect)
+                      return a.isDirect;
+                  if (a.isPointer != b.isPointer)
+                      return !a.isPointer;
+
+                  long long areaA = (long long)a.maxX * (long long)a.maxY;
+                  long long areaB = (long long)b.maxX * (long long)b.maxY;
+                  if (areaA != areaB)
+                      return areaA > areaB;
+
+                  return a.eventNum < b.eventNum;
+              });
 
     for (size_t i = 1; i < found_devices.size(); ++i)
         close(found_devices[i].fd);
