@@ -656,7 +656,8 @@ public: // 外部获取内存信息
         }
 
         // 只保证收集到的区段按内存地址从低到高排列。
-        // 输出文件是区段数据直接拼接，不按 baseAddr 展开，也不为模块地址空洞补 0。
+        // Dump 时按 [baseAddr, maxEnd) 整段展开。
+        // 无论是否命中模块区段，都尝试按页读取；只有读取失败时才补 0。
         std::sort(dumpSegs.begin(), dumpSegs.end(), [](const DumpSegment &a, const DumpSegment &b)
                   {
                       if (a.start != b.start)
@@ -679,23 +680,11 @@ public: // 外部获取内存信息
         }
 
         uint64_t spanSize = maxEnd - baseAddr;
-        uint64_t dumpSize = 0;
         constexpr uint64_t MAX_DUMP_SIZE = 1024ULL * 1024 * 500; // 500MB 防御 OOM
 
-        for (const auto &seg : dumpSegs)
+        if (baseAddr >= maxEnd || baseAddr == ~0ULL || spanSize == 0 || spanSize > MAX_DUMP_SIZE)
         {
-            uint64_t segSize = seg.end - seg.start;
-            if (dumpSize > MAX_DUMP_SIZE - segSize)
-            {
-                std::println(stderr, "[-] Dump: 模块区段总大小过大");
-                return false;
-            }
-            dumpSize += segSize;
-        }
-
-        if (baseAddr >= maxEnd || baseAddr == ~0ULL || spanSize == 0 || dumpSize == 0 || dumpSize > MAX_DUMP_SIZE)
-        {
-            std::println(stderr, "[-] Dump: 模块边界无效或大小过大 (0x{:X} 字节)", dumpSize);
+            std::println(stderr, "[-] Dump: 模块边界无效或大小过大 (0x{:X} 字节)", spanSize);
             return false;
         }
 
@@ -704,7 +693,7 @@ public: // 外部获取内存信息
         std::println(stdout, "[*] 基址: 0x{:X}", baseAddr);
         std::println(stdout, "[*] 结束: 0x{:X}", maxEnd);
         std::println(stdout, "[*] 地址跨度: 0x{:X} ({} MB)", spanSize, spanSize / 1024 / 1024);
-        std::println(stdout, "[*] 输出大小: 0x{:X} ({} MB)", dumpSize, dumpSize / 1024 / 1024);
+        std::println(stdout, "[*] 输出大小: 0x{:X} ({} MB)", spanSize, spanSize / 1024 / 1024);
 
         mkdir("/sdcard/dump", 0777); // 忽略已存在错误
 
@@ -723,28 +712,31 @@ public: // 外部获取内存信息
         size_t totalRead = 0;
         size_t failedPages = 0;
 
-        for (const auto &seg : dumpSegs)
+        for (uint64_t addr = baseAddr; addr < maxEnd; addr += PAGE_SIZE)
         {
-            for (uint64_t addr = seg.start; addr < seg.end; addr += PAGE_SIZE)
+            size_t toRead = static_cast<size_t>(std::min<uint64_t>(PAGE_SIZE, maxEnd - addr));
+            bool read_ok = false;
+
+            std::fill(page.begin(), page.begin() + toRead, 0);
+
+            if (KReadProcessMemory(addr, page.data(), toRead) > 0)
             {
-                size_t toRead = static_cast<size_t>(std::min<uint64_t>(PAGE_SIZE, seg.end - addr));
+                totalRead += toRead;
+                read_ok = true;
+            }
+            else
+            {
+                failedPages++;
+            }
+
+            if (!read_ok)
                 std::fill(page.begin(), page.begin() + toRead, 0);
 
-                if (KReadProcessMemory(addr, page.data(), toRead) > 0)
-                {
-                    totalRead += toRead;
-                }
-                else
-                {
-                    failedPages++;
-                }
-
-                if (fwrite(page.data(), 1, toRead, fp) != toRead)
-                {
-                    std::println(stderr, "[-] Dump: 写入文件失败 {} ({})", outPath, std::strerror(errno));
-                    fclose(fp);
-                    return false;
-                }
+            if (fwrite(page.data(), 1, toRead, fp) != toRead)
+            {
+                std::println(stderr, "[-] Dump: 写入文件失败 {} ({})", outPath, std::strerror(errno));
+                fclose(fp);
+                return false;
             }
         }
 
@@ -754,7 +746,7 @@ public: // 外部获取内存信息
         std::println(stdout, "[+] ==========================================");
         std::println(stdout, "[+] Dump 完成!");
         std::println(stdout, "[+] 路径: {}", outPath);
-        std::println(stdout, "[+] 大小: 0x{:X} ({} MB)", dumpSize, dumpSize / 1024 / 1024);
+        std::println(stdout, "[+] 大小: 0x{:X} ({} MB)", spanSize, spanSize / 1024 / 1024);
         std::println(stdout, "[+] ==========================================");
 
         return true;
