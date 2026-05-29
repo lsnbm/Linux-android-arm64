@@ -263,11 +263,58 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
         /* ========== 模块收集 ========== */
 
         /*
-        RWX 代码段优先作为伪模块暴露，不依赖文件路径。
+        普通so的文件映射收集
+        */
+        if (vma->vm_file)
+        {
+            last_mod_idx = -1;
+
+            path = d_path(&vma->vm_file->f_path, path_buf, PATH_MAX);
+            if (!IS_ERR(path))
+            {
+                mod_accepted = false;
+                for (i = 0; mod_include_prefixes[i]; i++)
+                {
+                    if (__builtin_strncmp(path, mod_include_prefixes[i], __builtin_strlen(mod_include_prefixes[i])) == 0)
+                    {
+                        mod_accepted = true;
+                        break;
+                    }
+                }
+                if (mod_accepted)
+                {
+                    last_mod_idx = find_or_add_module(info->modules, &info->module_count, path);
+                    if (last_mod_idx >= 0)
+                    {
+                        add_seg(&info->modules[last_mod_idx], 0, current_prot, vma->vm_start, vma->vm_end);
+                    }
+                }
+            }
+        }
+        /*
+         BSS 检测条件：
+            无文件映射（匿名页）
+            含写权限（VM_WRITE）即可，不强求可读。
+            反作弊会将 BSS 权限故意设为 -w-p（只写无读），
+            原先的 VMA_IS_RW 宏要求同时具备读写，导致此类 BSS 被漏掉。
+            与上一个 VMA 首尾严格相连（vm_start == prev->vm_end）
+            上一个 VMA 属于我们正在追踪的模块（last_mod_idx >= 0）
+         */
+        else if (prev && !vma->vm_file && vma->vm_start == prev->vm_end && (vma->vm_flags & VM_WRITE) && last_mod_idx >= 0)
+        {
+            add_seg(&info->modules[last_mod_idx], -1, current_prot, vma->vm_start, vma->vm_end);
+            /*
+            BSS 收集后继续保持 last_mod_idx 有效。
+            这样如果 BSS 后面紧跟着更多匿名 RW 碎片（极少见但存在），
+            也能被一并归入同一模块。
+             */
+        }
+        /*
+        RWX 代码段作为兜底伪模块暴露，不依赖文件路径。
         匿名映射 rwxp/rwxs: [anon:objects_external_alloc]
         共享映射 rwxs: /dev/zero (deleted)
         */
-        if (VMA_IS_RWX(vma))
+        else if (VMA_IS_RWX(vma))
         {
             char rwx_name[MOD_NAME_LEN];
             const char *kind = (vma->vm_flags & VM_SHARED) ? "rwxs" : "rwxp";
@@ -312,55 +359,6 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
              否则紧跟其后的匿名 RW 页会被误挂成该模块的 index=-1 段。
             */
             last_mod_idx = -1;
-        }
-
-        /*
-         BSS 检测条件：
-            无文件映射（匿名页）
-            含写权限（VM_WRITE）即可，不强求可读。
-            反作弊会将 BSS 权限故意设为 -w-p（只写无读），
-            原先的 VMA_IS_RW 宏要求同时具备读写，导致此类 BSS 被漏掉。
-            与上一个 VMA 首尾严格相连（vm_start == prev->vm_end）
-            上一个 VMA 属于我们正在追踪的模块（last_mod_idx >= 0）
-         */
-        else if (prev && !vma->vm_file && vma->vm_start == prev->vm_end && (vma->vm_flags & VM_WRITE) && last_mod_idx >= 0)
-        {
-            add_seg(&info->modules[last_mod_idx], -1, current_prot, vma->vm_start, vma->vm_end);
-            /*
-            BSS 收集后继续保持 last_mod_idx 有效。
-            这样如果 BSS 后面紧跟着更多匿名 RW 碎片（极少见但存在），
-            也能被一并归入同一模块。
-             */
-        }
-
-        /*
-        普通so的文件映射收集
-        */
-        else if (vma->vm_file)
-        {
-            last_mod_idx = -1;
-
-            path = d_path(&vma->vm_file->f_path, path_buf, PATH_MAX);
-            if (!IS_ERR(path))
-            {
-                mod_accepted = false;
-                for (i = 0; mod_include_prefixes[i]; i++)
-                {
-                    if (__builtin_strncmp(path, mod_include_prefixes[i], __builtin_strlen(mod_include_prefixes[i])) == 0)
-                    {
-                        mod_accepted = true;
-                        break;
-                    }
-                }
-                if (mod_accepted)
-                {
-                    last_mod_idx = find_or_add_module(info->modules, &info->module_count, path);
-                    if (last_mod_idx >= 0)
-                    {
-                        add_seg(&info->modules[last_mod_idx], 0, current_prot, vma->vm_start, vma->vm_end);
-                    }
-                }
-            }
         }
         else
         {
