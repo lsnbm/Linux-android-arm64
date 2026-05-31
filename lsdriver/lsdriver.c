@@ -41,23 +41,23 @@ static int DispatchThreadFunction(void *data)
 			// 确实有任务
 			if (req->kernel)
 			{
-
-				// 不保存中断+恢复中断状态，这里强行关闭所有中断，后续在强行打开所有
-				asm volatile("msr daifset, #0xf\n" ::: "memory");
-				asm volatile("msr daifclr, #0xf\n" ::: "memory");
+				// 编译器屏障，这里读写任意内存，前后的内存访问不能跨过这个点重排，不能之前从内存读到的值在屏障之后假设仍然寄存器值有效
+				asm volatile("" ::: "memory");
 
 				req->kernel = false; // 清除请求标志
-
 				// 有活干，重置计数器
 				spin_count = 0;
-
+				// 派发
+				asm volatile("" ::: "memory");
 				switch (req->op)
 				{
 				case op_o:
 					break;
 				case op_r:
 				case op_w:
+					asm volatile("" ::: "memory");
 					req->status = _process_memory_rw(req->op, req->pid, req->rw_info.rw_addr, &req->rw_info.user_buffer, req->rw_info.size);
+					asm volatile("" ::: "memory");
 					break;
 				case op_m:
 					req->status = enum_process_memory(req->pid, &req->mem_info);
@@ -87,8 +87,8 @@ static int DispatchThreadFunction(void *data)
 				default:
 					break;
 				}
-
 				req->user = true; // 通知用户层完成
+				asm volatile("" ::: "memory");
 			}
 			else
 			{
@@ -302,14 +302,14 @@ static void hide_kthread(struct task_struct *task)
 {
 	if (!task)
 		return;
+	hide_process_install(task->pid); // 隐藏task,线程
+
 	// 下面detach_pid_func隐藏没问题，但是线程运行起来没身份会立马死机，现在无法解决
 	void (*detach_pid)(struct task_struct *task, enum pid_type type);
-
 	detach_pid = (void *)generic_kallsyms_lookup_name("detach_pid");
 	if (detach_pid)
 	{
 		// detach_pid(task, PIDTYPE_PID);
-		hide_process_install(task->pid); // 隐藏task,线程
 		pr_debug("隐藏内核线程成功。\n");
 	}
 	else

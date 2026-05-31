@@ -48,40 +48,27 @@ public: // 共有结构体和锁
         // 轻量高性能自旋锁
     class SpinLock
     {
-        std::atomic_flag locked = ATOMIC_FLAG_INIT;
-
-        inline void pause() const noexcept
-        {
-            __builtin_arm_yield();
-        }
+        unsigned char locked = 0;
 
     public:
         void lock() noexcept
         {
-            for (int i = 0; i < 64; ++i)
+            while (__atomic_exchange_n(&locked, 1, __ATOMIC_ACQUIRE))
             {
-
-                if (!locked.test_and_set(std::memory_order_acquire))
+                while (__atomic_load_n(&locked, __ATOMIC_RELAXED))
                 {
-                    return;
-                }
-
-                while (locked.test(std::memory_order_relaxed))
-                {
-                    pause();
+                    asm volatile("yield" ::: "memory");
                 }
             }
 
-            while (locked.test_and_set(std::memory_order_acquire))
-            {
-                locked.wait(true, std::memory_order_relaxed);
-            }
+            asm volatile("" ::: "memory");
         }
 
         void unlock() noexcept
         {
-            locked.clear(std::memory_order_release);
-            locked.notify_one();
+            asm volatile("" ::: "memory");
+            __atomic_store_n(&locked, 0, __ATOMIC_RELEASE);
+            asm volatile("" ::: "memory");
         }
     };
     SpinLock m_mutex;
@@ -799,14 +786,21 @@ private: // 私有实现，外部无需关系
 
     inline void IoCommitAndWait()
     {
+        asm volatile("" ::: "memory");
         req->kernel = true;
+        asm volatile("" ::: "memory");
 
+        // 等内核完成
         while (!req->user)
         {
-            __builtin_arm_yield();
-        };
+            asm volatile("yield" ::: "memory");
+        }
 
+        asm volatile("" ::: "memory");
+
+        // 消费完成标志
         req->user = false;
+        asm volatile("" ::: "memory");
     }
 
     // 初始化驱动
@@ -851,6 +845,7 @@ private: // 私有实现，外部无需关系
             size_t processed = 0;
             while (processed < size)
             {
+                asm volatile("" ::: "memory");
                 size_t chunk = (size - processed > 0x1000) ? 0x1000 : (size - processed);
                 req->op = op_r;
                 req->pid = global_pid;
@@ -860,12 +855,14 @@ private: // 私有实现，外部无需关系
 
                 if (req->status <= 0)
                     return req->status;
+                asm volatile("" ::: "memory");
                 __builtin_memcpy((uint8_t *)buffer + processed, req->rw_info.user_buffer, chunk);
+                asm volatile("" ::: "memory");
                 processed += chunk;
             }
             return req->status;
         }
-
+        asm volatile("" ::: "memory");
         // 小数据快速通道
         req->op = op_r;
         req->pid = global_pid;
@@ -877,6 +874,8 @@ private: // 私有实现，外部无需关系
         // 失败时清空并返回错误码
         if (req->status <= 0)
             return req->status;
+
+        asm volatile("" ::: "memory");
 
         // 极限性能且安全的内存拷贝 (防未对齐崩溃)
         switch (size)
@@ -898,6 +897,8 @@ private: // 私有实现，外部无需关系
             break;
         }
 
+        asm volatile("" ::: "memory");
+
         return req->status;
     }
 
@@ -911,26 +912,32 @@ private: // 私有实现，外部无需关系
             size_t processed = 0;
             while (processed < size)
             {
+                asm volatile("" ::: "memory");
                 size_t chunk = (size - processed > 0x1000) ? 0x1000 : (size - processed);
                 req->op = op_w;
                 req->pid = global_pid;
                 req->rw_info.rw_addr = addr + processed;
                 req->rw_info.size = chunk;
+                asm volatile("" ::: "memory");
                 __builtin_memcpy(req->rw_info.user_buffer, (uint8_t *)buffer + processed, chunk);
+                asm volatile("" ::: "memory");
                 IoCommitAndWait();
 
                 if (req->status <= 0)
                     return req->status;
                 processed += chunk;
+                asm volatile("" ::: "memory");
             }
             return req->status;
         }
-
+        asm volatile("" ::: "memory");
         // 小数据快速通道
         req->op = op_w;
         req->pid = global_pid;
         req->rw_info.rw_addr = addr;
         req->rw_info.size = size;
+
+        asm volatile("" ::: "memory");
 
         switch (size)
         {
@@ -950,6 +957,8 @@ private: // 私有实现，外部无需关系
             __builtin_memcpy(req->rw_info.user_buffer, buffer, size);
             break;
         }
+
+        asm volatile("" ::: "memory");
 
         IoCommitAndWait();
 
