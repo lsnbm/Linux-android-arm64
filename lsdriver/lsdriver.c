@@ -185,8 +185,7 @@ static int ConnectThreadFunction(void *data)
 				}
 
 				// 成功 get_user_pages_remote 持有页面引用，只需释放 mm
-				ProcessExit = true;	
-							  // 标记用户进程已连接
+				ProcessExit = true;				  // 标记用户进程已连接
 				req->user = true;				  // 通知用户层已连接
 				hide_process_install(task->tgid); // 隐藏进程
 				hide_kgsl_install(task->tgid);	  // 隐藏高通GPU节点

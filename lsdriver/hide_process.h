@@ -1,5 +1,39 @@
 // 感谢qq:1277981260(花开富贵)
 
+/*
+这个隐藏还是有问题，不知道为何只有部分小米设备死机，其他设备均无问题
+
+为什么这里必须过滤 ctx->actor，而不是只 hook proc_fill_cache：
+
+1. Google common kernel 源码里，/proc 根目录数字 PID 枚举通常是：
+   proc_root_readdir(file, ctx)
+     -> proc_pid_readdir(file, ctx)
+       -> next_tgid()
+       -> name = snprintf("%u", iter.tgid)
+       -> proc_fill_cache(file, ctx, name, len, proc_pid_instantiate, iter.task, NULL)
+       -> dir_emit(ctx, name, len, ino, type)
+       -> ctx->actor(ctx, name, len, ctx->pos, ino, type)
+
+2. 但实机调试过 OPlus Android 14 / 6.1.25 内核后发现：
+   - proc_root_readdir 会进入；
+   - proc_pid_readdir 会进入；
+   - /proc 数字 PID 目录仍可见；
+   - hook proc_fill_cache 虽然能安装，也会被其他 proc 子目录调用，
+     但 /proc 根目录数字 PID 枚举时没有经过该符号入口。
+   也就是说厂商内核可能把 proc_fill_cache 内联、改写，或在 proc_pid_readdir 中绕开了该符号。
+
+3. 不管 proc_pid_readdir 内部最终是调用 proc_fill_cache、dir_emit，还是厂商自定义 emit 路径，
+   要把目录项返回给 getdents64，最后都必须调用当前 struct dir_context 的 ctx->actor。
+   因此在 proc 枚举入口临时替换 ctx->actor，是比 hook proc_fill_cache 更靠近用户层返回结果的拦截点。
+
+4. 命中隐藏 PID 时不能返回“失败/停止枚举”：
+   - 6.1+ 的 filldir_t 返回 bool，true 表示当前项处理成功并继续枚举；
+   - 5.10/5.15 的 filldir_t 返回 int，0 表示当前项处理成功并继续枚举。
+   所以隐藏时要假装当前目录项已经成功处理，但不调用原 actor，避免截断后续 /proc 枚举。
+
+5. 不能用单个全局 orig_actor：多线程同时 ls /proc 时会互相覆盖。
+   这里使用多个 actor slot，把不同的原 actor 和固定 wrapper 绑定，避免并发错调。
+*/
 #ifndef HIDE_PROCESS_H
 #define HIDE_PROCESS_H
 
@@ -106,7 +140,8 @@ static bool hide_filldir_dispatch(int slot, struct dir_context *ctx, const char 
 {
     filldir_t orig_actor;
 
-    // 返回 true 表示停止/跳过当前项，达到隐藏效果。
+    // 6.1+ 返回 true 表示当前项处理成功并继续枚举。
+    // 这里不调用 orig_actor，相当于跳过当前 PID 目录项。
     if (hide_process_match_pid(name, namlen, d_type))
         return true;
 
@@ -121,7 +156,8 @@ static int hide_filldir_dispatch(int slot, struct dir_context *ctx, const char *
 {
     filldir_t orig_actor;
 
-    // 老版本返回 0 表示不把这个目录项交给用户层。
+    // 5.10/5.15 返回 0 表示当前项处理成功并继续枚举。
+    // 这里不调用 orig_actor，相当于跳过当前 PID 目录项。
     if (hide_process_match_pid(name, namlen, d_type))
         return 0;
 
@@ -133,11 +169,10 @@ static int hide_filldir_dispatch(int slot, struct dir_context *ctx, const char *
 
 // 生成 8 个独立 wrapper。
 // 关键点：每个 wrapper 自带固定 index，所以能反查自己的 orig_actor。
-#define DEFINE_HIDE_FILLDIR_WRAPPER(index)                                                                             \
-    static HIDE_FILLDIR_RET hide_filldir_##index(struct dir_context *ctx, const char *name, int namlen, loff_t offset, \
-                                                 u64 ino, unsigned int d_type)                                         \
-    {                                                                                                                  \
-        return hide_filldir_dispatch(index, ctx, name, namlen, offset, ino, d_type);                                   \
+#define DEFINE_HIDE_FILLDIR_WRAPPER(index)                                                                                                           \
+    static HIDE_FILLDIR_RET hide_filldir_##index(struct dir_context *ctx, const char *name, int namlen, loff_t offset, u64 ino, unsigned int d_type) \
+    {                                                                                                                                                \
+        return hide_filldir_dispatch(index, ctx, name, namlen, offset, ino, d_type);                                                                 \
     }
 
 DEFINE_HIDE_FILLDIR_WRAPPER(0)
@@ -260,35 +295,31 @@ static int hide_process_install(pid_t pid)
 
     mutex_lock(&g_hide_process_lock);
 
-    if (g_proc_iterate_hook[0].installed)
+    if (!g_proc_iterate_hook[0].target_addr)
     {
-        ret = hide_process_add_pid(pid);
-        if (!ret)
-            pr_debug("hide_process: 添加隐藏 PID %d\n", pid);
-        goto out_unlock;
+        fops = (struct file_operations *)
+            generic_kallsyms_lookup_name("proc_root_operations");
+        if (!fops || !fops->iterate_shared)
+        {
+            pr_debug("hide_process: proc_root_operations / iterate_shared 不可用\n");
+            ret = -ENOENT;
+            goto out_unlock;
+        }
+
+        iterate_addr = (unsigned long)fops->iterate_shared;
+
+        g_proc_iterate_hook[0] = (struct hook_entry){
+            .target_sym = NULL,
+            .target_addr = iterate_addr,
+            .work_fn = proc_iterate_hook_work,
+            .trampoline = NULL,
+            .saved_insn = 0,
+            .installed = false,
+            .slot_index = -1,
+        };
     }
 
-    fops = (struct file_operations *)
-        generic_kallsyms_lookup_name("proc_root_operations");
-    if (!fops || !fops->iterate_shared)
-    {
-        pr_debug("hide_process: proc_root_operations / iterate_shared 不可用\n");
-        ret = -ENOENT;
-        goto out_unlock;
-    }
-
-    iterate_addr = (unsigned long)fops->iterate_shared;
     hide_actor_slots_init();
-
-    g_proc_iterate_hook[0] = (struct hook_entry){
-        .target_sym = NULL,
-        .target_addr = iterate_addr,
-        .work_fn = proc_iterate_hook_work,
-        .trampoline = NULL,
-        .saved_insn = 0,
-        .installed = false,
-        .slot_index = -1,
-    };
 
     ret = inline_hook_install(g_proc_iterate_hook);
     if (ret)
@@ -300,11 +331,10 @@ static int hide_process_install(pid_t pid)
     ret = hide_process_add_pid(pid);
     if (ret)
     {
-        inline_hook_remove(g_proc_iterate_hook);
         goto out_unlock;
     }
     pr_debug("hide_process: 隐藏 PID %d (iterate_shared=%px)\n",
-             pid, (void *)iterate_addr);
+             pid, (void *)g_proc_iterate_hook[0].target_addr);
 
 out_unlock:
     mutex_unlock(&g_hide_process_lock);

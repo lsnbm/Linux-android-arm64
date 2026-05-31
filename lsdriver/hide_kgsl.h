@@ -99,23 +99,13 @@ int hide_kgsl_install(pid_t pid)
         goto out_unlock;
     }
 
-    if (g_kgsl_hooks[0].installed && g_kgsl_hooks[1].installed)
+    ret = inline_hook_install(g_kgsl_hooks);
+    if (ret)
     {
-        WRITE_ONCE(g_hide_pid, pid);
-        pr_debug("kgsl_hide: update hidden PID %d\n", pid);
+        pr_err("kgsl_hide: inline hook install failed: %d\n", ret);
         goto out_unlock;
     }
-
-    if (!g_kgsl_hooks[0].installed || !g_kgsl_hooks[1].installed)
-    {
-        ret = inline_hook_install(g_kgsl_hooks);
-        if (ret)
-        {
-            pr_err("kgsl_hide: inline hook install failed: %d\n", ret);
-            goto out_unlock;
-        }
-        pr_debug("kgsl_hide: inline hook installed\n");
-    }
+    pr_debug("kgsl_hide: inline hook installed\n");
 
     WRITE_ONCE(g_hide_pid, pid);
     pr_debug("kgsl_hide: hidden PID %d\n", pid);

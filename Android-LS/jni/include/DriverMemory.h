@@ -664,8 +664,7 @@ public: // 外部获取内存信息
                           return a.start < b.start;
                       if (a.end != b.end)
                           return a.end < b.end;
-                      return a.index < b.index;
-                  });
+                      return a.index < b.index; });
 
         // 确定模块的内存跨度
         uint64_t baseAddr = dumpSegs.front().start;

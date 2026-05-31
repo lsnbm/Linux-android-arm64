@@ -10,7 +10,6 @@
 #include <asm/debug-monitors.h>
 #include <asm/insn.h>
 #include <asm/virt.h>
-#include <trace/events/sched.h>
 #include "export_fun.h"
 #include "arm64_reg.h"
 #include "inline_hook_frame.h"
@@ -49,8 +48,7 @@ struct breakpoint_config
 内核很多子系统的做法也一样
 */
 struct breakpoint_config g_bp_config[BP_CONFIG_MAX];
-static bool g_task_run_monitor_started = false; // 防止重复安装断点和卸载断点
-int num_brps, num_wrps;                         // 硬件执行和访问槽位总数
+int num_brps, num_wrps; // 硬件执行和访问槽位总数
 
 /*
  把外部断点参数转换成ARM架构内部格式，并完成基础检测/修正。
@@ -276,7 +274,7 @@ static void clear_hwbp_regs_on_cpu(void *data)
     }
 }
 
-// 执行断异常处理跳板工作函数，返回 0 表示继续执行原异常入口
+// 执行断异常处理跳板工作函数
 static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
 {
     int i;
@@ -318,8 +316,13 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
         由于 BCR/WCR 被清空，原硬件 debug 异常入口无法通过 BVR/BCR 或 WVR/WCR 匹配到
         对应的 perf_event owner，也就不会执行 perf_bp_event() 和后续disable + single-step + restore 的步过状态机。
         硬件debug异常分发直接结束并返回已处理
-
       结果是：硬件debug异常分发结束了，但 perf子系统没有收到这次命中的信息和步过闭环，状态机推进异常就死了
+
+    但是:你不继续执行原异常函数就不会有这个问题了，异常入口也不会上报信息给perf子系统
+    这里选择是自己的断点不继续执行原异常函数，就可以直接清空寄存器
+
+    perf 子系统在调度进 CPU 安装 perf 断点配置到寄存器，会重写 BVR/WVR + BCR/WCR；
+    只有异常步过和 debug_info 的临时启停，才是只改 BCR/WCR 的 enable 位
     */
 
     for (slot = 0; slot < num_brps; slot++)
@@ -353,18 +356,21 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
                     // 传递当前观点索引
                     g_bp_config[i].hit_point_index = j;
                     g_bp_config[i].on_hit(regs, &g_bp_config[i]);
-                    // 这里只禁用配置
-                    write_wb_reg(AARCH64_DBG_REG_BCR, slot, ctrl & ~0x1);
-                    return 0;
+                    // 不执行原函数其实可以直接清空寄存器，后续有问题在打开只禁用配置的注释吧
+                    write_wb_reg(AARCH64_DBG_REG_BVR, slot, 0);
+                    write_wb_reg(AARCH64_DBG_REG_BCR, slot, 0);
+                    // write_wb_reg(AARCH64_DBG_REG_BCR, slot, ctrl & ~0x1);
+                    // 是自己下的断点直接返回，原异常函数不继续运行，不上报信息给perf了
+                    hook_regs->regs[0] = 0; // 给异常函数返回0表示已处理异常
+                    return 1;               // 给hook框架返回1表示不继续运行原函数
                 }
             }
         }
     }
-
     return 0;
 }
 
-// 访问断异常处理跳板工作函数，返回 0 表示继续执行原异常入口
+// 访问断异常处理跳板工作函数
 static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
 {
     int i;
@@ -400,8 +406,11 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
                 {
                     g_bp_config[i].hit_point_index = j;
                     g_bp_config[i].on_hit(regs, &g_bp_config[i]);
-                    write_wb_reg(AARCH64_DBG_REG_WCR, slot, ctrl & ~0x1);
-                    return 0;
+                    write_wb_reg(AARCH64_DBG_REG_WVR, slot, 0);
+                    write_wb_reg(AARCH64_DBG_REG_WCR, slot, 0);
+                    // write_wb_reg(AARCH64_DBG_REG_BCR, slot, ctrl & ~0x1);
+                    hook_regs->regs[0] = 0;
+                    return 1;
                 }
             }
         }
@@ -410,27 +419,23 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
     return 0;
 }
 
-// 声明 hook 表
-static struct hook_entry g_hooks[] = {
+// 声明硬件调试异常 hook 表
+static struct hook_entry g_debug_exception_hooks[] = {
     HOOK_ENTRY("breakpoint_handler", work_trampoline_breakpoint),
     HOOK_ENTRY("watchpoint_handler", work_trampoline_watchpoint),
 };
 
-// 线程切换回调,6.1系是分水岭，内核整体上下区别变化大，encode_ctrl_reg是控制码转ARM架构内部格式
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
-static void probe_sched_switch(void *data, bool preempt,
-                               struct task_struct *prev,
-                               struct task_struct *next,
-                               unsigned int prev_state)
-#else // 这个回调运行在发生切换的那颗 CPU上，(task被切换到cpu5,这个回调就是cpu5运行)
-static void probe_sched_switch(void *data, bool preempt,
-                               struct task_struct *prev,
-                               struct task_struct *next)
-#endif
+// __switch_to(prev, next) 入口 hook：AArch64 参数 x0=prev, x1=next。
+static int work_trampoline_switch_to(struct pt_regs *hook_regs)
 {
+    struct task_struct *prev = (struct task_struct *)hook_regs->regs[0];
+    struct task_struct *next = (struct task_struct *)hook_regs->regs[1];
     int i;
     int next_slot = -1;
     int prev_slot = -1;
+
+    if (!prev || !next)
+        return 0;
 
     // 检查切入的进程pid是否在断点配置中设置
     for (i = 0; i < BP_CONFIG_MAX; i++)
@@ -458,6 +463,7 @@ static void probe_sched_switch(void *data, bool preempt,
     prev现在正在跑、准备离开 CPU 的 task
     CPU 从目标线程组切到别的线程组时，清掉当前 CPU 上残留的断点寄存器，避免断点漏到别的进程里。
     同线程组内相互切换，不要清理，下面线程组内只要有一个task切换就重复安装上断点防止被关掉
+    注意了：使用fork后的子进程在内核中是单独的一个线程组也是单独的一个进程，要装断点也是给子线程组 装
     */
     if (prev_slot >= 0 && prev->tgid != next->tgid)
     {
@@ -546,7 +552,43 @@ static void probe_sched_switch(void *data, bool preempt,
             }
         }
     }
+
+    return 0;
 }
+
+static struct hook_entry g_switch_to_hook[] = {
+    /*
+     调度切换大致顺序：
+     __schedule()
+       prev = current;
+       next = pick_next_task(...);
+       -> trace_sched_switch(..., prev, next, prev_state)
+          register_trace_sched_switch() 注册的 sched_switch tracepoint 回调在这里执行
+       -> context_switch(rq, prev, next, &rf)
+          -> prepare_task_switch(rq, prev, next)
+          -> arch_start_context_switch(prev)
+          -> switch_mm_irqs_off(..., next)
+          -> prepare_lock_switch(rq, next, rf)
+          -> switch_to(prev, next, prev)
+             -> __switch_to(prev, next)
+                -> fpsimd_thread_switch(next)
+                -> tls_thread_switch(next)
+                -> hw_breakpoint_thread_switch(next)
+                -> contextidr_thread_switch(next)
+                -> entry_task_switch(next)
+                -> cpu_switch_to(prev, next)
+          -> finish_task_switch(prev)
+
+     不管是之前使用 register_trace_sched_switch() 注册 sched_switch tracepoint 回调，
+     还是现在 hook __switch_to，写寄存器的位置都在 hw_breakpoint_thread_switch(next)
+     之前，后面仍可能被它覆盖掉。
+     不过实测这种方式也能运行。
+     更好的 hook 点是 finish_task_switch(prev)。它在 hw_breakpoint_thread_switch(next)
+     之后执行，自己的写寄存器逻辑会覆盖 perf 在 task 切换时安装到 CPU 的
+     硬件断点/观察点寄存器。
+     */
+    HOOK_ENTRY("__switch_to", work_trampoline_switch_to),
+};
 
 // 注册线程切换回调，开始监听
 static int start_task_run_monitor(struct breakpoint_config bp_config)
@@ -562,6 +604,7 @@ static int start_task_run_monitor(struct breakpoint_config bp_config)
         return -EINVAL;
     }
 
+    // 同pid只更新配置
     for (i = 0; i < BP_CONFIG_MAX; i++)
     {
         if (g_bp_config[i].pid == bp_config.pid)
@@ -573,20 +616,12 @@ static int start_task_run_monitor(struct breakpoint_config bp_config)
 
     if (existing_slot >= 0)
     {
-        if (g_task_run_monitor_started)
-        {
-            for (i = 0; i < num_brps; i++)
-                write_wb_reg(AARCH64_DBG_REG_BCR, i, 0);
-
-            for (i = 0; i < num_wrps; i++)
-                write_wb_reg(AARCH64_DBG_REG_WCR, i, 0);
-        }
-
         g_bp_config[existing_slot] = bp_config;
         pr_debug("monitor config updated, target tgid=%d slot=%d\n", bp_config.pid, existing_slot);
         return 0;
     }
 
+    // 不同pid找槽位添加
     for (i = 0; i < BP_CONFIG_MAX; i++)
     {
         if (g_bp_config[i].pid == 0)
@@ -605,40 +640,29 @@ static int start_task_run_monitor(struct breakpoint_config bp_config)
     // 传递上下文给全局数组，让异常处理和断点写入都能互相传递配置信息
     g_bp_config[slot] = bp_config;
 
-    // 初始化过hook和注册回调后续不执行
-    if (g_task_run_monitor_started)
-    {
-        pr_debug("monitor already running, add target tgid=%d slot=%d\n", bp_config.pid, slot);
-        return 0;
-    }
+    // 总数也是只获取一次。
+    num_brps = get_brps_num();
+    num_wrps = get_wrps_num();
 
     // 安装inline hook接管异常
-    ret = inline_hook_install(g_hooks);
+    ret = inline_hook_install(g_debug_exception_hooks);
     if (ret)
     {
-        pr_debug("inline_hook_install failed: %d\n", ret);
+        pr_debug("inline_hook_install debug exception hooks failed: %d\n", ret);
         memset(&g_bp_config[slot], 0, sizeof(g_bp_config[slot]));
         return ret;
     }
 
-    // 安装线程切换回调
-    ret = register_trace_sched_switch(probe_sched_switch, NULL);
+    // 安装线程切换 inline hook
+    ret = inline_hook_install(g_switch_to_hook);
     if (ret)
     {
-        pr_debug("register_trace_sched_switch failed: %d\n", ret);
-
-        // 这里安装失败也不要进行清理和返回失败
-        // 因为是安装过了删除的时候下面没有注销而已，重复安装就会失败，不过已经是安装成功了的会生效
-        // memset(&g_bp_config[slot], 0, sizeof(g_bp_config[slot]));
-        // inline_hook_remove(g_hooks);
-        // return ret;
+        pr_debug("inline_hook_install __switch_to failed: %d\n", ret);
+        memset(&g_bp_config[slot], 0, sizeof(g_bp_config[slot]));
+        inline_hook_remove(g_debug_exception_hooks);
+        return ret;
     }
-
-    // 总数也是只获取一次
-    num_brps = get_brps_num();
-    num_wrps = get_wrps_num();
-
-    g_task_run_monitor_started = true;
+    pr_debug("task switch hook installed: __switch_to\n");
     pr_debug("monitor start, target tgid=%d slot=%d\n", bp_config.pid, slot);
     return 0;
 }
@@ -653,13 +677,11 @@ static void stop_task_run_monitor(struct breakpoint_config bp_config)
     if (bp_config.pid <= 0)
         return;
 
-    if (g_task_run_monitor_started)
-    {
-        // 遍历所有在线 CPU，清理寄存器
-        for_each_online_cpu(cpu)
-            smp_call_function_single(cpu, clear_hwbp_regs_on_cpu, NULL, 1);
-    }
+    // 遍历所有在线 CPU，清理寄存器
+    for_each_online_cpu(cpu)
+        smp_call_function_single(cpu, clear_hwbp_regs_on_cpu, NULL, 1);
 
+    // 清空指定pid的槽位配置
     for (i = 0; i < BP_CONFIG_MAX; i++)
     {
         if (g_bp_config[i].pid == bp_config.pid)
@@ -670,7 +692,7 @@ static void stop_task_run_monitor(struct breakpoint_config bp_config)
         }
     }
 
-    // 如果数组里还有别的断点配置，说明 monitor 仍然有人在用，就只删除当前槽位，不卸载 hook，也不注销 sched_switch 回调
+    // 如果数组里还有别的断点配置，说明 monitor 仍然有人在用，就只删除当前槽位，不卸载 hook
     for (i = 0; i < BP_CONFIG_MAX; i++)
     {
         if (g_bp_config[i].pid != 0)
@@ -683,21 +705,9 @@ static void stop_task_run_monitor(struct breakpoint_config bp_config)
     if (has_config)
         return;
 
-    // 初始化hook和注册过回调才允许清理
-    if (g_task_run_monitor_started)
-    {
-
-        /*
-        不要进行注销线程切换回调，实测发现目标进程运行时注销会导致
-        目标进程的所有线程全部停止，具体不清除是什么原因
-        这样导致只能把目标进程放在后台，主动暂停了目标进程的运行，在切回目标进程才能正常跑下去
-        奇怪的是线程回调注销的是全局所有线程调度监听，但就只有想要断点目标进程被卡主，奇怪
-        */
-        // unregister_trace_sched_switch(probe_sched_switch, NULL);
-        pr_debug("monitor stop\n");
-        inline_hook_remove(g_hooks);
-        g_task_run_monitor_started = false;
-    }
+    pr_debug("monitor stop\n");
+    inline_hook_remove(g_switch_to_hook);
+    inline_hook_remove(g_debug_exception_hooks);
 }
 
 // //下面不用看了，是单步异常步过的内核api，我不使用了，上面异常回调直接关寄存器
