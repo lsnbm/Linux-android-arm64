@@ -22,7 +22,7 @@
 #include "process_memory_enum.h"
 #include "hide_process.h"
 #include "hide_kgsl.h"
-#include "get_decrypt_params.h"
+#include "arm64_syscall_monitor.h"
 
 static struct req_obj *req = NULL;
 
@@ -234,6 +234,8 @@ static int do_exit_hook_work(struct pt_regs *regs)
 		// 相应处理
 		_process_memory_rw(op_r, 666666, 1, &ProcessExit, 1); // 主动调用一下释放缓存的mm
 		v_touch_destroy();									  // 清理触摸
+		hide_process_remove(task->tgid);					  // 只取消当前用户进程的隐藏，不影响隐藏的内核线程
+		hide_kgsl_remove(task->tgid);						  // 取消当前用户进程的高通GPU节点隐藏
 		ProcessExit = false;								  // 标记用户进程已断开,前面read借用了ProcessExit，这里最后置为false，保证状态正确
 	}
 	return 0;
@@ -253,7 +255,6 @@ static int do_exit_init(void)
 		return ret;
 	}
 
-	pr_debug("成功：inline hook(do_exit) 已安装，开始监听 LS 退出。\n");
 	return 0;
 }
 
@@ -297,26 +298,6 @@ static void hide_myself(void)
 		kfree(use);
 	}
 }
-// 隐藏内核线程
-static void hide_kthread(struct task_struct *task)
-{
-	if (!task)
-		return;
-	hide_process_install(task->pid); // 隐藏task,线程
-
-	// 下面detach_pid_func隐藏没问题，但是线程运行起来没身份会立马死机，现在无法解决
-	void (*detach_pid)(struct task_struct *task, enum pid_type type);
-	detach_pid = (void *)generic_kallsyms_lookup_name("detach_pid");
-	if (detach_pid)
-	{
-		// detach_pid(task, PIDTYPE_PID);
-		pr_debug("隐藏内核线程成功。\n");
-	}
-	else
-	{
-		pr_debug("严重错误！无法找到 detach_pid 函数地址。将不做隐藏运行\n");
-	}
-}
 
 static int __init lsdriver_init(void)
 {
@@ -345,12 +326,12 @@ static int __init lsdriver_init(void)
 		return PTR_ERR(dhf);
 	}
 
-	// 注册回调
+	// 注册用户进程退出回调
 	do_exit_init();
 
 	// 隐藏内核线程
-	hide_kthread(chf);
-	hide_kthread(dhf);
+	hide_process_install(chf->pid); // 隐藏task,线程
+	hide_process_install(dhf->pid); // 隐藏task,线程
 
 	return 0;
 }

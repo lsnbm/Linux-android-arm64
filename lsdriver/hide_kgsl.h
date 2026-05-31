@@ -12,16 +12,36 @@
 #include "export_fun.h"
 #include "inline_hook_frame.h"
 
-// 隐藏状态：目标 pid，0 表示未激活
-static pid_t g_hide_pid __read_mostly = 0;
+#define HIDE_KGSL_MAX_PIDS 8
+
+// KGSL 隐藏表保存目标进程 tgid；0 表示空槽。
+static pid_t g_hide_kgsl_pids[HIDE_KGSL_MAX_PIDS];
 static DEFINE_MUTEX(g_hide_kgsl_lock);
 
-// 判断当前cpu运行的task是否为目标task
+// 快速判断 KGSL 隐藏表是否还有目标，空表时可卸载 hook。
+static bool hide_kgsl_has_pid(void)
+{
+    int i;
+
+    for (i = 0; i < HIDE_KGSL_MAX_PIDS; i++)
+        if (READ_ONCE(g_hide_kgsl_pids[i]))
+            return true;
+    return false;
+}
+
+// 判断当前 task 是否属于需要隐藏 KGSL 节点的目标进程。
 static bool should_hide(void)
 {
-    pid_t hide_pid = READ_ONCE(g_hide_pid);
+    int i;
 
-    return hide_pid != 0 && task_pid_nr(current) == hide_pid;
+    for (i = 0; i < HIDE_KGSL_MAX_PIDS; i++)
+    {
+        pid_t hide_pid = READ_ONCE(g_hide_kgsl_pids[i]);
+
+        if (hide_pid && current->tgid == hide_pid)
+            return true;
+    }
+    return false;
 }
 // 判断指定对象是否为kgsl下
 static bool kobj_under_kgsl(struct kobject *kobj)
@@ -81,10 +101,11 @@ static struct hook_entry g_kgsl_hooks[] = {
 
 };
 
-// 安装
+// 安装隐藏支持多个 PID 同时隐藏 KGSL/GPU 节点初始化信息
 int hide_kgsl_install(pid_t pid)
 {
     int ret = 0;
+    int i, empty = -1;
 
     if (pid <= 0)
         return -EINVAL;
@@ -107,7 +128,24 @@ int hide_kgsl_install(pid_t pid)
     }
     pr_debug("kgsl_hide: inline hook installed\n");
 
-    WRITE_ONCE(g_hide_pid, pid);
+    // hook 安装成功后再写隐藏表，避免表里有 PID 但拦截点没生效。
+    for (i = 0; i < HIDE_KGSL_MAX_PIDS; i++)
+    {
+        pid_t hidden_pid = READ_ONCE(g_hide_kgsl_pids[i]);
+
+        if (hidden_pid == pid)
+            goto out_unlock;
+        if (!hidden_pid && empty < 0)
+            empty = i;
+    }
+
+    if (empty < 0)
+    {
+        ret = -ENOSPC;
+        goto out_unlock;
+    }
+
+    WRITE_ONCE(g_hide_kgsl_pids[empty], pid);
     pr_debug("kgsl_hide: hidden PID %d\n", pid);
 
 out_unlock:
@@ -115,12 +153,23 @@ out_unlock:
     return ret;
 }
 
-// 清理
-void hide_kgsl_remove(void)
+// 删除指定目标 PID；如果隐藏表空了，就卸载 KGSL hooks。
+void hide_kgsl_remove(pid_t pid)
 {
+    int i;
+
+    if (pid <= 0)
+        return;
+
     mutex_lock(&g_hide_kgsl_lock);
-    inline_hook_remove(g_kgsl_hooks);
-    WRITE_ONCE(g_hide_pid, 0);
+    for (i = 0; i < HIDE_KGSL_MAX_PIDS; i++)
+    {
+        if (READ_ONCE(g_hide_kgsl_pids[i]) == pid)
+            WRITE_ONCE(g_hide_kgsl_pids[i], 0);
+    }
+
+    if (!hide_kgsl_has_pid())
+        inline_hook_remove(g_kgsl_hooks);
     mutex_unlock(&g_hide_kgsl_lock);
 }
 
