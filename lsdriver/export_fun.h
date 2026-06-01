@@ -14,6 +14,10 @@
 #include <asm/tlbflush.h>
 #include "arm64_reg.h"
 
+/*
+还有注意所有地方使用函数指针调用内核api，参数类型和返回值类型一定要与内核对齐，比如这里的 unsigned long就不能写为uint64_t
+*/
+
 // 屏蔽 CFI 检查，统一利用 kprobe 获取 kallsyms_lookup_name 地址
 __attribute__((no_sanitize("cfi"))) static unsigned long generic_kallsyms_lookup_name(const char *name)
 {
@@ -200,8 +204,67 @@ static inline pte_t *get_user_pte(struct mm_struct *mm, uint64_t vaddr)
         return ptep;
 }
 
-// 编码一条b指令
-static int arm64_make_b(unsigned long from, unsigned long to, uint32_t *insn)
+/*
+编码一条b指令
+
+在各个内核源码链接：
+Android 12 / 5.10
+MODULES_VSIZE = SZ_128M
+https://android.googlesource.com/kernel/common/+/refs/heads/android12-5.10/arch/arm64/include/asm/memory.h
+
+Android 13 / 5.15
+MODULES_VSIZE = SZ_128M
+https://android.googlesource.com/kernel/common/+/refs/heads/android13-5.15/arch/arm64/include/asm/memory.h
+
+Android 14 / 6.1
+MODULES_VSIZE = SZ_128M
+https://android.googlesource.com/kernel/common/+/refs/heads/android14-6.1/arch/arm64/include/asm/memory.h
+
+Android 15 / 6.6
+MODULES_VSIZE = SZ_2G
+https://android.googlesource.com/kernel/common/+/refs/heads/android15-6.6/arch/arm64/include/asm/memory.h
+
+Android 16 / 6.12
+MODULES_VSIZE = SZ_2G
+https://android.googlesource.com/kernel/common/+/refs/heads/android16-6.12/arch/arm64/include/asm/memory.h
+
+也就是说，外部内核模块加载时所在的内存区域是每个版本的内核不一样
+5系和6.1是128M不用看了符合B指令跳转范围
+
+6.6处理内核模块源码路径
+https://android.googlesource.com/kernel/common/+/refs/heads/android15-6.6/arch/arm64/kernel/module.c
+module_alloc() 优先从 128M  区分配
+if (module_direct_base) {
+    p = __vmalloc_node_range(size, MODULE_ALIGN,module_direct_base, module_direct_base + SZ_128M,...);
+}
+如果失败，再从 2G PLT 区分配：
+if (!p && module_plt_base) {
+    p = __vmalloc_node_range(size, MODULE_ALIGN, module_plt_base,module_plt_base + SZ_2G,...);
+}
+模块里调用内核 API，编译后常见就是 bl symbol，对应:
+R_AARCH64_CALL26
+R_AARCH64_JUMP26
+loader 先尝试直接把目标地址写进 26-bit branch immediate：
+
+ovf = reloc_insn_imm(RELOC_OP_PREL, loc, val, 2, 26, AARCH64_INSN_IMM_26);
+如果超出 ±128M：
+if (ovf == -ERANGE) {
+    val = module_emit_plt_entry(...);
+    ...
+    ovf = reloc_insn_imm(... loc, val, 2, 26, ...);
+}
+意思是：原本 bl 内核API 跳不到内核 API，就在模块自己的 .plt 里生成一个近处跳板，然后把 bl 改成跳这个 .plt entry。
+
+PLT entry 在 arch/arm64/kernel/module-plts.c：
+
+plt = __get_adrp_add_pair(dst, (u64)pc, AARCH64_INSN_REG_16);
+plt.br = cpu_to_le32(br);
+也就是类似：
+adrp x16, target_page
+add  x16, x16, target_pageoff
+br   x16
+*/
+static int arm64_make_b(uint64_t from, uint64_t to, uint32_t *insn)
 {
         int64_t offset = (int64_t)to - (int64_t)from;
 
@@ -210,6 +273,25 @@ static int arm64_make_b(unsigned long from, unsigned long to, uint32_t *insn)
 
         *insn = 0x14000000 | ((offset >> 2) & 0x03FFFFFF);
         return 0;
+}
+
+// 编码长跳转
+static void arm64_make_ldr_ret(uint64_t target, uint32_t *insn)
+{
+        uint32_t ldr_x16_literal = 0x58000050; // ldr x16, [pc, #8]
+        uint32_t ret_x16 = 0xD65F0200;         // ret x16
+
+        /*
+        实际编码结果：
+           insn[0]: ldr x16, [pc, #8]
+           insn[1]: ret x16
+           insn[2]: target low32
+           insn[3]: target high32
+        实际执行的汇编只有2条；后面的8字节是给ldr相对pc寻址到target地址数据。给ret跳
+        */
+        __builtin_memcpy(&insn[0], &ldr_x16_literal, sizeof(uint32_t));
+        __builtin_memcpy(&insn[1], &ret_x16, sizeof(uint32_t));
+        __builtin_memcpy(&insn[2], &target, sizeof(target));
 }
 
 // 释放一批通过GUP获取的page *;避免使用 put_page() 把 page_pinner 拉进来。

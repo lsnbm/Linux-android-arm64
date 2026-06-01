@@ -836,7 +836,6 @@ private: // 私有实现，外部无需关系
     // 读写
     int KReadProcessMemory(uint64_t addr, void *buffer, size_t size)
     {
-
         std::scoped_lock<SpinLock> lock(m_mutex);
 
         // 大数据自动分片，防止缓冲区溢出覆盖触摸数据
@@ -871,7 +870,6 @@ private: // 私有实现，外部无需关系
 
         IoCommitAndWait();
 
-        // 失败时清空并返回错误码
         if (req->status <= 0)
             return req->status;
 
