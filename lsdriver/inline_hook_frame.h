@@ -3,9 +3,11 @@
 #define INLINE_HOOK_FRAME_H
 #include <linux/kernel.h>
 #include <linux/errno.h>
+#include <linux/atomic.h>
 #include <linux/string.h>
 #include <linux/types.h>
 #include <linux/mm.h>
+#include <linux/stop_machine.h>
 #include <linux/vmalloc.h>
 #include <asm/cacheflush.h>
 #include <asm/memory.h>
@@ -91,9 +93,27 @@ static int trampoline_patch(uint32_t *dst, const uint32_t *src)
     }
     return 0;
 }
+// 保存目标入口即将被覆盖的原始AArch64指令word。
+static void hook_save_orig_insns(uint64_t addr, uint32_t *insns, int count)
+{
+    int i;
+    // AArch64指令天然4字节对齐，这里逐条READ_ONCE保存入口被覆盖的指令word。
+    for (i = 0; i < count; i++)
+        insns[i] = READ_ONCE(*(uint32_t *)(uintptr_t)(addr + i * 4));
+}
 
-// 逐条 patch一段AArch64指令
-static int hook_patch_words(uint64_t addr, const uint32_t *insns, int count)
+struct hook_patch_job
+{
+    uint64_t addr;           // 目标函数入口地址
+    const uint32_t *insns;   // 要写入的指令
+    const uint32_t *restore; // 非空表示安装路径，失败时用它回滚
+    int count;               // patch 的指令数量
+    int ret;                 // stop_machine 回调里的实际 patch 结果
+    atomic_t started;        // 防止 stop_machine 在多 CPU 上重复执行 patch
+};
+
+// 逐条 patch 一段 AArch64 指令
+static int hook_patch_words_raw(uint64_t addr, const uint32_t *insns, int count)
 {
     int i;
     int ret;
@@ -111,8 +131,8 @@ static int hook_patch_words(uint64_t addr, const uint32_t *insns, int count)
     return 0;
 }
 
-// patch目标入口；若中途失败，回滚已写入的word，避免半安装状态。
-static int hook_target_patch(uint64_t addr, const uint32_t *insns, const uint32_t *restore, int count)
+// patch 目标入口；若中途失败，回滚已写入的 word，避免半安装状态
+static int hook_target_patch_raw(uint64_t addr, const uint32_t *insns, const uint32_t *restore, int count)
 {
     int i;
     int ret;
@@ -135,13 +155,61 @@ static int hook_target_patch(uint64_t addr, const uint32_t *insns, const uint32_
     return 0;
 }
 
-// 保存目标入口即将被覆盖的原始AArch64指令word。
-static void hook_save_orig_insns(uint64_t addr, uint32_t *insns, int count)
+// stop_machine 回调：所有 CPU 停住后，只允许一个 CPU 执行真正的 text patch。
+static int hook_patch_stop_machine_cb(void *data)
 {
-    int i;
-    // AArch64指令天然4字节对齐，这里逐条READ_ONCE保存入口被覆盖的指令word。
-    for (i = 0; i < count; i++)
-        insns[i] = READ_ONCE(*(uint32_t *)(uintptr_t)(addr + i * 4));
+    struct hook_patch_job *job = data;
+
+    /*
+     stop_machine 的回调可能在多个 CPU 上进入。
+     patch 目标 text 只能执行一次，其余 CPU 只负责停住等待。
+    */
+    if (atomic_cmpxchg(&job->started, 0, 1) != 0)
+        return 0;
+
+    // restore 非空是安装 hook，带失败回滚；为空是卸载 hook，直接恢复原指令。
+    if (job->restore)
+        job->ret = hook_target_patch_raw(job->addr, job->insns, job->restore, job->count);
+    else
+        job->ret = hook_patch_words_raw(job->addr, job->insns, job->count);
+
+    return 0;
+}
+
+// 卸载 hook：用 stop_machine 恢复目标函数入口的原始 4 条指令，避免其他 CPU 执行到半恢复状态。
+static int hook_patch_words(uint64_t addr, const uint32_t *insns, int count)
+{
+    struct hook_patch_job job = {
+        .addr = addr,
+        .insns = insns,
+        .restore = NULL,
+        .count = count,
+        .ret = 0,
+        .started = ATOMIC_INIT(0),
+    };
+    int ret;
+
+    ret = stop_machine(hook_patch_stop_machine_cb, &job, NULL);
+
+    return ret ? ret : job.ret;
+}
+
+// 安装 hook：用 stop_machine 把目标函数入口改成 4条 长跳转，避免其他 CPU 执行到半 patch 状态。
+static int hook_target_patch(uint64_t addr, const uint32_t *insns, const uint32_t *restore, int count)
+{
+    struct hook_patch_job job = {
+        .addr = addr,
+        .insns = insns,
+        .restore = restore,
+        .count = count,
+        .ret = 0,
+        .started = ATOMIC_INIT(0),
+    };
+    int ret;
+
+    ret = stop_machine(hook_patch_stop_machine_cb, &job, NULL);
+
+    return ret ? ret : job.ret;
 }
 
 // 一条 hook 的描述
