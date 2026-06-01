@@ -1,20 +1,5 @@
 /*
-指定进程 syscall 入口监控：
-
-1. hook do_el0_svc，只覆盖 arm64 64 位 syscall 入口。
-   如果要覆盖 32 位兼容进程，还需要额外 hook do_el0_svc_compat。
-
-2. do_el0_svc 位置比 syscall_trace_enter 更靠前，不依赖
-   TIF_SYSCALL_TRACEPOINT / ftrace / seccomp / ptrace 等 syscall work 标志。
-
-3. 这里只做入口监控，记录“current 发起了什么 syscall”。
-   返回值需要在 do_el0_svc 原函数返回后处理
-
-4. 命中目标进程后每次 syscall 都 pr_info 输出；目标进程 syscall 很频繁时会大量刷日志。
-
-5. 不在热路径 copy_from_user 解码用户指针，避免 syscall 高频路径里引入大量开销
-   或缺页风险。日志中的 x0-x5 是原始参数，路径、sockaddr、ioctl arg 等可以后续
-   按 syscall 号有选择地补充解码。
+指定进程 syscall 入口监控
 */
 #ifndef ARM_SYSCALL_MONITOR_H
 #define ARM_SYSCALL_MONITOR_H
@@ -1446,16 +1431,16 @@ static int syscall_monitor_do_el0_svc_hook_work(struct pt_regs *regs)
     */
     scno = (long)regs->regs[8];
 
-    pr_info("[sysmon] tgid=%d pid=%d comm=%s syscall=%ld(%s) "
-            "x0=0x%llx x1=0x%llx x2=0x%llx x3=0x%llx x4=0x%llx x5=0x%llx\n",
-            task->tgid, task->pid, task->comm,
-            scno, syscall_monitor_name(scno),
-            (unsigned long long)regs->regs[0],
-            (unsigned long long)regs->regs[1],
-            (unsigned long long)regs->regs[2],
-            (unsigned long long)regs->regs[3],
-            (unsigned long long)regs->regs[4],
-            (unsigned long long)regs->regs[5]);
+    pr_debug("[sysmon] tgid=%d pid=%d comm=%s syscall=%ld(%s) "
+             "x0=0x%llx x1=0x%llx x2=0x%llx x3=0x%llx x4=0x%llx x5=0x%llx\n",
+             task->tgid, task->pid, task->comm,
+             scno, syscall_monitor_name(scno),
+             (unsigned long long)regs->regs[0],
+             (unsigned long long)regs->regs[1],
+             (unsigned long long)regs->regs[2],
+             (unsigned long long)regs->regs[3],
+             (unsigned long long)regs->regs[4],
+             (unsigned long long)regs->regs[5]);
 
     return 0;
 }

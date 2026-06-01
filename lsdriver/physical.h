@@ -246,10 +246,26 @@ static inline int mmu_translate_va_to_pa(struct mm_struct *mm, uint64_t va, phys
         "isb\n"
 
         /*
-        硬件地址翻译，这里会导致某个TLB entry(TLB条目)的 ASID(地址空间标识符) 中VA->PA 的被污染
+        翻译前先清本地 CPU 上该 VA 的所有 ASID 的TLB，防止旧 ASID+VA 命中影响本次 AT
+
         ASID允许相同虚拟地址映射不同物理地址，不同进程的地址空间分配不同的ASID到mm,运行时根据TCR_EL1.A1装载到ttbr0_el1或TTBR1_EL1
-        TLB entry 1: ASID 10 + VA 0x400000 -> PA 0x10000000
-        TLB entry 2: ASID 20 + VA 0x400000 -> PA 0x20000000
+        TLB entry 是“虚拟地址到物理地址”的缓存；ASID 是这条缓存属于哪个地址空间的标签。
+        比如两个进程都有同一个虚拟地址：如果 TLB 只按 VA 查，那 CPU 看到 0x400000 时就分不清这是 A 的还是 B 的。
+        进程 A:VA 0x400000 -> PA 0x11100000
+        进程 B:VA 0x400000 -> PA 0x22200000
+        所以 TLB 实际会类似这样存：这样同一个 VA:0x400000，可以在不同进程里翻译到不同 PA。
+        TLB entry0 :{ASID 10 + VA 0x400000 -> PA 0x11100000}
+        TLB entry1 :{ASID 20 + VA 0x400000 -> PA 0x22200000}
+        ASID 的作用就是避免每次进程切换都把整个 TLB 清空。进程 A 切到进程 B 时，A 的 TLB entry 可以继续留着，只要当前 ASID 变成 B 的 ASID，CPU 就不会命中 A 的 entry。
+        */
+        "lsr    %[tmp_offset], %[va], #12\n"
+        "tlbi   vaae1, %[tmp_offset]\n"
+        "dsb    nsh\n"
+        "isb\n"
+
+        /*
+        硬件地址翻译，这里会导致某个TLB entry(TLB条目)的 ASID(地址空间标识符) 中VA->PA 的被污染，下面清除
+
         at指令就是为了安全地探测页表，翻译的结果(无论成功还是失败)都会更新到 PAR_EL1寄存器中。
         普通ldr/str 指令导致mmu翻译失败会直接触发翻译异常，CPU 跳入 el1_da，执行翻译异常处理
         现在翻译异常绝大部分都是<缺页>导致的

@@ -136,30 +136,30 @@ static void print_el2_status(void)
     */
     sctlr_el1 = read_sctlr_el1();
 
-    pr_info("===== EL2 Detection =====\n");
+    pr_debug("===== EL2 Detection =====\n");
 
     // 打印当前运行级别。
-    pr_info("CurrentEL          : EL%u\n", current_el);
+    pr_debug("CurrentEL          : EL%u\n", current_el);
 
     // 打印硬件是否实现 EL2。
-    pr_info("EL2 implemented    : %s (ID_AA64PFR0_EL1[11:8] = %u)\n",
+    pr_debug("EL2 implemented    : %s (ID_AA64PFR0_EL1[11:8] = %u)\n",
             el2_implemented ? "YES" : "NO",
             el2_implemented);
 
     // 打印硬件是否支持 VHE。注意：硬件支持 VHE，不代表当前系统已经启用 VHE。
-    pr_info("VHE supported      : %s (ID_AA64MMFR1_EL1[11:8] = %u)\n",
+    pr_debug("VHE supported      : %s (ID_AA64MMFR1_EL1[11:8] = %u)\n",
             vhe_supported ? "YES" : "NO",
             vhe_supported);
 
     // 打印 SCTLR_EL1 的当前值。该值主要用于辅助观察当前控制寄存器状态。
-    pr_info("SCTLR_EL1          : 0x%016lx\n", sctlr_el1);
+    pr_debug("SCTLR_EL1          : 0x%016lx\n", sctlr_el1);
 
     // 判断 VHE 是否 active。
-    pr_info("VHE mode active    : %s\n",
+    pr_debug("VHE mode active    : %s\n",
             current_el == 2 ? "YES" : "NO");
 
     // 判断当前是否可以直接访问 EL2 寄存器。
-    pr_info("EL2 regs accessible: %s\n",
+    pr_debug("EL2 regs accessible: %s\n",
             current_el == 2 ? "YES" : "NO (trap)");
 
     // 运行在 EL2 时，读取 HCR_EL2。
@@ -174,17 +174,17 @@ static void print_el2_status(void)
             :
             :);
 
-        pr_info("HCR_EL2            : 0x%016lx\n", hcr_el2);
-        pr_info("  E2H bit[34]      : %lu (VHE=%s)\n",
+        pr_debug("HCR_EL2            : 0x%016lx\n", hcr_el2);
+        pr_debug("  E2H bit[34]      : %lu (VHE=%s)\n",
                 (hcr_el2 >> 34) & 1,
                 ((hcr_el2 >> 34) & 1) ? "enabled" : "disabled");
     }
     else
     {
-        pr_info("HCR_EL2            : NOT readable from EL1 (would trap)\n");
+        pr_debug("HCR_EL2            : NOT readable from EL1 (would trap)\n");
     }
 
-    pr_info("===== Hypervisor / TrustZone / Platform Probe =====\n");
+    pr_debug("===== Hypervisor / TrustZone / Platform Probe =====\n");
 
     /*
     查看是否有高通 Hypervisor (Gunyah/Haven)
@@ -208,10 +208,10 @@ static void print_el2_status(void)
     np = of_find_node_by_path("/hypervisor");
     if (np)
     {
-        pr_info("DT /hypervisor     : present\n");
+        pr_debug("DT /hypervisor     : present\n");
         of_property_for_each_string(np, "compatible", prop, str)
         {
-            pr_info("  compatible       : %s\n", str);
+            pr_debug("  compatible       : %s\n", str);
 
             if (strnstr(str, "gunyah", strlen(str)) ||
                 strnstr(str, "haven", strlen(str)) ||
@@ -226,18 +226,18 @@ static void print_el2_status(void)
     }
     else
     {
-        pr_info("DT /hypervisor     : no hyp node\n");
+        pr_debug("DT /hypervisor     : no hyp node\n");
     }
     np = of_find_node_by_path("/psci");
     if (!np)
         np = of_find_node_by_path("/firmware/psci");
     if (np)
     {
-        pr_info("DT PSCI            : present\n");
+        pr_debug("DT PSCI            : present\n");
 
         of_property_for_each_string(np, "compatible", prop, str)
         {
-            pr_info("  compatible       : %s\n", str);
+            pr_debug("  compatible       : %s\n", str);
 
             if (strnstr(str, "psci", strlen(str)) ||
                 strnstr(str, "arm,psci", strlen(str)))
@@ -250,7 +250,7 @@ static void print_el2_status(void)
     }
     else
     {
-        pr_info("DT PSCI            : not found\n");
+        pr_debug("DT PSCI            : not found\n");
     }
 
     // 直接看芯片/平台型号
@@ -258,16 +258,16 @@ static void print_el2_status(void)
     if (np)
     {
         if (!of_property_read_string(np, "model", &model))
-            pr_info("DT model           : %s\n", model);
+            pr_debug("DT model           : %s\n", model);
         else
-            pr_info("DT model           : unavailable\n");
+            pr_debug("DT model           : unavailable\n");
 
         of_property_for_each_string(np, "compatible", prop, str)
         {
-            pr_info("DT compatible      : %s\n", str);
+            pr_debug("DT compatible      : %s\n", str);
 
             if (strnstr(str, "qcom", strlen(str)))
-                pr_info("  platform hint    : Qualcomm SoC / board\n");
+                pr_debug("  platform hint    : Qualcomm SoC / board\n");
 
             if (strnstr(str, "gunyah", strlen(str)) ||
                 strnstr(str, "haven", strlen(str)) ||
@@ -282,13 +282,13 @@ static void print_el2_status(void)
     }
     else
     {
-        pr_info("DT root            : unavailable\n");
+        pr_debug("DT root            : unavailable\n");
     }
 
-    pr_info("HV keyword hint    : %s\n", hyp_hint ? "YES" : "NO");
-    pr_info("TZ/PSCI hint       : %s\n", tz_hint ? "YES" : "NO");
+    pr_debug("HV keyword hint    : %s\n", hyp_hint ? "YES" : "NO");
+    pr_debug("TZ/PSCI hint       : %s\n", tz_hint ? "YES" : "NO");
 
-    pr_info("=========================\n");
+    pr_debug("=========================\n");
 }
 
 // 解锁操作系统调试锁和全局启用硬件调试功能
