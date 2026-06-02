@@ -38,6 +38,7 @@ __attribute__((no_sanitize("cfi"))) static unsigned long generic_kallsyms_lookup
 
         return fn_kallsyms_lookup_name(name);
 }
+int (*fn_aarch64_insn_patch_text)(void *addrs[], uint32_t insns[], int cnt);
 
 /*
 
@@ -54,8 +55,6 @@ __attribute__((no_sanitize("cfi"))) static unsigned long generic_kallsyms_lookup
 感谢bypass_cfi由https://github.com/wangchuan2009(忘川)，处理运行时校验函数来过5系cfi
 */
 
-int (*fn_aarch64_insn_patch_text_nosync)(void *addr, uint32_t insn);
-
 __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
 {
         // AArch64 RET 指令机器码
@@ -63,15 +62,26 @@ __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
         // 内部状态，记录是否已经热更新成功
         static bool is_cfi_bypassed = false;
         uint64_t cfi_addr = 0;
+        void *patch_addrs[1];
+        uint32_t patch_insns[1] = {AARCH64_RET_INSTR};
 
         if (is_cfi_bypassed)
                 return true;
 
-        // 获取 patch 函数
-        fn_aarch64_insn_patch_text_nosync =
-            (void *)generic_kallsyms_lookup_name("aarch64_insn_patch_text_nosync");
+        // 获取同步 patch 函数：内部使用 stop_machine，避免其他 CPU 执行到半补丁状态。
+        /*
+        注意：aarch64_insn_patch_text_nosync不同步多cpu
+        在patch目标地址多行指令时很可能导致其他cpu执行到半补丁状态，
+        为了防止这个情况使用aarch64_insn_patch_text，
+        如继续使用nosync，需要在patch时用stop_machine 来停止所有cpu,再热循环补丁，
+        不过aarch64_insn_patch_text就是用的我说的这个方式，
+        aarch64_insn_patch_text内部也是stop_machine 停止其他cpu，
+        在循环调用aarch64_insn_patch_text_nosync来patch指令
+        */
+        fn_aarch64_insn_patch_text =
+            (void *)generic_kallsyms_lookup_name("aarch64_insn_patch_text");
 
-        if (!fn_aarch64_insn_patch_text_nosync)
+        if (!fn_aarch64_insn_patch_text)
                 return false;
 
         //  依次查找各个版本的 CFI slowpath 函数
@@ -85,11 +95,9 @@ __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
                 return false;
 
         // 强行 Patch 成 RET 指令 (直接返回，使得所有 CFI 校验默认通过)
-        if (fn_aarch64_insn_patch_text_nosync((void *)cfi_addr, AARCH64_RET_INSTR) != 0)
+        patch_addrs[0] = (void *)cfi_addr;
+        if (fn_aarch64_insn_patch_text(patch_addrs, patch_insns, 1) != 0)
                 return false;
-
-        // aarch64_insn_patch_text_nosync内部一般已经处理了 缓存，
-        // flush_icache_range(cfi_addr, cfi_addr + 4);
 
         is_cfi_bypassed = true;
         return true;
