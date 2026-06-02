@@ -107,10 +107,14 @@ static inline void *pte_map_page(phys_addr_t paddr, size_t size, const void *buf
     1.映射为有缓存的用户态和线性:对地址写入很多时候还存在CPU cache(多级缓存中,常见的如L1~L3级缓存)
                                 这时候进行绕过缓存读DRAM中数据，肯定是错乱的，应为cpu未把缓存写回DRAM
     2.映射为无缓存的内核态:你对这个物理页的读写都是直达DRAM,此时cpu拿缓存进行计算，修改DRMA不会实时反映到虚拟地址
+
+    这里使用无缓存读原因是：目标进程分配一个内存页，用dc civac直接清除这个内存页的缓存，
+                        随后把坐标指针重定向到这个内存页，内核读取了这个内存页用了缓存，那么下次这个页的读取就会变快，进行缓存检测
+    无缓存读会带来非常严重的性能下降和数据不一致情况
     */
     static const uint64_t FLAGS = PTE_TYPE_PAGE | PTE_VALID | PTE_AF |
                                   PTE_SHARED | PTE_PXN | PTE_UXN |
-                                  PTE_ATTRINDX(MT_NORMAL);
+                                  PTE_ATTRINDX(MT_NORMAL_NC);
     // // 硬件设备寄存器专用页表配置（不要使用硬件寄存器页表配置去读取普通物理页，原因不过多解释，太复杂了问AI去）
     // static const uint64_t FLAGS = PTE_TYPE_PAGE | PTE_VALID | PTE_AF |
     //                               PTE_SHARED | PTE_PXN | PTE_UXN |
@@ -576,14 +580,14 @@ static inline int _process_memory_rw(enum sm_req_op op, pid_t pid, uint64_t vadd
         if (op == op_r)
         {
 
-            // status = pte_read_physical(paddr_of_page + page_offset, (uint8_t *)buffer + bytes_copied, bytes_this_page);
-            status = linear_read_physical(paddr_of_page + page_offset, (uint8_t *)buffer + bytes_copied, bytes_this_page);
+            status = pte_read_physical(paddr_of_page + page_offset, (uint8_t *)buffer + bytes_copied, bytes_this_page);
+            // status = linear_read_physical(paddr_of_page + page_offset, (uint8_t *)buffer + bytes_copied, bytes_this_page);
         }
         else
         {
 
-            // status = pte_write_physical(paddr_of_page + page_offset, (const uint8_t *)buffer + bytes_copied, bytes_this_page);
-            status = linear_write_physical(paddr_of_page + page_offset, (uint8_t *)buffer + bytes_copied, bytes_this_page);
+            status = pte_write_physical(paddr_of_page + page_offset, (const uint8_t *)buffer + bytes_copied, bytes_this_page);
+            // status = linear_write_physical(paddr_of_page + page_offset, (uint8_t *)buffer + bytes_copied, bytes_this_page);
         }
 
         if (status != 0)
