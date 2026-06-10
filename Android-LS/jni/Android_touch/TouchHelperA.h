@@ -299,8 +299,7 @@ bool Touch_Init()
                   if (areaA != areaB)
                       return areaA > areaB;
 
-                  return a.eventNum < b.eventNum;
-              });
+                  return a.eventNum < b.eventNum; });
 
     for (size_t i = 1; i < found_devices.size(); ++i)
         close(found_devices[i].fd);

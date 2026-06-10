@@ -15,6 +15,7 @@
 #include "inline_hook_frame.h"
 
 #define BP_CONFIG_MAX 16
+#define ARM64_HWBKPT_ESR_ACCESS_MASK (1U << 6)
 
 struct breakpoint_point
 {
@@ -43,7 +44,7 @@ struct breakpoint_config
 /*
 这里用全局变量来传递异常回调和断点写入上下文
 应为异常处理路径的调用约定是硬件决定的，我没办法附加参数
-注册线程调度回调那个可以附加参数，但是只能附加一个参数
+注册线程调度回调那个可以附加参数，但是只能附加一个参数,现在使用inline hook也无法附加参数了
 既然使用全局指针传递上下文，那么<统一>使用传递的全局上下文，不在使用附带参数
 内核很多子系统的做法也一样
 */
@@ -51,10 +52,10 @@ struct breakpoint_config g_bp_config[BP_CONFIG_MAX];
 int num_brps, num_wrps; // 硬件执行和访问槽位总数
 
 /*
- 把外部断点参数转换成ARM架构内部格式，并完成基础检测/修正。
- 这里只处理用户态断点（EL0）场景。
- 在32位的task和per-cpu 场景不能按compat处理，要=0
- */
+把外部断点参数转换成ARM架构内部格式，并完成基础检测/修正。
+这里只处理用户态断点（EL0）场景。
+在32位的task和per-cpu 场景不能按compat处理，要=0
+*/
 static int hw_breakpoint_parse(struct breakpoint_point *point, bool is_compat, struct arch_hw_breakpoint *hw)
 {
     uint64_t alignment_mask, offset;
@@ -181,6 +182,76 @@ static int hw_breakpoint_parse(struct breakpoint_point *point, bool is_compat, s
     hw->ctrl.len <<= offset;
 
     return 0;
+}
+
+// 返回 BAS 位图中最低的有效字节位；没有有效位时返回 32。
+static uint32_t hwbp_lowest_set_bit(uint32_t value)
+{
+    uint32_t bit;
+
+    for (bit = 0; bit < 32; bit++)
+    {
+        if (value & (1U << bit))
+            return bit;
+    }
+
+    return 32;
+}
+
+// 返回 BAS 位图中最高的有效字节位；没有有效位时返回 32。
+static uint32_t hwbp_highest_set_bit(uint32_t value)
+{
+    int bit;
+
+    for (bit = 31; bit >= 0; bit--)
+    {
+        if (value & (1U << bit))
+            return (uint32_t)bit;
+    }
+
+    return 32;
+}
+
+// ARM64 watchpoint 可能上报 watched bytes 附近的地址；按策略计算距离。
+static uint64_t ls_get_distance_from_watchpoint(uint64_t fault_addr, uint64_t watch_addr, struct arch_hw_breakpoint_ctrl *ctrl)
+{
+    uint64_t wp_low;
+    uint64_t wp_high;
+    uint32_t lens;
+    uint32_t lene;
+
+    if (!ctrl || !ctrl->len)
+        return ~0ULL;
+
+    fault_addr = untagged_addr(fault_addr);
+    lens = hwbp_lowest_set_bit(ctrl->len);
+    lene = hwbp_highest_set_bit(ctrl->len);
+    if (lens >= 32 || lene >= 32)
+        return ~0ULL;
+
+    wp_low = watch_addr + lens;
+    wp_high = watch_addr + lene;
+
+    if (fault_addr < wp_low)
+        return wp_low - fault_addr;
+    if (fault_addr > wp_high)
+        return fault_addr - wp_high;
+    return 0;
+}
+
+// ESR bit 6 表示本次访问方向：0 为读，1 为写。
+static bool watchpoint_access_matches(struct arch_hw_breakpoint *info, uint64_t esr)
+{
+    bool is_write;
+
+    if (!info || info->ctrl.type == ARM_BREAKPOINT_EXECUTE)
+        return false;
+
+    is_write = !!(esr & ARM64_HWBKPT_ESR_ACCESS_MASK);
+    if (is_write)
+        return !!(info->ctrl.type & ARM_BREAKPOINT_STORE);
+
+    return !!(info->ctrl.type & ARM_BREAKPOINT_LOAD);
 }
 
 // 禁用当前 CPU 上的硬件断点/观察点控制寄存器，保留原有配置位
@@ -348,6 +419,39 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
                     info.address != addr)
                     continue;
 
+                /*
+                上案例
+                point0 配置地址 = 0x71B5654190
+                point1 配置地址 = 0x71B5653A68
+                point2 配置地址 = 0x71B5655590
+
+                安装进硬件地址寄存器：
+                BVR0 = 0x71B5654190
+                BVR1 = 0x71B5653A68
+                BVR2 = 0x71B5655590
+
+                目标执行到：
+                PC = 0x71B5655590
+
+                CPU 触发 debug exception，真实命中的是 slot2。
+
+                进入异常后，从 slot0 开始扫：
+                slot0:addr = read_bvr(0);  // 0x71B5654190
+
+                point0:info.address = 0x71B5654190
+
+                if (info.address == addr)派发 point0
+
+                bug 点：
+                这里仅证明 point0 安装在 slot0，
+                没证明这次异常由 slot0 触发。
+
+                所以真实命中 slot2，但 point0 先被派发了，
+                导致 point0.records 里写入了 record.pc = 0x71B5655590。
+                */
+                if (info.address != (regs->pc & ~0x3ULL))
+                    continue;
+
                 // 地址相等、控制码相等且当前槽位启用才派发
                 if ((ctrl & 0x1) &&
                     ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) == (ctrl & ~0x1ULL)) &&
@@ -376,20 +480,36 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
     int i;
     int j;
     int slot;
+    int hit_cfg_index = -1;
+    int hit_point_index = -1;
+    int hit_slot = -1;
     uint64_t addr;
     uint64_t ctrl;
+    uint64_t fault_addr = hook_regs->regs[0];
+    uint64_t esr = hook_regs->regs[1];
+    uint64_t dist;
+    uint64_t min_dist = ~0ULL;
+    bool exact_match = false;
     struct arch_hw_breakpoint info;
     struct pt_regs *regs = (struct pt_regs *)hook_regs->regs[2];
 
-    for (slot = 0; slot < num_wrps; slot++)
+    /*
+    watchpoint_handler 原型是 (addr, esr, regs)。这里用 addr 判断真实命中的访问地址，
+    用 esr 判断读写方向，避免只证明 point 安装在某个 WRP 槽就误派发。
+    */
+    for (slot = 0; slot < num_wrps && !exact_match; slot++)
     {
         addr = read_wb_reg(AARCH64_DBG_REG_WVR, slot);
         ctrl = read_wb_reg(AARCH64_DBG_REG_WCR, slot);
 
-        for (i = 0; i < BP_CONFIG_MAX; i++)
+        if (!(ctrl & 0x1))
+            continue;
+
+        for (i = 0; i < BP_CONFIG_MAX && !exact_match; i++)
         {
             if (g_bp_config[i].pid <= 0 ||
-                !g_bp_config[i].on_hit)
+                !g_bp_config[i].on_hit ||
+                g_bp_config[i].pid != current->tgid)
                 continue;
 
             for (j = 0; j < BP_CONFIG_MAX; j++)
@@ -397,26 +517,38 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
                 struct breakpoint_point *point = &g_bp_config[i].points[j];
 
                 if (hw_breakpoint_parse(point, 0, &info) ||
-                    info.address != addr)
+                    info.ctrl.type == ARM_BREAKPOINT_EXECUTE ||
+                    info.address != addr ||
+                    ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) != (ctrl & ~0x1ULL)) ||
+                    !watchpoint_access_matches(&info, esr))
                     continue;
 
-                if ((ctrl & 0x1) &&
-                    ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) == (ctrl & ~0x1ULL)) &&
-                    g_bp_config[i].pid == current->tgid)
-                {
-                    g_bp_config[i].hit_point_index = j;
-                    g_bp_config[i].on_hit(regs, &g_bp_config[i]);
-                    write_wb_reg(AARCH64_DBG_REG_WVR, slot, 0);
-                    write_wb_reg(AARCH64_DBG_REG_WCR, slot, 0);
-                    // write_wb_reg(AARCH64_DBG_REG_BCR, slot, ctrl & ~0x1);
-                    hook_regs->regs[0] = 0;
-                    return 1;
-                }
+                dist = ls_get_distance_from_watchpoint(fault_addr, addr, &info.ctrl);
+                if (dist >= min_dist)
+                    continue;
+
+                min_dist = dist;
+                hit_cfg_index = i;
+                hit_point_index = j;
+                hit_slot = slot;
+                exact_match = (dist == 0);
+
+                if (exact_match)
+                    break;
             }
         }
     }
 
-    return 0;
+    if (hit_cfg_index < 0)
+        return 0;
+
+    g_bp_config[hit_cfg_index].hit_point_index = hit_point_index;
+    g_bp_config[hit_cfg_index].on_hit(regs, &g_bp_config[hit_cfg_index]);
+    write_wb_reg(AARCH64_DBG_REG_WVR, hit_slot, 0);
+    write_wb_reg(AARCH64_DBG_REG_WCR, hit_slot, 0);
+    // write_wb_reg(AARCH64_DBG_REG_WCR, hit_slot, ctrl & ~0x1);
+    hook_regs->regs[0] = 0;
+    return 1;
 }
 
 // 声明硬件调试异常 hook 表
