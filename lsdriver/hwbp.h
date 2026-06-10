@@ -21,7 +21,6 @@
 
 #include "arm64_debug_monitor.h"
 
-
 struct breakpoint_config bp_config;
 
 // 断点触发回调函数

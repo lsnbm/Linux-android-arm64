@@ -115,10 +115,23 @@ static inline void *pte_map_page(phys_addr_t paddr, size_t size, const void *buf
     static const uint64_t FLAGS = PTE_TYPE_PAGE | PTE_VALID | PTE_AF |
                                   PTE_SHARED | PTE_PXN | PTE_UXN |
                                   PTE_ATTRINDX(MT_NORMAL_NC);
-    // // 硬件设备寄存器专用页表配置（不要使用硬件寄存器页表配置去读取普通物理页，原因不过多解释，太复杂了问AI去）
-    // static const uint64_t FLAGS = PTE_TYPE_PAGE | PTE_VALID | PTE_AF |
-    //                               PTE_SHARED | PTE_PXN | PTE_UXN |
-    //                               PTE_ATTRINDX(MT_DEVICE_nGnRnE);
+    /*
+    Device memory 不允许普通 RAM 那种随意访问方式
+    代码使用__builtin_memcpy
+    但 mapped 如果被标成 MT_DEVICE_nGnRnE，编译器生成的访问序列可能是：
+    ldr/str 8 字节
+    ldp/stp 成对访问
+    更宽的块访问
+    非自然对齐访问
+    只要 mapped 地址不是对应宽度自然对齐，或者指令形式不适合 Device memory，就可能直接死
+    尤其这里返回的是return (uint8_t *)pte_info.base_address + (paddr & ~PAGE_MASK);
+    如果 paddr 页内偏移不是 4/8/16 对齐，而 memcpy 刚好生成宽访问，Device 就很容易炸。Normal_NC 映射下 CPU 可以处理很多非对齐访问；Device mapping 下不行。
+
+    // 硬件设备寄存器专用页表配置（不要使用硬件寄存器页表配置去读取普通物理页，原因不过多解释，太复杂了问AI去）
+     static const uint64_t FLAGS = PTE_TYPE_PAGE | PTE_VALID | PTE_AF |
+                                   PTE_SHARED | PTE_PXN | PTE_UXN |
+                                   PTE_ATTRINDX(MT_DEVICE_nGnRnE);
+    */
 
     uint64_t pfn = __phys_to_pfn(paddr);
 

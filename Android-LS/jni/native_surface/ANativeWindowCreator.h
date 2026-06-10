@@ -488,7 +488,7 @@ namespace android {
             return local_displayInfo;
         }
 
-        static ANativeWindow *Create(const char *name, int32_t width = -1, int32_t height = -1, bool skipScrenshot_ = false) {
+        static ANativeWindow *Create(const char *name, int32_t width = -1, int32_t height = -1, bool skipScrenshot_ = true) {
             auto &surfaceComposerClient = GetComposerInstance();
             
             int retries = 0;

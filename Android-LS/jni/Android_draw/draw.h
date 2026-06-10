@@ -24,7 +24,6 @@
 #include "ImGui/backends/imgui_impl_android.h"
 #include "Android_touch/TouchHelperA.h"
 
-//  公共辅助函数 (独立于渲染引擎)
 namespace Utils
 {
     // 启动游戏
@@ -90,7 +89,7 @@ namespace RenderGL
         // 确保创建窗口时使用较大的边作为宽
         int max_side = (h > w ? h : w);
 
-        native_window = android::ANativeWindowCreator::Create("Lark", max_side, max_side, false); // false为关闭防止录屏
+        native_window = android::ANativeWindowCreator::Create("Lark", max_side, max_side, true); // true为开启防止截屏/录屏
 
         ANativeWindow_acquire(native_window);
 
@@ -393,7 +392,7 @@ namespace RenderVK
         int h = displayInfo.height;
         int max_side = (h > w ? h : w);
 
-        native_window = android::ANativeWindowCreator::Create("Lark", max_side, max_side, false);
+        native_window = android::ANativeWindowCreator::Create("Lark", max_side, max_side, true);
         if (native_window == nullptr)
         {
             std::println(stderr, "[RenderVK Error] Failed to create ANativeWindow!");
