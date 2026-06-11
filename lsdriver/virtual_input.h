@@ -394,6 +394,8 @@ static inline void v_touch_event(enum sm_req_op op, int slot, int x, int y)
     int old_tracking_id;
     int ret;
     bool last_virtual;
+    int max_x;
+    int max_y;
 
     if (!vt.initialized)
         return;
@@ -401,6 +403,23 @@ static inline void v_touch_event(enum sm_req_op op, int slot, int x, int y)
     // 越界保护,slot定义的是int,不是short,与内核字节对齐吧
     if ((unsigned)slot >= VIRTUAL_SLOTS)
         return;
+
+    // 坐标安全检查：只检查按下/移动，抬起事件不依赖 x/y。
+    // ABS 最大值本身也拒绝，避免 TouchUp(1,1,1,1) 这类脏坐标变成 raw 最大点后参与下一次 DOWN。和防止其他异常状态坐标上报
+    if (op == op_down || op == op_move)
+    {
+        if (!vt.dev || !vt.dev->absinfo)
+            return;
+
+        max_x = vt.dev->absinfo[ABS_MT_POSITION_X].maximum;
+        max_y = vt.dev->absinfo[ABS_MT_POSITION_Y].maximum;
+
+        if (max_x <= 0 || max_y <= 0)
+            return;
+
+        if (x < 0 || y < 0 || x >= max_x || y >= max_y)
+            return;
+    }
 
     if (op == op_move)
     {
@@ -446,17 +465,11 @@ static inline void v_touch_event(enum sm_req_op op, int slot, int x, int y)
             vt.tracking_ids[slot] = -1;
             last_virtual = vt_active_count() == 0;
 
-            // 虚拟手指抬起了，只有所有虚拟 slot 全部抬起时才解锁，才允许系统上报真实的抬起事件
-            ret = send_report(slot, 0, 0, false);
-            if (ret)
-            {
-                vt.tracking_ids[slot] = old_tracking_id;
-                if (last_virtual)
-                    set_global_key_lock_state(vt.dev, true);
-                return;
-            }
+            // 虚拟手指抬起了
+            send_report(slot, 0, 0, false);
 
-            // 最后一个虚拟手指抬起并成功提交后，再把全局按键能力还给物理驱动
+            // 最后一个虚拟手指抬起了，再把全局按键能力还给物理驱动，
+            // 这里不要看最后的虚拟slot是否抬起成功，强行把自己记录slot被抬起，一定要解锁设备的全局按键能力，然后设备驱动清理残留slot，虚拟手指还有未抬起的也不会解锁设备发全局按键状态能力
             if (last_virtual)
                 set_global_key_lock_state(vt.dev, false);
         }

@@ -982,6 +982,9 @@ private: // 私有实现，外部无需关系
         if (screenW <= 0 || screenH <= 0 || req->vinput_info.POSITION_X <= 0 || req->vinput_info.POSITION_Y <= 0)
             return;
 
+        if (x < 0 || y < 0 || x > screenW || y > screenH)
+            return;
+
         req->op = op;
         req->vinput_info.slot = slot;
         // 浮点运算提到前面，保持清晰
