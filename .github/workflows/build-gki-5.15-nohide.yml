@@ -1,0 +1,220 @@
+name: Build lsdriver Android GKI 5.15 NoHide
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_branch:
+        description: Android common kernel manifest branch
+        required: true
+        default: common-android13-5.15
+      strip_debug:
+        description: Strip debug symbols
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  contents: write
+
+env:
+  DRIVER_DIR: lsdriver
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout driver source
+        uses: actions/checkout@v4
+        with:
+          path: driver-src
+
+      - name: Disable hide logic and rename threads
+        run: |
+          cd driver-src/lsdriver
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path("lsdriver.c")
+          s = p.read_text()
+
+          patterns = [
+              r'^\s*hide_myself\(\);\s*//.*$',
+              r'^\s*hide_process_install\(task->tgid\);\s*//.*$',
+              r'^\s*hide_kgsl_install\(task->tgid\);\s*//.*$',
+              r'^\s*hide_process_remove\(task->tgid\);\s*//.*$',
+              r'^\s*hide_kgsl_remove\(task->tgid\);\s*//.*$',
+              r'^\s*hide_process_install\(chf->pid\);\s*//.*$',
+              r'^\s*hide_process_install\(dhf->pid\);\s*//.*$',
+          ]
+
+          for pat in patterns:
+              s = re.sub(pat, lambda m: "/* " + m.group(0).strip() + " */", s, flags=re.M)
+
+          s = s.replace(
+              'kthread_run(ConnectThreadFunction, NULL, "ext4-rsv-conver")',
+              'kthread_run(ConnectThreadFunction, NULL, "lsdriver-connect")'
+          )
+          s = s.replace(
+              'kthread_run(DispatchThreadFunction, NULL, "ext4-rsv-conver")',
+              'kthread_run(DispatchThreadFunction, NULL, "lsdriver-dispatch")'
+          )
+
+          p.write_text(s)
+          PY
+          sed -n '120,340p' lsdriver.c | grep -n "hide_\|kthread_run\|hide_myself" || true
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            bc bison build-essential ccache curl flex git \
+            libssl-dev libelf-dev python3 python-is-python3 \
+            zip unzip lz4 xz-utils rsync file dwarves \
+            device-tree-compiler
+
+      - name: Free disk space
+        run: |
+          df -h
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          sudo docker system prune -af || true
+          df -h
+
+      - name: Install repo tool
+        run: |
+          mkdir -p "$HOME/bin"
+          curl -L https://storage.googleapis.com/git-repo-downloads/repo -o "$HOME/bin/repo"
+          chmod +x "$HOME/bin/repo"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Configure git
+        run: |
+          git config --global user.name github-actions
+          git config --global user.email github-actions@github.com
+          git config --global color.ui false
+
+      - name: Sync Android common kernel
+        run: |
+          mkdir -p android-kernel
+          cd android-kernel
+          repo init \
+            -u https://android.googlesource.com/kernel/manifest \
+            -b "${{ github.event.inputs.kernel_branch }}" \
+            --depth=1
+          repo sync -c -j"$(nproc)" --no-tags --fail-fast
+          df -h
+
+      - name: Build modules_prepare only
+        run: |
+          cd android-kernel
+          (
+            while true; do
+              echo "[heartbeat] modules_prepare still running: $(date)"
+              df -h . || true
+              sleep 60
+            done
+          ) &
+          HEARTBEAT_PID=$!
+          trap 'kill $HEARTBEAT_PID 2>/dev/null || true' EXIT
+
+          tools/bazel build \
+            --verbose_failures \
+            --show_progress_rate_limit=30 \
+            --jobs=2 \
+            //common:kernel_aarch64_modules_prepare
+
+      - name: Extract modules_prepare output
+        run: |
+          cd android-kernel
+          mkdir -p out/modules_prepare
+          BAZEL_OUT="$(readlink -f out/modules_prepare)"
+          echo "BAZEL_OUT=$BAZEL_OUT" >> "$GITHUB_ENV"
+
+          TAR="$(find bazel-bin/common -path '*kernel_aarch64_modules_prepare*' -name 'modules_prepare_outdir.tar.gz' | head -n 1)"
+          if [ -z "$TAR" ]; then
+            echo "modules_prepare_outdir.tar.gz not found"
+            find bazel-bin/common -maxdepth 5 -type f | sort | head -300
+            exit 1
+          fi
+
+          tar -xzf "$TAR" -C "$BAZEL_OUT"
+          ls -la "$BAZEL_OUT" | head
+
+      - name: Build external module lsdriver.ko
+        run: |
+          cd android-kernel
+          CLANG_PATH="$PWD/prebuilts/clang/host/linux-x86/clang-r450784e"
+          NDK_LLVM="$PWD/prebuilts/ndk-r23/toolchains/llvm/prebuilt/linux-x86_64/bin"
+
+          env PATH="$CLANG_PATH/bin:$NDK_LLVM:$PATH" \
+            make -C "$PWD/common" \
+              O="$BAZEL_OUT" \
+              M="$GITHUB_WORKSPACE/driver-src/$DRIVER_DIR" \
+              ARCH=arm64 \
+              LLVM=1 \
+              LLVM_IAS=1 \
+              CROSS_COMPILE="$NDK_LLVM/aarch64-linux-android-" \
+              LLVM_TOOLCHAIN_PATH="$CLANG_PATH" \
+              KBUILD_MODPOST_WARN=1 \
+              modules -j"$(nproc)"
+
+      - name: Collect module
+        run: |
+          mkdir -p artifacts
+          cp "driver-src/$DRIVER_DIR/lsdriver.ko" artifacts/android13-5.15-lsdriver-nohide.ko
+          cp "driver-src/$DRIVER_DIR/Module.symvers" artifacts/ 2>/dev/null || true
+          cp "driver-src/$DRIVER_DIR/modules.order" artifacts/ 2>/dev/null || true
+          cp "driver-src/$DRIVER_DIR/lsdriver.mod" artifacts/ 2>/dev/null || true
+          cp "driver-src/$DRIVER_DIR/lsdriver.mod.c" artifacts/ 2>/dev/null || true
+
+      - name: Strip debug symbols
+        if: github.event.inputs.strip_debug == 'true'
+        run: |
+          cd android-kernel
+          CLANG_PATH="$PWD/prebuilts/clang/host/linux-x86/clang-r450784e"
+          "$CLANG_PATH/bin/llvm-strip" --strip-debug \
+            -o "$GITHUB_WORKSPACE/artifacts/android13-5.15-lsdriver-nohide-stripped.ko" \
+            "$GITHUB_WORKSPACE/artifacts/android13-5.15-lsdriver-nohide.ko"
+
+      - name: Show module info
+        run: |
+          ls -lh artifacts
+          file artifacts/*.ko || true
+          modinfo artifacts/*.ko || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android13-5.15-lsdriver-nohide
+          path: artifacts/**
+
+      - name: Publish module to dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          KO="$GITHUB_WORKSPACE/artifacts/android13-5.15-lsdriver-nohide.ko"
+          API="https://api.github.com/repos/${{ github.repository }}/contents/dist/android13-5.15-lsdriver-nohide.ko"
+          CONTENT="$(base64 -w0 "$KO")"
+          SHA="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$API?ref=main" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("sha",""))' 2>/dev/null || true)"
+          python3 - <<'PY' > /tmp/publish-ko.json
+          import json, os
+          body = {
+              "message": "Publish built lsdriver module",
+              "content": os.environ["CONTENT"],
+              "branch": "main",
+          }
+          if os.environ.get("SHA"):
+              body["sha"] = os.environ["SHA"]
+          print(json.dumps(body))
+          PY
+          curl -fsSL -X PUT \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            --data @/tmp/publish-ko.json \
+            "$API"

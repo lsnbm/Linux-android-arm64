@@ -1,0 +1,5 @@
+config LSDRIVER
+    tristate "LSDriver example module"
+    default m
+    help
+      This is a simple example driver for demonstration.
