@@ -75,7 +75,7 @@ namespace RenderGL
     static ANativeWindow *native_window = nullptr;
     static android::ANativeWindowCreator::DisplayInfo displayInfo{};
 
-    inline bool init()
+    inline bool init(bool preventCapture = true)
     {
         printf("[initEGLGUI] 开始初始化 EGL 和 GUI...\n");
         displayInfo = android::ANativeWindowCreator::GetDisplayInfo();
@@ -89,7 +89,7 @@ namespace RenderGL
         // 确保创建窗口时使用较大的边作为宽
         int max_side = (h > w ? h : w);
 
-        native_window = android::ANativeWindowCreator::Create("Lark", max_side, max_side, true); // true为开启防止截屏/录屏
+        native_window = android::ANativeWindowCreator::Create("Lark", max_side, max_side, preventCapture); // true为开启防止截屏/录屏
 
         ANativeWindow_acquire(native_window);
 
@@ -232,6 +232,9 @@ namespace RenderVK
 
     static ANativeWindow *native_window = nullptr;
     static android::ANativeWindowCreator::DisplayInfo displayInfo{};
+    static bool s_preventCapture = true;
+
+    inline void shutdown();
 
 #define VK_CHECK(x)                                                                                        \
     do                                                                                                     \
@@ -377,8 +380,9 @@ namespace RenderVK
         }
     }
 
-    inline bool init()
+    inline bool init(bool preventCapture = true)
     {
+        s_preventCapture = preventCapture;
         displayInfo = android::ANativeWindowCreator::GetDisplayInfo();
         if (displayInfo.width == 0 || displayInfo.height == 0)
         {
@@ -392,7 +396,7 @@ namespace RenderVK
         int h = displayInfo.height;
         int max_side = (h > w ? h : w);
 
-        native_window = android::ANativeWindowCreator::Create("Lark", max_side, max_side, true);
+        native_window = android::ANativeWindowCreator::Create("Lark", max_side, max_side, preventCapture);
         if (native_window == nullptr)
         {
             std::println(stderr, "[RenderVK Error] Failed to create ANativeWindow!");
@@ -581,6 +585,13 @@ namespace RenderVK
         io.Fonts->AddFontFromMemoryTTF((void *)OPPOSans_H, OPPOSans_H_size, 31.0f, &font_cfg, io.Fonts->GetGlyphRangesChineseFull());
         ImGui::GetStyle().ScaleAllSizes(3.0f);
 
+        if (!Touch_Init())
+        {
+            std::println(stderr, "[RenderVK Error] Failed to initialize touch!");
+            shutdown();
+            return false;
+        }
+
         return true;
     }
     inline void drawBegin()
@@ -598,6 +609,11 @@ namespace RenderVK
             RecreateSwapchain();
             g_SwapChainRebuild = false;
         }
+
+        if (!s_preventCapture)
+            android::ANativeWindowCreator::ProcessMirrorDisplay();
+
+        Touch_UpdateImGui();
 
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplAndroid_NewFrame();
@@ -698,6 +714,8 @@ namespace RenderVK
 
     inline void shutdown()
     {
+        Touch_Shutdown();
+
         if (g_Device != VK_NULL_HANDLE)
             vkDeviceWaitIdle(g_Device);
 

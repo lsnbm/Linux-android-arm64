@@ -2165,17 +2165,11 @@ private:
 int RunMemoryTool()
 {
     Config::g_Running = true;
+    constexpr bool preventCapture = false;
 
-    if (!RenderVK::init())
+    if (!RenderVK::init(preventCapture))
     {
         std::println(stderr, "[错误] 初始化图形引擎失败。");
-        return 1;
-    }
-
-    if (!Touch_Init())
-    {
-        std::println(stderr, "[错误] 初始化触摸失败。");
-        RenderVK::shutdown();
         return 1;
     }
 
@@ -2185,7 +2179,6 @@ int RunMemoryTool()
         MainUI ui;
         while (Config::g_Running)
         {
-            Touch_UpdateImGui();
             RenderVK::drawBegin();
             ui.draw();
             RenderVK::drawEnd();
@@ -2203,7 +2196,6 @@ int RunMemoryTool()
         rc = 1;
     }
 
-    Touch_Shutdown();
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     RenderVK::shutdown();
 
