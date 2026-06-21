@@ -230,7 +230,8 @@ struct memory_info
 
 struct virtual_input
 {
-    int POSITION_X, POSITION_Y; // 初始化触摸时返回的屏幕维度
+    int request_virtual_slots;  // 初始化时请求的虚拟 slot 数量（必须放在最前）
+    int POSITION_X, POSITION_Y; // 初始化触摸时返回的触摸面板 ABS 最大值
     int slot;                   // 触摸槽位
     int x, y;                   // 触摸坐标
 };

@@ -16,13 +16,13 @@
   - 分支跳转：B, BL, BR, BLR, RET, B.cond, CBZ, CBNZ, TBZ, TBNZ
   - 地址计算：ADR, ADRP
   - 整数访存 (W/X 寄存器，8 ~ 64 位)：
-      * LDR/STR, LDP/STP, LDRB/H/SW 
+      * LDR/STR, LDP/STP, LDRB/H/SW
   - 浮点/SIMD访存 (B/H/S/D/Q 寄存器，8 ~ 128 位)：
       * LDR/STR (SIMD), LDP/STP (SIMD), LDR (Literal, SIMD)
       * 突破内核限制，直接读取物理 CPU 的 Q0-Q31 寄存器，支持 128-bit 模拟。
 
   不支持的指令 (遇到会跳过该指令, PC = PC + 4)：
-  - ALU 计算指令：ADD, SUB, AND, LSL 等 
+  - ALU 计算指令：ADD, SUB, AND, LSL 等
   - 原子/独占指令：LDXR, STXR, CAS, SWP 等
   ========================================================================= */
 
@@ -389,7 +389,7 @@ static __always_inline bool emulate_insn(struct pt_regs *regs)
                 if (opt == 6)
                     ext = (s64)(s32)ext;
                 else if (opt == 2)
-                    ext = (uint64_t)(uint32_t)ext;                                   // 严格区分带符号(SXTW)和无符号(UXTW)
+                    ext = (uint64_t)(uint32_t)ext;                         // 严格区分带符号(SXTW)和无符号(UXTW)
                 int shift = ((insn >> 12) & 1) ? __builtin_ctz(bytes) : 0; // 自动推导 LSL 移位量: Q移4, D移3, S移2, H移1
                 addr = base + (ext << shift);
             }

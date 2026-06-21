@@ -18,24 +18,21 @@
 
 */
 // ==================== 配置调整 ====================
-#define VTOUCH_TRACKING_ID_BASE 40000
-#define ORIGINAL_SLOTS 10                // 物理驱动原始 slot 总数
-#define PHYSICAL_SLOTS 5                 // 物理驱动占用 slot 0–4 (共5个)
-#define VIRTUAL_SLOTS 5                  // 虚拟驱动占用 slot 5–9 (共5个)
-#define VIRTUAL_SLOT_BASE PHYSICAL_SLOTS // 虚拟 slot 在硬件上的起始索引 (5)
-#define TOTAL_SLOTS ORIGINAL_SLOTS       // 总 slot 数 (10)
-#define VTOUCH_REPORT_RETRY 32           // 遇到真实驱动半帧上报时，短暂重试
-
-// ==================== 动态符号导入 ====================
-static void (*input_handle_event)(struct input_dev *dev, unsigned int type, unsigned int code, int value);
+#define MAX_VIRTUAL_SLOTS 16
+// 运行时可配置的触摸参数（在 init_virtual_input_params 中动态初始化）
+static int vtouch_tracking_id_base = 0; // 虚拟手指 tracking_id 起始值
+static int original_slots = 0;          // 物理驱动原始 slot 总数
+static int physical_slots = 0;          // 物理驱动占用 slot 数量
+static int virtual_slots = 0;           // 虚拟驱动占用 slot 数量
+static int virtual_slot_base = 0;       // 虚拟 slot 在硬件上的起始索引 (= physical_slots)
 
 // 虚拟触摸上下文
 static struct
 {
     struct input_dev *dev;
 
-    //  对应 5 个虚拟手指
-    int tracking_ids[VIRTUAL_SLOTS];
+    //  对应虚拟手指的 tracking id，最大支持 MAX_VIRTUAL_SLOTS 个
+    int tracking_ids[MAX_VIRTUAL_SLOTS];
 
     bool has_touch_major;
     bool has_width_major;
@@ -43,8 +40,6 @@ static struct
     bool global_keys_locked;
     bool initialized;
 } vt = {
-    // 5 个虚拟手指初始化为 -1
-    .tracking_ids = {-1, -1, -1, -1, -1},
     .global_keys_locked = false,
     .initialized = false,
 };
@@ -52,10 +47,33 @@ static struct
 static inline int vt_active_count(void)
 {
     int i, count = 0;
-    for (i = 0; i < VIRTUAL_SLOTS; i++)
+    for (i = 0; i < virtual_slots; i++)
         if (vt.tracking_ids[i] != -1)
             count++;
     return count;
+}
+
+// 动态初始化虚拟触摸的运行时参数，若设备实际 slot 数不足，init 后 v_touch_init 会返回 -EINVAL。
+static inline int init_virtual_input_params(int requested_virtual_slots)
+{
+    int i;
+
+    if (requested_virtual_slots <= 0 || requested_virtual_slots > MAX_VIRTUAL_SLOTS)
+        return -EINVAL;
+
+    virtual_slots = requested_virtual_slots;
+    original_slots = 10; // 固定以 10 个 slot 作为总池
+    physical_slots = original_slots - virtual_slots;
+    if (physical_slots <= 0)
+        return -EINVAL;
+
+    virtual_slot_base = physical_slots;
+    vtouch_tracking_id_base = 40000;
+
+    for (i = 0; i < MAX_VIRTUAL_SLOTS; i++)
+        vt.tracking_ids[i] = -1;
+
+    return 0;
 }
 
 // 修改触摸屏设备的slot数量
@@ -67,7 +85,7 @@ static inline int hijack_init_slots(struct input_dev *dev)
         return -EINVAL;
 
     /*
- 这里把内核中触摸屏设备支持的slot截断到0-4(也就是5个数量)
+ 这里把内核中触摸屏设备支持的slot截断到0~(physical_slots-1)
  会有个问题:触摸屏驱动还会自己单独认为有0-9个slot，
      触摸驱动会继续遍历所有slot上报存活事件(注意:不是说有多少个真实手指就触摸驱动就上报多少，而是会固定遍历所有上报，被使用的slot就上报存活，没有使用的slot上报不存活)
 
@@ -85,20 +103,19 @@ static inline int hijack_init_slots(struct input_dev *dev)
          存活和不存活间隙过于短了
          上层Android系统会直接当这个slot为无效,自然Android就不会响应这次的物理驱动事件，肉眼看就是手指按下系统不响应
 
-    当前先不实现“避雷针”方案，仍保持真实驱动和虚拟触摸 5/5 分配：
-     Slot 0 - 4（共5个）：分配给真实手指。
-     Slot 5 - 9（共5个）：分配给虚拟手指。
+     当前方案：保留若干 slot 给物理驱动，其余 slot 分配给虚拟触摸。
          */
-    mt->num_slots = PHYSICAL_SLOTS;
+    mt->num_slots = physical_slots;
 
     // --- Flag 设置 ---
     mt->flags &= ~INPUT_MT_DROP_UNUSED; // 即使没更新也不要丢弃
     mt->flags |= INPUT_MT_DIRECT;
     mt->flags &= ~INPUT_MT_POINTER; // 禁用内核自动按键计算，防止 Key Flapping
 
-    // --- 告诉 Android 我们有 10 个 Slot ---
-    // 虽然触摸设备num_slots 设为 5 (给输入子系统看)，但我们要告诉 Android 我们支持到 10个
-    input_set_abs_params(dev, ABS_MT_SLOT, 0, TOTAL_SLOTS - 1, 0, 0); // 0~9:10,0-10:11,so:-1
+    // --- 告诉 Android 我们支持 original_slots 个 Slot ---
+    // 虽然触摸设备 num_slots 被截断为 physical_slots (给输入子系统看),
+    // 但我们要让 Android 看到完整的 slot 范围, 否则虚拟手指无法使用。
+    input_set_abs_params(dev, ABS_MT_SLOT, 0, original_slots - 1, 0, 0); // 例如 0~9 => 10 个
 
     return 0;
 }
@@ -119,8 +136,8 @@ static inline void set_global_key_bits(struct input_dev *dev, bool enable)
     }
 }
 
-// 锁内安全的全局按键更新
-static inline void update_global_keys_locked(void)
+// 全局按键更新
+static inline void update_global_keys(void)
 {
     struct input_dev *dev = vt.dev;
     struct input_mt *mt = dev->mt;
@@ -128,10 +145,10 @@ static inline void update_global_keys_locked(void)
     int count = 0;
     int i;
 
-    // 遍历前5个物理 Slot (0-4)，检查是否有真实手指按在屏幕上
+    // 遍历物理 Slot (0 ~ physical_slots-1)，检查是否有真实手指按在屏幕上
     // 通过读取 mt 结构体中的 tracking_id 来判断
     // tracking_id != -1 表示该 Slot 处于按下状态
-    for (i = 0; i < PHYSICAL_SLOTS; i++)
+    for (i = 0; i < physical_slots; i++)
     {
         if (input_mt_get_value(&mt->slots[i], ABS_MT_TRACKING_ID) != -1)
             count++;
@@ -142,51 +159,34 @@ static inline void update_global_keys_locked(void)
 
     /*
     如果当前正在锁定全局按键，keybit 是被清掉的。
-    input_handle_event 仍然会检查 keybit，所以这里在 event_lock 内临时恢复能力，
+    input_event 会检查 keybit，所以这里临时恢复能力，
     发完我们自己的 BTN_TOUCH/BTN_TOOL_* 后再清回去，只拦物理驱动，不拦虚拟注入。
     */
     if (relock_keys)
         set_global_key_bits(dev, true);
 
-    // 注意：在持有 event_lock 时，绝对不能调用 input_report_key
-    // 必须直接使用 input_handle_event 以防死锁
-    input_handle_event(dev, EV_KEY, BTN_TOUCH, count > 0);
-    input_handle_event(dev, EV_KEY, BTN_TOOL_FINGER, count == 1);
-    input_handle_event(dev, EV_KEY, BTN_TOOL_DOUBLETAP, count >= 2);
+    // 注意：这里绝对不能调用 input_report_key，必须直接使用 input_event
+    input_event(dev, EV_KEY, BTN_TOUCH, count > 0);
+    input_event(dev, EV_KEY, BTN_TOOL_FINGER, count == 1);
+    input_event(dev, EV_KEY, BTN_TOOL_DOUBLETAP, count >= 2);
 
     if (relock_keys)
         set_global_key_bits(dev, false);
 }
 
-// 设置全局触摸按键锁定状态：locked=true 时拦住物理驱动的 BTN_TOUCH/BTN_TOOL_*。
-static void set_global_key_lock_state(struct input_dev *dev, bool locked)
-{
-    unsigned long flags;
-
-    if (!dev)
-        return;
-
-    spin_lock_irqsave(&dev->event_lock, flags);
-    set_global_key_bits(dev, !locked);
-    vt.global_keys_locked = locked;
-    spin_unlock_irqrestore(&dev->event_lock, flags);
-}
-
-// 调用者传 0–4，内部映射到硬件 slot 5–9
+// 调用者传 0 ~ virtual_slots-1，内部映射到硬件 slot
 static inline int send_report(int vslot, int x, int y, bool touching)
 {
     struct input_dev *dev = vt.dev;
     struct input_mt *mt = dev->mt;
-    int hw_slot = VIRTUAL_SLOT_BASE + vslot;
+    int hw_slot = virtual_slot_base + vslot;
     int tracking_id;
     int old_slot;
-    int retry;
-    unsigned long flags;
 
-    if (!dev || !mt || !input_handle_event)
+    if (!dev || !mt)
         return -ENODEV;
 
-    if ((unsigned)vslot >= VIRTUAL_SLOTS)
+    if ((unsigned)vslot >= virtual_slots)
         return -EINVAL;
 
     if (touching && vt.tracking_ids[vslot] == -1)
@@ -194,53 +194,31 @@ static inline int send_report(int vslot, int x, int y, bool touching)
 
     tracking_id = touching ? vt.tracking_ids[vslot] : -1;
 
-    /*
-    input_event() 会拿 dev->event_lock。
-    我们直接拿同一把锁，再调用 input_handle_event()，这样虚拟触摸的一整包事件不会被物理驱动插队。
-    */
-    for (retry = 0; retry < VTOUCH_REPORT_RETRY; retry++)
-    {
-        spin_lock_irqsave(&dev->event_lock, flags);
-
-        /*
-        dev->num_vals != 0 说明真实驱动可能已经写入了半帧事件但还没 SYN_REPORT。
-        这时强行注入会把真实半帧和虚拟帧混在一起，所以先让路，等真实驱动把当前帧收尾。
-        */
-        if (likely(dev->num_vals == 0))
-            break;
-
-        spin_unlock_irqrestore(&dev->event_lock, flags);
-        udelay(10);
-    }
-
-    if (retry == VTOUCH_REPORT_RETRY)
-        return -EAGAIN;
-
     // 记住当前物理驱动正在操作的 slot
     old_slot = mt->slot;
 
-    // 瞬间开启所有slot
-    mt->num_slots = TOTAL_SLOTS;
+    // 瞬间开启所有 slot
+    mt->num_slots = original_slots;
 
     // 选中目标虚拟 slot
-    input_handle_event(dev, EV_ABS, ABS_MT_SLOT, hw_slot);
+    input_event(dev, EV_ABS, ABS_MT_SLOT, hw_slot);
 
     // 报告状态，注意了这里如果上报死亡：后续严禁对一个已经宣告死亡的 Slot 上报任何物理属性（ABS）。
-    input_handle_event(dev, EV_ABS, ABS_MT_TRACKING_ID, tracking_id);
+    input_event(dev, EV_ABS, ABS_MT_TRACKING_ID, tracking_id);
 
     if (touching)
     {
         // 上报坐标
-        input_handle_event(dev, EV_ABS, ABS_MT_POSITION_X, x);
-        input_handle_event(dev, EV_ABS, ABS_MT_POSITION_Y, y);
+        input_event(dev, EV_ABS, ABS_MT_POSITION_X, x);
+        input_event(dev, EV_ABS, ABS_MT_POSITION_Y, y);
 
         // 上报伪造面积和压力
         if (vt.has_touch_major)
-            input_handle_event(dev, EV_ABS, ABS_MT_TOUCH_MAJOR, 10);
+            input_event(dev, EV_ABS, ABS_MT_TOUCH_MAJOR, 10);
         if (vt.has_width_major)
-            input_handle_event(dev, EV_ABS, ABS_MT_WIDTH_MAJOR, 10);
+            input_event(dev, EV_ABS, ABS_MT_WIDTH_MAJOR, 10);
         if (vt.has_pressure)
-            input_handle_event(dev, EV_ABS, ABS_MT_PRESSURE, 60);
+            input_event(dev, EV_ABS, ABS_MT_PRESSURE, 60);
     }
 
     // 删除 input_mt_sync_frame(dev);
@@ -249,19 +227,16 @@ static inline int send_report(int vslot, int x, int y, bool touching)
 
     // 恢复: 这是解决"跳跃"最核心的一步，把接下来的写入权还给刚才被打断的真实坑位。
     // 这样真实驱动即使醒来，它的坐标依然会安全地写进 old_slot，而不会污染我们的虚拟 Slot。
-    input_handle_event(dev, EV_ABS, ABS_MT_SLOT, old_slot);
+    input_event(dev, EV_ABS, ABS_MT_SLOT, old_slot);
 
-    // 上报结束立刻收回slot，物理驱动依然只看到 5 个 slot
-    mt->num_slots = PHYSICAL_SLOTS;
+    // 上报结束立刻收回slot，物理驱动只看到 physical_slots 个 slot
+    mt->num_slots = physical_slots;
 
-    // 锁内安全地手动控制按键
-    update_global_keys_locked();
+    // 更新全局按键状态
+    update_global_keys();
 
     // 提交总帧
-    input_handle_event(dev, EV_SYN, SYN_REPORT, 0);
-
-    // 释放锁，物理驱动安全醒来，此时活跃 slot 已经复原
-    spin_unlock_irqrestore(&dev->event_lock, flags);
+    input_event(dev, EV_SYN, SYN_REPORT, 0);
 
     return 0;
 }
@@ -282,11 +257,11 @@ static int match_touchscreen(struct device *dev, void *data)
     return 0;
 }
 
-static inline int v_touch_init(int *max_x, int *max_y)
+static inline int v_touch_init(int request_virtual_slots, int *max_x, int *max_y)
 {
     struct input_dev *found = NULL;
     struct class *input_class;
-    int ret = 0;
+    int ret;
 
     if (!max_x || !max_y)
         return -EINVAL;
@@ -298,15 +273,17 @@ static inline int v_touch_init(int *max_x, int *max_y)
         return 0;
     }
 
-    if (!input_handle_event)
+    // request_virtual_slots == 0 表示用户不启用虚拟触摸，直接返回成功
+    if (request_virtual_slots <= 0)
     {
-        input_handle_event = (void *)generic_kallsyms_lookup_name("input_handle_event");
-        if (!input_handle_event)
-        {
-            pr_debug("vtouch: input_handle_event 查找失败\n");
-            return -EFAULT;
-        }
+        *max_x = 0;
+        *max_y = 0;
+        return 0;
     }
+
+    ret = init_virtual_input_params(request_virtual_slots);
+    if (ret)
+        return ret;
 
     input_class = (struct class *)generic_kallsyms_lookup_name("input_class");
     if (!input_class)
@@ -355,7 +332,7 @@ static inline void v_touch_destroy(void)
         return;
 
     // 发送所有仍按下的虚拟 slot 的抬起信号
-    for (i = 0; i < VIRTUAL_SLOTS; i++)
+    for (i = 0; i < virtual_slots; i++)
     {
         if (vt.tracking_ids[i] != -1)
         {
@@ -366,13 +343,16 @@ static inline void v_touch_destroy(void)
 
     // 把控制权还给物理驱动
     if (vt.dev)
-        set_global_key_lock_state(vt.dev, false);
+    {
+        set_global_key_bits(vt.dev, true);
+        vt.global_keys_locked = false;
+    }
 
-    // 恢复 num_slots 为原始值，让驱动重新看到全部 10 个 slot
+    // 恢复 num_slots 为原始值，让驱动重新看到全部 original_slots 个 slot
     if (vt.dev && vt.dev->mt)
     {
-        vt.dev->mt->num_slots = ORIGINAL_SLOTS;
-        input_set_abs_params(vt.dev, ABS_MT_SLOT, 0, ORIGINAL_SLOTS - 1, 0, 0);
+        vt.dev->mt->num_slots = original_slots;
+        input_set_abs_params(vt.dev, ABS_MT_SLOT, 0, original_slots - 1, 0, 0);
         vt.dev->mt->flags |= INPUT_MT_DROP_UNUSED;
         vt.dev->mt->flags &= ~INPUT_MT_DIRECT;
     }
@@ -385,7 +365,7 @@ static inline void v_touch_destroy(void)
 
     vt.initialized = false;
 
-    for (i = 0; i < VIRTUAL_SLOTS; i++)
+    for (i = 0; i < virtual_slots; i++)
         vt.tracking_ids[i] = -1;
 }
 
@@ -401,7 +381,7 @@ static inline void v_touch_event(enum sm_req_op op, int slot, int x, int y)
         return;
 
     // 越界保护,slot定义的是int,不是short,与内核字节对齐吧
-    if ((unsigned)slot >= VIRTUAL_SLOTS)
+    if ((unsigned)slot >= virtual_slots)
         return;
 
     // 坐标安全检查：只检查按下/移动，抬起事件不依赖 x/y。
@@ -432,7 +412,7 @@ static inline void v_touch_event(enum sm_req_op op, int slot, int x, int y)
     {
         if (vt.tracking_ids[slot] == -1)
         {
-            vt.tracking_ids[slot] = VTOUCH_TRACKING_ID_BASE + slot;
+            vt.tracking_ids[slot] = vtouch_tracking_id_base + slot;
 
             // 按下前，确保系统允许发送触摸按键
             // 第一个虚拟手指按下时，通常还没有锁定全局按键；send_report 会自己在 event_lock 内安全上报按键
@@ -446,7 +426,8 @@ static inline void v_touch_event(enum sm_req_op op, int slot, int x, int y)
                 }
                 // 发送完毕立刻上锁
                 // 此时物理手指无论怎么抬起，内核触发的 BTN_TOUCH=0 都会被静默丢弃，无法打断虚拟滑动
-                set_global_key_lock_state(vt.dev, true);
+                set_global_key_bits(vt.dev, false);
+                vt.global_keys_locked = true;
             }
             else
             {
@@ -469,9 +450,12 @@ static inline void v_touch_event(enum sm_req_op op, int slot, int x, int y)
             send_report(slot, 0, 0, false);
 
             // 最后一个虚拟手指抬起了，再把全局按键能力还给物理驱动，
-            // 这里不要看最后的虚拟slot是否抬起成功，强行把自己记录slot被抬起，一定要解锁设备的全局按键能力，然后设备驱动清理残留slot，虚拟手指还有未抬起的也不会解锁设备发全局按键状态能力
+            // 这里不要看最后的虚拟slot是否抬起成功，强行把自己记录slot被抬起，一定要解锁设备的全局按键能力，然后设备驱动清理残留slot
             if (last_virtual)
-                set_global_key_lock_state(vt.dev, false);
+            {
+                set_global_key_bits(vt.dev, true);
+                vt.global_keys_locked = false;
+            }
         }
     }
 }

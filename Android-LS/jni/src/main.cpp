@@ -21,9 +21,11 @@
 
 #include "MemoryTool.h"
 #include "DriverMemory.h"
+#include "SignatureScanner.h"
 #include "Disassembler.h"
-#include "PerformanceTestMain.h"
+#include "ReadWriteTest.h"
 #include "tcp_server.h"
+#include "TouchTest.h"
 #include "Android_touch/TouchHelperA.h"
 #include "Android_draw/draw.h"
 
@@ -2263,10 +2265,11 @@ int main()
 {
 
     std::println(stdout, "请选择启动模式：");
-    std::println(stdout, "  1) 性能测试");
-    std::println(stdout, "  2) 内存工具");
-    std::println(stdout, "  3) TCP服务器");
-    std::print(stdout, "请输入 [1/2/3]: ");
+    std::println(stdout, "  1) 读写测试");
+    std::println(stdout, "  2) 触摸测试");
+    std::println(stdout, "  3) 内存工具");
+    std::println(stdout, "  4) TCP服务器");
+    std::print(stdout, "请输入 [1/2/3/4]: ");
 
     int rc = 1;
     int mode = 0;
@@ -2277,7 +2280,7 @@ int main()
         std::println(stderr, "[错误] 输入无效。");
         return rc;
     }
-    if (mode < 1 || mode > 3)
+    if (mode < 1 || mode > 4)
     {
         std::println(stderr, "[错误] 未知选项: {}", mode);
         return rc;
@@ -2289,17 +2292,21 @@ int main()
         return rc;
     }
 
-    dr = new Driver(mode == 2);
+    dr = new Driver((mode == 2 || mode == 3) ? 5 : 0);
 
     if (mode == 1)
     {
-        rc = mainno();
+        rc = RunReadWriteTest();
     }
     else if (mode == 2)
     {
-        rc = RunMemoryTool();
+        rc = RunTouchTest();
     }
     else if (mode == 3)
+    {
+        rc = RunMemoryTool();
+    }
+    else if (mode == 4)
     {
         rc = tcp_server();
     }

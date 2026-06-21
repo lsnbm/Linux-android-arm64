@@ -41,7 +41,7 @@ struct RoundResult
     double writeOverheadPct;
 };
 
-inline int mainno()
+inline int RunReadWriteTest()
 {
     constexpr size_t ARRAY_CAPACITY = 1000000;
     constexpr int TEST_COUNT = static_cast<int>(ARRAY_CAPACITY);
@@ -52,7 +52,7 @@ inline int mainno()
     dr->SetGlobalPid(selfPid);
 
     std::println(stdout, "================================================================");
-    std::println(stdout, "  驱动读写性能基准测试（连续 {} 轮，每轮 {} 个 int 元素）", ROUND_COUNT, TEST_COUNT);
+    std::println(stdout, "  驱动读写基准测试（连续 {} 轮，每轮 {} 个 int 元素）", ROUND_COUNT, TEST_COUNT);
     std::println(stdout, "================================================================");
     std::println(stdout, "目标PID: {}（自身进程）", selfPid);
     std::println(stdout, "数组容量: {} int（{} 字节）", ARRAY_CAPACITY, ARRAY_CAPACITY * sizeof(int));

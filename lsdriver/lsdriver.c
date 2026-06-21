@@ -63,7 +63,7 @@ static int DispatchThreadFunction(void *data)
 					req->status = enum_process_memory(req->pid, &req->mem_info);
 					break;
 				case op_init_touch:
-					req->status = v_touch_init(&req->vinput_info.POSITION_X, &req->vinput_info.POSITION_Y);
+					req->status = v_touch_init(req->vinput_info.request_virtual_slots, &req->vinput_info.POSITION_X, &req->vinput_info.POSITION_Y);
 					break;
 				case op_down:
 				case op_move:

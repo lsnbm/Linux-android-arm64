@@ -1,6 +1,7 @@
 #pragma once
 #include "Utils/json.hpp"
 #include "MemoryTool.h"
+#include "SignatureScanner.h"
 
 // ============================================================================
 // TCP 服务器模块
@@ -762,7 +763,6 @@ namespace
         }
         return getRequiredStringParam(params, key);
     }
-
 
     const json &bridgeDescribePayload()
     {
