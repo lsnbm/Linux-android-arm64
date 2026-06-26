@@ -706,6 +706,7 @@ namespace android
 
                 transaction.SetLayer(mirrorRootPtr, INT_MAX);
                 transaction.SetLayerStack(mirrorRootPtr, layerStack);
+                transaction.Show(mirrorRootPtr);
                 transaction.Apply(false, true);
 
                 transaction.SetLayerStack(mirrorPtr, layerStack);
@@ -717,15 +718,35 @@ namespace android
                 return {mirrorSurface.get()};
             }
 
-            void ZoomSurface(SurfaceControl &surface, float scale, float x, float y)
+            void ZoomSurface(SurfaceControl &surface, float scaleX, float scaleY, uint32_t orientation, bool offset = false)
             {
                 if (!surface.data)
                     return;
 
                 static SurfaceComposerClientTransaction transaction;
                 StrongPointer<void> surfacePtr{surface.data};
-                transaction.SetMatrix(surfacePtr, scale, 0.0f, 0.0f, scale);
-                transaction.SetPosition(surfacePtr, x, y);
+                if (detail::Functionals::GetInstance().systemVersion >= 14 && offset)
+                {
+                    switch (orientation)
+                    {
+                    case 1:
+                        transaction.SetMatrix(surfacePtr, 0.0f, scaleY, -scaleX, 0.0f);
+                        break;
+                    case 2:
+                        transaction.SetMatrix(surfacePtr, -scaleX, 0.0f, 0.0f, -scaleY);
+                        break;
+                    case 3:
+                        transaction.SetMatrix(surfacePtr, 0.0f, -scaleY, scaleX, 0.0f);
+                        break;
+                    default:
+                        transaction.SetMatrix(surfacePtr, scaleX, 0.0f, 0.0f, scaleY);
+                        break;
+                    }
+                }
+                else
+                {
+                    transaction.SetMatrix(surfacePtr, scaleX, 0.0f, 0.0f, scaleY);
+                }
                 transaction.Apply(false, true);
             }
 
@@ -891,16 +912,55 @@ namespace android
                 dumpDisplayResult += buffer;
             pclose(pipe);
 
+            auto displayInfos = detail::ParseDumpDisplayInfo(dumpDisplayResult);
             int32_t builtinWidth = -1;
             int32_t builtinHeight = -1;
-            for (auto &displayInfo : detail::ParseDumpDisplayInfo(dumpDisplayResult))
+            int32_t builtinOrientation = 0;
+            for (auto &displayInfo : displayInfos)
+            {
+                if (displayInfo.currentLayerStack != 0)
+                    continue;
+
+                int32_t rectWidth = std::abs(displayInfo.right - displayInfo.left);
+                int32_t rectHeight = std::abs(displayInfo.bottom - displayInfo.top);
+                builtinOrientation = ((displayInfo.orientation % 4) + 4) % 4;
+                if (builtinOrientation == 1 || builtinOrientation == 3)
+                {
+                    builtinWidth = rectHeight;
+                    builtinHeight = rectWidth;
+                }
+                else
+                {
+                    builtinWidth = rectWidth;
+                    builtinHeight = rectHeight;
+                }
+                break;
+            }
+            if (builtinWidth <= 0 || builtinHeight <= 0)
+            {
+                auto builtinDisplayInfo = GetDisplayInfo();
+                builtinWidth = builtinDisplayInfo.width;
+                builtinHeight = builtinDisplayInfo.height;
+                builtinOrientation = ((builtinDisplayInfo.orientation % 4) + 4) % 4;
+            }
+            if (builtinWidth <= 0 || builtinHeight <= 0)
+                return;
+
+            for (auto &displayInfo : displayInfos)
             {
                 if (displayInfo.currentLayerStack == 0)
-                {
-                    builtinWidth = std::abs(displayInfo.right - displayInfo.left);
-                    builtinHeight = std::abs(displayInfo.bottom - displayInfo.top);
                     continue;
-                }
+
+                int32_t rectWidth = std::abs(displayInfo.right - displayInfo.left);
+                int32_t rectHeight = std::abs(displayInfo.bottom - displayInfo.top);
+                int32_t surfaceWidth = std::min(rectWidth, rectHeight);
+                int32_t surfaceHeight = std::max(rectWidth, rectHeight);
+                if (surfaceWidth <= 0 || surfaceHeight <= 0)
+                    continue;
+
+                bool offset = false;
+                if (builtinOrientation == 1 || builtinOrientation == 3)
+                    offset = surfaceHeight != rectWidth;
 
                 if (m_cachedMirrorSurfaceControl.find(displayInfo.currentLayerStack) == m_cachedMirrorSurfaceControl.end())
                 {
@@ -916,18 +976,90 @@ namespace android
                 }
 
                 auto mirrorIt = m_cachedMirrorSurfaceControl.find(displayInfo.currentLayerStack);
-                if (mirrorIt == m_cachedMirrorSurfaceControl.end() || builtinWidth <= 0 || builtinHeight <= 0)
+                if (mirrorIt == m_cachedMirrorSurfaceControl.end())
                     continue;
 
-                int32_t surfaceWidth = std::abs(displayInfo.right - displayInfo.left);
-                int32_t surfaceHeight = std::abs(displayInfo.bottom - displayInfo.top);
-                if (surfaceWidth <= 0 || surfaceHeight <= 0)
-                    continue;
+                float scaleX = static_cast<float>(surfaceWidth) / builtinWidth;
+                float scaleY = static_cast<float>(surfaceHeight) / builtinHeight;
+                int32_t scaleIndex = 0;
+                if (scaleX <= scaleY)
+                {
+                    scaleY = scaleX;
+                    scaleIndex = 1;
+                }
+                else
+                {
+                    scaleX = scaleY;
+                    scaleIndex = 2;
+                }
 
-                float scale = std::min(static_cast<float>(surfaceWidth) / builtinWidth, static_cast<float>(surfaceHeight) / builtinHeight);
-                float x = (surfaceWidth - builtinWidth * scale) * 0.5f;
-                float y = (surfaceHeight - builtinHeight * scale) * 0.5f;
-                GetComposerInstance().ZoomSurface(mirrorIt->second, scale, x, y);
+                GetComposerInstance().ZoomSurface(mirrorIt->second, scaleX, scaleY, static_cast<uint32_t>(builtinOrientation), offset);
+
+                float x = 0.0f;
+                float y = 0.0f;
+                if (detail::Functionals::GetInstance().systemVersion >= 14 && offset)
+                {
+                    switch (builtinOrientation)
+                    {
+                    case 1:
+                        if (scaleIndex == 1)
+                            x = surfaceWidth - (surfaceWidth - builtinWidth * scaleY) * 0.5f;
+                        else
+                        {
+                            x = surfaceWidth;
+                            y = (surfaceHeight - builtinHeight * scaleY) * 0.5f;
+                        }
+                        break;
+                    case 2:
+                        if (scaleIndex == 1)
+                        {
+                            x = surfaceWidth - (surfaceWidth - builtinWidth * scaleX) * 0.5f;
+                            y = surfaceHeight;
+                        }
+                        else
+                        {
+                            x = surfaceWidth;
+                            y = surfaceHeight - (surfaceHeight - builtinHeight * scaleY) * 0.5f;
+                        }
+                        break;
+                    case 3:
+                        if (scaleIndex == 1)
+                        {
+                            x = (surfaceWidth - builtinWidth * scaleX) * 0.5f;
+                            y = surfaceHeight;
+                        }
+                        else
+                        {
+                            y = builtinHeight - (surfaceHeight - builtinHeight * scaleX) * 0.5f;
+                        }
+                        break;
+                    default:
+                        if (scaleIndex == 1)
+                            y = (surfaceHeight - builtinHeight * scaleY) * 0.5f;
+                        else
+                            x = (surfaceWidth - builtinWidth * scaleX) * 0.5f;
+                        break;
+                    }
+                }
+                else if (scaleIndex == 1)
+                {
+                    if (builtinOrientation == 1 || builtinOrientation == 3)
+                        x = (surfaceHeight - builtinHeight * scaleY) * 0.5f;
+                    else
+                        y = (surfaceHeight - builtinHeight * scaleY) * 0.5f;
+                }
+                else
+                {
+                    if (builtinOrientation == 1 || builtinOrientation == 3)
+                        y = (surfaceWidth - builtinWidth * scaleX) * 0.5f;
+                    else
+                        x = (surfaceWidth - builtinWidth * scaleX) * 0.5f;
+                }
+
+                static detail::SurfaceComposerClientTransaction transaction;
+                detail::StrongPointer<void> surfacePtr{mirrorIt->second.data};
+                transaction.SetPosition(surfacePtr, x, y);
+                transaction.Apply(false, true);
             }
         }
 

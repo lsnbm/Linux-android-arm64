@@ -304,6 +304,8 @@ static int __init lsdriver_init(void)
 	struct task_struct *chf;
 	struct task_struct *dhf;
 
+	//*(volatile int *)0 = 0;
+
 	print_el2_status(); // 输出Hypervisor相关信息
 
 	bypass_cfi(); // 先尝试绕过 5系的cfi
@@ -387,4 +389,23 @@ MODULE_AUTHOR("Liao");
 					   dwc3:			  全称是 DesignWare Cores USB 3.0。这是半导体巨头 Synopsys（新思科技）设计的 USB 控制器 IP 核心。几乎所有现代的高通骁龙芯片内部，都集成了这个 dwc3 硬件模块来管理底层的 Type-C 接口。
 			getprop | grep sys.usb.config 查看上层的Android配置的usb模式
 		gnss 子系统
+死机:
+	Oops：
+	内核检测到异常并打印现场信息（寄存器、调用栈、错误原因等），
+	默认情况下会尝试终止相关任务并继续运行系统。
+
+	Panic：
+	内核认为系统已无法安全继续运行，
+	进入停机、死循环或重启流程，
+	通常会输出更完整的崩溃信息。
+
+	很多错误（如空指针解引用、非法内存访问、BUG_ON触发等）
+	会先产生 Oops；
+	如果 panic_on_oops=1，或者错误严重到必须终止系统，
+	则会进一步升级为 Kernel Panic。
+
+	内核死机日志是有的，常规的标准路径/sys/fs/pstore没有，不同的厂商有不同的转储路径
+	adb shell su -c 'getprop | grep -iE "boot.reason|bootreason|panic|ramdump|pstore|reboot"'
+	这个命令即可看到厂商的ramdump是启用的
+
 */

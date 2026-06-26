@@ -46,12 +46,12 @@ embed_file() {
 }
 
 
-embed_file "$KO_DIR/android14-6.1lsdriver.ko"  "payload_6_1"
-embed_file "$KO_DIR/android15-6.6lsdriver.ko"  "payload_6_6"
-embed_file "$KO_DIR/android16-6.12lsdriver.ko" "payload_6_12"
-embed_file "$KO_DIR/android13-5.15lsdriver.ko" "payload_5_15"
-embed_file "$KO_DIR/android12-5.10lsdriver.ko" "payload_android12"
-embed_file "$KO_DIR/android13-5.10lsdriver.ko" "payload_android13"
+embed_file "$KO_DIR/6.1-Android14.ko"  "payload_6_1"
+embed_file "$KO_DIR/6.6-Android15.ko"  "payload_6_6"
+embed_file "$KO_DIR/6.12-Android16.ko" "payload_6_12"
+embed_file "$KO_DIR/5.15-Android13.ko" "payload_5_15"
+embed_file "$KO_DIR/5.10-Android12.ko" "payload_android12"
+embed_file "$KO_DIR/5.10-Android13.ko" "payload_android13"
 
 # -------------------------------------------------------
 # 3. 核心逻辑 (根据内核字符串匹配)
@@ -64,6 +64,7 @@ load_driver_logic() {
 
     echo "=========================================="
     echo "[-] 内核版本: $KERNEL_VER"
+    echo "[-] 系统指纹: $BUILD_FINGERPRINT"
     echo "[-] 匹配分支: $desc"
     echo "[-] 提取位置: $TEMP_KO"
 
@@ -96,37 +97,42 @@ load_driver_logic() {
 
 # --- 主入口 ---
 KERNEL_VER=$(uname -r)
+BUILD_FINGERPRINT=$(getprop ro.build.fingerprint 2>/dev/null)
+
+if [ -z "$BUILD_FINGERPRINT" ]; then
+    BUILD_FINGERPRINT="unknown"
+fi
 
 case "$KERNEL_VER" in
     # 6.x 系列
     6.12.*)
-        load_driver_logic "payload_6_12" "android16-6.12"
+        load_driver_logic "payload_6_12" "6.12-Android16"
         ;;
     6.6.*)
-        load_driver_logic "payload_6_6" "android15-6.6"
+        load_driver_logic "payload_6_6" "6.6-Android15"
         ;;
     6.1.*)
-        load_driver_logic "payload_6_1" "android14-6.1"
+        load_driver_logic "payload_6_1" "6.1-Android14"
         ;;
     
     # 5.15 系列
     5.15.*)
-        load_driver_logic "payload_5_15" "android13-5.15"
+        load_driver_logic "payload_5_15" "5.15-Android13"
         ;;
     
     # 5.10 系列 (匹配内核名中的 android12 或 android13)
     5.10.*android12*)
-        load_driver_logic "payload_android12" "android12-5.10"
+        load_driver_logic "payload_android12" "5.10-Android12"
         ;;
     5.10.*android13*)
-        load_driver_logic "payload_android13" "android13-5.10"
+        load_driver_logic "payload_android13" "5.10-Android13"
         ;;
     
     # 5.10 兜底 (如果内核名里没写 android 版本，默认试用 13)
     5.10.*)
         echo "[!] 警告: 5.10 内核但未识别到 android12/13 标签。"
         echo "[!] 依次尝试 android13 -> android12..."
-        load_driver_logic "payload_android13" "android13-5.10 (fallback)"
+        load_driver_logic "payload_android13" "5.10-Android13 (fallback)"
         ;;
     
     # 其他
