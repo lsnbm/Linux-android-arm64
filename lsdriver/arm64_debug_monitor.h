@@ -390,7 +390,8 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
       结果是：硬件debug异常分发结束了，但 perf子系统没有收到这次命中的信息和步过闭环，状态机推进异常就死了
 
     但是:你不继续执行原异常函数就不会有这个问题了，异常入口也不会上报信息给perf子系统
-    这里选择是自己的断点不继续执行原异常函数，就可以直接清空寄存器
+    自己的断点不继续执行原异常函数，就可以直接清空寄存器
+    这里选择是只禁用enable位，不管是谁的断点统一继续执行原函数
 
     perf 子系统在调度进 CPU 安装 perf 断点配置到寄存器，会重写 BVR/WVR + BCR/WCR；
     只有异常步过和 debug_info 的临时启停，才是只改 BCR/WCR 的 enable 位
@@ -460,13 +461,9 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
                     // 传递当前观点索引
                     g_bp_config[i].hit_point_index = j;
                     g_bp_config[i].on_hit(regs, &g_bp_config[i]);
-                    // 不执行原函数其实可以直接清空寄存器，后续有问题在打开只禁用配置的注释吧
-                    write_wb_reg(AARCH64_DBG_REG_BVR, slot, 0);
-                    write_wb_reg(AARCH64_DBG_REG_BCR, slot, 0);
-                    // write_wb_reg(AARCH64_DBG_REG_BCR, slot, ctrl & ~0x1);
-                    // 是自己下的断点直接返回，原异常函数不继续运行，不上报信息给perf了
-                    hook_regs->regs[0] = 0; // 给异常函数返回0表示已处理异常
-                    return 1;               // 给hook框架返回1表示不继续运行原函数
+                    // 只清 enable 位，保留原有寄存器配置，继续走原异常处理链
+                    write_wb_reg(AARCH64_DBG_REG_BCR, slot, ctrl & ~0x1);
+                    return 0;
                 }
             }
         }
@@ -544,11 +541,9 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
 
     g_bp_config[hit_cfg_index].hit_point_index = hit_point_index;
     g_bp_config[hit_cfg_index].on_hit(regs, &g_bp_config[hit_cfg_index]);
-    write_wb_reg(AARCH64_DBG_REG_WVR, hit_slot, 0);
-    write_wb_reg(AARCH64_DBG_REG_WCR, hit_slot, 0);
-    // write_wb_reg(AARCH64_DBG_REG_WCR, hit_slot, ctrl & ~0x1);
-    hook_regs->regs[0] = 0;
-    return 1;
+    // 只清 enable 位，保留原有寄存器配置，继续走原异常处理链
+    write_wb_reg(AARCH64_DBG_REG_WCR, hit_slot, ctrl & ~0x1);
+    return 0;
 }
 
 // 声明硬件调试异常 hook 表
@@ -712,13 +707,36 @@ static struct hook_entry g_switch_to_hook[] = {
           -> finish_task_switch(prev)
 
      不管是之前使用 register_trace_sched_switch() 注册 sched_switch tracepoint 回调，
-     还是现在 hook __switch_to，写寄存器的位置都在 hw_breakpoint_thread_switch(next)
-     之前，后面仍可能被它覆盖掉。
-     不过实测这种方式也能运行。
-     更好的 hook 点是 finish_task_switch(prev)。它在 hw_breakpoint_thread_switch(next)
-     之后执行，自己的写寄存器逻辑会覆盖 perf 在 task 切换时安装到 CPU 的
-     硬件断点/观察点寄存器。
-     */
+     还是现在 hook __switch_to，写寄存器安装断点的位置都在 hw_breakpoint_thread_switch(next)之前，
+     目标程序自己给自己下断点后面就会被它会被perf系统覆盖掉。
+     不过实测这样引入了一个全新的完美机制
+     先解释一下内核perf子系统的硬件断点2种情况:
+        情况1按task : 硬件断点想做到跟着某个 task 走原理(也就是对用户态断点)
+            内核必须有一个地方长期保存这个 task 拥有哪些 perf_event 事件。这个地方就是 task 的 perf_event_context链表
+            硬件寄存器只是当前 CPU 上的瞬时编程状态，task没有长期拥有关系，task 跑到哪个 CPU，就把它需要的断点装到那个 CPU 的寄存器里。
+            如果有 8 个 CPU、每个 CPU 有 6 个执行断点寄存器，那全机一共有 48 个执行断点槽位，但每个 CPU 同时最多只能生效 6 个。
+            ,
+            不管用户态调用ptrace或__NR_perf_event_open,还是内核态直接使用register_hw_breakpoint这个API进行注册硬件断点
+            最终走的都是perf_event_create_kernel_counter，这个函数本质上是在向 perf 子系统注册一个 perf_event
+            本质上是在向 perf 子系统注册一个 perf_event，如果这个 event 是硬件断点类型，
+            就会把这个硬件断点纳入它的完整生命周期管理体系，但因为它是 PERF_TYPE_BREAKPOINT 类型，会走专门的perf_breakpoint PMU 分支，有自己的特殊处理逻辑。
+            对于 task 绑定的断点，最终这个 event 会挂到目标 task 的 perf_event_context 上
+            当调度切到某个 task 时：perf子系统 根据它的 perf_event_context 把相关 perf_event 调度进来, 并在当前 CPU 上编程对应的硬件断点寄存器；
+            当 task 切走时：再把这些 perf_event 调度出去，并卸载/禁用当前 CPU 上对应的硬件断点寄存器状态。
+        情况2：硬件断点直接安装到cpu（内核层断点）
+            很简单了，由于不需要跟着task走就不需要一系列的复杂调度机制，直接编程指定的地址进指定cpu的调试地址寄存器，
+            比如0x7000000000编程进cpu7
+            调度到这个cpu7上所有的task，只要跑过这个0x7000000000，都会直接被命中,不区分是那个进程的虚拟地址空间
+
+    好了解释完perf子系统的规则，能发现有一个关键的机制，就是跟随task的硬件断点需要知道task被调度到cpu上
+    这个规则是实现全新的完美机制的关键
+    既然需要知道task被调度到cpu上perf是怎么知道的呢，就是调度切换中调用的hw_breakpoint_thread_switch，用于通知perf
+    然后我们hook的线程调度是__switch_to，比hw_breakpoint_thread_switch先调用，
+    我们就先收到通知安装断点命中后，
+    perf后收到通知在安装命中
+    这样这种我们自己的断点不仅可以命中，目标进程使用perf的硬件断点一样命中，
+    打收到调度的时间差实现互不干扰，无法槽位检测，命中记录检测，命中寄存器现场检测，因为用户态硬件断点都是依赖perf,我们先运行，perf后运行，2者互不干扰
+    */
     HOOK_ENTRY("__switch_to", work_trampoline_switch_to),
 };
 

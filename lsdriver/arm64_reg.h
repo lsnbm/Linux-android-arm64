@@ -4,6 +4,7 @@
 #include <linux/types.h>
 #include <asm/memory.h>
 #include <asm/pgtable.h>
+#include <linux/arm-smccc.h>
 #include <linux/of.h>
 #include <linux/string.h>
 
@@ -51,20 +52,6 @@ static inline unsigned int read_current_el(void)
     return (unsigned int)val;
 }
 
-// 读取 ID_AA64MMFR1_EL1
-static inline unsigned int read_vhe_support(void)
-{
-    unsigned long val;
-    asm volatile(
-        "mrs %0, ID_AA64MMFR1_EL1\n\t"
-        "lsr %0, %0, #4\n\t"
-        "and %0, %0, #0xF"
-        : "=r"(val)
-        :
-        : "cc");
-    return (unsigned int)val;
-}
-
 // 读取 ID_AA64PFR0_EL
 static inline unsigned int read_el2_implemented(void)
 {
@@ -72,6 +59,20 @@ static inline unsigned int read_el2_implemented(void)
     asm volatile(
         "mrs %0, ID_AA64PFR0_EL1\n\t"
         "lsr %0, %0, #8\n\t"
+        "and %0, %0, #0xF"
+        : "=r"(val)
+        :
+        : "cc");
+    return (unsigned int)val;
+}
+
+// 读取 ID_AA64MMFR1_EL1
+static inline unsigned int read_vhe_support(void)
+{
+    unsigned long val;
+    asm volatile(
+        "mrs %0, ID_AA64MMFR1_EL1\n\t"
+        "lsr %0, %0, #4\n\t"
         "and %0, %0, #0xF"
         : "=r"(val)
         :
@@ -89,6 +90,98 @@ static inline unsigned long read_sctlr_el1(void)
         :
         : "cc");
     return val;
+}
+
+// Vendor Hypervisor UID 查询接口，用于识别 EL2 侧厂商 hypervisor 服务。
+#ifndef ARM_SMCCC_VENDOR_HYP_CALL_UID_FUNC_ID
+#define ARM_SMCCC_VENDOR_HYP_CALL_UID_FUNC_ID \
+    ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL, ARM_SMCCC_SMC_32, ARM_SMCCC_OWNER_VENDOR_HYP, 0xff01)
+#endif
+
+// ARM 标准 workaround 1 查询 ID，常用于判断 Spectre v2 缓解接口是否存在。
+#ifndef ARM_SMCCC_ARCH_WORKAROUND_1
+#define ARM_SMCCC_ARCH_WORKAROUND_1 \
+    ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL, ARM_SMCCC_SMC_32, ARM_SMCCC_OWNER_ARCH, 0x8000)
+#endif
+
+// ARM 标准 workaround 2 查询 ID，常用于判断 SSBD/Spectre v4 缓解接口是否存在。
+#ifndef ARM_SMCCC_ARCH_WORKAROUND_2
+#define ARM_SMCCC_ARCH_WORKAROUND_2 \
+    ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL, ARM_SMCCC_SMC_32, ARM_SMCCC_OWNER_ARCH, 0x7fff)
+#endif
+
+// ARM 标准 workaround 3 查询 ID，常用于判断 Spectre-BHB 缓解接口是否存在。
+#ifndef ARM_SMCCC_ARCH_WORKAROUND_3
+#define ARM_SMCCC_ARCH_WORKAROUND_3 \
+    ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL, ARM_SMCCC_SMC_32, ARM_SMCCC_OWNER_ARCH, 0x3fff)
+#endif
+
+static void arm_smccc_call_conduit(enum arm_smccc_conduit conduit,
+                                   unsigned long arg0, unsigned long arg1,
+                                   unsigned long arg2, unsigned long arg3,
+                                   unsigned long arg4, unsigned long arg5,
+                                   unsigned long arg6, unsigned long arg7,
+                                   struct arm_smccc_res *res)
+{
+    if (conduit == SMCCC_CONDUIT_HVC)
+        arm_smccc_hvc(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, res);
+    else
+        arm_smccc_smc(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, res);
+}
+
+// 查询一个标准 SMCCC function id 是否受支持；res.a0 是 SMCCC 返回码。
+static void print_smccc_arch_feature(enum arm_smccc_conduit conduit,
+                                     unsigned long func_id, const char *name)
+{
+    struct arm_smccc_res res;
+
+    arm_smccc_call_conduit(conduit, ARM_SMCCC_ARCH_FEATURES_FUNC_ID,
+                           func_id, 0, 0, 0, 0, 0, 0, &res);
+    pr_debug("SMCCC feature %-22s: %ld (0x%lx)\n", name, res.a0, res.a0);
+}
+
+// 强制使用 HVC 探测 SMCCC；只把内核选择的 conduit 作为参考打印。
+static void print_smccc_probe(unsigned int current_el, unsigned int el2_implemented)
+{
+    struct arm_smccc_res res;
+    enum arm_smccc_conduit kernel_conduit;
+    enum arm_smccc_conduit conduit = SMCCC_CONDUIT_HVC;
+
+    pr_debug("===== SMCCC Probe =====\n");
+
+    if (current_el != 1)
+    {
+        pr_debug("SMCCC probe        : skipped (CurrentEL is EL%u)\n", current_el);
+        return;
+    }
+
+    kernel_conduit = arm_smccc_1_1_get_conduit();
+    pr_debug("SMCCC kernel conduit: %s\n",
+             kernel_conduit == SMCCC_CONDUIT_HVC ? "HVC" : kernel_conduit == SMCCC_CONDUIT_SMC ? "SMC"
+                                                                                               : "NONE");
+    pr_debug("SMCCC active conduit: HVC (forced)\n");
+
+    if (!el2_implemented)
+    {
+        pr_debug("SMCCC HVC probe    : skipped (EL2 not implemented)\n");
+        return;
+    }
+
+    arm_smccc_call_conduit(conduit, ARM_SMCCC_VERSION_FUNC_ID,
+                           0, 0, 0, 0, 0, 0, 0, &res);
+    pr_debug("SMCCC version      : 0x%lx (major=%lu minor=%lu)\n",
+             res.a0, (res.a0 >> 16) & 0xffff, res.a0 & 0xffff);
+
+    print_smccc_arch_feature(conduit, ARM_SMCCC_VERSION_FUNC_ID, "SMCCC_VERSION");
+    print_smccc_arch_feature(conduit, ARM_SMCCC_ARCH_FEATURES_FUNC_ID, "ARCH_FEATURES");
+    print_smccc_arch_feature(conduit, ARM_SMCCC_ARCH_WORKAROUND_1, "ARCH_WORKAROUND_1");
+    print_smccc_arch_feature(conduit, ARM_SMCCC_ARCH_WORKAROUND_2, "ARCH_WORKAROUND_2");
+    print_smccc_arch_feature(conduit, ARM_SMCCC_ARCH_WORKAROUND_3, "ARCH_WORKAROUND_3");
+
+    arm_smccc_call_conduit(conduit, ARM_SMCCC_VENDOR_HYP_CALL_UID_FUNC_ID,
+                           0, 0, 0, 0, 0, 0, 0, &res);
+    pr_debug("Vendor hyp UID     : %08lx-%08lx-%08lx-%08lx\n",
+             res.a0, res.a1, res.a2, res.a3);
 }
 
 // 输出Hypervisor相关信息
@@ -287,6 +380,8 @@ static void print_el2_status(void)
 
     pr_debug("HV keyword hint    : %s\n", hyp_hint ? "YES" : "NO");
     pr_debug("TZ/PSCI hint       : %s\n", tz_hint ? "YES" : "NO");
+
+    print_smccc_probe(current_el, el2_implemented);
 
     pr_debug("=========================\n");
 }
