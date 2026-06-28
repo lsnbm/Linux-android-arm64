@@ -196,7 +196,7 @@ struct hwbp_info
 #define MAX_SCAN_REGIONS 16534
 
 #define MOD_NAME_LEN 256
-#define MAX_SEGS_PER_MODULE 10
+#define MAX_SEGS_PER_MODULE 512
 
 struct segment_info
 {

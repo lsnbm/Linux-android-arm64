@@ -295,7 +295,7 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
          BSS 检测条件：
             无文件映射（匿名页）
             含写权限（VM_WRITE）即可，不强求可读。
-            反作弊会将 BSS 权限故意设为 -w-p（只写无读），
+            反调试程序会将 BSS 权限故意设为 -w-p（只写无读），
             原先的 VMA_IS_RW 宏要求同时具备读写，导致此类 BSS 被漏掉。
             与上一个 VMA 首尾严格相连（vm_start == prev->vm_end）
             上一个 VMA 属于我们正在追踪的模块（last_mod_idx >= 0）
@@ -425,7 +425,7 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
 
     /*
      =========================================================================================
-     反作弊 VMA 碎裂与诱饵对抗机制
+     反调试程序的VMA 碎裂与诱饵对抗机制
      =========================================================================================
 
     【第一阶段：理想状态下的纯净内存布局 (原生 ELF 加载)】
@@ -438,27 +438,27 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
         PT_LOAD[3] (rw-)  : .data 全局变量段。
         BSS        (-w-/rw-) : 尾部额外分配的匿名读写内存（零初始化全局变量）。
 
-      即便没有反作弊，最纯净的环境也自然产生 [RO -> RX -> RW -> RW -> RW(anon)] 的天然区段。
+      即便没有反调试程序，最纯净的环境也自然产生 [RO -> RX -> RW -> RW -> RW(anon)] 的天然区段。
 
-    【第二阶段：反作弊的多层保护】
+    【第二阶段：反调试程序的多层保护】
 
     保护一：VMA 碎裂
-        反作弊调用 mprotect() Hook 游戏函数，内核被迫将原本一整块 RX 代码段
+        反调试程序调用 mprotect() Hook 游戏函数，内核被迫将原本一整块 RX 代码段
         "劈碎"成几十甚至上百个细碎 VMA，部分页被改为 RWX 混合权限，
         彻底打乱原本连贯的天然区段。
 
     保护二：远端假诱饵
-        反作弊在距离真实模块上百 MB 远的极低地址（如 0x6e32250000）凭空 mmap()
+        反调试程序在距离真实模块上百 MB 远的极低地址（如 0x6e32250000）凭空 mmap()
         一块假内存，命名为 libil2cpp.so，权限设为 RO。
         常规合并算法会误把假地址当成模块基址，导致读取指针全部失效。
 
     保护三：prot 权限污染
-        代码段内部散布着少量 RWX 碎片（反作弊自身的 trampoline hook 页）。
+        代码段内部散布着少量 RWX 碎片（反调试程序自身的 trampoline hook 页）。
         若在缝合阶段对权限做 OR 合并，RWX 碎片的 W 位会"传染"整个代码段，
         使本该是 RX 的代码段最终呈现为 RWX，干扰上层对段类型的判断。
 
     保护四：BSS 权限异化
-       反作弊将 BSS 段的权限故意设为 -w-p（只写，无读权限）。并碎裂BSS段，或分配虚假bss段
+       反调试程序将 BSS 段的权限故意设为 -w-p（只写，无读权限）。并碎裂BSS段，或分配虚假bss段
 
 
     【第三阶段：对抗算法】
@@ -478,7 +478,7 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
         豁免：index==-1 的匿名 BSS 段即便 end 超出 best_end，
         只要 start 在 best_end 附近（≤ 0x3000，一个 guard 页的余量），
         就视为合法的本体尾部延伸，保留并动态扩展 best_end。
-        这直接解决了 反作弊 将 BSS 权限设为 -w-p 后尾部被误杀的问题。
+        这直接解决了 反调试程序 将 BSS 权限设为 -w-p 后尾部被误杀的问题。
 
     步骤 4：严谨拓扑标记 (破解权限篡改)
         寻找天然的"防波堤"：向后扫描找到第一个"纯原生数据段 (有W无X)"。
@@ -488,7 +488,7 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
         内部临时标签约定：1=RO(头部), 0=RX(代码), 2=RW(数据), -1=BSS(保持不变)
 
     步骤 5：强制规范化 prot (消除权限污染)
-        反作弊的 RWX hook 页在步骤 4 中已被正确归入代码段（index=0），
+        反调试程序的 RWX hook 页在步骤 4 中已被正确归入代码段（index=0），
         但其 W 位仍残留在 prot 字段中。
         此步骤根据步骤 4 确立的权威拓扑标签，强制覆写每个碎片的 prot：
           index=1(Header/RELRO) → prot=1(R)
@@ -506,7 +506,7 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
        给缝合后的完美区段重新发放 0, 1, 2, 3... 的连续 Index，BSS 保留 -1。
 
      【最终】：
-      无论反作弊怎么切分、放诱饵、异化权限，跑完后，
+      无论反调试程序怎么切分、放诱饵、异化权限，跑完后，
       产出结果与干净手机上的原生 ELF 映射 差不多一致。
 
     典型输出（libil2cpp.so，保护环境）：
@@ -664,7 +664,7 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
             }
 
             /*
-            步骤 5：强制规范化 prot (消除反作弊权限污染)
+            步骤 5：强制规范化 prot (消除反调试程序权限污染)
             前面步骤 4 已建立权威拓扑标签，此处根据标签反推标准 prot，
             同时修正 BSS 的 -w-p 异常权限为标准 RW。
             缝合阶段（步骤 5）不再需要合并 prot。
