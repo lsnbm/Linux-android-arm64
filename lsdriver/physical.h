@@ -110,7 +110,7 @@ static inline void *pte_map_page(phys_addr_t paddr, size_t size, const void *buf
 
     这里使用无缓存读原因是：目标进程分配一个内存页，用dc civac直接清除这个内存页的缓存，
                         随后把坐标指针重定向到这个内存页，内核读取了这个内存页用了缓存，那么下次这个页的读取就会变快，进行缓存检测
-    无缓存读会带来非常严重的性能下降和数据不一致情况
+    无缓存读会带来非常严重的性能下降
     */
     static const uint64_t FLAGS = PTE_TYPE_PAGE | PTE_VALID | PTE_AF |
                                   PTE_SHARED | PTE_PXN | PTE_UXN |
@@ -159,6 +159,15 @@ static inline void *pte_map_page(phys_addr_t paddr, size_t size, const void *buf
     return (uint8_t *)pte_info.base_address + (paddr & ~PAGE_MASK);
 }
 
+static inline void dcache_inval_range(unsigned long start, unsigned long size)
+{
+    unsigned long addr, end = start + size;
+
+    for (addr = start & ~63UL; addr < end; addr += 64)
+        asm volatile("dc ivac, %0" :: "r"(addr) : "memory");
+    asm volatile("dsb sy" ::: "memory");
+}
+
 // 读取
 static inline int pte_read_physical(phys_addr_t paddr, void *buffer, size_t size)
 {
@@ -167,6 +176,8 @@ static inline int pte_read_physical(phys_addr_t paddr, void *buffer, size_t size
     {
         return PTR_ERR(mapped);
     }
+
+    dcache_inval_range((unsigned long)mapped, size);
 
     // 极限性能且安全的内存拷贝 (防未对齐崩溃)
     switch (size)
