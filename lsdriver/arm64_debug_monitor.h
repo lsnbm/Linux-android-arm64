@@ -709,7 +709,7 @@ static struct hook_entry g_switch_to_hook[] = {
      不管是之前使用 register_trace_sched_switch() 注册 sched_switch tracepoint 回调，
      还是现在 hook __switch_to，写寄存器安装断点的位置都在 hw_breakpoint_thread_switch(next)之前，
      目标程序自己给自己下断点后面就会被它会被perf系统覆盖掉。
-     不过实测这样引入了一个全新的完美机制
+     不过实测这样引入了一个全新的完美机制,注意注意注意！！！！！！！！！，这是我的猜测实际情况过于复杂，但是真的不知道具体为何自己的能命中，perf的一样的命中，2个都能正常命中
      先解释一下内核perf子系统的硬件断点2种情况:
         情况1按task : 硬件断点想做到跟着某个 task 走原理(也就是对用户态断点)
             内核必须有一个地方长期保存这个 task 拥有哪些 perf_event 事件。这个地方就是 task 的 perf_event_context链表

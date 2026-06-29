@@ -149,7 +149,6 @@ namespace android
             void (*SurfaceComposerClient__Destructor)(void *thiz) = nullptr;
             StrongPointer<void> (*SurfaceComposerClient__CreateSurface)(void *thiz, void *name, uint32_t w, uint32_t h, int32_t format, uint32_t flags, void *parentHandle, void *layerMetadata, uint32_t *outTransformHint) = nullptr;
             StrongPointer<void> (*SurfaceComposerClient__CreateSurface_and9)(void *thiz, void *name, uint32_t w, uint32_t h, int32_t format, uint32_t flags, void *parentHandle, int32_t windowType, int32_t ownerUid) = nullptr;
-            StrongPointer<void> (*SurfaceComposerClient__MirrorSurface)(void *thiz, void *mirrorFromSurface) = nullptr;
             StrongPointer<void> (*SurfaceComposerClient__GetInternalDisplayToken)() = nullptr;
             StrongPointer<void> (*SurfaceComposerClient__GetBuiltInDisplay)(ui::DisplayType type) = nullptr;
             int32_t (*SurfaceComposerClient__GetDisplayState)(StrongPointer<void> &display, ui::DisplayState *displayState) = nullptr;
@@ -262,11 +261,6 @@ namespace android
                 ResolveMethod(SurfaceComposerClient, GetDisplayInfo, libgui, "_ZN7android21SurfaceComposerClient14getDisplayInfoERKNS_2spINS_7IBinderEEEPNS_11DisplayInfoE");
                 ResolveMethod(SurfaceComposerClient, GetPhysicalDisplayIds, libgui, "_ZN7android21SurfaceComposerClient21getPhysicalDisplayIdsEv");
                 ResolveMethod(SurfaceComposerClient, GetPhysicalDisplayToken, libgui, "_ZN7android21SurfaceComposerClient23getPhysicalDisplayTokenENS_17PhysicalDisplayIdE");
-                if (13 <= systemVersion)
-                {
-                    ResolveMethod(SurfaceComposerClient, MirrorSurface, libgui, "_ZN7android21SurfaceComposerClient13mirrorSurfaceEPNS_14SurfaceControlE");
-                }
-
                 ResolveMethod(SurfaceComposerClient__Transaction, Constructor, libgui, "_ZN7android21SurfaceComposerClient11TransactionC2Ev");
                 ResolveMethod(SurfaceComposerClient__Transaction, SetLayer, libgui, "_ZN7android21SurfaceComposerClient11Transaction8setLayerERKNS_2spINS_14SurfaceControlEEEi");
                 ResolveMethod(SurfaceComposerClient__Transaction, SetTrustedOverlay, libgui, "_ZN7android21SurfaceComposerClient11Transaction17setTrustedOverlayERKNS_2spINS_14SurfaceControlEEEb");
@@ -540,7 +534,7 @@ namespace android
                 valid = true;
             }
 
-            SurfaceControl CreateSurface(const char *name, int32_t width, int32_t height, bool skipScrenshot, uint32_t windowFlags = 0)
+            SurfaceControl CreateSurface(const char *name, int32_t width, int32_t height, bool skipScrenshot, uint32_t windowFlags = 0, bool trustedOverlay = true, int64_t layerStack = -1)
             {
                 if (!valid)
                     return SurfaceControl(nullptr);
@@ -603,7 +597,12 @@ namespace android
                     static SurfaceComposerClientTransaction transaction;
                     if (transaction.valid)
                     {
-                        transaction.SetTrustedOverlay(result, true);
+                        transaction.SetTrustedOverlay(result, trustedOverlay);
+                        if (layerStack >= 0 && 13 <= f.systemVersion)
+                        {
+                            transaction.SetLayerStack(result, static_cast<uint32_t>(layerStack));
+                            transaction.Show(result);
+                        }
                         transaction.Apply(false, true);
                     }
                 }
@@ -677,80 +676,6 @@ namespace android
                 }
             }
 
-            SurfaceControl MirrorSurface(SurfaceControl &surface, uint32_t layerStack)
-            {
-                auto &f = Functionals::GetInstance();
-                if (!valid || f.systemVersion < 13 || !surface.data || !f.SurfaceComposerClient__MirrorSurface)
-                    return {};
-
-                auto mirrorSurface = f.SurfaceComposerClient__MirrorSurface(data, surface.data);
-                if (!mirrorSurface.get())
-                    return {};
-
-                ui::DisplayState displayInfo{};
-                int32_t width = 1080, height = 2340;
-                if (GetDisplayInfo(&displayInfo))
-                {
-                    width = displayInfo.layerStackSpaceRect.width;
-                    height = displayInfo.layerStackSpaceRect.height;
-                }
-
-                auto mirrorRootName = std::string("LarkMirrorRoot@") + std::to_string(layerStack);
-                auto mirrorRootSurface = CreateSurface(mirrorRootName.c_str(), width, height, false, 0x00004000);
-                if (!mirrorRootSurface.data)
-                    return {};
-
-                static SurfaceComposerClientTransaction transaction;
-                StrongPointer<void> mirrorRootPtr{mirrorRootSurface.data};
-                StrongPointer<void> mirrorPtr{mirrorSurface.get()};
-
-                transaction.SetLayer(mirrorRootPtr, INT_MAX);
-                transaction.SetLayerStack(mirrorRootPtr, layerStack);
-                transaction.Show(mirrorRootPtr);
-                transaction.Apply(false, true);
-
-                transaction.SetLayerStack(mirrorPtr, layerStack);
-                transaction.Show(mirrorPtr);
-                transaction.Reparent(mirrorPtr, mirrorRootPtr);
-                transaction.Apply(false, true);
-
-                m_mirrorRootSurfaces.emplace(layerStack, mirrorRootSurface);
-                return {mirrorSurface.get()};
-            }
-
-            void ZoomSurface(SurfaceControl &surface, float scaleX, float scaleY, uint32_t orientation, bool offset = false)
-            {
-                if (!surface.data)
-                    return;
-
-                static SurfaceComposerClientTransaction transaction;
-                StrongPointer<void> surfacePtr{surface.data};
-                if (detail::Functionals::GetInstance().systemVersion >= 14 && offset)
-                {
-                    switch (orientation)
-                    {
-                    case 1:
-                        transaction.SetMatrix(surfacePtr, 0.0f, scaleY, -scaleX, 0.0f);
-                        break;
-                    case 2:
-                        transaction.SetMatrix(surfacePtr, -scaleX, 0.0f, 0.0f, -scaleY);
-                        break;
-                    case 3:
-                        transaction.SetMatrix(surfacePtr, 0.0f, -scaleY, scaleX, 0.0f);
-                        break;
-                    default:
-                        transaction.SetMatrix(surfacePtr, scaleX, 0.0f, 0.0f, scaleY);
-                        break;
-                    }
-                }
-                else
-                {
-                    transaction.SetMatrix(surfacePtr, scaleX, 0.0f, 0.0f, scaleY);
-                }
-                transaction.Apply(false, true);
-            }
-
-            inline static std::unordered_map<uint32_t, SurfaceControl> m_mirrorRootSurfaces;
         };
 
         struct DumpDisplayInfo
@@ -809,6 +734,14 @@ namespace android
             int32_t orientation;
             int32_t width;
             int32_t height;
+        };
+
+        struct RecordDisplayInfo
+        {
+            uint32_t layerStack = 0;
+            int32_t width = 0;
+            int32_t height = 0;
+            int32_t orientation = 0;
         };
 
     public:
@@ -879,6 +812,80 @@ namespace android
             return nativeWindow;
         }
 
+        // 查找录屏/投屏虚拟屏所在的非主 layerStack，供双 Surface 方案创建录屏副本。
+        // 不再使用旧 ProcessMirrorDisplay：它依赖 mirrorSurface 私有 API，跨 Android 版本和厂商 ROM 不稳定。
+        static bool FindRecordDisplay(RecordDisplayInfo *recordDisplay, int32_t expectedWidth = 0, int32_t expectedHeight = 0)
+        {
+            if (!recordDisplay || 13 > detail::Functionals::GetInstance().systemVersion)
+                return false;
+
+            auto pipe = popen("dumpsys display", "r");
+            if (!pipe)
+                return false;
+
+            char buffer[512]{};
+            std::string dumpDisplayResult;
+            while (fgets(buffer, sizeof(buffer), pipe) != nullptr)
+                dumpDisplayResult += buffer;
+            pclose(pipe);
+
+            auto displayInfos = detail::ParseDumpDisplayInfo(dumpDisplayResult);
+            int bestScore = INT_MIN;
+            RecordDisplayInfo bestDisplay{};
+            for (const auto &displayInfo : displayInfos)
+            {
+                if (displayInfo.currentLayerStack == 0)
+                    continue;
+
+                int32_t rectWidth = std::abs(displayInfo.right - displayInfo.left);
+                int32_t rectHeight = std::abs(displayInfo.bottom - displayInfo.top);
+                if (rectWidth <= 0 || rectHeight <= 0)
+                    continue;
+
+                int score = 0;
+                if (expectedWidth > 0 && expectedHeight > 0)
+                {
+                    int exactDelta = std::abs(rectWidth - expectedWidth) + std::abs(rectHeight - expectedHeight);
+                    int swappedDelta = std::abs(rectWidth - expectedHeight) + std::abs(rectHeight - expectedWidth);
+                    score -= std::min(exactDelta, swappedDelta);
+                    if (exactDelta == 0)
+                        score += 100000;
+                    else if (swappedDelta == 0)
+                        score += 50000;
+                }
+                score += static_cast<int>(displayInfo.currentLayerStack);
+
+                if (score <= bestScore)
+                    continue;
+
+                bestScore = score;
+                bestDisplay.layerStack = displayInfo.currentLayerStack;
+                bestDisplay.orientation = ((displayInfo.orientation % 4) + 4) % 4;
+                bestDisplay.width = rectWidth;
+                bestDisplay.height = rectHeight;
+            }
+            if (bestScore == INT_MIN)
+                return false;
+
+            *recordDisplay = bestDisplay;
+            return true;
+        }
+
+        // 在指定 layerStack 上创建非可信、非防录屏窗口，用作录屏副本 Surface。
+        static ANativeWindow *CreateOnLayerStack(const char *name, int32_t width, int32_t height, uint32_t layerStack)
+        {
+            auto &surfaceComposerClient = GetComposerInstance();
+            auto surfaceControl = surfaceComposerClient.CreateSurface(name, width, height, false, 0, false, static_cast<int64_t>(layerStack));
+
+            detail::Surface *rawSurface = surfaceControl.GetSurface();
+            if (rawSurface == nullptr)
+                return nullptr;
+
+            auto nativeWindow = reinterpret_cast<ANativeWindow *>(rawSurface);
+            m_cachedSurfaceControl.emplace(nativeWindow, std::move(surfaceControl));
+            return nativeWindow;
+        }
+
         static void Destroy(ANativeWindow *nativeWindow)
         {
             if (!nativeWindow)
@@ -889,183 +896,10 @@ namespace android
 
             m_cachedSurfaceControl[nativeWindow].DestroySurface(reinterpret_cast<detail::Surface *>(nativeWindow));
             m_cachedSurfaceControl.erase(nativeWindow);
-            if (m_cachedSurfaceControl.empty())
-                m_cachedMirrorSurfaceControl.clear();
-        }
-
-        static void ProcessMirrorDisplay()
-        {
-            static std::chrono::steady_clock::time_point lastTime{};
-            if (13 > detail::Functionals::GetInstance().systemVersion || m_cachedSurfaceControl.empty())
-                return;
-            if (std::chrono::steady_clock::now() - lastTime < std::chrono::seconds(1))
-                return;
-            lastTime = std::chrono::steady_clock::now();
-
-            auto pipe = popen("dumpsys display", "r");
-            if (!pipe)
-                return;
-
-            char buffer[512]{};
-            std::string dumpDisplayResult;
-            while (fgets(buffer, sizeof(buffer), pipe) != nullptr)
-                dumpDisplayResult += buffer;
-            pclose(pipe);
-
-            auto displayInfos = detail::ParseDumpDisplayInfo(dumpDisplayResult);
-            int32_t builtinWidth = -1;
-            int32_t builtinHeight = -1;
-            int32_t builtinOrientation = 0;
-            for (auto &displayInfo : displayInfos)
-            {
-                if (displayInfo.currentLayerStack != 0)
-                    continue;
-
-                int32_t rectWidth = std::abs(displayInfo.right - displayInfo.left);
-                int32_t rectHeight = std::abs(displayInfo.bottom - displayInfo.top);
-                builtinOrientation = ((displayInfo.orientation % 4) + 4) % 4;
-                if (builtinOrientation == 1 || builtinOrientation == 3)
-                {
-                    builtinWidth = rectHeight;
-                    builtinHeight = rectWidth;
-                }
-                else
-                {
-                    builtinWidth = rectWidth;
-                    builtinHeight = rectHeight;
-                }
-                break;
-            }
-            if (builtinWidth <= 0 || builtinHeight <= 0)
-            {
-                auto builtinDisplayInfo = GetDisplayInfo();
-                builtinWidth = builtinDisplayInfo.width;
-                builtinHeight = builtinDisplayInfo.height;
-                builtinOrientation = ((builtinDisplayInfo.orientation % 4) + 4) % 4;
-            }
-            if (builtinWidth <= 0 || builtinHeight <= 0)
-                return;
-
-            for (auto &displayInfo : displayInfos)
-            {
-                if (displayInfo.currentLayerStack == 0)
-                    continue;
-
-                int32_t rectWidth = std::abs(displayInfo.right - displayInfo.left);
-                int32_t rectHeight = std::abs(displayInfo.bottom - displayInfo.top);
-                int32_t surfaceWidth = std::min(rectWidth, rectHeight);
-                int32_t surfaceHeight = std::max(rectWidth, rectHeight);
-                if (surfaceWidth <= 0 || surfaceHeight <= 0)
-                    continue;
-
-                bool offset = false;
-                if (builtinOrientation == 1 || builtinOrientation == 3)
-                    offset = surfaceHeight != rectWidth;
-
-                if (m_cachedMirrorSurfaceControl.find(displayInfo.currentLayerStack) == m_cachedMirrorSurfaceControl.end())
-                {
-                    for (auto &[_, surfaceControl] : m_cachedSurfaceControl)
-                    {
-                        auto mirrorLayer = GetComposerInstance().MirrorSurface(surfaceControl, displayInfo.currentLayerStack);
-                        if (mirrorLayer.data)
-                        {
-                            m_cachedMirrorSurfaceControl.emplace(displayInfo.currentLayerStack, std::move(mirrorLayer));
-                            break;
-                        }
-                    }
-                }
-
-                auto mirrorIt = m_cachedMirrorSurfaceControl.find(displayInfo.currentLayerStack);
-                if (mirrorIt == m_cachedMirrorSurfaceControl.end())
-                    continue;
-
-                float scaleX = static_cast<float>(surfaceWidth) / builtinWidth;
-                float scaleY = static_cast<float>(surfaceHeight) / builtinHeight;
-                int32_t scaleIndex = 0;
-                if (scaleX <= scaleY)
-                {
-                    scaleY = scaleX;
-                    scaleIndex = 1;
-                }
-                else
-                {
-                    scaleX = scaleY;
-                    scaleIndex = 2;
-                }
-
-                GetComposerInstance().ZoomSurface(mirrorIt->second, scaleX, scaleY, static_cast<uint32_t>(builtinOrientation), offset);
-
-                float x = 0.0f;
-                float y = 0.0f;
-                if (detail::Functionals::GetInstance().systemVersion >= 14 && offset)
-                {
-                    switch (builtinOrientation)
-                    {
-                    case 1:
-                        if (scaleIndex == 1)
-                            x = surfaceWidth - (surfaceWidth - builtinWidth * scaleY) * 0.5f;
-                        else
-                        {
-                            x = surfaceWidth;
-                            y = (surfaceHeight - builtinHeight * scaleY) * 0.5f;
-                        }
-                        break;
-                    case 2:
-                        if (scaleIndex == 1)
-                        {
-                            x = surfaceWidth - (surfaceWidth - builtinWidth * scaleX) * 0.5f;
-                            y = surfaceHeight;
-                        }
-                        else
-                        {
-                            x = surfaceWidth;
-                            y = surfaceHeight - (surfaceHeight - builtinHeight * scaleY) * 0.5f;
-                        }
-                        break;
-                    case 3:
-                        if (scaleIndex == 1)
-                        {
-                            x = (surfaceWidth - builtinWidth * scaleX) * 0.5f;
-                            y = surfaceHeight;
-                        }
-                        else
-                        {
-                            y = builtinHeight - (surfaceHeight - builtinHeight * scaleX) * 0.5f;
-                        }
-                        break;
-                    default:
-                        if (scaleIndex == 1)
-                            y = (surfaceHeight - builtinHeight * scaleY) * 0.5f;
-                        else
-                            x = (surfaceWidth - builtinWidth * scaleX) * 0.5f;
-                        break;
-                    }
-                }
-                else if (scaleIndex == 1)
-                {
-                    if (builtinOrientation == 1 || builtinOrientation == 3)
-                        x = (surfaceHeight - builtinHeight * scaleY) * 0.5f;
-                    else
-                        y = (surfaceHeight - builtinHeight * scaleY) * 0.5f;
-                }
-                else
-                {
-                    if (builtinOrientation == 1 || builtinOrientation == 3)
-                        y = (surfaceWidth - builtinWidth * scaleX) * 0.5f;
-                    else
-                        x = (surfaceWidth - builtinWidth * scaleX) * 0.5f;
-                }
-
-                static detail::SurfaceComposerClientTransaction transaction;
-                detail::StrongPointer<void> surfacePtr{mirrorIt->second.data};
-                transaction.SetPosition(surfacePtr, x, y);
-                transaction.Apply(false, true);
-            }
         }
 
     private:
         inline static std::unordered_map<ANativeWindow *, detail::SurfaceControl> m_cachedSurfaceControl;
-        inline static std::unordered_map<uint32_t, detail::SurfaceControl> m_cachedMirrorSurfaceControl;
     };
 }
 #undef ResolveMethod
