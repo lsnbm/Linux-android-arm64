@@ -236,6 +236,13 @@ struct virtual_input
     int x, y;                   // 触摸坐标
 };
 
+struct virtual_gyro
+{
+    int gyro_x;
+    int gyro_y;
+    int gyro_z;
+};
+
 struct memory_rw
 {
     uint64_t rw_addr;            // 读写的地址
@@ -246,17 +253,19 @@ struct memory_rw
 enum sm_req_op
 {
     op_o, // 空调用
-    op_r,
-    op_w,
+    op_r, // 读取内存
+    op_w, // 写入内存
     op_m, // 获取进程内存信息
 
-    op_down,
-    op_move,
-    op_up,
     op_init_touch, // 初始化触摸
+    op_down,       // 上报按下
+    op_move,       // 上报移动
+    op_up,         // 上报抬起
 
-    op_brps_weps_info,      // 获取执行断点数量和访问断点数量
-    op_set_process_hwbp,    // 设置硬件断点
+    op_init_gyro,   // 初始化陀螺仪
+    op_gyro_report, // 上报陀螺仪数据
+
+    op_set_process_hwbp,    // 设置硬件断点并获取执行/访问断点数量
     op_remove_process_hwbp, // 删除硬件断点
 
     op_kexit // 内核线程退出
@@ -279,6 +288,8 @@ struct req_obj
     struct memory_info mem_info;
     // 虚拟触摸信息
     struct virtual_input vinput_info;
+    // 虚拟陀螺仪信息
+    struct virtual_gyro vgyro_info;
     // 断点信息
     struct hwbp_info bp_info;
 };

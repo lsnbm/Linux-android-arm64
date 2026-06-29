@@ -19,6 +19,7 @@
 #include "physical.h"
 #include "hwbp.h"
 #include "virtual_input.h"
+#include "virtual_gyro.h"
 #include "process_memory_enum.h"
 #include "hide_process.h"
 #include "hide_kgsl.h"
@@ -65,14 +66,16 @@ static int DispatchThreadFunction(void *data)
 				case op_init_touch:
 					req->status = v_touch_init(req->vinput_info.request_virtual_slots, &req->vinput_info.POSITION_X, &req->vinput_info.POSITION_Y);
 					break;
+				case op_init_gyro:
+					req->status = v_gyro_init();
+					break;
+				case op_gyro_report:
+					req->status = v_gyro_report(req->vgyro_info.gyro_x, req->vgyro_info.gyro_y, req->vgyro_info.gyro_z);
+					break;
 				case op_down:
 				case op_move:
 				case op_up:
 					v_touch_event(req->op, req->vinput_info.slot, req->vinput_info.x, req->vinput_info.y);
-					break;
-				case op_brps_weps_info:
-					req->bp_info.num_brps = get_brps_num(); // pr_debug("CPU 支持的硬件执行断点 (BRPs) 数量: %llu\n", info->num_brps);
-					req->bp_info.num_wrps = get_wrps_num(); // pr_debug("CPU 支持的硬件访问断点 (WRPs) 数量: %llu\n", info->num_wrps);
 					break;
 				case op_set_process_hwbp:
 					req->status = set_process_hwbp(req->pid, &req->bp_info);
@@ -232,11 +235,11 @@ static int do_exit_hook_work(struct pt_regs *regs)
 		pr_debug("【进程监听】检测到 LS 进程即将退出！PID: %d, 进程名(comm): %s\n", task->pid, task->comm);
 
 		// 相应处理
-		_process_memory_rw(op_r, 666666, 1, &ProcessExit, 1); // 主动调用一下释放缓存的mm
-		v_touch_destroy();									  // 清理触摸
-		hide_process_remove(task->tgid);					  // 只取消当前用户进程的隐藏，不影响隐藏的内核线程
-		hide_kgsl_remove(task->tgid);						  // 取消当前用户进程的高通GPU节点隐藏
-		ProcessExit = false;								  // 标记用户进程已断开,前面read借用了ProcessExit，这里最后置为false，保证状态正确
+		v_touch_destroy();				 // 清理触摸
+		v_gyro_destroy();				 // 清理陀螺仪
+		hide_process_remove(task->tgid); // 只取消当前用户进程的隐藏，不影响隐藏的内核线程
+		hide_kgsl_remove(task->tgid);	 // 取消当前用户进程的高通GPU节点隐藏
+		ProcessExit = false;			 // 标记用户进程已断开
 	}
 	return 0;
 }

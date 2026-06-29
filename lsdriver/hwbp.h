@@ -564,6 +564,9 @@ static inline int set_process_hwbp(pid_t pid, struct hwbp_info *info)
     if (pid <= 0 || !info)
         return -EINVAL;
 
+    info->num_brps = get_brps_num();
+    info->num_wrps = get_wrps_num();
+
     memset(&bp_config, 0, sizeof(bp_config));
     bp_config.pid = pid;
     bp_config.hit_point_index = -1;

@@ -532,12 +532,8 @@ static inline int _process_memory_rw(enum sm_req_op op, pid_t pid, uint64_t vadd
         struct pid *pid_struct;
         struct task_struct *task;
 
-        if (s_last_mm)
-        {
-            mmput(s_last_mm); // 引用计数-1
-            s_last_mm = 0;
-        }
-
+        // 目标进程切换清缓存
+        s_last_mm = 0;
         pid_struct = find_get_pid(pid);
         if (!pid_struct)
             return -ESRCH;
@@ -549,9 +545,15 @@ static inline int _process_memory_rw(enum sm_req_op op, pid_t pid, uint64_t vadd
 
         s_last_mm = get_task_mm(task); // 引用计数+1
         put_task_struct(task);
-
-        if (!s_last_mm)
+        // 这里不长期持有mm引用计数,靠后面的判断稳住mm释放时也不崩溃
+        if (s_last_mm)
+        {
+            mmput(s_last_mm); // 引用计数-1
+        }
+        else
+        {
             return -EINVAL;
+        }
 
         s_last_pid = pid;
         s_last_vpage_base = -1ULL;

@@ -26,6 +26,7 @@
 #include "ReadWriteTest.h"
 #include "tcp_server.h"
 #include "TouchTest.h"
+#include "GyroTest.h"
 #include "Android_touch/TouchHelperA.h"
 #include "Android_draw/draw.h"
 
@@ -2269,7 +2270,8 @@ int main()
     std::println(stdout, "  2) 触摸测试");
     std::println(stdout, "  3) 内存工具");
     std::println(stdout, "  4) TCP服务器");
-    std::print(stdout, "请输入 [1/2/3/4]: ");
+    std::println(stdout, "  5) 陀螺仪测试");
+    std::print(stdout, "请输入 [1/2/3/4/5]: ");
 
     int rc = 1;
     int mode = 0;
@@ -2280,7 +2282,7 @@ int main()
         std::println(stderr, "[错误] 输入无效。");
         return rc;
     }
-    if (mode < 1 || mode > 4)
+    if (mode < 1 || mode > 5)
     {
         std::println(stderr, "[错误] 未知选项: {}", mode);
         return rc;
@@ -2292,7 +2294,7 @@ int main()
         return rc;
     }
 
-    dr = new Driver((mode == 2 || mode == 3) ? 5 : 0);
+    dr = new Driver((mode == 2 || mode == 3) ? 5 : 0, mode == 5);
 
     if (mode == 1)
     {
@@ -2309,6 +2311,10 @@ int main()
     else if (mode == 4)
     {
         rc = tcp_server();
+    }
+    else if (mode == 5)
+    {
+        rc = RunGyroTest();
     }
     delete dr;
     dr = nullptr;

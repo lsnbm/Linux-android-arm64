@@ -225,11 +225,9 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
     if (!path_buf)
         return -ENOMEM;
 
-    rcu_read_lock();
     task = pid_task(find_vpid(pid), PIDTYPE_PID);
     if (task)
         get_task_struct(task);
-    rcu_read_unlock();
     if (!task)
     {
         kfree(path_buf);

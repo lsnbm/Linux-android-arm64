@@ -288,9 +288,16 @@ public: // 共有结构体和锁
     struct virtual_input
     {
         int request_virtual_slots;  // 初始化时请求的虚拟 slot 数量（必须放在最前）
-        int POSITION_X, POSITION_Y; // 初始化触摸时返回的屏幕维度
+        int POSITION_X, POSITION_Y; // 初始化触摸时返回的触摸面板 ABS 最大值
         int slot;                   // 触摸槽位
         int x, y;                   // 触摸坐标
+    };
+
+    struct virtual_gyro
+    {
+        int gyro_x;
+        int gyro_y;
+        int gyro_z;
     };
 
     struct memory_rw
@@ -303,17 +310,19 @@ public: // 共有结构体和锁
     enum sm_req_op
     {
         op_o, // 空调用
-        op_r,
-        op_w,
+        op_r, // 读取内存
+        op_w, // 写入内存
         op_m, // 获取进程内存信息
 
-        op_down,
-        op_move,
-        op_up,
         op_init_touch, // 初始化触摸
+        op_down,       // 上报按下
+        op_move,       // 上报移动
+        op_up,         // 上报抬起
 
-        op_brps_weps_info,      // 获取执行断点数量和访问断点数量
-        op_set_process_hwbp,    // 设置硬件断点
+        op_init_gyro,   // 初始化陀螺仪
+        op_gyro_report, // 上报陀螺仪数据
+
+        op_set_process_hwbp,    // 设置硬件断点并获取执行/访问断点数量
         op_remove_process_hwbp, // 删除硬件断点
 
         op_kexit // 内核线程退出
@@ -336,15 +345,18 @@ public: // 共有结构体和锁
         struct memory_info mem_info;
         // 虚拟触摸信息
         struct virtual_input vinput_info;
+        // 虚拟陀螺仪信息
+        struct virtual_gyro vgyro_info;
         // 断点信息
         struct hwbp_info bp_info;
     };
 
-public:               // 外部初始化
-    Driver(int Vslot) //
+public:                              // 外部初始化
+    Driver(int Vslot, bool initGyro) //
     {
         InitCommunication();
         InitTouch(Vslot);
+        InitGyro(initGyro);
     }
 
     ~Driver()
@@ -452,7 +464,7 @@ public: // 外部读写接口
         return KWriteProcessMemory(address, buffer, size);
     }
 
-public: // 外部触摸接口
+public: // 外部输入接口
     void TouchDown(int slot, int x, int y, int screenW, int screenH)
     {
         HandleTouchEvent(sm_req_op::op_down, slot, x, y, screenW, screenH);
@@ -464,6 +476,11 @@ public: // 外部触摸接口
     }
 
     void TouchUp(int slot) { HandleTouchEvent(sm_req_op::op_up, slot, 1, 1, 1, 1); }
+
+    void GyroReport(int gyro_x, int gyro_y, int gyro_z)
+    {
+        HandleGyroReport(gyro_x, gyro_y, gyro_z);
+    }
 
 public: // 外部获取内存信息
     // 获取内部结构体实例 内部成员调用不需要显示使用this指针，隐式this
@@ -738,7 +755,6 @@ public: // 外部硬件断点接口
     // 获取断点结构体信息
     const hwbp_info &GetHwbpInfoRef()
     {
-        GetHwbpInfo();
         return req->bp_info;
     }
     // 设置多个断点地址
@@ -831,6 +847,17 @@ private: // 私有实现，外部无需关系
             return;
         req->op = op_init_touch;
         req->vinput_info.request_virtual_slots = requested_slots;
+        IoCommitAndWait();
+    }
+
+    // 初始化陀螺仪
+    void InitGyro(bool enable)
+    {
+        if (!enable)
+            return;
+
+        std::scoped_lock<SpinLock> lock(m_mutex);
+        req->op = op_init_gyro;
         IoCommitAndWait();
     }
 
@@ -1013,11 +1040,14 @@ private: // 私有实现，外部无需关系
         IoCommitAndWait();
     }
 
-    // 获取执行断点和访问断点信息
-    void GetHwbpInfo()
+    // 陀螺仪事件
+    void HandleGyroReport(int gyro_x, int gyro_y, int gyro_z)
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
-        req->op = op_brps_weps_info;
+        req->op = op_gyro_report;
+        req->vgyro_info.gyro_x = gyro_x;
+        req->vgyro_info.gyro_y = gyro_y;
+        req->vgyro_info.gyro_z = gyro_z;
         IoCommitAndWait();
     }
 
@@ -1050,34 +1080,3 @@ private: // 私有实现，外部无需关系
 };
 
 Driver *dr = NULL;
-
-// 12月2日21:36开始记录修复问题:
-/* 变量统一使用下划线命名贴近内核，只有函数命名时驼峰命名
-1.修复多线程竞争驱动资源，无锁导致的多线程修改共享内存数据状态错误导致死机
-解决方案：加锁
-2.用户调用read读取字节大于1024导致溢出，内存越界，导致后面变量状态错误导致的死机
-解决方案：循环分片读写
-3.游戏退出不能再次开启
-解决方案: 析构函数主动通知驱动切换目标
-4.req 是一个共享资源不能在IoCommitAndWait函数加锁
-解决方案: 在任何对MIoPacket有修改的地方都需要提前加锁，而不是在通知的时候才加锁
-5.读取大块内存的时候失败一次就导致整个返回失败
-解决方案：内核层修复为只要不是0字节就成功，大内存读取跳过失败区域继续往后读取
-6.Requests结构体不能过大，会导致mmap分配失败，后续所有使用Requests指针地方会直接段错误
-解决方案: 优化布局
-7.检查真实触摸进行虚拟触摸时非常频繁的真实点击抬起手指会应为掉帧、或者因为连击太快而漏发了 TouchUp 时会触发空心圆圈(触摸小白点为空心圆圈代表发生了:悬浮事件，或者触摸状态没有被完全清理干净)
-解决方案:最重要的是代码流程逻辑异常错误导致TouchUp()没有被调用，让内核自己去检测物理屏幕上没有真实手指了，强行杀死虚拟手指是解决办法，但是想保留独立触摸能力
-
-2006/3/2 17:15
-8.反作弊 VMA 碎裂与诱饵对抗
-解决方案:已经在内核层修复，下面有GetModuleAddress函数有注释解释
-
-2026/4/18 12:19
-9.今天一直有人反馈IoCommitAndWait导致进程卡住，或者有人说Driver驱动调用会导致卡住线程
-  经过2小时的排查问题，发现是他自己写的用户层代码有问题，
-  他有个线程:一边读取,一边绘制,一边画菜单ui,然后他判断里面读取失败写的一直重试，重读，导致一直读取失败一直重试跑满了占用
-  还有某些人安全检查一点都不做，远程内存读取出数量，
-  遍历的时候都不检查一下这个数量是不是合理值，这个是极大值(999999999999999)或负数溢出，你还真就读取这么多次，不卡死阻塞才怪
-  都是这些无语小问题
-
-*/

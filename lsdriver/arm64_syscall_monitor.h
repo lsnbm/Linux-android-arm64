@@ -1529,7 +1529,6 @@ uint64_t get_tpidr_el0_by_name(int32_t tgid, const char *thread_name)
         return 0;
 
     //  遍历线程组
-    rcu_read_lock();
     for_each_thread(p, t)
     {
         // 比较线程名，注意 task->comm 长度限制为 16 字节
@@ -1551,7 +1550,6 @@ uint64_t get_tpidr_el0_by_name(int32_t tgid, const char *thread_name)
             break;
         }
     }
-    rcu_read_unlock();
 
     put_task_struct(p); // 释放 task 引用
     return tpidr_val;
