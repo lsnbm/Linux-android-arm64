@@ -135,6 +135,7 @@ static inline void add_seg(struct module_info *m, short type_tag, uint8_t prot, 
 static inline int enum_process_memory(pid_t pid, struct memory_info *info)
 {
     struct task_struct *task = NULL;
+    struct pid *pid_struct = NULL;
     struct mm_struct *mm = NULL;
     struct vm_area_struct *vma, *prev = NULL;
     char *path_buf, *path;
@@ -225,9 +226,12 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
     if (!path_buf)
         return -ENOMEM;
 
-    task = pid_task(find_vpid(pid), PIDTYPE_PID);
-    if (task)
-        get_task_struct(task);
+    pid_struct = find_get_pid(pid);
+    if (pid_struct)
+    {
+        task = get_pid_task(pid_struct, PIDTYPE_PID);
+        put_pid(pid_struct);
+    }
     if (!task)
     {
         kfree(path_buf);
@@ -417,6 +421,7 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
         }
 
         prev = vma;
+        cond_resched(); // 长 VMA 遍历中主动让出 CPU，让调度器决定立刻切走或继续跑。，其他cpu调用synchronize_rcu_expedited()它要等所有相关 CPU 都证明“我已经离开过可能持有旧 RCU 引用的执行区间”,避免单核长时间不进入 RCU 静止态。
     }
 
     mmap_read_unlock(mm);
@@ -619,7 +624,7 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
 
             /* --- 步骤 4：严谨拓扑标记 --- */
             int first_data_idx = -1;
-
+            cond_resched(); // 主动调度让出cpu,这几步的超大循环连续跑会单核长时间不进入 RCU 静止态
             for (j = 0; j < m->seg_count; j++)
             {
                 if (m->segs[j].index == -1)
