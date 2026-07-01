@@ -4,7 +4,7 @@ obj-m += lsdriver.o
 
 
 # 注释这行为release编译，不会有pr_debug输出
-ccflags-y += -DDEBUG
+#ccflags-y += -DDEBUG
 
 #O3
 ccflags-y += -O3
