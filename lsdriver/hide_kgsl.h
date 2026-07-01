@@ -12,6 +12,117 @@
 #include "export_fun.h"
 #include "inline_hook_frame.h"
 
+/*
+在高通设备上可查询 GPU/KGSL 信息的路径：
+
+设备节点：
+/dev/kgsl-3d0
+/dev/dri/card0
+/dev/dri/renderD128
+
+高通 KGSL 进程节点：
+/sys/class/kgsl/kgsl
+/sys/class/kgsl/kgsl/proc
+/sys/class/kgsl/kgsl/proc/<pid>
+/sys/class/kgsl/kgsl/pagetables
+/sys/class/kgsl/kgsl/pagetables/<pid>
+/sys/class/kgsl/kgsl/pagetables/<pid>/mapped
+/sys/class/kgsl/kgsl/pagetables/<pid>/max_mapped
+/sys/class/kgsl/kgsl/pagetables/<pid>/entries
+
+KGSL 全局内存节点：
+/sys/class/kgsl/kgsl/mapped
+/sys/class/kgsl/kgsl/mapped_max
+/sys/class/kgsl/kgsl/secure
+/sys/class/kgsl/kgsl/secure_max
+/sys/class/kgsl/kgsl/vmalloc_max
+/sys/class/kgsl/kgsl/coherent_max
+/sys/class/kgsl/kgsl/page_alloc
+/sys/class/kgsl/kgsl/max_reclaim_limit
+/sys/class/kgsl/kgsl/page_reclaim_per_call
+/sys/class/kgsl/kgsl/full_cache_threshold
+
+KGSL 3D 设备状态节点：
+/sys/class/kgsl/kgsl-3d0
+/sys/class/kgsl/kgsl-3d0/gpu_model
+/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage
+/sys/class/kgsl/kgsl-3d0/gpubusy
+/sys/class/kgsl/kgsl-3d0/gpuclk
+/sys/class/kgsl/kgsl-3d0/clock_mhz
+/sys/class/kgsl/kgsl-3d0/gpu_available_frequencies
+/sys/class/kgsl/kgsl-3d0/freq_table_mhz
+/sys/class/kgsl/kgsl-3d0/gpu_clock_stats
+/sys/class/kgsl/kgsl-3d0/temp
+/sys/class/kgsl/kgsl-3d0/reset_count
+/sys/class/kgsl/kgsl-3d0/preempt_count
+/sys/class/kgsl/kgsl-3d0/ifpc_count
+/sys/class/kgsl/kgsl-3d0/perfcounter
+/sys/class/kgsl/kgsl-3d0/dev
+/sys/class/kgsl/kgsl-3d0/uevent
+
+KGSL 电源和频率控制节点：
+/sys/class/kgsl/kgsl-3d0/min_pwrlevel
+/sys/class/kgsl/kgsl-3d0/max_pwrlevel
+/sys/class/kgsl/kgsl-3d0/default_pwrlevel
+/sys/class/kgsl/kgsl-3d0/thermal_pwrlevel
+/sys/class/kgsl/kgsl-3d0/min_clock_mhz
+/sys/class/kgsl/kgsl-3d0/max_clock_mhz
+/sys/class/kgsl/kgsl-3d0/max_gpuclk
+/sys/class/kgsl/kgsl-3d0/force_clk_on
+/sys/class/kgsl/kgsl-3d0/force_bus_on
+/sys/class/kgsl/kgsl-3d0/force_rail_on
+/sys/class/kgsl/kgsl-3d0/force_no_nap
+/sys/class/kgsl/kgsl-3d0/idle_timer
+/sys/class/kgsl/kgsl-3d0/pwrscale
+/sys/class/kgsl/kgsl-3d0/power
+/sys/class/kgsl/kgsl-3d0/power/runtime_status
+/sys/class/kgsl/kgsl-3d0/power/runtime_active_time
+/sys/class/kgsl/kgsl-3d0/power/runtime_suspended_time
+/sys/class/kgsl/kgsl-3d0/power/autosuspend_delay_ms
+/sys/class/kgsl/kgsl-3d0/power/control
+
+KGSL devfreq 节点：
+/sys/class/kgsl/kgsl-3d0/devfreq
+/sys/class/kgsl/kgsl-3d0/devfreq/cur_freq
+/sys/class/kgsl/kgsl-3d0/devfreq/target_freq
+/sys/class/kgsl/kgsl-3d0/devfreq/min_freq
+/sys/class/kgsl/kgsl-3d0/devfreq/max_freq
+/sys/class/kgsl/kgsl-3d0/devfreq/available_frequencies
+/sys/class/kgsl/kgsl-3d0/devfreq/gpu_load
+/sys/class/kgsl/kgsl-3d0/devfreq/mod_percent
+/sys/class/kgsl/kgsl-3d0/devfreq/governor
+/sys/class/kgsl/kgsl-3d0/devfreq/available_governors
+/sys/class/kgsl/kgsl-3d0/devfreq/trans_stat
+/sys/class/kgsl/kgsl-3d0/devfreq/suspend_time
+/sys/class/kgsl/kgsl-3d0/devfreq/name
+/sys/class/devfreq/3d00000.qcom,kgsl-3d0
+/sys/class/devfreq/kgsl-busmon
+
+KGSL 快照和故障节点：
+/sys/class/kgsl/kgsl-3d0/snapshot
+/sys/class/kgsl/kgsl-3d0/snapshot/dump
+/sys/class/kgsl/kgsl-3d0/snapshot/faultcount
+/sys/class/kgsl/kgsl-3d0/snapshot/timestamp
+/sys/class/kgsl/kgsl-3d0/snapshot/snapshot_control
+/sys/class/kgsl/kgsl-3d0/snapshot/snapshot_hashid
+/sys/class/kgsl/kgsl-3d0/snapshot/snapshot_legacy
+/sys/class/kgsl/kgsl-3d0/snapshot/snapshot_crashdumper
+/sys/class/kgsl/kgsl-3d0/snapshot/skip_ib_capture
+/sys/class/kgsl/kgsl-3d0/snapshot/prioritize_unrecoverable
+/sys/class/kgsl/kgsl-3d0/snapshot/minidump_test
+/sys/class/kgsl/kgsl-3d0/snapshot/force_panic
+
+其他可见的 GPU/KGSL 路径：
+/proc/irq/320/kgsl_3d0_irq
+/sys/devices/platform/soc/3d00000.qcom,kgsl-3d0
+/sys/devices/platform/soc/3d00000.qcom,kgsl-3d0/kgsl/kgsl-3d0
+/sys/class/kgsl/kgsl-3d0/device/devfreq
+/sys/class/kgsl/kgsl-3d0/device/kgsl
+/sys/class/kgsl/kgsl-3d0/device/kgsl-busmon
+/sys/class/kgsl/kgsl-3d0/device/coresight-gfx
+/sys/class/kgsl/kgsl-3d0/device/coresight-gfx-cx
+*/
+
 #define HIDE_KGSL_MAX_PIDS 8
 
 // KGSL 隐藏表保存目标进程 tgid；0 表示空槽。
