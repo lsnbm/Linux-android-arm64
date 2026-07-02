@@ -16,6 +16,25 @@
 #include <linux/sort.h>
 #include <linux/types.h>
 
+// 寄存器操作类型定义
+#define HWBP_OP_NONE 0x0  // 00: 不操作
+#define HWBP_OP_READ 0x1  // 01: 读
+#define HWBP_OP_WRITE 0x2 // 10: 写
+
+// 设置掩码位的宏，参数1:结构体指针，参数2:寄存器索引，参数3:操作类型
+#define HWBP_SET_MASK(record, reg, op)                          \
+    do                                                          \
+    {                                                           \
+        int byte_idx = (reg) >> 2;                              \
+        int bit_offset = ((reg) & 0x3) << 1;                    \
+        (record)->mask[byte_idx] &= ~(0x3 << bit_offset);       \
+        (record)->mask[byte_idx] |= ((op) & 0x3) << bit_offset; \
+    } while (0)
+
+// 获取掩码位的宏，参数1:结构体指针，参数2:寄存器索引
+#define HWBP_GET_MASK(record, reg) \
+    (((record)->mask[(reg) >> 2] >> (((reg) & 0x3) << 1)) & 0x3)
+
 // 断点类型(类型和长度完全与内核一致会冲突，所以这里HW加上BP后缀,原型没有BP)
 enum hwbp_type
 {
@@ -124,25 +143,6 @@ enum hwbp_reg_idx
     MAX_REG_COUNT
 };
 
-// 寄存器操作类型定义
-#define HWBP_OP_NONE 0x0  // 00: 不操作
-#define HWBP_OP_READ 0x1  // 01: 读
-#define HWBP_OP_WRITE 0x2 // 10: 写
-
-// 设置掩码位的宏，参数1:结构体指针，参数2:寄存器索引，参数3:操作类型
-#define HWBP_SET_MASK(record, reg, op)                          \
-    do                                                          \
-    {                                                           \
-        int byte_idx = (reg) >> 2;                              \
-        int bit_offset = ((reg) & 0x3) << 1;                    \
-        (record)->mask[byte_idx] &= ~(0x3 << bit_offset);       \
-        (record)->mask[byte_idx] |= ((op) & 0x3) << bit_offset; \
-    } while (0)
-
-// 获取掩码位的宏，参数1:结构体指针，参数2:寄存器索引
-#define HWBP_GET_MASK(record, reg) \
-    (((record)->mask[(reg) >> 2] >> (((reg) & 0x3) << 1)) & 0x3)
-
 // 记录单个 PC（触发指令地址）的命中状态
 struct hwbp_record
 {
@@ -185,11 +185,32 @@ struct hwbp_point
 };
 
 // 存储整体命中信息
-struct hwbp_info
+struct hardware_breakpoint
 {
     uint64_t num_brps;            // 执行断点的数量
     uint64_t num_wrps;            // 访问断点的数量
     struct hwbp_point points[16]; // 多个观点地址
+};
+
+struct virtual_gnss
+{
+    int latitude_e7;
+    int longitude_e7;
+};
+
+struct virtual_gyro
+{
+    int gyro_x;
+    int gyro_y;
+    int gyro_z;
+};
+
+struct virtual_input
+{
+    int request_virtual_slots;  // 初始化时请求的虚拟 slot 数量
+    int POSITION_X, POSITION_Y; // 初始化触摸时返回的触摸面板 ABS 最大值
+    int slot;                   // 触摸槽位
+    int x, y;                   // 触摸坐标
 };
 
 #define MAX_MODULES 1024
@@ -219,7 +240,7 @@ struct region_info
     uint64_t end;
 };
 
-struct memory_info
+struct virtual_memory
 {
     int module_count;                        // 总模块数量
     struct module_info modules[MAX_MODULES]; // 模块信息
@@ -228,70 +249,60 @@ struct memory_info
     struct region_info regions[MAX_SCAN_REGIONS]; // 可扫描内存区域 (rw-p, 排除特殊区域)
 };
 
-struct virtual_input
-{
-    int request_virtual_slots;  // 初始化时请求的虚拟 slot 数量（必须放在最前）
-    int POSITION_X, POSITION_Y; // 初始化触摸时返回的触摸面板 ABS 最大值
-    int slot;                   // 触摸槽位
-    int x, y;                   // 触摸坐标
-};
-
-struct virtual_gyro
-{
-    int gyro_x;
-    int gyro_y;
-    int gyro_z;
-};
-
-struct memory_rw
+struct virtual_memoryrw
 {
     uint64_t rw_addr;            // 读写的地址
     uint8_t user_buffer[0x1000]; // 物理标准页大小的数据缓存区
     int size;                    // 读写的大小
 };
 
-enum sm_req_op
+enum request_op
 {
-    op_o, // 空调用
-    op_r, // 读取内存
-    op_w, // 写入内存
-    op_m, // 获取进程内存信息
+    request_op_none,       // 空调用
+    request_op_vmem_read,  // 读取内存
+    request_op_vmem_write, // 写入内存
+    request_op_vmem_info,  // 获取进程内存信息
 
-    op_init_touch, // 初始化触摸
-    op_down,       // 上报按下
-    op_move,       // 上报移动
-    op_up,         // 上报抬起
+    request_op_touch_init, // 初始化触摸
+    request_op_touch_down, // 上报按下
+    request_op_touch_move, // 上报移动
+    request_op_touch_up,   // 上报抬起
 
-    op_init_gyro,   // 初始化陀螺仪
-    op_gyro_report, // 上报陀螺仪数据
+    request_op_gyro_init,   // 初始化陀螺仪
+    request_op_gyro_report, // 上报陀螺仪数据
 
-    op_set_process_hwbp,    // 设置硬件断点并获取执行/访问断点数量
-    op_remove_process_hwbp, // 删除硬件断点
+    request_op_gnss_init,   // 初始化虚拟定位
+    request_op_gnss_report, // 上报虚拟定位数据
 
-    op_kexit // 内核线程退出
+    request_op_hwbp_set,    // 设置硬件断点并获取执行/访问断点数量
+    request_op_hwbp_remove, // 删除硬件断点
+
+    request_op_kernel_exit // 内核线程退出
 };
 
 // 将在队列中使用的请求实例结构体
-struct req_obj
+struct request_obj
 {
     bool kernel; // 由用户模式设置 true = 内核有待处理的请求, false = 请求已完成
     bool user;   // 由内核模式设置 true = 用户模式有待处理的请求, false = 请求已完成
 
-    enum sm_req_op op; // shared memory请求操作类型
-    int status;        // 操作状态
-
     int pid; // 当前派发指定的pid
 
-    // 进程内存读写信息
-    struct memory_rw rw_info;
-    // 进程虚拟内存信息
-    struct memory_info mem_info;
+    enum request_op op; // 请求操作类型
+    int status;         // 请求操作状态
+
+    // 虚拟内存读写信息
+    struct virtual_memoryrw vmemrw_info;
+    // 虚拟内存信息
+    struct virtual_memory vmem_info;
     // 虚拟触摸信息
     struct virtual_input vinput_info;
     // 虚拟陀螺仪信息
     struct virtual_gyro vgyro_info;
-    // 断点信息
-    struct hwbp_info bp_info;
+    // 虚拟定位信息
+    struct virtual_gnss vgnss_info;
+    // 硬件断点信息
+    struct hardware_breakpoint hwbp_info;
 };
 
 #endif // IO_STRUCT_H

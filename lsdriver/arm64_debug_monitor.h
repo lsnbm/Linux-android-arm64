@@ -38,7 +38,7 @@ struct breakpoint_config
     void (*on_hit)(struct pt_regs *regs, struct breakpoint_config *self);
 
     // 允许携带私有的数据
-    struct hwbp_info *bp_info;
+    struct hardware_breakpoint *hwbp_info;
 };
 
 /*

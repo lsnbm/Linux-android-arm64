@@ -369,7 +369,7 @@ static inline void v_touch_destroy(void)
         vt.tracking_ids[i] = -1;
 }
 
-static inline void v_touch_event(enum sm_req_op op, int slot, int x, int y)
+static inline void v_touch_event(enum request_op op, int slot, int x, int y)
 {
     int old_tracking_id;
     int ret;
@@ -386,7 +386,7 @@ static inline void v_touch_event(enum sm_req_op op, int slot, int x, int y)
 
     // 坐标安全检查：只检查按下/移动，抬起事件不依赖 x/y。
     // ABS 最大值本身也拒绝，避免 TouchUp(1,1,1,1) 这类脏坐标变成 raw 最大点后参与下一次 DOWN。和防止其他异常状态坐标上报
-    if (op == op_down || op == op_move)
+    if (op == request_op_touch_down || op == request_op_touch_move)
     {
         if (!vt.dev || !vt.dev->absinfo)
             return;
@@ -401,14 +401,14 @@ static inline void v_touch_event(enum sm_req_op op, int slot, int x, int y)
             return;
     }
 
-    if (op == op_move)
+    if (op == request_op_touch_move)
     {
         if (vt.tracking_ids[slot] != -1)
         {
             send_report(slot, x, y, true);
         }
     }
-    else if (op == op_down)
+    else if (op == request_op_touch_down)
     {
         if (vt.tracking_ids[slot] == -1)
         {
@@ -438,7 +438,7 @@ static inline void v_touch_event(enum sm_req_op op, int slot, int x, int y)
             }
         }
     }
-    else if (op == op_up)
+    else if (op == request_op_touch_up)
     {
         if (vt.tracking_ids[slot] != -1)
         {

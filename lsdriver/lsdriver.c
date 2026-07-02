@@ -16,82 +16,90 @@
 #include "io_struct.h"
 #include "export_fun.h"
 #include "inline_hook_frame.h"
-#include "physical.h"
+#include "virtual_memory_rw.h"
 #include "hwbp.h"
 #include "virtual_input.h"
 #include "virtual_gyro.h"
-#include "process_memory_enum.h"
-#include "hide_process.h"
+#include "virtual_gnss.h"
+#include "virtual_memory_enum.h"
+#include "hide_task.h"
 #include "hide_kgsl.h"
 #include "arm64_syscall_monitor.h"
 
-static struct req_obj *req = NULL;
+static struct request_obj *req = NULL;
 
-static bool ProcessExit = false; // 用户进程默认未启动
-static bool KThreadExit = true;	 // 内核线程默认启用
+struct task_struct *connect_thread_task = 0;
+struct task_struct *dispatch_thread_task = 0;
+struct task_struct *ls_process_task = 0;
 
 static int DispatchThreadFunction(void *data)
 {
 	// 自旋计数器：用来记录我们空转了多久
 	int spin_count = 0;
 
-	while (KThreadExit)
+	while (dispatch_thread_task)
 	{
-		if (ProcessExit)
+		if (ls_process_task)
 		{
 			// 确实有任务
 			if (req->kernel)
 			{
-				// 编译器屏障，这里读写任意内存，前后的内存访问不能跨过这个点重排，不能之前从内存读到的值在屏障之后假设仍然寄存器值有效
-				asm volatile("" ::: "memory");
-
-				req->kernel = false; // 清除请求标志
 				// 有活干，重置计数器
 				spin_count = 0;
-				// 派发
+
+				// 编译器屏障，这里读写任意内存，前后的内存访问不能跨过这个点重排，不能之前从内存读到的值在屏障之后假设仍然寄存器值有效
 				asm volatile("" ::: "memory");
-				switch (req->op)
+				req->kernel = false; // 清除请求标志
+
+				asm volatile("" ::: "memory");
+				switch (req->op) // 派发
 				{
-				case op_o:
+				case request_op_none:
 					break;
-				case op_r:
-				case op_w:
-					asm volatile("" ::: "memory");
-					req->status = _process_memory_rw(req->op, req->pid, req->rw_info.rw_addr, &req->rw_info.user_buffer, req->rw_info.size);
-					asm volatile("" ::: "memory");
+				case request_op_vmem_read:
+				case request_op_vmem_write:
+					req->status = virtual_memory_rw(req->op, req->pid, req->vmemrw_info.rw_addr, &req->vmemrw_info.user_buffer, req->vmemrw_info.size);
 					break;
-				case op_m:
-					req->status = enum_process_memory(req->pid, &req->mem_info);
+				case request_op_vmem_info:
+					req->status = virtual_memory_enum(req->pid, &req->vmem_info);
 					break;
-				case op_init_touch:
+				case request_op_touch_init:
 					req->status = v_touch_init(req->vinput_info.request_virtual_slots, &req->vinput_info.POSITION_X, &req->vinput_info.POSITION_Y);
 					break;
-				case op_init_gyro:
-					req->status = v_gyro_init();
-					break;
-				case op_gyro_report:
-					req->status = v_gyro_report(req->vgyro_info.gyro_x, req->vgyro_info.gyro_y, req->vgyro_info.gyro_z);
-					break;
-				case op_down:
-				case op_move:
-				case op_up:
+				case request_op_touch_down:
+				case request_op_touch_move:
+				case request_op_touch_up:
 					v_touch_event(req->op, req->vinput_info.slot, req->vinput_info.x, req->vinput_info.y);
 					break;
-				case op_set_process_hwbp:
-					req->status = set_process_hwbp(req->pid, &req->bp_info);
+				case request_op_gyro_init:
+					req->status = v_gyro_init();
 					break;
-				case op_remove_process_hwbp:
+				case request_op_gyro_report:
+					req->status = v_gyro_report(req->vgyro_info.gyro_x, req->vgyro_info.gyro_y, req->vgyro_info.gyro_z);
+					break;
+				case request_op_gnss_init:
+					req->status = v_gnss_init();
+					break;
+				case request_op_gnss_report:
+					req->status = v_gnss_report(req->vgnss_info.latitude_e7, req->vgnss_info.longitude_e7);
+					break;
+				case request_op_hwbp_set:
+					req->status = set_process_hwbp(req->pid, &req->hwbp_info);
+					break;
+				case request_op_hwbp_remove:
 					remove_process_hwbp();
 					break;
-				case op_kexit:
-					KThreadExit = false;	  // 标记内核线程退出
-					inline_hook_remove_all(); // 内核退出才清理所有hook
+				case request_op_kernel_exit:
+					hide_task_remove(connect_thread_task->pid);
+					hide_task_remove(dispatch_thread_task->pid);
+					connect_thread_task = NULL;	 // 标记连接线程退出
+					dispatch_thread_task = NULL; // 标记调度线程退出
 					break;
 				default:
 					break;
 				}
-				req->user = true; // 通知用户层完成
 				asm volatile("" ::: "memory");
+				req->user = true; // 通知用户层完成
 			}
 			else
 			{
@@ -131,82 +139,88 @@ static int ConnectThreadFunction(void *data)
 	int ret;
 
 	// 和内核线程在运行
-	while (KThreadExit)
+	while (connect_thread_task)
 	{
-		// 请求进程处于未启用
-		if (!ProcessExit)
+
+		// 遍历系统中所有进程,//这里不加RCU锁，不然会导致6.6以上超时
+		for_each_process(task)
 		{
-			// 遍历系统中所有进程,//这里不加RCU锁，不然会导致6.6以上超时
-			for_each_process(task)
+			if (__builtin_strcmp(task->comm, "LS") != 0)
+				continue;
+
+			// 这次的task是旧task跳过
+			if (task == ls_process_task)
+				continue;
+			// 这次的task启动时间小于旧task跳过
+			if (ls_process_task && task->start_time <= ls_process_task->start_time)
+				continue;
+
+			// 获取进程的内存描述符
+			mm = get_task_mm(task);
+			if (!mm)
+				continue;
+
+			// 计算页数
+			num_pages = (sizeof(struct request_obj) + PAGE_SIZE - 1) / PAGE_SIZE;
+
+			// 分配页指针数组
+			pages = kmalloc_array(num_pages, sizeof(struct page *), GFP_KERNEL);
+			if (!pages)
 			{
-				if (__builtin_strcmp(task->comm, "LS") != 0)
-					continue;
-
-				// 获取进程的内存描述符
-				mm = get_task_mm(task);
-				if (!mm)
-					continue;
-
-				// 计算页数
-				num_pages = (sizeof(struct req_obj) + PAGE_SIZE - 1) / PAGE_SIZE;
-
-				// 分配页指针数组
-				pages = kmalloc_array(num_pages, sizeof(struct page *), GFP_KERNEL);
-				if (!pages)
-				{
-					pr_debug("kmalloc_array 失败\n");
-					goto out_put_mm;
-				}
-
-				// 远程获取用户空间地址对应的物理页（将用户地址映射到内核）
-				mmap_read_lock(mm);
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0) // 内核 6.12
-				ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL);
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)	 // 内核 6.5 到 6.12
-				ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL);
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)	 // 内核 6.1 到 6.5
-				ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL, NULL);
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0) // 内核 5.15 到 6.1
-				ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL, NULL);
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0) // 内核 5.10 到 5.15
-				ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL, NULL);
-#endif
-				mmap_read_unlock(mm);
-
-				if (ret < num_pages)
-				{
-					pr_debug("get_user_pages_remote 失败, ret=%d\n", ret);
-					goto out_put_pages;
-				}
-
-				// 映射到内核虚拟地址
-				req = vmap(pages, num_pages, VM_MAP, PAGE_KERNEL);
-				if (!req)
-				{
-					pr_debug("vmap 失败\n");
-					goto out_put_pages;
-				}
-
-				// 成功 get_user_pages_remote 持有页面引用，只需释放 mm
-				ProcessExit = true;				  // 标记用户进程已连接
-				req->user = true;				  // 通知用户层已连接
-				hide_process_install(task->tgid); // 隐藏进程
-				hide_kgsl_install(task->tgid);	  // 隐藏高通GPU节点
-				kfree(pages);
-				pages = NULL;
-				mmput(mm);
-				mm = NULL;
-				break; // 找到目标进程，退出遍历
-
-			out_put_pages:
-				release_gup_pages(pages, ret);
-				kfree(pages);
-				pages = NULL;
-
-			out_put_mm:
-				mmput(mm);
-				mm = NULL;
+				pr_debug("kmalloc_array 失败\n");
+				goto out_put_mm;
 			}
+
+			// 远程获取用户空间地址对应的物理页（将用户地址映射到内核）
+			mmap_read_lock(mm);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0) // 内核 6.12
+			ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)	 // 内核 6.5 到 6.12
+			ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)	 // 内核 6.1 到 6.5
+			ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL, NULL);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0) // 内核 5.15 到 6.1
+			ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL, NULL);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0) // 内核 5.10 到 5.15
+			ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL, NULL);
+#endif
+			mmap_read_unlock(mm);
+
+			if (ret < num_pages)
+			{
+				pr_debug("get_user_pages_remote 失败, ret=%d\n", ret);
+				goto out_put_pages;
+			}
+
+			// 映射到内核虚拟地址
+			req = vmap(pages, num_pages, VM_MAP, PAGE_KERNEL);
+			if (!req)
+			{
+				pr_debug("vmap 失败\n");
+				goto out_put_pages;
+			}
+
+			// 成功 get_user_pages_remote 持有页面引用，只需释放 mm
+			if (ls_process_task)
+				send_sig(SIGKILL, ls_process_task, 0); // 杀死旧的task
+			ls_process_task = task;				   // 保存用户进程指针
+			req->user = true;					   // 通知用户层已连接
+			hide_task_install(task->tgid);		   // 隐藏进程
+			hide_kgsl_install(task->tgid);		   // 隐藏高通GPU节点
+			kfree(pages);
+			pages = NULL;
+			mmput(mm);
+			mm = NULL;
+			break; // 找到目标进程，退出遍历
+
+		out_put_pages:
+			release_gup_pages(pages, ret);
+			kfree(pages);
+			pages = NULL;
+
+		out_put_mm:
+			mmput(mm);
+			mm = NULL;
 		}
 
 		msleep(2000);
@@ -235,11 +249,17 @@ static int do_exit_hook_work(struct pt_regs *regs)
 		pr_debug("【进程监听】检测到 LS 进程即将退出！PID: %d, 进程名(comm): %s\n", task->pid, task->comm);
 
 		// 相应处理
-		v_touch_destroy();				 // 清理触摸
-		v_gyro_destroy();				 // 清理陀螺仪
-		hide_process_remove(task->tgid); // 只取消当前用户进程的隐藏，不影响隐藏的内核线程
-		hide_kgsl_remove(task->tgid);	 // 取消当前用户进程的高通GPU节点隐藏
-		ProcessExit = false;			 // 标记用户进程已断开
+		ls_process_task = NULL;		  // 标记用户进程已断开
+		hide_task_remove(task->tgid); // 只取消当前用户进程的隐藏，不影响隐藏的内核线程
+		hide_kgsl_remove(task->tgid); // 取消当前用户进程的高通GPU节点隐藏
+		v_touch_destroy();			  // 清理触摸
+		v_gnss_destroy();			  // 清理定位
+		v_gyro_destroy();			  // 清理陀螺仪
+		remove_process_hwbp();		  // 清理硬件断点
+		if (!connect_thread_task && !dispatch_thread_task)
+		{
+			inline_hook_remove_all(); // 内核退出才清理所有hook
+		}
 	}
 	return 0;
 }
@@ -304,9 +324,6 @@ static void hide_myself(void)
 
 static int __init lsdriver_init(void)
 {
-	struct task_struct *chf;
-	struct task_struct *dhf;
-
 	//*(volatile int *)0 = 0;
 
 	print_el2_status(); // 输出Hypervisor相关信息
@@ -317,26 +334,26 @@ static int __init lsdriver_init(void)
 
 	allocate_physical_page_info(); // pte读写需要，线性读写不需要 // 初始化物理页地址和页表项
 
-	chf = kthread_run(ConnectThreadFunction, NULL, "ext4-rsv-conver");
-	if (IS_ERR(chf))
+	connect_thread_task = kthread_run(ConnectThreadFunction, NULL, "ext4-rsv-conver");
+	if (IS_ERR(connect_thread_task))
 	{
 		pr_debug("创建连接线程失败\n");
-		return PTR_ERR(chf);
+		return PTR_ERR(connect_thread_task);
 	}
 
-	dhf = kthread_run(DispatchThreadFunction, NULL, "ext4-rsv-conver");
-	if (IS_ERR(dhf))
+	dispatch_thread_task = kthread_run(DispatchThreadFunction, NULL, "ext4-rsv-conver");
+	if (IS_ERR(dispatch_thread_task))
 	{
 		pr_debug("创建调度线程失败\n");
-		return PTR_ERR(dhf);
+		return PTR_ERR(dispatch_thread_task);
 	}
 
 	// 注册用户进程退出回调
 	do_exit_init();
 
 	// 隐藏内核线程
-	hide_process_install(chf->pid); // 隐藏task,线程
-	hide_process_install(dhf->pid); // 隐藏task,线程
+	hide_task_install(connect_thread_task->pid);  // 隐藏task,线程
+	hide_task_install(dispatch_thread_task->pid); // 隐藏task,线程
 
 	return 0;
 }

@@ -52,7 +52,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#include "DriverMemory.h"
+#include "Driver.h"
 #include "Utils/ThreadPool.h"
 #include "Utils/MappedFile.h"
 #include "Disassembler.h"

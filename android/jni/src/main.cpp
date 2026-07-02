@@ -20,13 +20,14 @@
 #include <span>
 
 #include "MemoryTool.h"
-#include "DriverMemory.h"
+#include "Driver.h"
 #include "SignatureScanner.h"
 #include "Disassembler.h"
 #include "ReadWriteTest.h"
 #include "tcp_server.h"
 #include "TouchTest.h"
 #include "GyroTest.h"
+#include "GnssTest.h"
 #include "Android_touch/TouchHelperA.h"
 #include "Android_draw/draw.h"
 
@@ -332,7 +333,7 @@ private:
         if (recordIndex < 0)
             return nullptr;
 
-        auto &info = const_cast<Driver::hwbp_info &>(dr->GetHwbpInfoRef());
+        auto &info = const_cast<Driver::hardware_breakpoint &>(dr->GetHwbpInfoRef());
         int flatIndex = 0;
         for (auto &point : info.points)
         {
@@ -1463,7 +1464,7 @@ private:
             UI::Text(Colors::HINT, "暂无命中记录");
     }
 
-    void drawBpRecords(const Driver::hwbp_info &info, float w)
+    void drawBpRecords(const Driver::hardware_breakpoint &info, float w)
     {
         uint64_t totalHits = 0;
         int totalPointCount = 0;
@@ -2271,7 +2272,8 @@ int main()
     std::println(stdout, "  3) 内存工具");
     std::println(stdout, "  4) TCP服务器");
     std::println(stdout, "  5) 陀螺仪测试");
-    std::print(stdout, "请输入 [1/2/3/4/5]: ");
+    std::println(stdout, "  6) 定位测试");
+    std::print(stdout, "请输入 [1/2/3/4/5/6]: ");
 
     int rc = 1;
     int mode = 0;
@@ -2282,7 +2284,7 @@ int main()
         std::println(stderr, "[错误] 输入无效。");
         return rc;
     }
-    if (mode < 1 || mode > 5)
+    if (mode < 1 || mode > 6)
     {
         std::println(stderr, "[错误] 未知选项: {}", mode);
         return rc;
@@ -2294,7 +2296,7 @@ int main()
         return rc;
     }
 
-    dr = new Driver((mode == 2 || mode == 3) ? 5 : 0, mode == 5);
+    dr = new Driver((mode == 2 || mode == 3) ? 5 : 0, mode == 5, mode == 6);
 
     if (mode == 1)
     {
@@ -2315,6 +2317,10 @@ int main()
     else if (mode == 5)
     {
         rc = RunGyroTest();
+    }
+    else if (mode == 6)
+    {
+        rc = RunGnssTest();
     }
     delete dr;
     dr = nullptr;

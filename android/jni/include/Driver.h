@@ -73,6 +73,25 @@ public: // 共有结构体和锁
     };
     SpinLock m_mutex;
 
+    // 寄存器操作类型定义
+#define HWBP_OP_NONE 0x0  // 00: 不操作
+#define HWBP_OP_READ 0x1  // 01: 读
+#define HWBP_OP_WRITE 0x2 // 10: 写
+
+// 设置掩码位的宏，参数1:结构体指针，参数2:寄存器索引，参数3:操作类型
+#define HWBP_SET_MASK(record, reg, op)                          \
+    do                                                          \
+    {                                                           \
+        int byte_idx = (reg) >> 2;                              \
+        int bit_offset = ((reg) & 0x3) << 1;                    \
+        (record)->mask[byte_idx] &= ~(0x3 << bit_offset);       \
+        (record)->mask[byte_idx] |= ((op) & 0x3) << bit_offset; \
+    } while (0)
+
+// 获取掩码位的宏，参数1:结构体指针，参数2:寄存器索引
+#define HWBP_GET_MASK(record, reg) \
+    (((record)->mask[(reg) >> 2] >> (((reg) & 0x3) << 1)) & 0x3)
+
     // 断点类型(类型和长度完全与内核一致会冲突，所以这里HW加上BP后缀,原型没有BP)
     enum hwbp_type
     {
@@ -181,25 +200,6 @@ public: // 共有结构体和锁
         MAX_REG_COUNT
     };
 
-// 寄存器操作类型定义
-#define HWBP_OP_NONE 0x0  // 00: 不操作
-#define HWBP_OP_READ 0x1  // 01: 读
-#define HWBP_OP_WRITE 0x2 // 10: 写
-
-// 设置掩码位的宏，参数1:结构体指针，参数2:寄存器索引，参数3:操作类型
-#define HWBP_SET_MASK(record, reg, op)                          \
-    do                                                          \
-    {                                                           \
-        int byte_idx = (reg) >> 2;                              \
-        int bit_offset = ((reg) & 0x3) << 1;                    \
-        (record)->mask[byte_idx] &= ~(0x3 << bit_offset);       \
-        (record)->mask[byte_idx] |= ((op) & 0x3) << bit_offset; \
-    } while (0)
-
-// 获取掩码位的宏，参数1:结构体指针，参数2:寄存器索引
-#define HWBP_GET_MASK(record, reg) \
-    (((record)->mask[(reg) >> 2] >> (((reg) & 0x3) << 1)) & 0x3)
-
     // 记录单个 PC（触发指令地址）的命中状态
     struct hwbp_record
     {
@@ -242,11 +242,32 @@ public: // 共有结构体和锁
     };
 
     // 存储整体命中信息
-    struct hwbp_info
+    struct hardware_breakpoint
     {
         uint64_t num_brps;            // 执行断点的数量
         uint64_t num_wrps;            // 访问断点的数量
         struct hwbp_point points[16]; // 多个观点地址
+    };
+
+    struct virtual_gnss
+    {
+        int latitude_e7;
+        int longitude_e7;
+    };
+
+    struct virtual_gyro
+    {
+        int gyro_x;
+        int gyro_y;
+        int gyro_z;
+    };
+
+    struct virtual_input
+    {
+        int request_virtual_slots;  // 初始化时请求的虚拟 slot 数量
+        int POSITION_X, POSITION_Y; // 初始化触摸时返回的触摸面板 ABS 最大值
+        int slot;                   // 触摸槽位
+        int x, y;                   // 触摸坐标
     };
 
 #define MAX_MODULES 1024
@@ -276,7 +297,7 @@ public: // 共有结构体和锁
         uint64_t end;
     };
 
-    struct memory_info
+    struct virtual_memory
     {
         int module_count;                        // 总模块数量
         struct module_info modules[MAX_MODULES]; // 模块信息
@@ -285,78 +306,69 @@ public: // 共有结构体和锁
         struct region_info regions[MAX_SCAN_REGIONS]; // 可扫描内存区域 (rw-p, 排除特殊区域)
     };
 
-    struct virtual_input
-    {
-        int request_virtual_slots;  // 初始化时请求的虚拟 slot 数量（必须放在最前）
-        int POSITION_X, POSITION_Y; // 初始化触摸时返回的触摸面板 ABS 最大值
-        int slot;                   // 触摸槽位
-        int x, y;                   // 触摸坐标
-    };
-
-    struct virtual_gyro
-    {
-        int gyro_x;
-        int gyro_y;
-        int gyro_z;
-    };
-
-    struct memory_rw
+    struct virtual_memoryrw
     {
         uint64_t rw_addr;            // 读写的地址
         uint8_t user_buffer[0x1000]; // 物理标准页大小的数据缓存区
         int size;                    // 读写的大小
     };
 
-    enum sm_req_op
+    enum request_op
     {
-        op_o, // 空调用
-        op_r, // 读取内存
-        op_w, // 写入内存
-        op_m, // 获取进程内存信息
+        request_op_none,       // 空调用
+        request_op_vmem_read,  // 读取内存
+        request_op_vmem_write, // 写入内存
+        request_op_vmem_info,  // 获取进程内存信息
 
-        op_init_touch, // 初始化触摸
-        op_down,       // 上报按下
-        op_move,       // 上报移动
-        op_up,         // 上报抬起
+        request_op_touch_init, // 初始化触摸
+        request_op_touch_down, // 上报按下
+        request_op_touch_move, // 上报移动
+        request_op_touch_up,   // 上报抬起
 
-        op_init_gyro,   // 初始化陀螺仪
-        op_gyro_report, // 上报陀螺仪数据
+        request_op_gyro_init,   // 初始化陀螺仪
+        request_op_gyro_report, // 上报陀螺仪数据
 
-        op_set_process_hwbp,    // 设置硬件断点并获取执行/访问断点数量
-        op_remove_process_hwbp, // 删除硬件断点
+        request_op_gnss_init,   // 初始化虚拟定位
+        request_op_gnss_report, // 上报虚拟定位数据
 
-        op_kexit // 内核线程退出
+        request_op_hwbp_set,    // 设置硬件断点并获取执行/访问断点数量
+        request_op_hwbp_remove, // 删除硬件断点
+
+        request_op_kernel_exit // 内核线程退出
     };
 
     // 将在队列中使用的请求实例结构体
-    struct req_obj
+    struct request_obj
     {
         bool kernel; // 由用户模式设置 true = 内核有待处理的请求, false = 请求已完成
         bool user;   // 由内核模式设置 true = 用户模式有待处理的请求, false = 请求已完成
 
-        enum sm_req_op op; // shared memory请求操作类型
-        int status;        // 操作状态
-
         int pid; // 当前派发指定的pid
 
-        // 进程内存读写信息
-        struct memory_rw rw_info;
-        // 进程虚拟内存信息
-        struct memory_info mem_info;
+        enum request_op op; // 请求操作类型
+        int status;         // 请求操作状态
+
+        // 虚拟内存读写信息
+        struct virtual_memoryrw vmemrw_info;
+        // 虚拟内存信息
+        struct virtual_memory vmem_info;
         // 虚拟触摸信息
         struct virtual_input vinput_info;
         // 虚拟陀螺仪信息
         struct virtual_gyro vgyro_info;
-        // 断点信息
-        struct hwbp_info bp_info;
+        // 虚拟定位信息
+        struct virtual_gnss vgnss_info;
+        // 硬件断点信息
+        struct hardware_breakpoint hwbp_info;
     };
 
-public:                              // 外部初始化
-    Driver(int Vslot, bool initGyro) //
+public: // 外部初始化
+    Driver(int Vslot, bool initGyro, bool initGnss)
     {
         InitCommunication();
         InitTouch(Vslot);
         InitGyro(initGyro);
+        InitGnss(initGnss);
     }
 
     ~Driver()
@@ -368,16 +380,16 @@ public:
     void NullIo()
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
-        req->op = op_o;
+        req->op = request_op_none;
         IoCommitAndWait();
     }
-
     void ExitKernel()
     {
         // 内核停止运行
-        req->op = op_kexit;
+        req->op = request_op_kernel_exit;
         req->kernel = true;
     }
+
     int GetPid(std::string_view packageName)
     {
         DIR *dir = opendir("/proc");
@@ -431,13 +443,13 @@ public: // 外部读写接口
     T Read(uint64_t address)
     {
         T value = {};
-        KReadProcessMemory(address, &value, sizeof(T));
+        HandleVirtualMemoryRWEvent(request_op_vmem_read, address, &value, sizeof(T));
         return value;
     }
 
     int Read(uint64_t address, void *buffer, size_t size)
     {
-        return KReadProcessMemory(address, buffer, size);
+        return HandleVirtualMemoryRWEvent(request_op_vmem_read, address, buffer, size);
     }
 
     std::string ReadString(uint64_t address, size_t max_length = 128)
@@ -456,42 +468,47 @@ public: // 外部读写接口
     template <typename T>
     int Write(uint64_t address, const T &value)
     {
-        return KWriteProcessMemory(address, const_cast<T *>(&value), sizeof(T));
+        return HandleVirtualMemoryRWEvent(request_op_vmem_write, address, const_cast<T *>(&value), sizeof(T));
     }
 
     int Write(uint64_t address, void *buffer, size_t size)
     {
-        return KWriteProcessMemory(address, buffer, size);
+        return HandleVirtualMemoryRWEvent(request_op_vmem_write, address, buffer, size);
     }
 
 public: // 外部输入接口
     void TouchDown(int slot, int x, int y, int screenW, int screenH)
     {
-        HandleTouchEvent(sm_req_op::op_down, slot, x, y, screenW, screenH);
+        HandleTouchEvent(request_op_touch_down, slot, x, y, screenW, screenH);
     }
 
     void TouchMove(int slot, int x, int y, int screenW, int screenH)
     {
-        HandleTouchEvent(sm_req_op::op_move, slot, x, y, screenW, screenH);
+        HandleTouchEvent(request_op_touch_move, slot, x, y, screenW, screenH);
     }
 
-    void TouchUp(int slot) { HandleTouchEvent(sm_req_op::op_up, slot, 1, 1, 1, 1); }
+    void TouchUp(int slot) { HandleTouchEvent(request_op_touch_up, slot, 1, 1, 1, 1); }
 
     void GyroReport(int gyro_x, int gyro_y, int gyro_z)
     {
         HandleGyroReport(gyro_x, gyro_y, gyro_z);
     }
 
+    void GnssReport(int latitude_e7, int longitude_e7)
+    {
+        HandleGnssReport(latitude_e7, longitude_e7);
+    }
+
 public: // 外部获取内存信息
     // 获取内部结构体实例 内部成员调用不需要显示使用this指针，隐式this
-    const memory_info &GetMemoryInfoRef()
+    const virtual_memory &GetMemoryInfoRef()
     {
-        if (GetMemoryInfo() != 0)
+        if (HandleVirtualMemoryInfo() != 0)
         {
             std::println("获取内存信息失败!!!");
-            __builtin_memset(&req->mem_info, 0, sizeof(req->mem_info));
+            __builtin_memset(&req->vmem_info, 0, sizeof(req->vmem_info));
         }
-        return req->mem_info;
+        return req->vmem_info;
     }
 
     // 获取模块地址，true为起始地址，false为结束地址
@@ -505,7 +522,7 @@ public: // 外部获取内存信息
 
         *outAddress = 0;
 
-        if (GetMemoryInfo() != 0)
+        if (HandleVirtualMemoryInfo() != 0)
         {
             std::println(stderr, "驱动获取内存信息失败");
             return false;
@@ -570,7 +587,7 @@ public: // 外部获取内存信息
     {
         std::vector<std::pair<uintptr_t, uintptr_t>> regions;
 
-        if (GetMemoryInfo() != 0)
+        if (HandleVirtualMemoryInfo() != 0)
         {
             std::println(stderr, "驱动获取内存信息失败");
             return regions;
@@ -718,7 +735,7 @@ public: // 外部获取内存信息
 
             std::fill(page.begin(), page.begin() + toRead, 0);
 
-            if (KReadProcessMemory(addr, page.data(), toRead) > 0)
+            if (HandleVirtualMemoryRWEvent(request_op_vmem_read, addr, page.data(), toRead) > 0)
             {
                 totalRead += toRead;
                 read_ok = true;
@@ -753,19 +770,19 @@ public: // 外部获取内存信息
 
 public: // 外部硬件断点接口
     // 获取断点结构体信息
-    const hwbp_info &GetHwbpInfoRef()
+    const hardware_breakpoint &GetHwbpInfoRef()
     {
-        return req->bp_info;
+        return req->hwbp_info;
     }
     // 设置多个断点地址
     int SetProcessHwbpRef(std::span<const hwbp_point> points)
     {
-        return SetProcessHwbp(points);
+        return HandleHardwareBreakpointEvent(request_op_hwbp_set, points);
     }
     // 删除断点
     void RemoveProcessHwbpRef()
     {
-        RemoveProcessHwbp();
+        HandleHardwareBreakpointEvent(request_op_hwbp_remove);
     }
 
     // 删除指定索引内容
@@ -775,7 +792,7 @@ public: // 外部硬件断点接口
             return;
 
         int flat_index = 0;
-        for (auto &point : req->bp_info.points)
+        for (auto &point : req->hwbp_info.points)
         {
             if (index >= flat_index && index < flat_index + point.record_count)
             {
@@ -793,7 +810,7 @@ public: // 外部硬件断点接口
     }
 
 private: // 私有实现，外部无需关系
-    struct req_obj *req = nullptr;
+    struct request_obj *req = nullptr;
     int global_pid = 0;
 
     inline void IoCommitAndWait()
@@ -820,16 +837,16 @@ private: // 私有实现，外部无需关系
     {
         prctl(PR_SET_NAME, "LS", 0, 0, 0);
 
-        req = (req_obj *)mmap((void *)0x2025827000, sizeof(req_obj), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+        req = (request_obj *)mmap((void *)0x2025827000, sizeof(request_obj), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
 
         if (req == MAP_FAILED)
         {
             printf("[-] 分配共享内存失败，错误码: %d (%s)\n", errno, strerror(errno));
             return;
         }
-        __builtin_memset(req, 0, sizeof(req_obj));
+        __builtin_memset(req, 0, sizeof(request_obj));
 
-        printf("[+] 分配虚拟地址成功，地址: %p  大小: %lu\n", req, sizeof(req_obj));
+        printf("[+] 分配虚拟地址成功，地址: %p  大小: %lu\n", req, sizeof(request_obj));
         printf("当前进程 PID: %d\n", getpid());
         printf("等待驱动握手...\n");
 
@@ -845,7 +862,7 @@ private: // 私有实现，外部无需关系
     {
         if (requested_slots <= 0)
             return;
-        req->op = op_init_touch;
+        req->op = request_op_touch_init;
         req->vinput_info.request_virtual_slots = requested_slots;
         IoCommitAndWait();
     }
@@ -857,152 +874,89 @@ private: // 私有实现，外部无需关系
             return;
 
         std::scoped_lock<SpinLock> lock(m_mutex);
-        req->op = op_init_gyro;
+        req->op = request_op_gyro_init;
         IoCommitAndWait();
     }
 
-    // 读写
-    int KReadProcessMemory(uint64_t addr, void *buffer, size_t size)
+    // 初始化虚拟定位
+    void InitGnss(bool enable)
+    {
+        if (!enable)
+            return;
+
+        std::scoped_lock<SpinLock> lock(m_mutex);
+        req->op = request_op_gnss_init;
+        IoCommitAndWait();
+    }
+
+    // 虚拟内存读写事件
+    int HandleVirtualMemoryRWEvent(request_op op, uint64_t addr, void *buffer, size_t size)
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
-
-        // 大数据自动分片，防止缓冲区溢出覆盖触摸数据
-        if (size > 0x1000)
+        const bool is_read = (op == request_op_vmem_read);
+        size_t processed = 0;
+        const auto copy_virtual_memory_chunk = [](void *destination, const void *source, size_t copy_size)
         {
-            size_t processed = 0;
-            while (processed < size)
+            switch (copy_size)
             {
-                asm volatile("" ::: "memory");
-                size_t chunk = (size - processed > 0x1000) ? 0x1000 : (size - processed);
-                req->op = op_r;
-                req->pid = global_pid;
-                req->rw_info.rw_addr = addr + processed;
-                req->rw_info.size = chunk;
-                IoCommitAndWait();
-
-                if (req->status <= 0)
-                    return req->status;
-                asm volatile("" ::: "memory");
-                __builtin_memcpy((uint8_t *)buffer + processed, req->rw_info.user_buffer, chunk);
-                asm volatile("" ::: "memory");
-                processed += chunk;
+            case 1:
+                __builtin_memcpy(destination, source, 1);
+                break;
+            case 2:
+                __builtin_memcpy(destination, source, 2);
+                break;
+            case 4:
+                __builtin_memcpy(destination, source, 4);
+                break;
+            case 8:
+                __builtin_memcpy(destination, source, 8);
+                break;
+            default:
+                __builtin_memcpy(destination, source, copy_size);
+                break;
             }
-            return req->status;
-        }
-        asm volatile("" ::: "memory");
-        // 小数据快速通道
-        req->op = op_r;
-        req->pid = global_pid;
-        req->rw_info.rw_addr = addr;
-        req->rw_info.size = size;
+        };
 
-        IoCommitAndWait();
-
-        if (req->status <= 0)
-            return req->status;
-
-        asm volatile("" ::: "memory");
-
-        // 极限性能且安全的内存拷贝 (防未对齐崩溃)
-        switch (size)
+        while (processed < size)
         {
-        case 1:
-            __builtin_memcpy(buffer, req->rw_info.user_buffer, 1);
-            break;
-        case 2:
-            __builtin_memcpy(buffer, req->rw_info.user_buffer, 2);
-            break;
-        case 4:
-            __builtin_memcpy(buffer, req->rw_info.user_buffer, 4);
-            break;
-        case 8:
-            __builtin_memcpy(buffer, req->rw_info.user_buffer, 8);
-            break;
-        default:
-            __builtin_memcpy(buffer, req->rw_info.user_buffer, size);
-            break;
-        }
+            asm volatile("" ::: "memory");
+            const size_t chunk = (size - processed > 0x1000) ? 0x1000 : (size - processed);
+            req->op = op;
+            req->pid = global_pid;
+            req->vmemrw_info.rw_addr = addr + processed;
+            req->vmemrw_info.size = chunk;
 
-        asm volatile("" ::: "memory");
+            if (!is_read)
+                copy_virtual_memory_chunk(req->vmemrw_info.user_buffer, static_cast<uint8_t *>(buffer) + processed, chunk);
+
+            asm volatile("" ::: "memory");
+            IoCommitAndWait();
+
+            if (req->status <= 0)
+                return req->status;
+
+            asm volatile("" ::: "memory");
+            if (is_read)
+                copy_virtual_memory_chunk(static_cast<uint8_t *>(buffer) + processed, req->vmemrw_info.user_buffer, chunk);
+
+            processed += chunk;
+        }
 
         return req->status;
     }
 
-    int KWriteProcessMemory(uint64_t addr, void *buffer, size_t size)
+    // 获取进程虚拟内存信息事件
+    int HandleVirtualMemoryInfo()
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
-
-        // 大数据自动分片，防止本地拷贝时溢出覆盖触摸数据
-        if (size > 0x1000)
-        {
-            size_t processed = 0;
-            while (processed < size)
-            {
-                asm volatile("" ::: "memory");
-                size_t chunk = (size - processed > 0x1000) ? 0x1000 : (size - processed);
-                req->op = op_w;
-                req->pid = global_pid;
-                req->rw_info.rw_addr = addr + processed;
-                req->rw_info.size = chunk;
-                asm volatile("" ::: "memory");
-                __builtin_memcpy(req->rw_info.user_buffer, (uint8_t *)buffer + processed, chunk);
-                asm volatile("" ::: "memory");
-                IoCommitAndWait();
-
-                if (req->status <= 0)
-                    return req->status;
-                processed += chunk;
-                asm volatile("" ::: "memory");
-            }
-            return req->status;
-        }
-        asm volatile("" ::: "memory");
-        // 小数据快速通道
-        req->op = op_w;
-        req->pid = global_pid;
-        req->rw_info.rw_addr = addr;
-        req->rw_info.size = size;
-
-        asm volatile("" ::: "memory");
-
-        switch (size)
-        {
-        case 1:
-            __builtin_memcpy(req->rw_info.user_buffer, buffer, 1);
-            break;
-        case 2:
-            __builtin_memcpy(req->rw_info.user_buffer, buffer, 2);
-            break;
-        case 4:
-            __builtin_memcpy(req->rw_info.user_buffer, buffer, 4);
-            break;
-        case 8:
-            __builtin_memcpy(req->rw_info.user_buffer, buffer, 8);
-            break;
-        default:
-            __builtin_memcpy(req->rw_info.user_buffer, buffer, size);
-            break;
-        }
-
-        asm volatile("" ::: "memory");
-
-        IoCommitAndWait();
-
-        return req->status;
-    }
-
-    // 获取进程内存信息
-    int GetMemoryInfo()
-    {
-        std::scoped_lock<SpinLock> lock(m_mutex);
-        req->op = op_m;
+        req->op = request_op_vmem_info;
         req->pid = global_pid;
         IoCommitAndWait();
         return req->status;
     }
 
     // 触摸事件
-    void HandleTouchEvent(sm_req_op op, int slot, int x, int y, int screenW, int screenH)
+    void HandleTouchEvent(request_op op, int slot, int x, int y, int screenW, int screenH)
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
 
@@ -1040,42 +994,50 @@ private: // 私有实现，外部无需关系
         IoCommitAndWait();
     }
 
-    // 陀螺仪事件
+    // 陀螺仪事件，单位为 rad/s * 1000
     void HandleGyroReport(int gyro_x, int gyro_y, int gyro_z)
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
-        req->op = op_gyro_report;
+        req->op = request_op_gyro_report;
         req->vgyro_info.gyro_x = gyro_x;
         req->vgyro_info.gyro_y = gyro_y;
         req->vgyro_info.gyro_z = gyro_z;
         IoCommitAndWait();
     }
 
-    // 设置进程多地址断点(断点只要触发驱动就会向hwbp_info写值，外部获取引用循环读取就行)
-    int SetProcessHwbp(std::span<const hwbp_point> points)
+    // 虚拟定位事件，单位为 degrees * 10000000
+    void HandleGnssReport(int latitude_e7, int longitude_e7)
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
-        req->op = op_set_process_hwbp;
-        req->pid = global_pid;
-        __builtin_memset(req->bp_info.points, 0, sizeof(req->bp_info.points));
-        const size_t count = std::min(points.size(), std::size(req->bp_info.points));
-        for (size_t i = 0; i < count; ++i)
+        req->op = request_op_gnss_report;
+        req->vgnss_info.latitude_e7 = latitude_e7;
+        req->vgnss_info.longitude_e7 = longitude_e7;
+        IoCommitAndWait();
+    }
+
+    // 硬件断点事件
+    int HandleHardwareBreakpointEvent(request_op op, std::span<const hwbp_point> points = {})
+    {
+        std::scoped_lock<SpinLock> lock(m_mutex);
+        if (op != request_op_hwbp_set && op != request_op_hwbp_remove)
+            return -1;
+
+        req->op = op;
+        if (op == request_op_hwbp_set)
         {
-            req->bp_info.points[i].hit_addr = points[i].hit_addr;
-            req->bp_info.points[i].bt = points[i].bt;
-            req->bp_info.points[i].bl = points[i].bl;
-            req->bp_info.points[i].bs = points[i].bs;
+            req->pid = global_pid;
+            __builtin_memset(req->hwbp_info.points, 0, sizeof(req->hwbp_info.points));
+            const size_t count = std::min(points.size(), std::size(req->hwbp_info.points));
+            for (size_t i = 0; i < count; ++i)
+            {
+                req->hwbp_info.points[i].hit_addr = points[i].hit_addr;
+                req->hwbp_info.points[i].bt = points[i].bt;
+                req->hwbp_info.points[i].bl = points[i].bl;
+                req->hwbp_info.points[i].bs = points[i].bs;
+            }
         }
         IoCommitAndWait();
         return req->status;
-    }
-
-    // 删除进程断点
-    void RemoveProcessHwbp()
-    {
-        std::scoped_lock<SpinLock> lock(m_mutex);
-        req->op = op_remove_process_hwbp;
-        IoCommitAndWait();
     }
 };
 

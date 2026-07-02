@@ -1,5 +1,5 @@
-#ifndef PROCESS_MEMORY_ENUM_H
-#define PROCESS_MEMORY_ENUM_H
+#ifndef VIRTUAL_MEMORY_ENUM_H
+#define VIRTUAL_MEMORY_ENUM_H
 
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -132,7 +132,7 @@ static inline void add_seg(struct module_info *m, short type_tag, uint8_t prot, 
     m->seg_count++;
 }
 
-static inline int enum_process_memory(pid_t pid, struct memory_info *info)
+static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
 {
     struct task_struct *task = NULL;
     struct pid *pid_struct = NULL;
@@ -729,4 +729,4 @@ static inline int enum_process_memory(pid_t pid, struct memory_info *info)
     return 0;
 }
 
-#endif // PROCESS_MEMORY_ENUM_H
+#endif // VIRTUAL_MEMORY_ENUM_H

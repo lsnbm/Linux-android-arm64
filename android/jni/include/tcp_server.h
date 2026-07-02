@@ -166,7 +166,7 @@ namespace
         return count;
     }
 
-    Driver::hwbp_record *findHwbpRecordByFlatIndex(Driver::hwbp_info &info, int index, int *pointIndex = nullptr, int *pointRecordIndex = nullptr)
+    Driver::hwbp_record *findHwbpRecordByFlatIndex(Driver::hardware_breakpoint &info, int index, int *pointIndex = nullptr, int *pointRecordIndex = nullptr)
     {
         if (index < 0)
             return nullptr;
@@ -193,7 +193,7 @@ namespace
         return nullptr;
     }
 
-    int getHwbpTotalRecordCount(const Driver::hwbp_info &info)
+    int getHwbpTotalRecordCount(const Driver::hardware_breakpoint &info)
     {
         int total = 0;
         for (const auto &point : info.points)
@@ -1407,7 +1407,7 @@ namespace
             const auto value = MemUtils::ParseUInt128(std::get<std::string>(valueText));
             if (!value.has_value())
                 return fail(std::format("operation={} 参数 value 无效", op));
-            auto &info = const_cast<Driver::hwbp_info &>(dr->GetHwbpInfoRef());
+            auto &info = const_cast<Driver::hardware_breakpoint &>(dr->GetHwbpInfoRef());
             int pointIndex = -1;
             int pointRecordIndex = -1;
             auto *record = findHwbpRecordByFlatIndex(info, std::get<int>(index), &pointIndex, &pointRecordIndex);

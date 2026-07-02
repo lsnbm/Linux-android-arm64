@@ -14,7 +14,7 @@
 #include <string>
 #include <vector>
 
-#include "DriverMemory.h"
+#include "Driver.h"
 
 namespace SignatureScanner
 {

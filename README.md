@@ -56,7 +56,7 @@ TG:https://t.me/+ArHIx-Km9jkxNjZl
    - 模块初始化时会隐藏模块链表、sysfs 模块对象、部分 vmalloc 信息和工作线程链表节点。
 
 8. [用户态封装和辅助工具](#11-用户态封装要点)
-   - `Android-LS/include/DriverMemory.h` 在这些基础能力上提供 C++ 封装和上层工具。
+   - `android/include/Driver.h` 在这些基础能力上提供 C++ 封装和上层工具。
    - 包括读写模板、模块地址查询、扫描区域合并、模块 dump、硬件断点记录管理和特征扫描。
 
 用户态封装主要接口：
@@ -77,8 +77,8 @@ TG:https://t.me/+ArHIx-Km9jkxNjZl
 
 - `lsdriver.c`：模块入口、连接线程、调度线程、进程退出监听、模块/线程隐藏逻辑
 - `io_struct.h`：共享内存协议定义，包括操作码、请求结构、内存信息结构、硬件断点记录结构
-- `physical.h`：进程虚拟地址到物理地址翻译、物理内存读写、跨页读写主流程
-- `process_memory_enum.h`：进程 VMA 枚举、模块收集、扫描区过滤、模块区段反诱饵后处理
+- `virtual_memory_rw.h`：进程虚拟地址到物理地址翻译、物理内存读写、跨页读写主流程
+- `virtual_memory_enum.h`：进程 VMA 枚举、模块收集、扫描区过滤、模块区段反诱饵后处理
 - `virtual_input.h`：虚拟触摸初始化、slot 劫持、虚拟触摸事件上报与销毁
 - `hwbp.h`：硬件断点用户可见接口、命中现场记录/回放逻辑
 - `arm64_debug_monitor.h`：sched_switch 监听、debug monitor inline hook、BVR/BCR/WVR/WCR 写入与清理
@@ -87,7 +87,7 @@ TG:https://t.me/+ArHIx-Km9jkxNjZl
 - `export_fun.h`：`kallsyms_lookup_name` 获取、CFI 绕过、页表辅助函数
 - `Makefile`：模块编译参数
 
-`Android-LS/include/DriverMemory.h` 是配套用户态 C++ 封装，负责共享内存映射、握手、同步、自旋锁、读写分片、坐标换算和上层辅助功能。
+`android/include/Driver.h` 是配套用户态 C++ 封装，负责共享内存映射、握手、同步、自旋锁、读写分片、坐标换算和上层辅助功能。
 
 ---
 
@@ -186,13 +186,13 @@ TG:https://t.me/+ArHIx-Km9jkxNjZl
 
 ## 5. 进程内存读写实现
 
-实现文件：`physical.h`
+实现文件：`virtual_memory_rw.h`
 
 入口函数：
 
 - `read_process_memory(pid, vaddr, buffer, size)`
 - `write_process_memory(pid, vaddr, buffer, size)`
-- 两者最终都进入 `_process_memory_rw(...)`
+- 两者最终都进入 `virtual_memory_rw(...)`
 
 当前实际启用路径：
 
@@ -221,7 +221,7 @@ TG:https://t.me/+ArHIx-Km9jkxNjZl
 
 ### 5.2 读写主流程
 
-`_process_memory_rw(...)` 做了这些处理：
+`virtual_memory_rw(...)` 做了这些处理：
 
 - 缓存上一次使用的 `mm_struct`：`s_last_pid` / `s_last_mm`
 - 缓存上一次翻译的页：`s_last_vpage_base` / `s_last_ppage_base`
@@ -236,17 +236,17 @@ TG:https://t.me/+ArHIx-Km9jkxNjZl
 - 参数错误：返回 `-EINVAL`
 - 找不到进程或 task：返回 `-ESRCH`
 
-用户态 `DriverMemory.h` 还会对超过 `0x1000` 的读写进行二次分片，因为共享结构中的 `user_buffer` 固定为一页大小。
+用户态 `Driver.h` 还会对超过 `0x1000` 的读写进行二次分片，因为共享结构中的 `user_buffer` 固定为一页大小。
 
 ---
 
 ## 6. 进程内存布局枚举
 
-实现文件：`process_memory_enum.h`
+实现文件：`virtual_memory_enum.h`
 
 入口函数：
 
-- `enum_process_memory(pid, &req->mem_info)`
+- `virtual_memory_enum(pid, &req->mem_info)`
 
 输出结构：
 
@@ -585,7 +585,7 @@ inline hook 表：
 
 ## 11. 用户态封装要点
 
-实现文件：`Android-LS/include/DriverMemory.h`
+实现文件：`android/include/Driver.h`
 
 ### 11.1 通信
 

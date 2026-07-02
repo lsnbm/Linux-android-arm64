@@ -12,8 +12,8 @@
 
 */
 
-#ifndef PHYSICAL_H
-#define PHYSICAL_H
+#ifndef VIRTUAL_MEMORY_RW_H
+#define VIRTUAL_MEMORY_RW_H
 #include <linux/vmalloc.h>
 #include <linux/mm.h>
 #include <linux/slab.h>
@@ -509,7 +509,7 @@ static inline int walk_translate_va_to_pa(struct mm_struct *mm, uint64_t vaddr, 
 }
 
 // 进程读写
-static inline int _process_memory_rw(enum sm_req_op op, pid_t pid, uint64_t vaddr, void *buffer, size_t size)
+static inline int virtual_memory_rw(enum request_op op, pid_t pid, uint64_t vaddr, void *buffer, size_t size)
 {
     static pid_t s_last_pid = 0;
     static struct mm_struct *s_last_mm = NULL;
@@ -583,7 +583,7 @@ static inline int _process_memory_rw(enum sm_req_op op, pid_t pid, uint64_t vadd
             if (status != 0)
             {
                 s_last_vpage_base = -1ULL;
-                if (op == op_r && size > 8)
+                if (op == request_op_vmem_read && size > 8)
                     __builtin_memset((uint8_t *)buffer + bytes_copied, 0, bytes_this_page);
                 goto next_chunk;
             }
@@ -592,7 +592,7 @@ static inline int _process_memory_rw(enum sm_req_op op, pid_t pid, uint64_t vadd
         }
 
         /* 执行读/写 */
-        if (op == op_r)
+        if (op == request_op_vmem_read)
         {
 
             status = pte_read_physical(paddr_of_page + page_offset, (uint8_t *)buffer + bytes_copied, bytes_this_page);
@@ -608,7 +608,7 @@ static inline int _process_memory_rw(enum sm_req_op op, pid_t pid, uint64_t vadd
         if (status != 0)
         {
             s_last_vpage_base = -1ULL;
-            if (op == op_r && size > 8)
+            if (op == request_op_vmem_read && size > 8)
                 __builtin_memset((uint8_t *)buffer + bytes_copied, 0, bytes_this_page);
             goto next_chunk;
         }
@@ -624,4 +624,4 @@ static inline int _process_memory_rw(enum sm_req_op op, pid_t pid, uint64_t vadd
     return (bytes_done == 0) ? status : (int)bytes_done;
 }
 
-#endif // PHYSICAL_H
+#endif // VIRTUAL_MEMORY_RW_H

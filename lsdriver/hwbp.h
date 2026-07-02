@@ -30,12 +30,12 @@ static inline void sample_hbp_handler(struct pt_regs *regs, struct breakpoint_co
     struct hwbp_record *rec = NULL;
     int i;
 
-    if (!regs || !self || !self->bp_info ||
+    if (!regs || !self || !self->hwbp_info ||
         self->hit_point_index < 0 ||
         self->hit_point_index >= BP_CONFIG_MAX)
         return;
 
-    point = &self->bp_info->points[self->hit_point_index];
+    point = &self->hwbp_info->points[self->hit_point_index];
 
     // 唯一的一次查找：查找当前 PC 是否记录过
     for (i = 0; i < point->record_count; i++)
@@ -556,7 +556,7 @@ static inline void sample_hbp_handler(struct pt_regs *regs, struct breakpoint_co
     }
 }
 
-static inline int set_process_hwbp(pid_t pid, struct hwbp_info *info)
+static inline int set_process_hwbp(pid_t pid, struct hardware_breakpoint *info)
 {
     int ret;
     int i;
@@ -584,7 +584,7 @@ static inline int set_process_hwbp(pid_t pid, struct hwbp_info *info)
     }
 
     bp_config.on_hit = sample_hbp_handler;
-    bp_config.bp_info = info;
+    bp_config.hwbp_info = info;
 
     ret = start_task_run_monitor(bp_config);
     if (ret)

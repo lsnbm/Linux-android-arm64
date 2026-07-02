@@ -24,9 +24,18 @@
 
   实现方式:
     1. inline_hook_install() 挂钩 __arm64_sys_sendto 或 __sys_sendto
-    2. 拦截 sendto 用户缓冲区
+        2. AOSP BitTube 使用 send() 写入本地 socket；arm64 Linux 上 send() 通常进入 sendto 路径，因此在 sendto hook 中拦截用户缓冲区
     3. 在 104 字节 ASensorEvent 中找到 gyro/gyro_uncalibrated
     4. 修改 data[0]/data[1]/data[2] 后 copy_to_user 写回
+
+在 Android 系统中，传感器数据的传输路径如下：
+    Sensor HAL（硬件抽象层） 从硬件获取到陀螺仪等数据。
+    system_server 进程中的 SensorService 负责统一管理这些数据。
+        App 通过 Binder 调用 SensorService 创建 SensorEventConnection、enable/disable 传感器、设置采样率和 flush。
+        SensorEventConnection 创建 BitTube，并通过 Binder reply 把 BitTube 的接收端 fd 传给 App。
+        高频 ASensorEvent/sensors_event_t 事件本身不会逐条通过 Binder 传输；SensorService 调用 SensorEventQueue::write() 写入 BitTube。
+        BitTube 底层使用 socketpair(AF_UNIX, SOCK_SEQPACKET) 创建一对 Unix Domain Socket，并通过 send()/recv() 传递事件数据。
+        UDS 不经过网卡，也不走 TCP/IP 网络协议栈；数据通过内核 socket 缓冲区在本地进程之间传递，适合高频、小数据量事件分发。
 */
 #define VGYRO_SENSOR_TYPE_GYROSCOPE 4
 #define VGYRO_SENSOR_TYPE_GYROSCOPE_UNCALIBRATED 16
@@ -36,7 +45,6 @@
 #define VGYRO_ASENSOR_DATA_OFFSET 24
 #define VGYRO_SCALE_MILLI 1000
 #define VGYRO_MAX_SCAN_BYTES (2 * 1024 * 1024)
-#define VGYRO_LOG_PREFIX "vgyro: "
 
 enum vgyro_sendto_arg_mode
 {
@@ -330,10 +338,10 @@ static int vgyro_handle_sendto(struct pt_regs *regs, enum vgyro_sendto_arg_mode 
         unsigned long missing = copy_to_user(ubuf, kbuf, len);
 
         if (missing)
-            pr_debug(VGYRO_LOG_PREFIX "sendto copy back missing=%lu len=%zu\n",
+            pr_debug("vgyro: sendto copy back missing=%lu len=%zu\n",
                      missing, len);
         else
-            pr_debug(VGYRO_LOG_PREFIX "sendto patched %d gyro event(s) len=%zu mode=%d mrad=%d/%d/%d\n",
+            pr_debug("vgyro: sendto patched %d gyro event(s) len=%zu mode=%d mrad=%d/%d/%d\n",
                      patched, len, mode, READ_ONCE(vg.gyro_x),
                      READ_ONCE(vg.gyro_y), READ_ONCE(vg.gyro_z));
     }
@@ -385,12 +393,12 @@ static int vgyro_install_hook_locked(void)
         ret = inline_hook_install(vgyro_sendto_hook_targets[i]);
         if (!ret)
         {
-            pr_debug(VGYRO_LOG_PREFIX "inline hook on %s registered\n",
+            pr_debug("vgyro: inline hook on %s registered\n",
                      vgyro_sendto_hook_targets[i][0].target_sym);
             return 0;
         }
 
-        pr_warn(VGYRO_LOG_PREFIX "inline hook on %s failed: %d\n",
+        pr_warn("vgyro: inline hook on %s failed: %d\n",
                 vgyro_sendto_hook_targets[i][0].target_sym, ret);
     }
 
@@ -412,7 +420,7 @@ static inline int v_gyro_init(void)
 
     mutex_unlock(&vgyro_lock);
 
-    pr_debug(VGYRO_LOG_PREFIX "init sendto_inline_hook=%d active=1\n", ret);
+    pr_debug("vgyro: init sendto_inline_hook=%d active=1\n", ret);
     return ret;
 }
 
@@ -424,7 +432,7 @@ static inline int v_gyro_report(int gyro_x, int gyro_y, int gyro_z)
     WRITE_ONCE(vg.gyro_z, gyro_z);
     WRITE_ONCE(vg.active, true);
 
-    pr_debug(VGYRO_LOG_PREFIX "report mrad=%d/%d/%d hook=%d\n",
+    pr_debug("vgyro: report mrad=%d/%d/%d hook=%d\n",
              gyro_x, gyro_y, gyro_z, vgyro_sendto_hook_installed());
     return 0;
 }
@@ -444,9 +452,9 @@ static inline void v_gyro_destroy(void)
     for (i = 0; i < ARRAY_SIZE(vgyro_sendto_hook_targets); i++)
         inline_hook_remove(vgyro_sendto_hook_targets[i]);
 
-    pr_debug(VGYRO_LOG_PREFIX "inline hook unregistered\n");
+    pr_debug("vgyro: inline hook unregistered\n");
 
-    pr_debug(VGYRO_LOG_PREFIX "destroy\n");
+    pr_debug("vgyro: destroy\n");
 
     mutex_unlock(&vgyro_lock);
 }

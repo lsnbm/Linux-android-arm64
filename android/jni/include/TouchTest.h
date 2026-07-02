@@ -8,7 +8,7 @@
 #include <print>
 #include <thread>
 
-#include "DriverMemory.h"
+#include "Driver.h"
 
 // 获取屏幕方向对应的逻辑尺寸
 inline void GetScreenLogicalSize(int &w, int &h)

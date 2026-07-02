@@ -14,13 +14,12 @@
 .vscode/
 .claude/
 .codex/
-# Android-LS build outputs
-Android-LS/obj/
-Android-LS/libs/
-Android-LS/libomp.a
-Android-LS/libomp.so
+# android build outputs
+android/obj/
+android/libomp.a
+android/libomp.so
 obj/
-libs/
+/libs/
 windows/__pycache__/
 *.pyc
 
@@ -52,6 +51,6 @@ captures/
 .DS_Store
 Thumbs.db
 
-# Android-LS root-level binaries
-Android-LS/*.a
-Android-LS/*.so
+# android root-level binaries
+android/*.a
+android/*.so
