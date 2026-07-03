@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 from __future__ import annotations
 
 import argparse
@@ -445,13 +445,13 @@ def android_memory_view_read() -> dict[str, Any]:
 
 @mcp.tool()
 def android_breakpoint_list() -> dict[str, Any]:
-    """List hardware breakpoint state; each hwbp_info.points[] item owns its own records[]."""
+    """List hardware breakpoint state; each bp_info.points[] item owns its own records[]."""
     return _call_bridge_operation("breakpoint.info")
 
 
 @mcp.tool()
 def android_breakpoint_set(points: list[dict[str, Any]]) -> dict[str, Any]:
-    """Create hardware breakpoints from hwbp_point-style configs; hit records are grouped under each point."""
+    """Create hardware breakpoints from bp_point-style configs; hit records are grouped under each point."""
     current = _call_bridge_operation("breakpoint.info")
     data = current.get("data")
     if isinstance(data, dict) and bool(data.get("active", False)):
@@ -495,6 +495,43 @@ def android_breakpoint_clear_all() -> dict[str, Any]:
             "connection": current.get("connection", {}),
         }
     return _call_bridge_operation("breakpoint.clear")
+
+
+@mcp.tool()
+def android_ptebp_list() -> dict[str, Any]:
+    """List PTEBP state; the backend reuses the same bp_info.points[] payload shape."""
+    return _call_bridge_operation("ptebp.info")
+
+
+@mcp.tool()
+def android_ptebp_set(points: list[dict[str, Any]]) -> dict[str, Any]:
+    """Create one or more PTEBP points from bp_point-style configs."""
+    normalized_points: list[dict[str, Any]] = []
+    for point in points:
+        if not isinstance(point, dict):
+            raise ValueError("points must contain objects with address, bp_type, bp_scope, length")
+        clamped_length = max(1, min(8, int(point["length"])))
+        normalized_points.append(
+            {
+                "address": format_address(point["address"]),
+                "bp_type": point["bp_type"],
+                "bp_scope": point["bp_scope"],
+                "length": clamped_length,
+            }
+        )
+    if not normalized_points:
+        raise ValueError("points must not be empty")
+
+    return _call_bridge_operation(
+        "ptebp.set",
+        {"points": normalized_points},
+    )
+
+
+@mcp.tool()
+def android_ptebp_clear_all() -> dict[str, Any]:
+    """Remove all active PTEBP state from the current target process."""
+    return _call_bridge_operation("ptebp.clear")
 
 
 @mcp.tool()
@@ -769,7 +806,7 @@ TOOL_META: dict[str, dict[str, Any]] = {
     },
     "android_breakpoint_list": {
         "group": "Breakpoints",
-        "use_when": "Inspect active breakpoint info. hwbp_info.points[] is the monitored-address list; every point owns an independent records[] array.",
+        "use_when": "Inspect active breakpoint info. bp_info.points[] is the monitored-address list; every point owns an independent records[] array.",
         "example": {},
         "parameter_notes": {},
         "result_notes": "Returns raw breakpoint.info payload. Each point is one configured address/type/scope/length, and point.records[] stores records for different hit PCs under that point. Flat record indexes are derived by traversing points then each point.records[] in order.",
@@ -784,7 +821,7 @@ TOOL_META: dict[str, dict[str, Any]] = {
             ]
         },
         "parameter_notes": {
-            "points": "List of hwbp_point configs. Each item creates one hwbp_info.points[] entry, and later hits for that address are recorded in that point's own records[] array.",
+            "points": "List of bp_point configs. Each item creates one bp_info.points[] entry, and later hits for that address are recorded in that point's own records[] array.",
             "points[].address": "Target instruction/data address.",
             "points[].bp_type": "Service token: read/write/read_write/execute. Numeric tokens 1/2/3/4 are also accepted.",
             "points[].bp_scope": "Service token: main/other/all. Numeric tokens 0/1/2 are also accepted.",
@@ -799,11 +836,42 @@ TOOL_META: dict[str, dict[str, Any]] = {
         "parameter_notes": {},
         "result_notes": "Clears runtime breakpoints.",
     },
+    "android_ptebp_list": {
+        "group": "Breakpoints",
+        "use_when": "Inspect active PTEBP info. The backend returns the same bp_info.points[] shape as hardware breakpoints.",
+        "example": {},
+        "parameter_notes": {},
+        "result_notes": "Returns raw ptebp.info payload.",
+    },
+    "android_ptebp_set": {
+        "group": "Breakpoints",
+        "use_when": "Create one or more PTEBP points.",
+        "example": {
+            "points": [
+                {"address": "0x12345678", "bp_type": "read", "bp_scope": "main", "length": 4},
+            ]
+        },
+        "parameter_notes": {
+            "points": "List of bp_point configs. Each item creates one monitored address entry.",
+            "points[].address": "Target instruction/data address.",
+            "points[].bp_type": "Service token: read/write/read_write/execute. Numeric tokens 1/2/3/4 are also accepted.",
+            "points[].bp_scope": "Service token: main/other/all. Numeric tokens 0/1/2 are also accepted.",
+            "points[].length": "Breakpoint length in bytes, 1..8.",
+        },
+        "result_notes": "Creates one or more PTEBP point entries.",
+    },
+    "android_ptebp_clear_all": {
+        "group": "Breakpoints",
+        "use_when": "Remove all active PTEBP state.",
+        "example": {},
+        "parameter_notes": {},
+        "result_notes": "Clears runtime PTEBP state.",
+    },
     "android_breakpoint_record_remove": {
         "group": "Breakpoints",
         "use_when": "Delete one saved breakpoint record entry.",
         "example": {"index": 0},
-        "parameter_notes": {"index": "Flat record index obtained by traversing android_breakpoint_list.data.hwbp_info.points[], then each point.records[], in order."},
+        "parameter_notes": {"index": "Flat record index obtained by traversing android_breakpoint_list.data.bp_info.points[], then each point.records[], in order."},
         "result_notes": "Use descending record indexes to delete a whole point.",
     },
     "android_breakpoint_record_update": {
@@ -811,9 +879,9 @@ TOOL_META: dict[str, dict[str, Any]] = {
         "use_when": "Patch one register field in a saved breakpoint record; this enables the write mask for that register.",
         "example": {"index": 0, "field": "x0", "value": "0x12345678"},
         "parameter_notes": {
-            "index": "Flat record index obtained by traversing android_breakpoint_list.data.hwbp_info.points[], then each point.records[], in order.",
+            "index": "Flat record index obtained by traversing android_breakpoint_list.data.bp_info.points[], then each point.records[], in order.",
             "field": "pc/hit_count/lr/sp/pstate/orig_x0/syscallno/fpsr/fpcr/x0~x29/q0~q31, op.<field> for write-mask control, or mask0~mask17.",
-            "value": "Number or hex string. Register writes set HWBP_OP_WRITE before updating the struct field.",
+            "value": "Number or hex string. Register writes set BP_OP_WRITE before updating the struct field.",
         },
         "result_notes": "Requires non-empty records; otherwise index out of range.",
     },

@@ -6,6 +6,11 @@
 #include <linux/kprobes.h>
 #include <linux/types.h>
 #include <linux/kprobes.h>
+#include <linux/mm.h>
+#include <linux/pid.h>
+#include <linux/sched.h>
+#include <linux/sched/mm.h>
+#include <linux/sched/task.h>
 #include <linux/vmalloc.h>
 #include <asm/cacheflush.h>
 #include <asm/cpufeature.h>
@@ -210,6 +215,139 @@ static inline pte_t *get_user_pte(struct mm_struct *mm, uint64_t vaddr)
                 return NULL;
 
         return ptep;
+}
+
+// 根据 pid 获取 task_struct，调用方负责 put_task_struct。
+static inline struct task_struct *get_task_by_pid(pid_t pid)
+{
+        struct pid *pid_struct;
+        struct task_struct *task;
+
+        pid_struct = find_get_pid(pid);
+        if (!pid_struct)
+                return NULL;
+
+        task = get_pid_task(pid_struct, PIDTYPE_PID);
+        put_pid(pid_struct);
+        return task;
+}
+
+// 根据 pid 获取 mm_struct，调用方负责 mmput。
+static inline struct mm_struct *get_mm_by_pid(pid_t pid)
+{
+        struct task_struct *task;
+        struct mm_struct *mm;
+
+        task = get_task_by_pid(pid);
+        if (!task)
+                return NULL;
+
+        mm = get_task_mm(task);
+        put_task_struct(task);
+        return mm;
+}
+
+// 读取用户地址所在页的 PTE 值。
+static inline int read_user_pte_value(struct mm_struct *mm, uint64_t addr, pteval_t *out_pte)
+{
+        pte_t *ptep;
+        pte_t current_pte;
+
+        if (!mm || !out_pte)
+                return -EINVAL;
+
+        ptep = get_user_pte(mm, addr);
+        if (!ptep)
+                return -EFAULT;
+
+        current_pte = READ_ONCE(*ptep);
+        if (!pte_present(current_pte))
+                return -EFAULT;
+
+        *out_pte = pte_val(current_pte);
+        return 0;
+}
+
+// 用 ARM64 TLBI 指令刷新全部cpu一个用户 VA 对应的所有 ASID TLB 项
+static inline void flush_user_tlb_addr_all_asid(uint64_t addr)
+{
+        uint64_t tlbi_addr = addr >> PAGE_SHIFT;
+
+        asm volatile(
+            "dsb ishst\n\t"
+            "tlbi vaae1is, %[tlbi_addr]\n\t" // 需要所有cpu，因为写的是目标用户态的页，随时都能被其他cpu执行
+            "dsb ish\n\t"
+            "isb\n\t"
+            :
+            : [tlbi_addr] "r"(tlbi_addr)
+            : "memory");
+}
+
+// 用 ARM64 TLBI 指令刷新当前 CPU 上一个用户 VA 对应的所有 ASID TLB 项
+static inline void flush_user_tlb_addr_all_asid_current_cpu(uint64_t addr)
+{
+        uint64_t tlbi_addr = addr >> PAGE_SHIFT;
+
+        asm volatile(
+            "dsb nshst\n\t"
+            "tlbi vaae1, %[tlbi_addr]\n\t"
+            "dsb nsh\n\t"
+            "isb\n\t"
+            :
+            : [tlbi_addr] "r"(tlbi_addr)
+            : "memory");
+}
+
+// 用 ARM64 TLBI 指令刷新全部cpu一个内核 VA 对应的所有 ASID TLB 项
+static inline void flush_kernel_tlb_addr_all_asid(uint64_t addr)
+{
+        uint64_t tlbi_addr = addr >> PAGE_SHIFT;
+
+        asm volatile(
+            "dsb ishst\n\t"
+            "tlbi vaae1is, %[tlbi_addr]\n\t"
+            "dsb ish\n\t"
+            "isb\n\t"
+            :
+            : [tlbi_addr] "r"(tlbi_addr)
+            : "memory");
+}
+
+// 用 ARM64 TLBI 指令刷新当前 CPU 上一个内核 VA 对应的所有 ASID TLB 项
+static inline void flush_kernel_tlb_addr_all_asid_current_cpu(uint64_t addr)
+{
+        uint64_t tlbi_addr = addr >> PAGE_SHIFT;
+
+        asm volatile(
+            "dsb nshst\n\t"
+            "tlbi vaae1, %[tlbi_addr]\n\t"
+            "dsb nsh\n\t"
+            "isb\n\t"
+            :
+            : [tlbi_addr] "r"(tlbi_addr)
+            : "memory");
+}
+
+// 写入用户地址所在页的 PTE，并用汇编刷新该用户页 TLB。
+static inline int write_user_pte_value(struct mm_struct *mm, uint64_t addr, pteval_t new_pte)
+{
+        pte_t *ptep;
+        struct vm_area_struct *vma;
+
+        if (!mm)
+                return -EINVAL;
+
+        vma = find_vma(mm, addr);
+        if (!vma || addr < vma->vm_start)
+                return -EFAULT;
+
+        ptep = get_user_pte(mm, addr);
+        if (!ptep)
+                return -EFAULT;
+
+        set_pte(ptep, __pte(new_pte));
+        flush_user_tlb_addr_all_asid(addr);
+        return 0;
 }
 
 /*

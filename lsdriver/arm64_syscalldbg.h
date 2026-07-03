@@ -1,8 +1,8 @@
 /*
 指定进程 syscall 入口监控
 */
-#ifndef ARM_SYSCALL_MONITOR_H
-#define ARM_SYSCALL_MONITOR_H
+#ifndef ARM64_SYSCALLDBG_H
+#define ARM64_SYSCALLDBG_H
 
 #include <linux/kernel.h>
 #include <linux/mutex.h>
@@ -11,6 +11,7 @@
 #include <asm/ptrace.h>
 #include <uapi/asm-generic/unistd.h>
 
+#include "export_fun.h"
 #include "inline_hook_frame.h"
 
 #define ARM_SYSCALL_MONITOR_MAX_PIDS 8
@@ -1512,19 +1513,13 @@ static void syscall_monitor_remove(pid_t target_tgid)
 uint64_t get_tpidr_el0_by_name(int32_t tgid, const char *thread_name)
 {
     struct task_struct *p, *t;
-    struct pid *pid_struct;
     uint64_t tpidr_val = 0;
 
     if (!thread_name || tgid <= 0)
         return 0;
 
     // 查找主进程结构体
-    pid_struct = find_get_pid(tgid);
-    if (!pid_struct)
-        return 0;
-
-    p = get_pid_task(pid_struct, PIDTYPE_PID);
-    put_pid(pid_struct); // 拿到 task 后即可释放 pid 引用
+    p = get_task_by_pid(tgid);
     if (!p)
         return 0;
 
@@ -1555,4 +1550,4 @@ uint64_t get_tpidr_el0_by_name(int32_t tgid, const char *thread_name)
     return tpidr_val;
 }
 
-#endif /* ARM_SYSCALL_MONITOR_H */
+#endif /* ARM64_SYSCALLDBG_H */

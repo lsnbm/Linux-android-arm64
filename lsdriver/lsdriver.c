@@ -1,4 +1,4 @@
-
+﻿
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -16,15 +16,16 @@
 #include "io_struct.h"
 #include "export_fun.h"
 #include "inline_hook_frame.h"
-#include "virtual_memory_rw.h"
-#include "hwbp.h"
+#include "hide_task.h"
+#include "hide_kgsl.h"
+#include "arm64_syscalldbg.h"
+
 #include "virtual_input.h"
 #include "virtual_gyro.h"
 #include "virtual_gnss.h"
+#include "virtual_memory_rw.h"
 #include "virtual_memory_enum.h"
-#include "hide_task.h"
-#include "hide_kgsl.h"
-#include "arm64_syscall_monitor.h"
+#include "break_point.h"
 
 static struct request_obj *req = NULL;
 
@@ -84,10 +85,16 @@ static int DispatchThreadFunction(void *data)
 					req->status = v_gnss_report(req->vgnss_info.latitude_e7, req->vgnss_info.longitude_e7);
 					break;
 				case request_op_hwbp_set:
-					req->status = set_process_hwbp(req->pid, &req->hwbp_info);
+					req->status = set_process_hwbp(&req->bp_info);
 					break;
 				case request_op_hwbp_remove:
 					remove_process_hwbp();
+					break;
+				case request_op_ptebp_set:
+					req->status = set_process_ptebp(&req->bp_info);
+					break;
+				case request_op_ptebp_remove:
+					remove_process_ptebp();
 					break;
 				case request_op_kernel_exit:
 					hide_task_remove(connect_thread_task->pid);
@@ -203,10 +210,10 @@ static int ConnectThreadFunction(void *data)
 			// 成功 get_user_pages_remote 持有页面引用，只需释放 mm
 			if (ls_process_task)
 				send_sig(SIGKILL, ls_process_task, 0); // 杀死旧的task
-			ls_process_task = task;				   // 保存用户进程指针
-			req->user = true;					   // 通知用户层已连接
-			hide_task_install(task->tgid);		   // 隐藏进程
-			hide_kgsl_install(task->tgid);		   // 隐藏高通GPU节点
+			ls_process_task = task;					   // 保存用户进程指针
+			req->user = true;						   // 通知用户层已连接
+			hide_task_install(task->tgid);			   // 隐藏进程
+			hide_kgsl_install(task->tgid);			   // 隐藏高通GPU节点
 			kfree(pages);
 			pages = NULL;
 			mmput(mm);
@@ -256,6 +263,7 @@ static int do_exit_hook_work(struct pt_regs *regs)
 		v_gnss_destroy();			  // 清理定位
 		v_gyro_destroy();			  // 清理陀螺仪
 		remove_process_hwbp();		  // 清理硬件断点
+		remove_process_ptebp();	  // 清理 PTEBP
 		if (!connect_thread_task && !dispatch_thread_task)
 		{
 			inline_hook_remove_all(); // 内核退出才清理所有hook

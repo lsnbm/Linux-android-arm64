@@ -1,4 +1,4 @@
-#include <linux/module.h>
+﻿#include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/kallsyms.h>
 #include <linux/memory.h>
@@ -13,33 +13,9 @@
 #include "export_fun.h"
 #include "arm64_reg.h"
 #include "inline_hook_frame.h"
+#include "io_struct.h"
 
-#define BP_CONFIG_MAX 16
 #define ARM64_HWBKPT_ESR_ACCESS_MASK (1U << 6)
-
-struct breakpoint_point
-{
-    enum hwbp_type bt;  // 断点类型
-    enum hwbp_len bl;   // 断点长度
-    enum hwbp_scope bs; // 断点作用线程范围
-    uint64_t addr;      // 断点地址
-};
-
-struct breakpoint_config
-{
-    pid_t pid; // 目标进程 pid
-
-    // 多个地址观点
-    struct breakpoint_point points[BP_CONFIG_MAX];
-    int hit_point_index; // 命中时的观点索引，用于传递给回调进行快速派发
-
-    // 触发回调，命中时调用
-    // regs: 命中时的寄存器现场 self: 指向本结构体自身，方便回调访问配置信息
-    void (*on_hit)(struct pt_regs *regs, struct breakpoint_config *self);
-
-    // 允许携带私有的数据
-    struct hardware_breakpoint *hwbp_info;
-};
 
 /*
 这里用全局变量来传递异常回调和断点写入上下文
@@ -48,15 +24,47 @@ struct breakpoint_config
 既然使用全局指针传递上下文，那么<统一>使用传递的全局上下文，不在使用附带参数
 内核很多子系统的做法也一样
 */
-struct breakpoint_config g_bp_config[BP_CONFIG_MAX];
+struct break_point *g_bp_info;
 int num_brps, num_wrps; // 硬件执行和访问槽位总数
+
+// 判断单个断点点位是否具备安装和派发条件。
+static bool hwbp_point_is_active(struct bp_point *point)
+{
+    return point && point->hit_addr != 0 && point->on_hit;
+}
+
+// 判断一个 break_point 配置中是否至少存在一个有效点位。
+static bool hwbp_info_has_active_point(struct break_point *info)
+{
+    int point_slot;
+
+    if (!info || info->pid <= 0)
+        return false;
+
+    for (point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
+    {
+        if (hwbp_point_is_active(&info->points[point_slot]))
+            return true;
+    }
+
+    return false;
+}
+
+// 判断一个 break_point 配置中是否包含指定线程组 pid 的有效点位。
+static bool hwbp_info_has_pid(struct break_point *info, pid_t pid)
+{
+    if (!info || pid <= 0 || info->pid != pid)
+        return false;
+
+    return hwbp_info_has_active_point(info);
+}
 
 /*
 把外部断点参数转换成ARM架构内部格式，并完成基础检测/修正。
 这里只处理用户态断点（EL0）场景。
 在32位的task和per-cpu 场景不能按compat处理，要=0
 */
-static int hw_breakpoint_parse(struct breakpoint_point *point, bool is_compat, struct arch_hw_breakpoint *hw)
+static int hw_breakpoint_parse(struct bp_point *point, bool is_compat, struct arch_hw_breakpoint *hw)
 {
     uint64_t alignment_mask, offset;
 
@@ -68,16 +76,16 @@ static int hw_breakpoint_parse(struct breakpoint_point *point, bool is_compat, s
     // 类型转换：对应 arch_build_bp_info()
     switch (point->bt)
     {
-    case HW_BREAKPOINT_X:
+    case BP_BREAKPOINT_X:
         hw->ctrl.type = ARM_BREAKPOINT_EXECUTE;
         break;
-    case HW_BREAKPOINT_R:
+    case BP_BREAKPOINT_R:
         hw->ctrl.type = ARM_BREAKPOINT_LOAD;
         break;
-    case HW_BREAKPOINT_W:
+    case BP_BREAKPOINT_W:
         hw->ctrl.type = ARM_BREAKPOINT_STORE;
         break;
-    case HW_BREAKPOINT_RW:
+    case BP_BREAKPOINT_RW:
         hw->ctrl.type = ARM_BREAKPOINT_LOAD | ARM_BREAKPOINT_STORE;
         break;
     default:
@@ -87,28 +95,28 @@ static int hw_breakpoint_parse(struct breakpoint_point *point, bool is_compat, s
     // 长度转换：对应 arch_build_bp_info()
     switch (point->bl)
     {
-    case HW_BREAKPOINT_LEN_1:
+    case BP_BREAKPOINT_LEN_1:
         hw->ctrl.len = ARM_BREAKPOINT_LEN_1;
         break;
-    case HW_BREAKPOINT_LEN_2:
+    case BP_BREAKPOINT_LEN_2:
         hw->ctrl.len = ARM_BREAKPOINT_LEN_2;
         break;
-    case HW_BREAKPOINT_LEN_3:
+    case BP_BREAKPOINT_LEN_3:
         hw->ctrl.len = ARM_BREAKPOINT_LEN_3;
         break;
-    case HW_BREAKPOINT_LEN_4:
+    case BP_BREAKPOINT_LEN_4:
         hw->ctrl.len = ARM_BREAKPOINT_LEN_4;
         break;
-    case HW_BREAKPOINT_LEN_5:
+    case BP_BREAKPOINT_LEN_5:
         hw->ctrl.len = ARM_BREAKPOINT_LEN_5;
         break;
-    case HW_BREAKPOINT_LEN_6:
+    case BP_BREAKPOINT_LEN_6:
         hw->ctrl.len = ARM_BREAKPOINT_LEN_6;
         break;
-    case HW_BREAKPOINT_LEN_7:
+    case BP_BREAKPOINT_LEN_7:
         hw->ctrl.len = ARM_BREAKPOINT_LEN_7;
         break;
-    case HW_BREAKPOINT_LEN_8:
+    case BP_BREAKPOINT_LEN_8:
         hw->ctrl.len = ARM_BREAKPOINT_LEN_8;
         break;
     default:
@@ -133,7 +141,7 @@ static int hw_breakpoint_parse(struct breakpoint_point *point, bool is_compat, s
     }
 
     // 地址初始值：对应 arch_build_bp_info()
-    hw->address = point->addr;
+    hw->address = point->hit_addr;
 
     // 权限：这里只做用户态断点
     hw->ctrl.privilege = AARCH64_BREAKPOINT_EL0;
@@ -258,15 +266,18 @@ static bool watchpoint_access_matches(struct arch_hw_breakpoint *info, uint64_t 
 static void clear_hwbp_regs_on_cpu(void *data)
 {
     int i;
-    int cfg_index;
-    int point_index;
+    int point_slot;
     uint32_t ctrl;
     uint32_t expected_ctrl;
     uint64_t addr;
     struct arch_hw_breakpoint info;
+    struct break_point *bp_info = g_bp_info;
     bool should_disable;
 
     (void)data;
+
+    if (!bp_info)
+        return;
 
     for (i = 0; i < num_brps; i++)
     {
@@ -277,29 +288,22 @@ static void clear_hwbp_regs_on_cpu(void *data)
             continue;
 
         should_disable = false;
-        for (cfg_index = 0; cfg_index < BP_CONFIG_MAX; cfg_index++)
+        for (point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
         {
-            if (g_bp_config[cfg_index].pid <= 0 ||
-                !g_bp_config[cfg_index].on_hit)
+            struct bp_point *point = &bp_info->points[point_slot];
+
+            if (!hwbp_point_is_active(point) ||
+                point->bt != BP_BREAKPOINT_X ||
+                hw_breakpoint_parse(point, 0, &info) ||
+                info.ctrl.type != ARM_BREAKPOINT_EXECUTE ||
+                info.address != addr)
                 continue;
 
-            for (point_index = 0; point_index < BP_CONFIG_MAX; point_index++)
-            {
-                struct breakpoint_point *point = &g_bp_config[cfg_index].points[point_index];
+            expected_ctrl = encode_ctrl_reg(info.ctrl);
+            if ((expected_ctrl & ~0x1) != (ctrl & ~0x1))
+                continue;
 
-                if (point->addr == 0 ||
-                    point->bt != HW_BREAKPOINT_X ||
-                    hw_breakpoint_parse(point, 0, &info) ||
-                    info.ctrl.type != ARM_BREAKPOINT_EXECUTE ||
-                    info.address != addr)
-                    continue;
-
-                expected_ctrl = encode_ctrl_reg(info.ctrl);
-                if ((expected_ctrl & ~0x1) != (ctrl & ~0x1))
-                    continue;
-
-                should_disable = true;
-            }
+            should_disable = true;
         }
 
         if (should_disable)
@@ -315,29 +319,22 @@ static void clear_hwbp_regs_on_cpu(void *data)
             continue;
 
         should_disable = false;
-        for (cfg_index = 0; cfg_index < BP_CONFIG_MAX; cfg_index++)
+        for (point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
         {
-            if (g_bp_config[cfg_index].pid <= 0 ||
-                !g_bp_config[cfg_index].on_hit)
+            struct bp_point *point = &bp_info->points[point_slot];
+
+            if (!hwbp_point_is_active(point) ||
+                point->bt == BP_BREAKPOINT_X ||
+                hw_breakpoint_parse(point, 0, &info) ||
+                info.ctrl.type == ARM_BREAKPOINT_EXECUTE ||
+                info.address != addr)
                 continue;
 
-            for (point_index = 0; point_index < BP_CONFIG_MAX; point_index++)
-            {
-                struct breakpoint_point *point = &g_bp_config[cfg_index].points[point_index];
+            expected_ctrl = encode_ctrl_reg(info.ctrl);
+            if ((expected_ctrl & ~0x1) != (ctrl & ~0x1))
+                continue;
 
-                if (point->addr == 0 ||
-                    point->bt == HW_BREAKPOINT_X ||
-                    hw_breakpoint_parse(point, 0, &info) ||
-                    info.ctrl.type == ARM_BREAKPOINT_EXECUTE ||
-                    info.address != addr)
-                    continue;
-
-                expected_ctrl = encode_ctrl_reg(info.ctrl);
-                if ((expected_ctrl & ~0x1) != (ctrl & ~0x1))
-                    continue;
-
-                should_disable = true;
-            }
+            should_disable = true;
         }
 
         if (should_disable)
@@ -348,13 +345,16 @@ static void clear_hwbp_regs_on_cpu(void *data)
 // 执行断异常处理跳板工作函数
 static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
 {
-    int i;
     int j;
     int slot;
     uint64_t addr;
     uint64_t ctrl;
     struct arch_hw_breakpoint info;
+    struct break_point *bp_info = g_bp_info;
     struct pt_regs *regs = (struct pt_regs *)hook_regs->regs[2];
+
+    if (!bp_info)
+        return 0;
 
     /*
    这里说明一下为何可以这么做进行步过
@@ -403,24 +403,19 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
         addr = read_wb_reg(AARCH64_DBG_REG_BVR, slot);
         ctrl = read_wb_reg(AARCH64_DBG_REG_BCR, slot);
 
-        // 派发异常信息给不同配置
-        for (i = 0; i < BP_CONFIG_MAX; i++)
+        // 根据不同观点派发
+        for (j = 0; j < BP_CONFIG_MAX; j++)
         {
-            if (g_bp_config[i].pid <= 0 ||
-                !g_bp_config[i].on_hit)
+            struct bp_point *point = &bp_info->points[j];
+
+            // 地址不相等跳过
+            if (!hwbp_point_is_active(point) ||
+                bp_info->pid != current->tgid ||
+                hw_breakpoint_parse(point, 0, &info) ||
+                info.address != addr)
                 continue;
 
-            // 根据不同观点派发
-            for (j = 0; j < BP_CONFIG_MAX; j++)
-            {
-                struct breakpoint_point *point = &g_bp_config[i].points[j];
-
-                // 地址不相等跳过
-                if (hw_breakpoint_parse(point, 0, &info) ||
-                    info.address != addr)
-                    continue;
-
-                /*
+            /*
                 上案例
                 point0 配置地址 = 0x71B5654190
                 point1 配置地址 = 0x71B5653A68
@@ -450,21 +445,18 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
                 所以真实命中 slot2，但 point0 先被派发了，
                 导致 point0.records 里写入了 record.pc = 0x71B5655590。
                 */
-                if (info.address != (regs->pc & ~0x3ULL))
-                    continue;
+            if (info.address != (regs->pc & ~0x3ULL))
+                continue;
 
-                // 地址相等、控制码相等且当前槽位启用才派发
-                if ((ctrl & 0x1) &&
-                    ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) == (ctrl & ~0x1ULL)) &&
-                    g_bp_config[i].pid == current->tgid)
-                {
-                    // 传递当前观点索引
-                    g_bp_config[i].hit_point_index = j;
-                    g_bp_config[i].on_hit(regs, &g_bp_config[i]);
-                    // 只清 enable 位，保留原有寄存器配置，继续走原异常处理链
-                    write_wb_reg(AARCH64_DBG_REG_BCR, slot, ctrl & ~0x1);
-                    return 0;
-                }
+            // 地址相等、控制码相等且当前槽位启用才派发
+            if ((ctrl & 0x1) &&
+                ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) == (ctrl & ~0x1ULL)) &&
+                bp_info->pid == current->tgid)
+            {
+                point->on_hit((void *)regs, (void *)point);
+                // 只清 enable 位，保留原有寄存器配置，继续走原异常处理链
+                write_wb_reg(AARCH64_DBG_REG_BCR, slot, ctrl & ~0x1);
+                return 0;
             }
         }
     }
@@ -474,21 +466,24 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
 // 访问断异常处理跳板工作函数
 static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
 {
-    int i;
     int j;
     int slot;
-    int hit_cfg_index = -1;
-    int hit_point_index = -1;
     int hit_slot = -1;
     uint64_t addr;
     uint64_t ctrl;
+    uint64_t hit_ctrl = 0;
     uint64_t fault_addr = hook_regs->regs[0];
     uint64_t esr = hook_regs->regs[1];
     uint64_t dist;
     uint64_t min_dist = ~0ULL;
     bool exact_match = false;
     struct arch_hw_breakpoint info;
+    struct break_point *bp_info = g_bp_info;
+    struct bp_point *hit_point = NULL;
     struct pt_regs *regs = (struct pt_regs *)hook_regs->regs[2];
+
+    if (!bp_info)
+        return 0;
 
     /*
     watchpoint_handler 原型是 (addr, esr, regs)。这里用 addr 判断真实命中的访问地址，
@@ -502,47 +497,40 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
         if (!(ctrl & 0x1))
             continue;
 
-        for (i = 0; i < BP_CONFIG_MAX && !exact_match; i++)
+        for (j = 0; j < BP_CONFIG_MAX; j++)
         {
-            if (g_bp_config[i].pid <= 0 ||
-                !g_bp_config[i].on_hit ||
-                g_bp_config[i].pid != current->tgid)
+            struct bp_point *point = &bp_info->points[j];
+
+            if (!hwbp_point_is_active(point) ||
+                bp_info->pid != current->tgid ||
+                hw_breakpoint_parse(point, 0, &info) ||
+                info.ctrl.type == ARM_BREAKPOINT_EXECUTE ||
+                info.address != addr ||
+                ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) != (ctrl & ~0x1ULL)) ||
+                !watchpoint_access_matches(&info, esr))
                 continue;
 
-            for (j = 0; j < BP_CONFIG_MAX; j++)
-            {
-                struct breakpoint_point *point = &g_bp_config[i].points[j];
+            dist = ls_get_distance_from_watchpoint(fault_addr, addr, &info.ctrl);
+            if (dist >= min_dist)
+                continue;
 
-                if (hw_breakpoint_parse(point, 0, &info) ||
-                    info.ctrl.type == ARM_BREAKPOINT_EXECUTE ||
-                    info.address != addr ||
-                    ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) != (ctrl & ~0x1ULL)) ||
-                    !watchpoint_access_matches(&info, esr))
-                    continue;
+            min_dist = dist;
+            hit_point = point;
+            hit_slot = slot;
+            hit_ctrl = ctrl;
+            exact_match = (dist == 0);
 
-                dist = ls_get_distance_from_watchpoint(fault_addr, addr, &info.ctrl);
-                if (dist >= min_dist)
-                    continue;
-
-                min_dist = dist;
-                hit_cfg_index = i;
-                hit_point_index = j;
-                hit_slot = slot;
-                exact_match = (dist == 0);
-
-                if (exact_match)
-                    break;
-            }
+            if (exact_match)
+                break;
         }
     }
 
-    if (hit_cfg_index < 0)
+    if (!hit_point)
         return 0;
 
-    g_bp_config[hit_cfg_index].hit_point_index = hit_point_index;
-    g_bp_config[hit_cfg_index].on_hit(regs, &g_bp_config[hit_cfg_index]);
+    hit_point->on_hit((void *)regs, (void *)hit_point);
     // 只清 enable 位，保留原有寄存器配置，继续走原异常处理链
-    write_wb_reg(AARCH64_DBG_REG_WCR, hit_slot, ctrl & ~0x1);
+    write_wb_reg(AARCH64_DBG_REG_WCR, hit_slot, hit_ctrl & ~0x1);
     return 0;
 }
 
@@ -557,34 +545,18 @@ static int work_trampoline_switch_to(struct pt_regs *hook_regs)
 {
     struct task_struct *prev = (struct task_struct *)hook_regs->regs[0];
     struct task_struct *next = (struct task_struct *)hook_regs->regs[1];
+    struct break_point *bp_info = g_bp_info;
     int i;
-    int next_slot = -1;
-    int prev_slot = -1;
+    int j;
+    bool next_active;
+    bool prev_active;
 
-    if (!prev || !next)
+    if (!prev || !next || !bp_info)
         return 0;
 
-    // 检查切入的进程pid是否在断点配置中设置
-    for (i = 0; i < BP_CONFIG_MAX; i++)
-    {
-        // 找到了对应的配置
-        if (g_bp_config[i].pid == next->tgid)
-        {
-            next_slot = i;
-            break;
-        }
-    }
-
-    // 切走的
-    for (i = 0; i < BP_CONFIG_MAX; i++)
-    {
-        // 找到配置
-        if (g_bp_config[i].pid == prev->tgid)
-        {
-            prev_slot = i;
-            break;
-        }
-    }
+    // 检查切入/切走的进程pid是否在断点配置中设置
+    next_active = hwbp_info_has_pid(bp_info, next->tgid);
+    prev_active = hwbp_info_has_pid(bp_info, prev->tgid);
 
     /*
     prev现在正在跑、准备离开 CPU 的 task
@@ -592,7 +564,7 @@ static int work_trampoline_switch_to(struct pt_regs *hook_regs)
     同线程组内相互切换，不要清理，下面线程组内只要有一个task切换就重复安装上断点防止被关掉
     注意了：使用fork后的子进程在内核中是单独的一个线程组也是单独的一个进程，要装断点也是给子线程组 装
     */
-    if (prev_slot >= 0 && prev->tgid != next->tgid)
+    if (prev_active && prev->tgid != next->tgid)
     {
         if (prev->pid == prev->tgid)
         {
@@ -609,13 +581,13 @@ static int work_trampoline_switch_to(struct pt_regs *hook_regs)
         for (i = 0; i < num_wrps; i++)
             write_wb_reg(AARCH64_DBG_REG_WCR, i, 0);
 
-        if (next_slot < 0)
+        if (!next_active)
             // 线程组被切走cpu进行关闭OS+开启硬件调试
             disable_hardware_debug_on_cpu(NULL);
     }
 
     // 目标进程的线程组被切入(线程组id就是进程的pid)
-    if (next_slot >= 0)
+    if (next_active)
     {
         int brp_slot = 0;
         int wrp_slot = 0;
@@ -634,14 +606,14 @@ static int work_trampoline_switch_to(struct pt_regs *hook_regs)
         enable_hardware_debug_on_cpu(NULL);
 
         // 遍历所有观点分配槽位安装进cpu
-        for (i = 0; i < BP_CONFIG_MAX; i++)
+        for (j = 0; j < BP_CONFIG_MAX; j++)
         {
-            struct breakpoint_point *point = &g_bp_config[next_slot].points[i];
+            struct bp_point *point = &bp_info->points[j];
             struct arch_hw_breakpoint info;
             int reg_slot;
 
             // 为空的观点不设置
-            if (point->addr == 0)
+            if (!hwbp_point_is_active(point) || bp_info->pid != next->tgid)
                 continue;
 
             // 把观点的断点描述信息转化为arm架构内部格式
@@ -741,65 +713,42 @@ static struct hook_entry g_switch_to_hook[] = {
 };
 
 // 注册线程切换回调，开始监听
-static int start_task_run_monitor(struct breakpoint_config bp_config)
+static int start_task_run_monitor(struct break_point *bp_info)
 {
     int ret;
-    int i;
-    int slot = -1;
-    int existing_slot = -1;
 
-    if (bp_config.pid <= 0)
+    if (!bp_info || !hwbp_info_has_active_point(bp_info))
     {
-        pr_debug("pid error\n");
+        pr_debug("breakpoint info error\n");
         return -EINVAL;
     }
 
-    // 同pid只更新配置
-    for (i = 0; i < BP_CONFIG_MAX; i++)
+    if (g_bp_info)
     {
-        if (g_bp_config[i].pid == bp_config.pid)
-        {
-            existing_slot = i;
-            break;
-        }
-    }
-
-    if (existing_slot >= 0)
-    {
-        g_bp_config[existing_slot] = bp_config;
-        pr_debug("monitor config updated, target tgid=%d slot=%d\n", bp_config.pid, existing_slot);
+        g_bp_info = bp_info;
+        num_brps = get_brps_num();
+        num_wrps = get_wrps_num();
+        bp_info->num_brps = num_brps;
+        bp_info->num_wrps = num_wrps;
+        pr_debug("monitor config updated\n");
         return 0;
     }
 
-    // 不同pid找槽位添加
-    for (i = 0; i < BP_CONFIG_MAX; i++)
-    {
-        if (g_bp_config[i].pid == 0)
-        {
-            slot = i;
-            break;
-        }
-    }
-
-    if (slot < 0)
-    {
-        pr_debug("breakpoint config slots full\n");
-        return -ENOSPC;
-    }
-
-    // 传递上下文给全局数组，让异常处理和断点写入都能互相传递配置信息
-    g_bp_config[slot] = bp_config;
+    // 传递上下文给全局指针，让异常处理和断点写入都能互相传递配置信息
+    g_bp_info = bp_info;
 
     // 总数也是只获取一次。
     num_brps = get_brps_num();
     num_wrps = get_wrps_num();
+    bp_info->num_brps = num_brps;
+    bp_info->num_wrps = num_wrps;
 
     // 安装inline hook接管异常
     ret = inline_hook_install(g_debug_exception_hooks);
     if (ret)
     {
         pr_debug("inline_hook_install debug exception hooks failed: %d\n", ret);
-        memset(&g_bp_config[slot], 0, sizeof(g_bp_config[slot]));
+        g_bp_info = NULL;
         return ret;
     }
 
@@ -808,150 +757,31 @@ static int start_task_run_monitor(struct breakpoint_config bp_config)
     if (ret)
     {
         pr_debug("inline_hook_install __switch_to failed: %d\n", ret);
-        memset(&g_bp_config[slot], 0, sizeof(g_bp_config[slot]));
+        g_bp_info = NULL;
         inline_hook_remove(g_debug_exception_hooks);
         return ret;
     }
     pr_debug("task switch hook installed: __switch_to\n");
-    pr_debug("monitor start, target tgid=%d slot=%d\n", bp_config.pid, slot);
+    pr_debug("monitor start\n");
     return 0;
 }
 
 // 注销回调，取消监听
-static void stop_task_run_monitor(struct breakpoint_config bp_config)
+static void stop_task_run_monitor(void)
 {
-    int i;
     int cpu;
-    bool has_config = false;
 
-    if (bp_config.pid <= 0)
+    if (!g_bp_info)
         return;
 
     // 遍历所有在线 CPU，清理寄存器
     for_each_online_cpu(cpu)
         smp_call_function_single(cpu, clear_hwbp_regs_on_cpu, NULL, 1);
 
-    // 清空指定pid的槽位配置
-    for (i = 0; i < BP_CONFIG_MAX; i++)
-    {
-        if (g_bp_config[i].pid == bp_config.pid)
-        {
-            __builtin_memset(&g_bp_config[i], 0, sizeof(g_bp_config[i]));
-            pr_debug("monitor config removed, target tgid=%d slot=%d\n", bp_config.pid, i);
-            break;
-        }
-    }
-
-    // 如果数组里还有别的断点配置，说明 monitor 仍然有人在用，就只删除当前槽位，不卸载 hook
-    for (i = 0; i < BP_CONFIG_MAX; i++)
-    {
-        if (g_bp_config[i].pid != 0)
-        {
-            has_config = true;
-            break;
-        }
-    }
-
-    if (has_config)
-        return;
+    g_bp_info = NULL;
+    pr_debug("monitor config removed\n");
 
     pr_debug("monitor stop\n");
     inline_hook_remove(g_switch_to_hook);
     inline_hook_remove(g_debug_exception_hooks);
 }
-
-// //下面不用看了，是单步异常步过的内核api，我不使用了，上面异常回调直接关寄存器
-// static struct step_hook hwbp_step_hook;
-// static void (*fn_user_enable_single_step)(struct task_struct *task);
-// static void (*fn_user_disable_single_step)(struct task_struct *task);
-// static void (*fn_register_user_step_hook)(struct step_hook *hook);
-// static void (*fn_unregister_user_step_hook)(struct step_hook *hook);
-
-// // 命中断点后临时关闭当前控制寄存器，并开启单步执行一条指令
-// static void hwbp_begin_step(struct breakpoint_config *cfg, int type, struct pt_regs *regs)
-// {
-//     uint32_t ctrl;
-
-//     // 只处理用户态命中
-//     if (!cfg || !user_mode(regs))
-//         return;
-
-//     if (type == 1)
-//     {
-//         // 清空控制寄存器
-//         ctrl = read_wb_reg(AARCH64_DBG_REG_BCR, 0);
-//         write_wb_reg(AARCH64_DBG_REG_BCR, 0, 0);
-//     }
-//     else
-//     {
-//         // 清空控制寄存器
-//         ctrl = read_wb_reg(AARCH64_DBG_REG_WCR, 0);
-//         write_wb_reg(AARCH64_DBG_REG_WCR, 0, 0);
-//     }
-
-//     // 记录恢复所需状态，single-step 异常回来时使用
-//     cfg->suspended_step = 1;
-//     cfg->suspended_type = type;
-//     cfg->suspended_ctrl = ctrl;
-//     cfg->suspended_task = current;
-
-//     // 开启用户态单步，返回用户态执行一条指令后会进入 hwbp_user_step_handler
-//     fn_user_enable_single_step(current);
-// }
-
-// // 单步异常回调：恢复刚才临时关闭的 BCR/WCR
-// static int hwbp_user_step_handler(struct pt_regs *regs, unsigned long esr)
-// {
-//     struct breakpoint_config *cfg = g_bp_config;
-
-//     (void)esr;
-
-//     // 不是我们发起的单步就交给系统原有处理链
-//     if (!cfg || !cfg->suspended_step || cfg->suspended_task != current)
-//         return DBG_HOOK_ERROR;
-
-//     if (cfg->suspended_type == 1)
-//         // 恢复执行断点
-//         write_wb_reg(AARCH64_DBG_REG_BCR, 0, cfg->suspended_ctrl);
-//     else if (cfg->suspended_type == 2)
-//         // 恢复访问断点
-//         write_wb_reg(AARCH64_DBG_REG_WCR, 0, cfg->suspended_ctrl);
-
-//     // 清理步过状态
-//     cfg->suspended_step = 0;
-//     cfg->suspended_type = 0;
-//     cfg->suspended_ctrl = 0;
-//     cfg->suspended_task = NULL;
-
-//     // 关闭本次单步，告诉异常分发器这次 single-step 已经处理
-//     fn_user_disable_single_step(current);
-//     return DBG_HOOK_HANDLED;
-// }
-
-// // 安装用户态 single-step hook，用来在步过后恢复断点
-// static int hwbp_step_hook_install(void)
-// {
-//     // user_enable_single_step:返回用户态后，执行下一条指令之后触发一次硬件单步异常。
-//     fn_user_enable_single_step = (void *)generic_kallsyms_lookup_name("user_enable_single_step");
-//     fn_user_disable_single_step = (void *)generic_kallsyms_lookup_name("user_disable_single_step");
-//     fn_register_user_step_hook = (void *)generic_kallsyms_lookup_name("register_user_step_hook");
-//     fn_unregister_user_step_hook = (void *)generic_kallsyms_lookup_name("unregister_user_step_hook");
-
-//     if (!fn_user_enable_single_step || !fn_user_disable_single_step ||
-//         !fn_register_user_step_hook || !fn_unregister_user_step_hook)
-//     {
-//         pr_debug("[driver] cannot find single-step symbols\n");
-//         return -ENOENT;
-//     }
-
-//     // 注册到 arm64 debug-monitors 的用户态单步回调链
-//     memset(&hwbp_step_hook, 0, sizeof(hwbp_step_hook));
-//     hwbp_step_hook.fn = (void *)hwbp_user_step_handler;
-//     fn_register_user_step_hook(&hwbp_step_hook);
-
-//     return 0;
-// }
-// static void hwbp_step_hook_remove(void)
-// {
-//     fn_unregister_user_step_hook(&hwbp_step_hook);
-// }

@@ -140,11 +140,12 @@ static void print_smccc_arch_feature(enum arm_smccc_conduit conduit,
     pr_debug("SMCCC feature %-22s: %ld (0x%lx)\n", name, res.a0, res.a0);
 }
 
-// 强制使用 HVC 探测 SMCCC；只把内核选择的 conduit 作为参考打印。
+// 强制使用 HVC 探测 SMCCC
 static void print_smccc_probe(unsigned int current_el, unsigned int el2_implemented)
 {
     struct arm_smccc_res res;
-    enum arm_smccc_conduit kernel_conduit;
+    // 注释掉或移除相关代码，避免引入未导出符号
+    // enum arm_smccc_conduit kernel_conduit;
     enum arm_smccc_conduit conduit = SMCCC_CONDUIT_HVC;
 
     pr_debug("===== SMCCC Probe =====\n");
@@ -155,10 +156,8 @@ static void print_smccc_probe(unsigned int current_el, unsigned int el2_implemen
         return;
     }
 
-    kernel_conduit = arm_smccc_1_1_get_conduit();
-    pr_debug("SMCCC kernel conduit: %s\n",
-             kernel_conduit == SMCCC_CONDUIT_HVC ? "HVC" : kernel_conduit == SMCCC_CONDUIT_SMC ? "SMC"
-                                                                                               : "NONE");
+    // 调用未导出的 arm_smccc_1_1_get_conduit()
+    pr_debug("SMCCC kernel conduit: UNKNOWN (symbol not exported)\n");
     pr_debug("SMCCC active conduit: HVC (forced)\n");
 
     if (!el2_implemented)
