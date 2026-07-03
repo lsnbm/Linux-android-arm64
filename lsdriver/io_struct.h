@@ -1,4 +1,4 @@
-
+﻿
 #ifndef IO_STRUCT_H
 #define IO_STRUCT_H
 #include <linux/vmalloc.h>
@@ -15,14 +15,17 @@
 #include <linux/pid.h>
 #include <linux/sort.h>
 #include <linux/types.h>
+#include <asm/ptrace.h>
+#include "arm64_reg.h"
 
 // 寄存器操作类型定义
-#define HWBP_OP_NONE 0x0  // 00: 不操作
-#define HWBP_OP_READ 0x1  // 01: 读
-#define HWBP_OP_WRITE 0x2 // 10: 写
+#define BP_OP_NONE 0x0  // 00: 不操作
+#define BP_OP_READ 0x1  // 01: 读
+#define BP_OP_WRITE 0x2 // 10: 写
+#define BP_CONFIG_MAX 16
 
 // 设置掩码位的宏，参数1:结构体指针，参数2:寄存器索引，参数3:操作类型
-#define HWBP_SET_MASK(record, reg, op)                          \
+#define BP_SET_MASK(record, reg, op)                            \
     do                                                          \
     {                                                           \
         int byte_idx = (reg) >> 2;                              \
@@ -32,42 +35,42 @@
     } while (0)
 
 // 获取掩码位的宏，参数1:结构体指针，参数2:寄存器索引
-#define HWBP_GET_MASK(record, reg) \
+#define BP_GET_MASK(record, reg) \
     (((record)->mask[(reg) >> 2] >> (((reg) & 0x3) << 1)) & 0x3)
 
-// 断点类型(类型和长度完全与内核一致会冲突，所以这里HW加上BP后缀,原型没有BP)
-enum hwbp_type
+// 断点类型
+enum bp_type
 {
-    HWBP_BREAKPOINT_EMPTY = 0,
-    HWBP_BREAKPOINT_R = 1,
-    HWBP_BREAKPOINT_W = 2,
-    HWBP_BREAKPOINT_RW = HWBP_BREAKPOINT_R | HWBP_BREAKPOINT_W,
-    HWBP_BREAKPOINT_X = 4,
-    HWBP_BREAKPOINT_INVALID = HWBP_BREAKPOINT_RW | HWBP_BREAKPOINT_X,
+    BP_BREAKPOINT_EMPTY = 0,
+    BP_BREAKPOINT_R = 1,
+    BP_BREAKPOINT_W = 2,
+    BP_BREAKPOINT_RW = BP_BREAKPOINT_R | BP_BREAKPOINT_W,
+    BP_BREAKPOINT_X = 4,
+    BP_BREAKPOINT_INVALID = BP_BREAKPOINT_RW | BP_BREAKPOINT_X,
 };
 // 断点长度
-enum hwbp_len
+enum bp_len
 {
-    HWBP_BREAKPOINT_LEN_1 = 1,
-    HWBP_BREAKPOINT_LEN_2 = 2,
-    HWBP_BREAKPOINT_LEN_3 = 3,
-    HWBP_BREAKPOINT_LEN_4 = 4,
-    HWBP_BREAKPOINT_LEN_5 = 5,
-    HWBP_BREAKPOINT_LEN_6 = 6,
-    HWBP_BREAKPOINT_LEN_7 = 7,
-    HWBP_BREAKPOINT_LEN_8 = 8,
+    BP_BREAKPOINT_LEN_1 = 1,
+    BP_BREAKPOINT_LEN_2 = 2,
+    BP_BREAKPOINT_LEN_3 = 3,
+    BP_BREAKPOINT_LEN_4 = 4,
+    BP_BREAKPOINT_LEN_5 = 5,
+    BP_BREAKPOINT_LEN_6 = 6,
+    BP_BREAKPOINT_LEN_7 = 7,
+    BP_BREAKPOINT_LEN_8 = 8,
 
 };
 // 断点作用线程范围
-enum hwbp_scope
+enum bp_scope
 {
-    SCOPE_MAIN_THREAD,   // 仅主线程
-    SCOPE_OTHER_THREADS, // 仅其他子线程
-    SCOPE_ALL_THREADS    // 全部线程
+    BP_SCOPE_MAIN_THREAD,   // 仅主线程
+    BP_SCOPE_OTHER_THREADS, // 仅其他子线程
+    BP_SCOPE_ALL_THREADS    // 全部线程
 };
 
 // 寄存器索引枚举 (每个索引占用 2 bits)
-enum hwbp_reg_idx
+enum bp_reg_idx
 {
     IDX_PC = 0,
     IDX_HIT_COUNT,
@@ -144,7 +147,7 @@ enum hwbp_reg_idx
 };
 
 // 记录单个 PC（触发指令地址）的命中状态
-struct hwbp_record
+struct bp_record
 {
     /*
     一个掩码位，控制所有寄存器的读写行为
@@ -174,22 +177,25 @@ struct hwbp_record
 };
 
 // 单个观点地址结构
-struct hwbp_point
+struct bp_point
 {
-    enum hwbp_type bt;                 // 断点类型
-    enum hwbp_len bl;                  // 断点长度
-    enum hwbp_scope bs;                // 断点作用线程范围
-    uint64_t hit_addr;                 // 监控的地址
-    int record_count;                  // 当前已记录的不同 PC 数量
-    struct hwbp_record records[0x100]; // 记录不同 PC 触发状态的数组
+    void (*on_hit)(void *regs, void *self); // 触发回调，命中时调用
+    enum bp_type bt;                        // 断点类型
+    enum bp_len bl;                         // 断点长度
+    enum bp_scope bs;                       // 断点作用线程范围
+    uint64_t hit_addr;                      // 监控的地址
+    int record_count;                       // 当前已记录的不同 PC 数量
+    struct bp_record records[0x100];        // 记录不同 PC 触发状态的数组
 };
 
 // 存储整体命中信息
-struct hardware_breakpoint
+struct break_point
 {
-    uint64_t num_brps;            // 执行断点的数量
-    uint64_t num_wrps;            // 访问断点的数量
-    struct hwbp_point points[16]; // 多个观点地址
+
+    uint64_t num_brps;                     // 执行断点的数量
+    uint64_t num_wrps;                     // 访问断点的数量
+    int pid;                               // 这个 break_point 属于哪个进程
+    struct bp_point points[BP_CONFIG_MAX]; // 多个观点地址
 };
 
 struct virtual_gnss
@@ -277,6 +283,9 @@ enum request_op
     request_op_hwbp_set,    // 设置硬件断点并获取执行/访问断点数量
     request_op_hwbp_remove, // 删除硬件断点
 
+    request_op_ptebp_set,    // 设置 PTE UXN breakpoint
+    request_op_ptebp_remove, // 删除 PTE UXN breakpoint
+
     request_op_kernel_exit // 内核线程退出
 };
 
@@ -301,8 +310,8 @@ struct request_obj
     struct virtual_gyro vgyro_info;
     // 虚拟定位信息
     struct virtual_gnss vgnss_info;
-    // 硬件断点信息
-    struct hardware_breakpoint hwbp_info;
+    // 断点信息
+    struct break_point bp_info;
 };
 
 #endif // IO_STRUCT_H

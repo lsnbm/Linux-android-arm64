@@ -1,4 +1,4 @@
-
+﻿
 #pragma once
 #include <algorithm>
 #include <array>
@@ -7,6 +7,7 @@
 #include <charconv>
 #include <chrono>
 #include <cinttypes>
+#include <cctype>
 #include <cmath>
 #include <concepts>
 #include <condition_variable>
@@ -19,6 +20,7 @@
 #include <functional>
 #include <future>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <list>
 #include <map>
@@ -307,97 +309,97 @@ namespace MemUtils
     {
         switch (op)
         {
-        case HWBP_OP_READ:
+        case BP_OP_READ:
             return "read";
-        case HWBP_OP_WRITE:
+        case BP_OP_WRITE:
             return "write";
-        case HWBP_OP_NONE:
+        case BP_OP_NONE:
         default:
             return "none";
         }
     }
 
-    inline void HwbpRequestRead(Driver::hwbp_record &record, int reg)
+    inline void HwbpRequestRead(Driver::bp_record &record, int reg)
     {
-        if (reg >= 0 && reg < Driver::MAX_REG_COUNT && HWBP_GET_MASK(&record, reg) != HWBP_OP_WRITE)
-            HWBP_SET_MASK(&record, reg, HWBP_OP_READ);
+        if (reg >= 0 && reg < Driver::MAX_REG_COUNT && BP_GET_MASK(&record, reg) != BP_OP_WRITE)
+            BP_SET_MASK(&record, reg, BP_OP_READ);
     }
 
-    inline void HwbpRequestAll(Driver::hwbp_record &record)
+    inline void HwbpRequestAll(Driver::bp_record &record)
     {
         for (int reg = Driver::IDX_PC; reg < Driver::MAX_REG_COUNT; ++reg)
             HwbpRequestRead(record, reg);
     }
 
-    inline std::uint64_t HwbpGetXField(const Driver::hwbp_record &record, int index)
+    inline std::uint64_t HwbpGetXField(const Driver::bp_record &record, int index)
     {
-        static constexpr std::uint64_t Driver::hwbp_record::*fields[] = {
-            &Driver::hwbp_record::x0, &Driver::hwbp_record::x1, &Driver::hwbp_record::x2,
-            &Driver::hwbp_record::x3, &Driver::hwbp_record::x4, &Driver::hwbp_record::x5,
-            &Driver::hwbp_record::x6, &Driver::hwbp_record::x7, &Driver::hwbp_record::x8,
-            &Driver::hwbp_record::x9, &Driver::hwbp_record::x10, &Driver::hwbp_record::x11,
-            &Driver::hwbp_record::x12, &Driver::hwbp_record::x13, &Driver::hwbp_record::x14,
-            &Driver::hwbp_record::x15, &Driver::hwbp_record::x16, &Driver::hwbp_record::x17,
-            &Driver::hwbp_record::x18, &Driver::hwbp_record::x19, &Driver::hwbp_record::x20,
-            &Driver::hwbp_record::x21, &Driver::hwbp_record::x22, &Driver::hwbp_record::x23,
-            &Driver::hwbp_record::x24, &Driver::hwbp_record::x25, &Driver::hwbp_record::x26,
-            &Driver::hwbp_record::x27, &Driver::hwbp_record::x28, &Driver::hwbp_record::x29};
+        static constexpr std::uint64_t Driver::bp_record::*fields[] = {
+            &Driver::bp_record::x0, &Driver::bp_record::x1, &Driver::bp_record::x2,
+            &Driver::bp_record::x3, &Driver::bp_record::x4, &Driver::bp_record::x5,
+            &Driver::bp_record::x6, &Driver::bp_record::x7, &Driver::bp_record::x8,
+            &Driver::bp_record::x9, &Driver::bp_record::x10, &Driver::bp_record::x11,
+            &Driver::bp_record::x12, &Driver::bp_record::x13, &Driver::bp_record::x14,
+            &Driver::bp_record::x15, &Driver::bp_record::x16, &Driver::bp_record::x17,
+            &Driver::bp_record::x18, &Driver::bp_record::x19, &Driver::bp_record::x20,
+            &Driver::bp_record::x21, &Driver::bp_record::x22, &Driver::bp_record::x23,
+            &Driver::bp_record::x24, &Driver::bp_record::x25, &Driver::bp_record::x26,
+            &Driver::bp_record::x27, &Driver::bp_record::x28, &Driver::bp_record::x29};
         return (index >= 0 && index < 30) ? (record.*fields[index]) : 0;
     }
 
-    inline void HwbpSetXField(Driver::hwbp_record &record, int index, std::uint64_t value)
+    inline void HwbpSetXField(Driver::bp_record &record, int index, std::uint64_t value)
     {
-        static constexpr std::uint64_t Driver::hwbp_record::*fields[] = {
-            &Driver::hwbp_record::x0, &Driver::hwbp_record::x1, &Driver::hwbp_record::x2,
-            &Driver::hwbp_record::x3, &Driver::hwbp_record::x4, &Driver::hwbp_record::x5,
-            &Driver::hwbp_record::x6, &Driver::hwbp_record::x7, &Driver::hwbp_record::x8,
-            &Driver::hwbp_record::x9, &Driver::hwbp_record::x10, &Driver::hwbp_record::x11,
-            &Driver::hwbp_record::x12, &Driver::hwbp_record::x13, &Driver::hwbp_record::x14,
-            &Driver::hwbp_record::x15, &Driver::hwbp_record::x16, &Driver::hwbp_record::x17,
-            &Driver::hwbp_record::x18, &Driver::hwbp_record::x19, &Driver::hwbp_record::x20,
-            &Driver::hwbp_record::x21, &Driver::hwbp_record::x22, &Driver::hwbp_record::x23,
-            &Driver::hwbp_record::x24, &Driver::hwbp_record::x25, &Driver::hwbp_record::x26,
-            &Driver::hwbp_record::x27, &Driver::hwbp_record::x28, &Driver::hwbp_record::x29};
+        static constexpr std::uint64_t Driver::bp_record::*fields[] = {
+            &Driver::bp_record::x0, &Driver::bp_record::x1, &Driver::bp_record::x2,
+            &Driver::bp_record::x3, &Driver::bp_record::x4, &Driver::bp_record::x5,
+            &Driver::bp_record::x6, &Driver::bp_record::x7, &Driver::bp_record::x8,
+            &Driver::bp_record::x9, &Driver::bp_record::x10, &Driver::bp_record::x11,
+            &Driver::bp_record::x12, &Driver::bp_record::x13, &Driver::bp_record::x14,
+            &Driver::bp_record::x15, &Driver::bp_record::x16, &Driver::bp_record::x17,
+            &Driver::bp_record::x18, &Driver::bp_record::x19, &Driver::bp_record::x20,
+            &Driver::bp_record::x21, &Driver::bp_record::x22, &Driver::bp_record::x23,
+            &Driver::bp_record::x24, &Driver::bp_record::x25, &Driver::bp_record::x26,
+            &Driver::bp_record::x27, &Driver::bp_record::x28, &Driver::bp_record::x29};
         if (index >= 0 && index < 30)
             (record.*fields[index]) = value;
     }
 
-    inline __uint128_t HwbpGetQField(const Driver::hwbp_record &record, int index)
+    inline __uint128_t HwbpGetQField(const Driver::bp_record &record, int index)
     {
-        static constexpr __uint128_t Driver::hwbp_record::*fields[] = {
-            &Driver::hwbp_record::q0, &Driver::hwbp_record::q1, &Driver::hwbp_record::q2,
-            &Driver::hwbp_record::q3, &Driver::hwbp_record::q4, &Driver::hwbp_record::q5,
-            &Driver::hwbp_record::q6, &Driver::hwbp_record::q7, &Driver::hwbp_record::q8,
-            &Driver::hwbp_record::q9, &Driver::hwbp_record::q10, &Driver::hwbp_record::q11,
-            &Driver::hwbp_record::q12, &Driver::hwbp_record::q13, &Driver::hwbp_record::q14,
-            &Driver::hwbp_record::q15, &Driver::hwbp_record::q16, &Driver::hwbp_record::q17,
-            &Driver::hwbp_record::q18, &Driver::hwbp_record::q19, &Driver::hwbp_record::q20,
-            &Driver::hwbp_record::q21, &Driver::hwbp_record::q22, &Driver::hwbp_record::q23,
-            &Driver::hwbp_record::q24, &Driver::hwbp_record::q25, &Driver::hwbp_record::q26,
-            &Driver::hwbp_record::q27, &Driver::hwbp_record::q28, &Driver::hwbp_record::q29,
-            &Driver::hwbp_record::q30, &Driver::hwbp_record::q31};
+        static constexpr __uint128_t Driver::bp_record::*fields[] = {
+            &Driver::bp_record::q0, &Driver::bp_record::q1, &Driver::bp_record::q2,
+            &Driver::bp_record::q3, &Driver::bp_record::q4, &Driver::bp_record::q5,
+            &Driver::bp_record::q6, &Driver::bp_record::q7, &Driver::bp_record::q8,
+            &Driver::bp_record::q9, &Driver::bp_record::q10, &Driver::bp_record::q11,
+            &Driver::bp_record::q12, &Driver::bp_record::q13, &Driver::bp_record::q14,
+            &Driver::bp_record::q15, &Driver::bp_record::q16, &Driver::bp_record::q17,
+            &Driver::bp_record::q18, &Driver::bp_record::q19, &Driver::bp_record::q20,
+            &Driver::bp_record::q21, &Driver::bp_record::q22, &Driver::bp_record::q23,
+            &Driver::bp_record::q24, &Driver::bp_record::q25, &Driver::bp_record::q26,
+            &Driver::bp_record::q27, &Driver::bp_record::q28, &Driver::bp_record::q29,
+            &Driver::bp_record::q30, &Driver::bp_record::q31};
         return (index >= 0 && index < 32) ? (record.*fields[index]) : 0;
     }
 
-    inline void HwbpSetQField(Driver::hwbp_record &record, int index, __uint128_t value)
+    inline void HwbpSetQField(Driver::bp_record &record, int index, __uint128_t value)
     {
-        static constexpr __uint128_t Driver::hwbp_record::*fields[] = {
-            &Driver::hwbp_record::q0, &Driver::hwbp_record::q1, &Driver::hwbp_record::q2,
-            &Driver::hwbp_record::q3, &Driver::hwbp_record::q4, &Driver::hwbp_record::q5,
-            &Driver::hwbp_record::q6, &Driver::hwbp_record::q7, &Driver::hwbp_record::q8,
-            &Driver::hwbp_record::q9, &Driver::hwbp_record::q10, &Driver::hwbp_record::q11,
-            &Driver::hwbp_record::q12, &Driver::hwbp_record::q13, &Driver::hwbp_record::q14,
-            &Driver::hwbp_record::q15, &Driver::hwbp_record::q16, &Driver::hwbp_record::q17,
-            &Driver::hwbp_record::q18, &Driver::hwbp_record::q19, &Driver::hwbp_record::q20,
-            &Driver::hwbp_record::q21, &Driver::hwbp_record::q22, &Driver::hwbp_record::q23,
-            &Driver::hwbp_record::q24, &Driver::hwbp_record::q25, &Driver::hwbp_record::q26,
-            &Driver::hwbp_record::q27, &Driver::hwbp_record::q28, &Driver::hwbp_record::q29,
-            &Driver::hwbp_record::q30, &Driver::hwbp_record::q31};
+        static constexpr __uint128_t Driver::bp_record::*fields[] = {
+            &Driver::bp_record::q0, &Driver::bp_record::q1, &Driver::bp_record::q2,
+            &Driver::bp_record::q3, &Driver::bp_record::q4, &Driver::bp_record::q5,
+            &Driver::bp_record::q6, &Driver::bp_record::q7, &Driver::bp_record::q8,
+            &Driver::bp_record::q9, &Driver::bp_record::q10, &Driver::bp_record::q11,
+            &Driver::bp_record::q12, &Driver::bp_record::q13, &Driver::bp_record::q14,
+            &Driver::bp_record::q15, &Driver::bp_record::q16, &Driver::bp_record::q17,
+            &Driver::bp_record::q18, &Driver::bp_record::q19, &Driver::bp_record::q20,
+            &Driver::bp_record::q21, &Driver::bp_record::q22, &Driver::bp_record::q23,
+            &Driver::bp_record::q24, &Driver::bp_record::q25, &Driver::bp_record::q26,
+            &Driver::bp_record::q27, &Driver::bp_record::q28, &Driver::bp_record::q29,
+            &Driver::bp_record::q30, &Driver::bp_record::q31};
         if (index >= 0 && index < 32)
             (record.*fields[index]) = value;
     }
 
-    inline __uint128_t HwbpReadRegisterValue(Driver::hwbp_record &record, int reg)
+    inline __uint128_t HwbpReadRegisterValue(Driver::bp_record &record, int reg)
     {
         HwbpRequestRead(record, reg);
         switch (reg)
@@ -429,12 +431,12 @@ namespace MemUtils
         }
     }
 
-    inline bool HwbpWriteRegisterValue(Driver::hwbp_record &record, int reg, __uint128_t value)
+    inline bool HwbpWriteRegisterValue(Driver::bp_record &record, int reg, __uint128_t value)
     {
         if (reg < 0 || reg >= Driver::MAX_REG_COUNT)
             return false;
 
-        HWBP_SET_MASK(&record, reg, HWBP_OP_WRITE);
+        BP_SET_MASK(&record, reg, BP_OP_WRITE);
         switch (reg)
         {
         case Driver::IDX_PC:
@@ -563,7 +565,7 @@ namespace MemUtils
         return *index;
     }
 
-    inline bool AssignHwbpRecordField(Driver::hwbp_record &record, std::string_view fieldToken, std::uint64_t value)
+    inline bool AssignHwbpRecordField(Driver::bp_record &record, std::string_view fieldToken, std::uint64_t value)
     {
         const std::string token = HwbpLowerAscii(fieldToken);
         if (const auto maskIndex = HwbpMaskByteIndexFromToken(token); maskIndex.has_value())
@@ -575,9 +577,9 @@ namespace MemUtils
         if (token.starts_with("op.") || token.starts_with("mask."))
         {
             const auto regIndex = HwbpRegIndexFromToken(token);
-            if (!regIndex.has_value() || value > HWBP_OP_WRITE)
+            if (!regIndex.has_value() || value > BP_OP_WRITE)
                 return false;
-            HWBP_SET_MASK(&record, *regIndex, static_cast<std::uint8_t>(value));
+            BP_SET_MASK(&record, *regIndex, static_cast<std::uint8_t>(value));
             return true;
         }
 
@@ -647,8 +649,7 @@ namespace MemUtils
                                 T value{};
                                 if (dr->Read(addr, &value, sizeof(T)) != static_cast<int>(sizeof(T)))
                                     return "??";
-                                return detail::ValueToString(value);
-                            });
+                                return detail::ValueToString(value); });
     }
 
     // 把字符串按指定类型写入目标地址。
@@ -863,6 +864,385 @@ namespace MemUtils
     }
 
 } // namespace MemUtils
+
+// ============================================================================
+// 特征码扫描器
+// ============================================================================
+namespace SignatureScanner
+{
+    inline constexpr int SIG_MAX_RANGE = 1200;
+    inline constexpr size_t SIG_BUFFER_SIZE = 0x8000;
+    inline constexpr const char *SIG_DEFAULT_FILE = "Signature.txt";
+
+    struct SigElement
+    {
+        std::vector<uint8_t> bytes;
+        std::vector<bool> mask;
+        bool empty() const { return bytes.empty(); }
+        size_t size() const { return bytes.size(); }
+        void clear()
+        {
+            bytes.clear();
+            mask.clear();
+        }
+    };
+
+    struct SigFilterResult
+    {
+        bool success = false;
+        int changedCount = 0;
+        int totalCount = 0;
+        std::string oldSignature;
+        std::string newSignature;
+    };
+
+    namespace
+    {
+        std::string NormalizeSigFileName(const char *filename)
+        {
+            if (filename != nullptr && *filename != '\0')
+                return std::string(filename);
+            return std::string(SIG_DEFAULT_FILE);
+        }
+
+        bool IsAbsoluteSigPath(std::string_view path)
+        {
+            return !path.empty() && path.front() == '/';
+        }
+
+        std::string ResolveSigPath(std::string_view path)
+        {
+            if (IsAbsoluteSigPath(path))
+                return std::string(path);
+            return std::string("/data/akernel/") + std::string(path);
+        }
+
+        std::string FormatSignature(const SigElement &sig)
+        {
+            if (sig.empty())
+                return "";
+            std::string result;
+            result.reserve(sig.size() * 4);
+            for (size_t i = 0; i < sig.bytes.size(); ++i)
+            {
+                if (i > 0)
+                    result += ' ';
+                if (!sig.mask[i])
+                    result += "??";
+                else
+                    std::format_to(std::back_inserter(result), "{:02X}h", sig.bytes[i]);
+            }
+            return result;
+        }
+
+        SigElement ParseSignature(std::string_view text)
+        {
+            SigElement sig;
+            if (text.empty())
+                return sig;
+
+            std::istringstream iss{std::string{text}};
+            std::string token;
+
+            while (iss >> token)
+            {
+                if (token == "??" || token == "?")
+                {
+                    sig.bytes.push_back(0);
+                    sig.mask.push_back(false);
+                }
+                else
+                {
+                    std::string hex = token;
+                    if (!hex.empty() && std::tolower(static_cast<unsigned char>(hex.back())) == 'h')
+                        hex.pop_back();
+
+                    unsigned val = 0;
+                    auto [ptr, ec] = std::from_chars(hex.data(), hex.data() + hex.size(), val, 16);
+                    if (ec == std::errc() && val <= 0xFF)
+                    {
+                        sig.bytes.push_back(static_cast<uint8_t>(val));
+                        sig.mask.push_back(true);
+                    }
+                    else
+                    {
+                        std::println(stderr, "[ParseSignature] 无法解析: '{}'", token);
+                        sig.clear();
+                        return sig;
+                    }
+                }
+            }
+            return sig;
+        }
+
+        bool MatchSignature(const uint8_t *data, const SigElement &sig)
+        {
+            for (size_t i = 0; i < sig.size(); ++i)
+                if (sig.mask[i] && data[i] != sig.bytes[i])
+                    return false;
+            return true;
+        }
+
+        std::vector<uintptr_t> ScanCore(const SigElement &sig, int rangeOffset)
+        {
+            std::vector<uintptr_t> matches;
+            if (sig.empty())
+                return matches;
+
+            auto regions = dr->GetScanRegions();
+            if (regions.empty())
+                return matches;
+
+            const size_t sigSize = sig.size();
+            std::vector<uint8_t> buffer(SIG_BUFFER_SIZE);
+            const size_t step = (SIG_BUFFER_SIZE > sigSize) ? (SIG_BUFFER_SIZE - sigSize) : 1;
+
+            for (const auto &[rStart, rEnd] : regions)
+            {
+                if (rEnd - rStart < sigSize)
+                    continue;
+
+                for (uintptr_t addr = rStart; addr + sigSize <= rEnd; addr += step)
+                {
+                    size_t readSize = std::min(static_cast<size_t>(rEnd - addr), SIG_BUFFER_SIZE);
+                    if (readSize < sigSize)
+                        break;
+                    if (dr->Read(addr, buffer.data(), readSize) <= 0)
+                        continue;
+
+                    size_t searchEnd = readSize - sigSize;
+                    for (size_t off = 0; off <= searchEnd; ++off)
+                    {
+                        if (MatchSignature(buffer.data() + off, sig))
+                            matches.push_back(addr + off + rangeOffset);
+                    }
+                }
+            }
+            return matches;
+        }
+
+        bool ReadSigFile(const char *filename, int &range, std::string &sigText)
+        {
+            std::ifstream fp(filename);
+            if (!fp)
+                return false;
+
+            range = 0;
+            sigText.clear();
+            std::string line;
+
+            while (std::getline(fp, line))
+            {
+                while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
+                    line.pop_back();
+
+                if (line.starts_with("范围:"))
+                {
+                    auto sub = line.substr(line.find(':') + 1);
+                    auto it = std::ranges::find_if(sub, [](char ch)
+                                                   { return std::isdigit(static_cast<unsigned char>(ch)); });
+                    if (it != sub.end())
+                        std::from_chars(&*it, sub.data() + sub.size(), range);
+                }
+                else if (line.starts_with("特征码:"))
+                {
+                    auto sub = line.substr(line.find(':') + 1);
+                    if (auto f = sub.find_first_not_of(' '); f != std::string::npos)
+                        sigText = sub.substr(f);
+                }
+            }
+            return (range > 0 && !sigText.empty());
+        }
+
+        bool WriteSigFile(const char *filename, uintptr_t addr, int range, const SigElement &sig)
+        {
+            std::ofstream fp(filename);
+            if (!fp)
+                return false;
+            std::println(fp, "目标地址: 0x{:X}", addr);
+            std::println(fp, "范围: {}", range);
+            std::println(fp, "总字节: {}", sig.size());
+            std::println(fp, "特征码: {}", FormatSignature(sig));
+            return !fp.fail();
+        }
+
+        bool ReadSigFileWithFallback(const char *filename, int &range, std::string &sigText)
+        {
+            const std::string rawName = NormalizeSigFileName(filename);
+            if (ReadSigFile(rawName.c_str(), range, sigText))
+                return true;
+            if (!IsAbsoluteSigPath(rawName))
+            {
+                const std::string fallback = ResolveSigPath(rawName);
+                return ReadSigFile(fallback.c_str(), range, sigText);
+            }
+            return false;
+        }
+
+        bool WriteSigFileWithFallback(const char *filename, uintptr_t addr, int range, const SigElement &sig)
+        {
+            const std::string rawName = NormalizeSigFileName(filename);
+            if (WriteSigFile(rawName.c_str(), addr, range, sig))
+                return true;
+            if (!IsAbsoluteSigPath(rawName))
+            {
+                const std::string fallback = ResolveSigPath(rawName);
+                return WriteSigFile(fallback.c_str(), addr, range, sig);
+            }
+            return false;
+        }
+    }
+
+    inline bool ScanAddressSignature(uintptr_t addr, int range, const char *filename = SIG_DEFAULT_FILE)
+    {
+        if (range <= 0 || range > SIG_MAX_RANGE)
+        {
+            std::println(stderr, "[找特征] range 无效: {} (1-{})", range, SIG_MAX_RANGE);
+            return false;
+        }
+        if (addr < static_cast<uintptr_t>(range))
+        {
+            std::println(stderr, "[找特征] 地址过小会下溢");
+            return false;
+        }
+
+        size_t totalSize = static_cast<size_t>(range) * 2;
+        SigElement sig;
+        sig.bytes.resize(totalSize);
+
+        if (dr->Read(addr - range, sig.bytes.data(), totalSize) <= 0)
+        {
+            std::println(stderr, "[找特征] 读取失败: 0x{:X}", addr - range);
+            return false;
+        }
+
+        sig.mask.assign(totalSize, true);
+
+        if (!WriteSigFileWithFallback(filename, addr, range, sig))
+        {
+            std::println(stderr, "[找特征] 写文件失败: {}", filename);
+            return false;
+        }
+
+        std::println("[找特征] 完成 地址:0x{:X} 范围:±{} 字节:{}", addr, range, totalSize);
+        return true;
+    }
+
+    inline SigFilterResult FilterSignature(uintptr_t addr, const char *filename = SIG_DEFAULT_FILE)
+    {
+        SigFilterResult result;
+
+        int range = 0;
+        std::string oldSigText;
+        if (!ReadSigFileWithFallback(filename, range, oldSigText))
+        {
+            std::println(stderr, "[过滤特征] 读取文件失败: {}", filename);
+            return result;
+        }
+
+        SigElement oldSig = ParseSignature(oldSigText);
+        if (oldSig.empty())
+        {
+            std::println(stderr, "[过滤特征] 特征码解析失败");
+            return result;
+        }
+
+        if (addr < static_cast<uintptr_t>(range))
+        {
+            std::println(stderr, "[过滤特征] 地址过小");
+            return result;
+        }
+
+        size_t totalSize = static_cast<size_t>(range) * 2;
+        std::vector<uint8_t> curData(totalSize);
+
+        if (dr->Read(addr - range, curData.data(), totalSize) <= 0)
+        {
+            std::println(stderr, "[过滤特征] 读取失败: 0x{:X}", addr - range);
+            return result;
+        }
+
+        size_t cmpSize = std::min(oldSig.size(), curData.size());
+        SigElement newSig;
+        newSig.bytes.resize(cmpSize);
+        newSig.mask.resize(cmpSize);
+        result.totalCount = static_cast<int>(cmpSize);
+
+        for (size_t i = 0; i < cmpSize; ++i)
+        {
+            if (!oldSig.mask[i])
+            {
+                newSig.bytes[i] = 0;
+                newSig.mask[i] = false;
+            }
+            else if (oldSig.bytes[i] != curData[i])
+            {
+                newSig.bytes[i] = 0;
+                newSig.mask[i] = false;
+                ++result.changedCount;
+            }
+            else
+            {
+                newSig.bytes[i] = curData[i];
+                newSig.mask[i] = true;
+            }
+        }
+
+        result.oldSignature = oldSigText;
+        result.newSignature = FormatSignature(newSig);
+
+        WriteSigFileWithFallback(filename, addr, range, newSig);
+
+        result.success = true;
+        std::println("[过滤特征] 完成 总字节:{} 变化:{}", result.totalCount, result.changedCount);
+        return result;
+    }
+
+    inline std::vector<uintptr_t> ScanSignature(const char *pattern, int range = 0)
+    {
+        SigElement sig = ParseSignature(pattern);
+        if (sig.empty())
+        {
+            std::println(stderr, "[扫特征码] 解析失败");
+            return {};
+        }
+
+        std::println("[扫特征码] 开始 长度:{} 偏移:{}", sig.size(), range);
+        auto matches = ScanCore(sig, range);
+        std::println("[扫特征码] 完成 找到 {} 个匹配", matches.size());
+        return matches;
+    }
+
+    inline std::vector<uintptr_t> ScanSignatureFromFile(const char *filename = SIG_DEFAULT_FILE)
+    {
+        int range = 0;
+        std::string sigText;
+        if (!ReadSigFileWithFallback(filename, range, sigText))
+        {
+            std::println(stderr, "[扫特征码] 读取文件失败: {}", filename);
+            return {};
+        }
+
+        SigElement sig = ParseSignature(sigText);
+        if (sig.empty())
+            return {};
+
+        std::println("[扫特征码] 开始 长度:{} 范围偏移:{}", sig.size(), range);
+        auto matches = ScanCore(sig, range);
+        std::println("[扫特征码] 完成 找到 {} 个匹配", matches.size());
+
+        const std::string outPath = ResolveSigPath(NormalizeSigFileName(filename));
+        std::ofstream out(outPath, std::ios::app);
+        if (out)
+        {
+            std::println(out, "\n扫描结果: {} 个", matches.size());
+            for (auto a : matches)
+                std::println(out, "0x{:X}", a);
+        }
+
+        return matches;
+    }
+}
 
 // ============================================================================
 // 位图包装
@@ -3311,3 +3691,70 @@ public:
         std::println("导出完成: 成功向外输出了 {} 条链条！", chainCount);
     }
 };
+
+// ============================================================================
+// 内存工具统一运行时
+// ============================================================================
+namespace MemoryTool
+{
+    struct HwbpState
+    {
+        bool active = false;
+        std::uint64_t address = 0;
+        std::string mode;
+        std::string type;
+        std::string scope;
+        int length = 0;
+
+        void clear()
+        {
+            active = false;
+            address = 0;
+            mode.clear();
+            type.clear();
+            scope.clear();
+            length = 0;
+        }
+    };
+
+    class Runtime
+    {
+    public:
+        MemScanner scanner;
+        MemViewer viewer;
+        PointerManager pointerManager;
+        LockManager locks;
+        HwbpState hwbp;
+    };
+
+    inline Runtime &GetRuntime()
+    {
+        static Runtime runtime;
+        return runtime;
+    }
+
+    inline MemScanner &Scanner()
+    {
+        return GetRuntime().scanner;
+    }
+
+    inline MemViewer &Viewer()
+    {
+        return GetRuntime().viewer;
+    }
+
+    inline PointerManager &Pointer()
+    {
+        return GetRuntime().pointerManager;
+    }
+
+    inline LockManager &Locks()
+    {
+        return GetRuntime().locks;
+    }
+
+    inline HwbpState &Hwbp()
+    {
+        return GetRuntime().hwbp;
+    }
+}

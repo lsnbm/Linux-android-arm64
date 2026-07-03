@@ -1,4 +1,4 @@
-
+﻿
 #include <imgui.h>
 #include <Android_touch/ImGuiFloatingKeyboard.h>
 #include <cstdarg>
@@ -21,10 +21,9 @@
 
 #include "MemoryTool.h"
 #include "Driver.h"
-#include "SignatureScanner.h"
 #include "Disassembler.h"
 #include "ReadWriteTest.h"
-#include "tcp_server.h"
+#include "TcpServer.h"
 #include "TouchTest.h"
 #include "GyroTest.h"
 #include "GnssTest.h"
@@ -200,10 +199,10 @@ namespace Colors
 class MainUI
 {
 private:
-    MemScanner scanner_;
-    PointerManager ptrManager_;
-    LockManager lockManager_;
-    MemViewer memViewer_;
+    MemScanner &scanner_ = MemoryTool::Scanner();
+    PointerManager &ptrManager_ = MemoryTool::Pointer();
+    LockManager &lockManager_ = MemoryTool::Locks();
+    MemViewer &memViewer_ = MemoryTool::Viewer();
 
     struct ScanParams
     {
@@ -244,6 +243,7 @@ private:
         uintptr_t address = 0;
         int pointCount = 0;
         bool active = false;
+        bool ptebpActive = false;
 
         int editingRecordIdx = -1;
         char regEditBuf[64] = {};
@@ -312,12 +312,12 @@ private:
                            static_cast<unsigned long long>(value));
     }
 
-    static std::uint64_t HwbpRead64(Driver::hwbp_record &record, int regIndex)
+    static std::uint64_t HwbpRead64(Driver::bp_record &record, int regIndex)
     {
         return static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(record, regIndex));
     }
 
-    static std::uint32_t HwbpRead32(Driver::hwbp_record &record, int regIndex)
+    static std::uint32_t HwbpRead32(Driver::bp_record &record, int regIndex)
     {
         return static_cast<std::uint32_t>(MemUtils::HwbpReadRegisterValue(record, regIndex));
     }
@@ -328,12 +328,12 @@ private:
         ImGui::SetClipboardText(temp.c_str());
     }
 
-    Driver::hwbp_record *findHwbpRecordByFlatIndex(int recordIndex)
+    Driver::bp_record *findHwbpRecordByFlatIndex(int recordIndex)
     {
         if (recordIndex < 0)
             return nullptr;
 
-        auto &info = const_cast<Driver::hardware_breakpoint &>(dr->GetHwbpInfoRef());
+        auto &info = const_cast<Driver::break_point &>(dr->GetHwbpInfoRef());
         int flatIndex = 0;
         for (auto &point : info.points)
         {
@@ -372,21 +372,21 @@ private:
         return true;
     }
 
-    std::vector<Driver::hwbp_point> buildHwbpPointsFromRows()
+    std::vector<Driver::bp_point> buildHwbpPointsFromRows()
     {
-        static constexpr Driver::hwbp_type typeValues[] = {
-            Driver::HWBP_BREAKPOINT_R,
-            Driver::HWBP_BREAKPOINT_W,
-            Driver::HWBP_BREAKPOINT_RW,
-            Driver::HWBP_BREAKPOINT_X,
+        static constexpr Driver::bp_type typeValues[] = {
+            Driver::BP_BREAKPOINT_R,
+            Driver::BP_BREAKPOINT_W,
+            Driver::BP_BREAKPOINT_RW,
+            Driver::BP_BREAKPOINT_X,
         };
-        static constexpr Driver::hwbp_scope scopeValues[] = {
-            Driver::SCOPE_MAIN_THREAD,
-            Driver::SCOPE_OTHER_THREADS,
-            Driver::SCOPE_ALL_THREADS,
+        static constexpr Driver::bp_scope scopeValues[] = {
+            Driver::BP_SCOPE_MAIN_THREAD,
+            Driver::BP_SCOPE_OTHER_THREADS,
+            Driver::BP_SCOPE_ALL_THREADS,
         };
 
-        std::vector<Driver::hwbp_point> points;
+        std::vector<Driver::bp_point> points;
         const int count = std::clamp(bpParams_.configPointCount, 1, 16);
         points.reserve(count);
         for (int i = 0; i < count; ++i)
@@ -399,11 +399,11 @@ private:
             const int scopeIndex = std::clamp(bpParams_.points[i].scope, 0, 2);
             const int len = std::clamp(bpParams_.points[i].len, 1, 8);
 
-            Driver::hwbp_point point{};
+            Driver::bp_point point{};
             point.hit_addr = *addr;
             point.bt = typeValues[typeIndex];
             point.bs = scopeValues[scopeIndex];
-            point.bl = static_cast<Driver::hwbp_len>(len);
+            point.bl = static_cast<Driver::bp_len>(len);
             points.push_back(point);
         }
         return points;
@@ -1346,16 +1346,19 @@ private:
     {
         float w = ImGui::GetContentRegionAvail().x, bh = S(45);
 
-        UI::Text(Colors::TITLE, "━━ 硬件断点 ━━");
+        UI::Text(Colors::TITLE, "━━ 断点 ━━");
         UI::Space(S(4));
 
         // 硬件信息
         const auto &info = dr->GetHwbpInfoRef();
+        const bool anyBpActive = bpParams_.active || bpParams_.ptebpActive;
         UI::LabelValue(Colors::ADDR_CYAN, "执行断点寄存器: ", Colors::ADDR_GREEN,
                        "%llu", (unsigned long long)info.num_brps);
         ImGui::SameLine();
         UI::LabelValue(Colors::ADDR_CYAN, "  访问断点寄存器: ", Colors::ADDR_GREEN,
                        "%llu", (unsigned long long)info.num_wrps);
+        UI::Text(bpParams_.ptebpActive ? Colors::OK : Colors::HINT,
+             bpParams_.ptebpActive ? "PTEBP: 已激活" : "PTEBP: 未激活");
 
         UI::Space(S(6));
         ImGui::Separator();
@@ -1397,12 +1400,12 @@ private:
             ImGui::PopID();
         }
         float rowBtnW = (w - S(8)) / 2;
-        ImGui::BeginDisabled(bpParams_.configPointCount >= 16 || bpParams_.active);
+        ImGui::BeginDisabled(bpParams_.configPointCount >= 16 || anyBpActive);
         if (UI::Btn("添加point", {rowBtnW, S(38)}, Colors::BTN_BLUE))
             ++bpParams_.configPointCount;
         ImGui::EndDisabled();
         ImGui::SameLine();
-        ImGui::BeginDisabled(bpParams_.configPointCount <= 1 || bpParams_.active);
+        ImGui::BeginDisabled(bpParams_.configPointCount <= 1 || anyBpActive);
         if (UI::Btn("删除point", {rowBtnW, S(38)}, Colors::BTN_RED))
             --bpParams_.configPointCount;
         ImGui::EndDisabled();
@@ -1410,32 +1413,76 @@ private:
 
         // 操作按钮
         float halfW = (w - S(8)) / 2;
-        ImGui::BeginDisabled(bpParams_.active);
-        if (UI::Btn("设置断点", {halfW, S(52)}, Colors::BTN_GREEN))
+        ImGui::BeginDisabled(anyBpActive);
+        if (UI::Btn("设置HWBP", {halfW, S(52)}, Colors::BTN_GREEN))
         {
             auto points = buildHwbpPointsFromRows();
             if (!points.empty())
             {
                 bpParams_.address = points.front().hit_addr;
                 bpParams_.pointCount = static_cast<int>(points.size());
-                if (dr->SetProcessHwbpRef(std::span<const Driver::hwbp_point>(points.data(), points.size())) == 0)
+                if (dr->SetProcessHwbpRef(std::span<const Driver::bp_point>(points.data(), points.size())) == 0)
+                {
                     bpParams_.active = true;
+                    auto &hwbp = MemoryTool::Hwbp();
+                    hwbp.active = true;
+                    hwbp.mode = "hwbp";
+                    hwbp.address = points.front().hit_addr;
+                    hwbp.type = points.size() == 1 ? std::to_string(static_cast<int>(points.front().bt)) : "multi";
+                    hwbp.scope = points.size() == 1 ? std::to_string(static_cast<int>(points.front().bs)) : "multi";
+                    hwbp.length = points.size() == 1 ? static_cast<int>(points.front().bl) : 0;
+                }
             }
         }
         ImGui::EndDisabled();
         ImGui::SameLine();
-        ImGui::BeginDisabled(!bpParams_.active);
-        if (UI::Btn("移除断点", {halfW, S(52)}, {0.5f, 0.15f, 0.15f, 1}))
+        ImGui::BeginDisabled(!bpParams_.active || bpParams_.ptebpActive);
+        if (UI::Btn("移除HWBP", {halfW, S(52)}, {0.5f, 0.15f, 0.15f, 1}))
         {
             dr->RemoveProcessHwbpRef();
             bpParams_.active = false;
             bpParams_.pointCount = 0;
+            MemoryTool::Hwbp().clear();
+        }
+        ImGui::EndDisabled();
+
+        UI::Space(S(6));
+        ImGui::BeginDisabled(anyBpActive);
+        if (UI::Btn("设置PTEBP", {halfW, S(52)}, Colors::BTN_TEAL))
+        {
+            auto points = buildHwbpPointsFromRows();
+            if (!points.empty())
+            {
+                bpParams_.address = points.front().hit_addr;
+                bpParams_.pointCount = static_cast<int>(points.size());
+                if (dr->SetProcessPtebpRef(std::span<const Driver::bp_point>(points.data(), points.size())) == 0)
+                {
+                    bpParams_.ptebpActive = true;
+                    auto &hwbp = MemoryTool::Hwbp();
+                    hwbp.active = true;
+                    hwbp.mode = "ptebp";
+                    hwbp.address = points.front().hit_addr;
+                    hwbp.type = points.size() == 1 ? std::to_string(static_cast<int>(points.front().bt)) : "multi";
+                    hwbp.scope = points.size() == 1 ? std::to_string(static_cast<int>(points.front().bs)) : "multi";
+                    hwbp.length = points.size() == 1 ? static_cast<int>(points.front().bl) : 0;
+                }
+            }
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!bpParams_.ptebpActive);
+        if (UI::Btn("移除PTEBP", {halfW, S(52)}, {0.5f, 0.15f, 0.15f, 1}))
+        {
+            dr->RemoveProcessPtebpRef();
+            bpParams_.ptebpActive = false;
+            bpParams_.pointCount = 0;
+            MemoryTool::Hwbp().clear();
         }
         ImGui::EndDisabled();
 
         UI::Space(S(8));
-        bpParams_.active
-            ? UI::Text(Colors::OK, "● 断点已激活  地址数: %d  首地址: 0x%lX", bpParams_.pointCount, bpParams_.address)
+        anyBpActive
+            ? UI::Text(Colors::OK, "● 断点已激活  地址数: %d  首地址: 0x%lX  模式: %s", bpParams_.pointCount, bpParams_.address, bpParams_.ptebpActive ? "PTEBP" : "HWBP")
             : UI::Text(Colors::HINT, "○ 断点未激活");
         for (const auto &point : info.points)
         {
@@ -1464,7 +1511,7 @@ private:
             UI::Text(Colors::HINT, "暂无命中记录");
     }
 
-    void drawBpRecords(const Driver::hardware_breakpoint &info, float w)
+    void drawBpRecords(const Driver::break_point &info, float w)
     {
         uint64_t totalHits = 0;
         int totalPointCount = 0;
@@ -1476,7 +1523,7 @@ private:
                 totalPointCount++;
             for (int r = 0; r < recordCount; ++r)
             {
-                auto &rec = const_cast<Driver::hwbp_record &>(point.records[r]);
+                auto &rec = const_cast<Driver::bp_record &>(point.records[r]);
                 MemUtils::HwbpRequestAll(rec);
                 totalHits += HwbpRead64(rec, Driver::IDX_HIT_COUNT);
                 totalRecordCount++;
@@ -1508,7 +1555,7 @@ private:
             uint64_t pointHits = 0;
             for (int r = 0; r < recordCount; ++r)
             {
-                auto &rec = const_cast<Driver::hwbp_record &>(point.records[r]);
+                auto &rec = const_cast<Driver::bp_record &>(point.records[r]);
                 pointHits += HwbpRead64(rec, Driver::IDX_HIT_COUNT);
             }
 
@@ -1546,7 +1593,7 @@ private:
                     for (int r = 0; r < recordCount; ++r)
                     {
                         const int recordFlatIndex = pointFlatStart + r;
-                        auto &rec = const_cast<Driver::hwbp_record &>(point.records[r]);
+                        auto &rec = const_cast<Driver::bp_record &>(point.records[r]);
                         const auto pc = HwbpRead64(rec, Driver::IDX_PC);
                         const auto hitCount = HwbpRead64(rec, Driver::IDX_HIT_COUNT);
                         ImGui::PushID(recordFlatIndex);
@@ -1602,9 +1649,9 @@ private:
         }
     }
 
-    void drawBpRecordDetail(const Driver::hwbp_record &rec, int r)
+    void drawBpRecordDetail(const Driver::bp_record &rec, int r)
     {
-        auto &show = const_cast<Driver::hwbp_record &>(rec);
+        auto &show = const_cast<Driver::bp_record &>(rec);
 
         // 通用：显示一行寄存器，点击"改"后输入 Hex 并立即写回
         // fieldId: 0~29=X0~X29, 30=LR, 31=SP, 32=PC, 33=PSTATE, 34=ORIG_X0, 35=SYSCALLNO

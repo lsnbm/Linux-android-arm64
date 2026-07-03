@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
@@ -73,13 +73,14 @@ public: // 共有结构体和锁
     };
     SpinLock m_mutex;
 
-    // 寄存器操作类型定义
-#define HWBP_OP_NONE 0x0  // 00: 不操作
-#define HWBP_OP_READ 0x1  // 01: 读
-#define HWBP_OP_WRITE 0x2 // 10: 写
+// 寄存器操作类型定义
+#define BP_OP_NONE 0x0  // 00: 不操作
+#define BP_OP_READ 0x1  // 01: 读
+#define BP_OP_WRITE 0x2 // 10: 写
+#define BP_CONFIG_MAX 16
 
 // 设置掩码位的宏，参数1:结构体指针，参数2:寄存器索引，参数3:操作类型
-#define HWBP_SET_MASK(record, reg, op)                          \
+#define BP_SET_MASK(record, reg, op)                            \
     do                                                          \
     {                                                           \
         int byte_idx = (reg) >> 2;                              \
@@ -89,42 +90,42 @@ public: // 共有结构体和锁
     } while (0)
 
 // 获取掩码位的宏，参数1:结构体指针，参数2:寄存器索引
-#define HWBP_GET_MASK(record, reg) \
+#define BP_GET_MASK(record, reg) \
     (((record)->mask[(reg) >> 2] >> (((reg) & 0x3) << 1)) & 0x3)
 
-    // 断点类型(类型和长度完全与内核一致会冲突，所以这里HW加上BP后缀,原型没有BP)
-    enum hwbp_type
+    // 断点类型
+    enum bp_type
     {
-        HWBP_BREAKPOINT_EMPTY = 0,
-        HWBP_BREAKPOINT_R = 1,
-        HWBP_BREAKPOINT_W = 2,
-        HWBP_BREAKPOINT_RW = HWBP_BREAKPOINT_R | HWBP_BREAKPOINT_W,
-        HWBP_BREAKPOINT_X = 4,
-        HWBP_BREAKPOINT_INVALID = HWBP_BREAKPOINT_RW | HWBP_BREAKPOINT_X,
+        BP_BREAKPOINT_EMPTY = 0,
+        BP_BREAKPOINT_R = 1,
+        BP_BREAKPOINT_W = 2,
+        BP_BREAKPOINT_RW = BP_BREAKPOINT_R | BP_BREAKPOINT_W,
+        BP_BREAKPOINT_X = 4,
+        BP_BREAKPOINT_INVALID = BP_BREAKPOINT_RW | BP_BREAKPOINT_X,
     };
     // 断点长度
-    enum hwbp_len
+    enum bp_len
     {
-        HWBP_BREAKPOINT_LEN_1 = 1,
-        HWBP_BREAKPOINT_LEN_2 = 2,
-        HWBP_BREAKPOINT_LEN_3 = 3,
-        HWBP_BREAKPOINT_LEN_4 = 4,
-        HWBP_BREAKPOINT_LEN_5 = 5,
-        HWBP_BREAKPOINT_LEN_6 = 6,
-        HWBP_BREAKPOINT_LEN_7 = 7,
-        HWBP_BREAKPOINT_LEN_8 = 8,
+        BP_BREAKPOINT_LEN_1 = 1,
+        BP_BREAKPOINT_LEN_2 = 2,
+        BP_BREAKPOINT_LEN_3 = 3,
+        BP_BREAKPOINT_LEN_4 = 4,
+        BP_BREAKPOINT_LEN_5 = 5,
+        BP_BREAKPOINT_LEN_6 = 6,
+        BP_BREAKPOINT_LEN_7 = 7,
+        BP_BREAKPOINT_LEN_8 = 8,
 
     };
     // 断点作用线程范围
-    enum hwbp_scope
+    enum bp_scope
     {
-        SCOPE_MAIN_THREAD,   // 仅主线程
-        SCOPE_OTHER_THREADS, // 仅其他子线程
-        SCOPE_ALL_THREADS    // 全部线程
+        BP_SCOPE_MAIN_THREAD,   // 仅主线程
+        BP_SCOPE_OTHER_THREADS, // 仅其他子线程
+        BP_SCOPE_ALL_THREADS    // 全部线程
     };
 
     // 寄存器索引枚举 (每个索引占用 2 bits)
-    enum hwbp_reg_idx
+    enum bp_reg_idx
     {
         IDX_PC = 0,
         IDX_HIT_COUNT,
@@ -201,7 +202,7 @@ public: // 共有结构体和锁
     };
 
     // 记录单个 PC（触发指令地址）的命中状态
-    struct hwbp_record
+    struct bp_record
     {
         /*
         一个掩码位，控制所有寄存器的读写行为
@@ -231,22 +232,24 @@ public: // 共有结构体和锁
     };
 
     // 单个观点地址结构
-    struct hwbp_point
+    struct bp_point
     {
-        enum hwbp_type bt;                 // 断点类型
-        enum hwbp_len bl;                  // 断点长度
-        enum hwbp_scope bs;                // 断点作用线程范围
-        uint64_t hit_addr;                 // 监控的地址
-        int record_count;                  // 当前已记录的不同 PC 数量
-        struct hwbp_record records[0x100]; // 记录不同 PC 触发状态的数组
+        void (*on_hit)(void *regs, void *self); // 触发回调，命中时调用
+        enum bp_type bt;                        // 断点类型
+        enum bp_len bl;                         // 断点长度
+        enum bp_scope bs;                       // 断点作用线程范围
+        uint64_t hit_addr;                      // 监控的地址
+        int record_count;                       // 当前已记录的不同 PC 数量
+        struct bp_record records[0x100];        // 记录不同 PC 触发状态的数组
     };
 
     // 存储整体命中信息
-    struct hardware_breakpoint
+    struct break_point
     {
-        uint64_t num_brps;            // 执行断点的数量
-        uint64_t num_wrps;            // 访问断点的数量
-        struct hwbp_point points[16]; // 多个观点地址
+        uint64_t num_brps;                     // 执行断点的数量
+        uint64_t num_wrps;                     // 访问断点的数量
+        int pid;                               // 这个 break_point 属于哪个进程
+        struct bp_point points[BP_CONFIG_MAX]; // 多个观点地址
     };
 
     struct virtual_gnss
@@ -334,6 +337,9 @@ public: // 共有结构体和锁
         request_op_hwbp_set,    // 设置硬件断点并获取执行/访问断点数量
         request_op_hwbp_remove, // 删除硬件断点
 
+        request_op_ptebp_set,    // 设置 PTE UXN breakpoint
+        request_op_ptebp_remove, // 删除 PTE UXN breakpoint
+
         request_op_kernel_exit // 内核线程退出
     };
 
@@ -358,8 +364,8 @@ public: // 共有结构体和锁
         struct virtual_gyro vgyro_info;
         // 虚拟定位信息
         struct virtual_gnss vgnss_info;
-        // 硬件断点信息
-        struct hardware_breakpoint hwbp_info;
+        // 断点信息
+        struct break_point bp_info;
     };
 
 public: // 外部初始化
@@ -770,19 +776,27 @@ public: // 外部获取内存信息
 
 public: // 外部硬件断点接口
     // 获取断点结构体信息
-    const hardware_breakpoint &GetHwbpInfoRef()
+    const break_point &GetHwbpInfoRef()
     {
-        return req->hwbp_info;
+        return req->bp_info;
     }
     // 设置多个断点地址
-    int SetProcessHwbpRef(std::span<const hwbp_point> points)
+    int SetProcessHwbpRef(std::span<const bp_point> points)
     {
-        return HandleHardwareBreakpointEvent(request_op_hwbp_set, points);
+        return HandleHwbpEvent(request_op_hwbp_set, points);
     }
     // 删除断点
     void RemoveProcessHwbpRef()
     {
-        HandleHardwareBreakpointEvent(request_op_hwbp_remove);
+        HandleHwbpEvent(request_op_hwbp_remove);
+    }
+    int SetProcessPtebpRef(std::span<const bp_point> points)
+    {
+        return HandlePtebpEvent(request_op_ptebp_set, points);
+    }
+    void RemoveProcessPtebpRef()
+    {
+        HandlePtebpEvent(request_op_ptebp_remove);
     }
 
     // 删除指定索引内容
@@ -792,16 +806,16 @@ public: // 外部硬件断点接口
             return;
 
         int flat_index = 0;
-        for (auto &point : req->hwbp_info.points)
+        for (auto &point : req->bp_info.points)
         {
             if (index >= flat_index && index < flat_index + point.record_count)
             {
                 const int local_index = index - flat_index;
                 const int tail_count = point.record_count - local_index - 1;
                 if (tail_count > 0)
-                    __builtin_memmove(&point.records[local_index], &point.records[local_index + 1], static_cast<size_t>(tail_count) * sizeof(hwbp_record));
+                    __builtin_memmove(&point.records[local_index], &point.records[local_index + 1], static_cast<size_t>(tail_count) * sizeof(bp_record));
                 point.record_count--;
-                __builtin_memset(&point.records[point.record_count], 0, sizeof(hwbp_record));
+                __builtin_memset(&point.records[point.record_count], 0, sizeof(bp_record));
                 return;
             }
 
@@ -1016,7 +1030,7 @@ private: // 私有实现，外部无需关系
     }
 
     // 硬件断点事件
-    int HandleHardwareBreakpointEvent(request_op op, std::span<const hwbp_point> points = {})
+    int HandleHwbpEvent(request_op op, std::span<const bp_point> points = {})
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
         if (op != request_op_hwbp_set && op != request_op_hwbp_remove)
@@ -1026,14 +1040,41 @@ private: // 私有实现，外部无需关系
         if (op == request_op_hwbp_set)
         {
             req->pid = global_pid;
-            __builtin_memset(req->hwbp_info.points, 0, sizeof(req->hwbp_info.points));
-            const size_t count = std::min(points.size(), std::size(req->hwbp_info.points));
+            req->bp_info.pid = global_pid;
+            __builtin_memset(req->bp_info.points, 0, sizeof(req->bp_info.points));
+            const size_t count = std::min(points.size(), std::size(req->bp_info.points));
             for (size_t i = 0; i < count; ++i)
             {
-                req->hwbp_info.points[i].hit_addr = points[i].hit_addr;
-                req->hwbp_info.points[i].bt = points[i].bt;
-                req->hwbp_info.points[i].bl = points[i].bl;
-                req->hwbp_info.points[i].bs = points[i].bs;
+                req->bp_info.points[i].hit_addr = points[i].hit_addr;
+                req->bp_info.points[i].bt = points[i].bt;
+                req->bp_info.points[i].bl = points[i].bl;
+                req->bp_info.points[i].bs = points[i].bs;
+            }
+        }
+        IoCommitAndWait();
+        return req->status;
+    }
+
+    // PTEBP 复用 bp_info.points 和 records 存储命中现场
+    int HandlePtebpEvent(request_op op, std::span<const bp_point> points = {})
+    {
+        std::scoped_lock<SpinLock> lock(m_mutex);
+        if (op != request_op_ptebp_set && op != request_op_ptebp_remove)
+            return -1;
+
+        req->op = op;
+        if (op == request_op_ptebp_set)
+        {
+            req->pid = global_pid;
+            req->bp_info.pid = global_pid;
+            __builtin_memset(req->bp_info.points, 0, sizeof(req->bp_info.points));
+            const size_t count = std::min(points.size(), std::size(req->bp_info.points));
+            for (size_t index = 0; index < count; ++index)
+            {
+                req->bp_info.points[index].hit_addr = points[index].hit_addr;
+                req->bp_info.points[index].bt = points[index].bt;
+                req->bp_info.points[index].bl = points[index].bl;
+                req->bp_info.points[index].bs = points[index].bs;
             }
         }
         IoCommitAndWait();

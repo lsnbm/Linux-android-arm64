@@ -148,13 +148,10 @@ static inline void *pte_map_page(phys_addr_t paddr, size_t size, const void *buf
     // 修改 PTE 指向目标物理页
     set_pte(pte_info.pte_address, pfn_pte(pfn, __pgprot(FLAGS)));
 
-    // dsb(ishst); // 内存屏障(ishst只等写完成，ish等读写完成)，确保PTE写入提交内存
+    // 刷新当前 CPU 上该内核 VA 对应的 TLB 项
+    flush_kernel_tlb_addr_all_asid_current_cpu((uint64_t)pte_info.base_address);
 
-    // 刷新该页的 TLB, 内部含：dsb(ish) + TLBI + dsb(ish)+isb(),手写刷新需取消dsbisb注释
-    flush_tlb_kernel_range((uint64_t)pte_info.base_address, (uint64_t)pte_info.base_address + PAGE_SIZE);
     // flush_tlb_all();//刷新全部cpu核心TLB
-
-    // isb(); // 刷新流水线，确保后续读取使用新的映射
 
     return (uint8_t *)pte_info.base_address + (paddr & ~PAGE_MASK);
 }
@@ -162,6 +159,8 @@ static inline void *pte_map_page(phys_addr_t paddr, size_t size, const void *buf
 // 读取
 static inline int pte_read_physical(phys_addr_t paddr, void *buffer, size_t size)
 {
+    // 这不能被抢占，被抢占可能会导致运行cpu迁移,pte_map_page里面刷新的当前cpu，可能是cpu0上刷新,被抢占后memcpy运行在cpu1
+    // 正常来说运行读写进来后都是一个cpu上线性跑完的
     void *mapped = pte_map_page(paddr, size, buffer);
     if (IS_ERR(mapped))
     {
@@ -299,8 +298,8 @@ static inline int mmu_translate_va_to_pa(struct mm_struct *mm, uint64_t va, phys
         TCR_EL1.A1 = 1  => ASID 来自 TTBR1_EL1[63:48]
         */
         "lsr    %[tmp_offset], %[va], #12\n" // 清除当前va地址
-        "tlbi   vaae1, %[tmp_offset]\n"      // 所有的ASID
-        "dsb    nsh\n"                       // 并只同步当前cpu
+        "tlbi   vaae1, %[tmp_offset]\n"      // 所有的ASID,并只同步当前cpu,vaae1is是清理全部cpu的这个va地址
+        "dsb    nsh\n"                       // 指令同步屏障，nsh非共享，ish内部共享
         "isb\n"
 
         // 恢复原始 TTBR0
@@ -529,22 +528,9 @@ static inline int virtual_memory_rw(enum request_op op, pid_t pid, uint64_t vadd
     /* ---------- mm_struct 缓存 ---------- */
     if (pid != s_last_pid || s_last_mm == NULL)
     {
-        struct pid *pid_struct;
-        struct task_struct *task;
-
         // 目标进程切换清缓存
         s_last_mm = 0;
-        pid_struct = find_get_pid(pid);
-        if (!pid_struct)
-            return -ESRCH;
-
-        task = get_pid_task(pid_struct, PIDTYPE_PID);
-        put_pid(pid_struct);
-        if (!task)
-            return -ESRCH;
-
-        s_last_mm = get_task_mm(task); // 引用计数+1
-        put_task_struct(task);
+        s_last_mm = get_mm_by_pid(pid); // 引用计数+1
         // 这里不长期持有mm引用计数,靠后面的判断稳住mm释放时也不崩溃
         if (s_last_mm)
         {

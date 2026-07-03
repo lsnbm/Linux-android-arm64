@@ -135,7 +135,6 @@ static inline void add_seg(struct module_info *m, short type_tag, uint8_t prot, 
 static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
 {
     struct task_struct *task = NULL;
-    struct pid *pid_struct = NULL;
     struct mm_struct *mm = NULL;
     struct vm_area_struct *vma, *prev = NULL;
     char *path_buf, *path;
@@ -226,12 +225,7 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
     if (!path_buf)
         return -ENOMEM;
 
-    pid_struct = find_get_pid(pid);
-    if (pid_struct)
-    {
-        task = get_pid_task(pid_struct, PIDTYPE_PID);
-        put_pid(pid_struct);
-    }
+    task = get_task_by_pid(pid);
     if (!task)
     {
         kfree(path_buf);
