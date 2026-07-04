@@ -15,12 +15,14 @@
 #include <asm/pgtable.h>
 #include <asm/tlbflush.h>
 
+#include "export_fun.h"
+
 /*
- * ARM64 单页 DBI 重编译器：输入一页原始指令和对应 ghost 页地址，输出可在
- * ghost VA 执行的等价指令流，并维护 target PC 到 ghost PC 的映射。
- *
- * 这一层只负责指令重写，不分配内存、不改页表、不处理异常入口。
- */
+ ARM64 单页 DBI 重编译器：输入一页原始指令和对应 ghost 页地址，输出可在
+  ghost VA 执行的等价指令流，并维护 target PC 到 ghost PC 的映射。
+
+  这一层只负责指令重写，不分配内存、不改页表、不处理异常入口。
+*/
 #define ARM64_DBI_TARGET_SIZE 4096
 #define ARM64_DBI_TARGET_INSNS (ARM64_DBI_TARGET_SIZE / 4)
 #define ARM64_DBI_GHOST_MAX_INSNS (ARM64_DBI_TARGET_INSNS * 8)
@@ -235,6 +237,22 @@ static inline int arm64_dbi_emit_far_jump(struct arm64_dbi_ctx *ctx, u64 target)
     return arm64_dbi_emit(ctx, arm64_dbi_enc_br(ARM64_DBI_SCRATCH_REG));
 }
 
+static inline int arm64_dbi_emit_skip_far_jump(struct arm64_dbi_ctx *ctx, u64 target, u32 enc_template, int imm_bits)
+{
+    int branch_idx = ctx->ghost_count;
+    int after_idx;
+    int status;
+
+    if (arm64_dbi_emit(ctx, 0))
+        return -ENOSPC;
+    status = arm64_dbi_emit_far_jump(ctx, target);
+    if (status)
+        return status;
+
+    after_idx = ctx->ghost_count;
+    return arm64_patch_signed_imm_field(&ctx->ghost[branch_idx], enc_template, after_idx - branch_idx, imm_bits, 5);
+}
+
 static inline int arm64_dbi_emit_load_addr(struct arm64_dbi_ctx *ctx, u32 rd, u64 addr)
 {
     u32 movs[4];
@@ -277,6 +295,17 @@ static inline int arm64_dbi_queue_branch(struct arm64_dbi_ctx *ctx, int ghost_id
     return 0;
 }
 
+static inline int arm64_dbi_emit_pending_branch(struct arm64_dbi_ctx *ctx, u32 enc_template, u16 target_tidx, u8 kind)
+{
+    int ghost_idx = ctx->ghost_count;
+
+    if (arm64_dbi_emit(ctx, enc_template))
+        return -ENOSPC;
+
+    ctx->intra_page_fixed++;
+    return arm64_dbi_queue_branch(ctx, ghost_idx, enc_template, target_tidx, kind);
+}
+
 static inline int arm64_dbi_recomp_b(struct arm64_dbi_ctx *ctx, u32 insn, u64 orig_pc)
 {
     // B 指令可以优先尝试重编码；距离过远才展开成绝对跳转。
@@ -299,11 +328,7 @@ static inline int arm64_dbi_recomp_b(struct arm64_dbi_ctx *ctx, u32 insn, u64 or
         }
         else
         {
-            int ghost_idx = ctx->ghost_count;
-            if (arm64_dbi_emit(ctx, 0x14000000U))
-                return -ENOSPC;
-            ctx->intra_page_fixed++;
-            return arm64_dbi_queue_branch(ctx, ghost_idx, 0x14000000U, (u16)tidx, 3);
+            return arm64_dbi_emit_pending_branch(ctx, 0x14000000U, (u16)tidx, 3);
         }
     }
 
@@ -358,12 +383,8 @@ static inline int arm64_dbi_recomp_bcond(struct arm64_dbi_ctx *ctx, u32 insn, u6
         }
         else
         {
-            int ghost_idx = ctx->ghost_count;
             u32 tpl = 0x54000000U | (cond & 0xFU);
-            if (arm64_dbi_emit(ctx, tpl))
-                return -ENOSPC;
-            ctx->intra_page_fixed++;
-            return arm64_dbi_queue_branch(ctx, ghost_idx, tpl, (u16)tidx, 0);
+            return arm64_dbi_emit_pending_branch(ctx, tpl, (u16)tidx, 0);
         }
     }
 
@@ -374,19 +395,7 @@ static inline int arm64_dbi_recomp_bcond(struct arm64_dbi_ctx *ctx, u32 insn, u6
     }
 
     ctx->expanded++;
-    {
-        int branch_idx = ctx->ghost_count;
-        int after_idx;
-        if (arm64_dbi_emit(ctx, 0))
-            return -ENOSPC;
-        if (arm64_dbi_emit_far_jump(ctx, target))
-            return -ENOSPC;
-        after_idx = ctx->ghost_count;
-        if (arm64_dbi_enc_b_cond(cond ^ 1U, (s64)((after_idx - branch_idx) * 4), &enc))
-            return -ERANGE;
-        ctx->ghost[branch_idx] = enc;
-        return 0;
-    }
+    return arm64_dbi_emit_skip_far_jump(ctx, target, 0x54000000U | ((cond ^ 1U) & 0xFU), 19);
 }
 
 static inline int arm64_dbi_recomp_cbz(struct arm64_dbi_ctx *ctx, u32 insn, u64 orig_pc)
@@ -413,13 +422,9 @@ static inline int arm64_dbi_recomp_cbz(struct arm64_dbi_ctx *ctx, u32 insn, u64 
         }
         else
         {
-            int ghost_idx = ctx->ghost_count;
             u32 op = is_nz ? 0x35000000U : 0x34000000U;
             u32 tpl = op | ((sf & 1U) << 31) | (rt & 0x1FU);
-            if (arm64_dbi_emit(ctx, tpl))
-                return -ENOSPC;
-            ctx->intra_page_fixed++;
-            return arm64_dbi_queue_branch(ctx, ghost_idx, tpl, (u16)tidx, 1);
+            return arm64_dbi_emit_pending_branch(ctx, tpl, (u16)tidx, 1);
         }
     }
 
@@ -430,19 +435,8 @@ static inline int arm64_dbi_recomp_cbz(struct arm64_dbi_ctx *ctx, u32 insn, u64 
     }
 
     ctx->expanded++;
-    {
-        int branch_idx = ctx->ghost_count;
-        int after_idx;
-        if (arm64_dbi_emit(ctx, 0))
-            return -ENOSPC;
-        if (arm64_dbi_emit_far_jump(ctx, target))
-            return -ENOSPC;
-        after_idx = ctx->ghost_count;
-        if (arm64_dbi_enc_cbz(sf, rt, (s64)((after_idx - branch_idx) * 4), !is_nz, &enc))
-            return -ERANGE;
-        ctx->ghost[branch_idx] = enc;
-        return 0;
-    }
+    return arm64_dbi_emit_skip_far_jump(ctx, target,
+                                        (is_nz ? 0x34000000U : 0x35000000U) | ((sf & 1U) << 31) | (rt & 0x1FU), 19);
 }
 
 static inline int arm64_dbi_recomp_tbz(struct arm64_dbi_ctx *ctx, u32 insn, u64 orig_pc)
@@ -469,13 +463,9 @@ static inline int arm64_dbi_recomp_tbz(struct arm64_dbi_ctx *ctx, u32 insn, u64 
         }
         else
         {
-            int ghost_idx = ctx->ghost_count;
             u32 op = is_nz ? 0x37000000U : 0x36000000U;
             u32 tpl = op | (((bit >> 5) & 1U) << 31) | ((bit & 0x1FU) << 19) | (rt & 0x1FU);
-            if (arm64_dbi_emit(ctx, tpl))
-                return -ENOSPC;
-            ctx->intra_page_fixed++;
-            return arm64_dbi_queue_branch(ctx, ghost_idx, tpl, (u16)tidx, 2);
+            return arm64_dbi_emit_pending_branch(ctx, tpl, (u16)tidx, 2);
         }
     }
 
@@ -486,19 +476,10 @@ static inline int arm64_dbi_recomp_tbz(struct arm64_dbi_ctx *ctx, u32 insn, u64 
     }
 
     ctx->expanded++;
-    {
-        int branch_idx = ctx->ghost_count;
-        int after_idx;
-        if (arm64_dbi_emit(ctx, 0))
-            return -ENOSPC;
-        if (arm64_dbi_emit_far_jump(ctx, target))
-            return -ENOSPC;
-        after_idx = ctx->ghost_count;
-        if (arm64_dbi_enc_tbz(rt, bit, (s64)((after_idx - branch_idx) * 4), !is_nz, &enc))
-            return -ERANGE;
-        ctx->ghost[branch_idx] = enc;
-        return 0;
-    }
+    return arm64_dbi_emit_skip_far_jump(ctx, target,
+                                        (is_nz ? 0x36000000U : 0x37000000U) |
+                                            (((bit >> 5) & 1U) << 31) | ((bit & 0x1FU) << 19) | (rt & 0x1FU),
+                                        14);
 }
 
 static inline int arm64_dbi_recomp_adrp(struct arm64_dbi_ctx *ctx, u32 insn, u64 orig_pc)
@@ -639,39 +620,26 @@ static inline int arm64_dbi_recompile_page(struct arm64_dbi_ctx *ctx)
         s64 delta = (s64)(target_ghost - patch_pc);
         s64 imm = delta / 4;
         u32 enc = branch->enc_template;
+        int imm_bits = 26;
+        int imm_shift = 0;
 
         if (branch->kind == 0 || branch->kind == 1)
         {
-            if (imm < -(1LL << 18) || imm >= (1LL << 18))
-            {
-                ctx->ghost[branch->ghost_idx] = arm64_dbi_enc_nop();
-                ctx->failed++;
-                continue;
-            }
-            enc |= ((u32)imm & 0x7FFFFU) << 5;
+            imm_bits = 19;
+            imm_shift = 5;
         }
         else if (branch->kind == 2)
         {
-            if (imm < -(1LL << 13) || imm >= (1LL << 13))
-            {
-                ctx->ghost[branch->ghost_idx] = arm64_dbi_enc_nop();
-                ctx->failed++;
-                continue;
-            }
-            enc |= ((u32)imm & 0x3FFFU) << 5;
-        }
-        else
-        {
-            if (imm < -(1LL << 25) || imm >= (1LL << 25))
-            {
-                ctx->ghost[branch->ghost_idx] = arm64_dbi_enc_nop();
-                ctx->failed++;
-                continue;
-            }
-            enc |= (u32)imm & 0x03FFFFFFU;
+            imm_bits = 14;
+            imm_shift = 5;
         }
 
-        ctx->ghost[branch->ghost_idx] = enc;
+        if (arm64_patch_signed_imm_field(&ctx->ghost[branch->ghost_idx], enc, imm, imm_bits, imm_shift))
+        {
+            ctx->ghost[branch->ghost_idx] = arm64_dbi_enc_nop();
+            ctx->failed++;
+            continue;
+        }
     }
 
     return 0;
@@ -699,19 +667,13 @@ static inline u64 arm64_dbi_target_to_ghost_pc(const struct arm64_dbi_ctx *ctx, 
     return ctx->ghost_page + (u64)ghost_idx * 4;
 }
 
-#include "export_fun.h"
 #include "virtual_memory_rw.h"
 
 /*
- * ARM64 DBI ghost 通用层：
- * 1. 接收目标页地址和一页 4KB 原始机器码；
- * 2. 在内核分配 ghost 物理页；
- * 3. 调用本文件内联的 ARM64 DBI 重编译器，把原指令页重编译到 ghost 页；
- * 4. 在目标进程用户地址空间寻找空洞 VA，并手动写 PTE 映射到 ghost PA；
- * 5. 需要拦截执行时，把原目标页 PTE 加 UXN，让异常入口把 PC 切到 ghost VA。
- *
- * 注意：prepare 阶段只准备 ghost 和映射，不写 UXN。调用方如果有异常入口状态发布
- * 的时序要求，应先让状态对 fault handler 可见，再调用 arm。
+    ARM64 DBI ghost 托管层：
+    1. install 一次完成原页快照、DBI 重编译、ghost 映射、slot 发布和 UXN 启用；
+    2. fault handler 只通过 lookup_pc 查询 target PC 对应的 ghost PC；
+    3. 上层卸载时只按 pid 调用 remove_all 恢复目标页并释放资源。
  */
 #ifndef PTE_UXN
 #define ARM64_DBI_GHOST_UXN (_AT(pteval_t, 1) << 54)
@@ -725,14 +687,12 @@ static inline u64 arm64_dbi_target_to_ghost_pc(const struct arm64_dbi_ctx *ctx, 
 
 struct arm64_dbi_ghost
 {
-    // used 表示 ghost 资源已经准备完成；armed 表示目标页逻辑上需要恢复原 PTE。
-    bool used;
+    // armed 表示托管 slot 已发布，释放时需要恢复目标页 PTE。
     bool armed;
     u64 target_page;
     u64 ghost_page;
-    // saved_pte 是目标页原始 PTE；ghost_pte 是 ghost 首页映射的 PTE 值，便于调试观察。
+    // saved_pte 是目标页原始 PTE，用于安装时启用 UXN 和释放时恢复。
     pteval_t saved_pte;
-    pteval_t ghost_pte;
     // target_copy 保存原页快照，ghost_copy 是内核分配并映射给目标进程执行的影子页。
     void *target_copy;
     void *ghost_copy;
@@ -777,27 +737,8 @@ static inline size_t arm64_dbi_ghost_size(void)
     return (size_t)arm64_dbi_ghost_page_count() * PAGE_SIZE;
 }
 
-// 只负责把目标页 PTE 写成 UXN；不修改 ghost->armed，便于上层控制发布时序。
-static inline int arm64_dbi_ghost_enable_uxn(pid_t pid, const struct arm64_dbi_ghost *ghost)
-{
-    int status;
-    pteval_t armed_pte;
-
-    if (!ghost || !ghost->target_page)
-        return -EINVAL;
-
-    armed_pte = arm64_dbi_ghost_build_armed_pte(ghost->saved_pte);
-    if (armed_pte == ghost->saved_pte)
-        return -EACCES;
-
-    status = write_user_pte_value_by_pid(pid, ghost->target_page, armed_pte);
-    if (!status)
-        flush_tlb_all();
-    return status;
-}
-
 // 卸载时恢复目标页原始 PTE。
-static inline int arm64_dbi_ghost_restore_target(pid_t pid, const struct arm64_dbi_ghost *ghost)
+static inline int arm64_dbi_ghost_restore_target_pte(pid_t pid, const struct arm64_dbi_ghost *ghost)
 {
     int status;
 
@@ -952,9 +893,6 @@ static inline int arm64_dbi_ghost_install_ptes(struct mm_struct *mm, struct arm6
 
         new_pte = pfn_pte(__phys_to_pfn(ghost_pa), __pgprot(ARM64_DBI_GHOST_PTE_FLAGS));
         set_pte(ptep, new_pte);
-
-        if (index == 0)
-            ghost->ghost_pte = pte_val(new_pte);
         installed++;
     }
 
@@ -1005,7 +943,7 @@ static inline void arm64_dbi_ghost_release(pid_t pid, struct arm64_dbi_ghost *gh
         return;
 
     if (pid > 0 && ghost->armed)
-        arm64_dbi_ghost_restore_target(pid, ghost);
+        arm64_dbi_ghost_restore_target_pte(pid, ghost);
 
     if (pid > 0 && ghost->ghost_page)
     {
@@ -1024,14 +962,13 @@ static inline void arm64_dbi_ghost_release(pid_t pid, struct arm64_dbi_ghost *gh
     __builtin_memset(ghost, 0, sizeof(*ghost));
 }
 
-// 准备 ghost 资源并返回 ghost->ghost_page；不会给目标页加 UXN。
-static inline int arm64_dbi_ghost_prepare(pid_t pid, u64 target_page, const void *machine_code_4k, struct arm64_dbi_ghost *ghost)
+// 内部准备步骤：生成 ghost 资源并映射 ghost VA；不写目标页 UXN。
+static inline int arm64_dbi_ghost_prepare_resource(pid_t pid, u64 target_page, const void *machine_code_4k, struct arm64_dbi_ghost *ghost)
 {
     /*
-     * 通用准备流程：接收一页原始机器码，生成 ghost 页并映射到目标进程空洞 VA。
-     * machine_code_4k 为 NULL 时，内部按 target_page 从目标进程读取原页快照。
-     * 这里不写目标页 UXN；调用方应在异常入口状态可见后再 arm。
-     */
+    install 调用这里完成资源准备；slot 发布和 UXN 启用由安装入口统一处理。
+    machine_code_4k 为 NULL 时，内部按 target_page 从目标进程读取原页快照。
+    */
     struct mm_struct *mm;
     int status;
     size_t ghost_size = arm64_dbi_ghost_size();
@@ -1064,15 +1001,10 @@ static inline int arm64_dbi_ghost_prepare(pid_t pid, u64 target_page, const void
             goto err_out;
     }
 
-    // 记录原始 PTE，后续 arm 用它加 UXN，release 用它恢复。
+    // 记录原始 PTE，后续启用 UXN 和 release 恢复都依赖它。
     status = read_user_pte_value_by_pid(pid, target_page, &ghost->saved_pte);
     if (status)
         goto err_out;
-    if (arm64_dbi_ghost_build_armed_pte(ghost->saved_pte) == ghost->saved_pte)
-    {
-        status = -EACCES;
-        goto err_out;
-    }
 
     mm = get_mm_by_pid(pid);
     if (!mm)
@@ -1117,7 +1049,6 @@ static inline int arm64_dbi_ghost_prepare(pid_t pid, u64 target_page, const void
         goto err_out;
 
     arm64_dbi_ghost_sync_icache(ghost->ghost_copy, ghost_size);
-    ghost->used = true;
     return 0;
 
 err_out:
@@ -1125,15 +1056,7 @@ err_out:
     return status;
 }
 
-// fault handler 使用：把原目标页 PC 映射成 ghost 页 PC；失败返回 0。
-static inline u64 arm64_dbi_ghost_target_to_ghost_pc(const struct arm64_dbi_ghost *ghost, u64 target_pc)
-{
-    if (!ghost)
-        return 0;
-    return arm64_dbi_target_to_ghost_pc(&ghost->dbi, target_pc);
-}
-
-// 以下 managed 接口让 ghost 层自己维护 pid + target_page -> ghost 的全局槽位。
+// 以下接口让 ghost 层自己维护 pid + target_page -> ghost 的全局槽位。
 static inline struct arm64_dbi_ghost_slot *arm64_dbi_ghost_find_slot_locked(pid_t pid, u64 target_page)
 {
     int slot_index;
@@ -1171,13 +1094,14 @@ static inline void arm64_dbi_ghost_release_slot_copy(pid_t pid, struct arm64_dbi
     __builtin_memset(slot, 0, sizeof(*slot));
 }
 
-// 一键安装托管 ghost：prepare 完成后先发布到表，再写 UXN。
-static inline int arm64_dbi_ghost_install_managed(pid_t pid, u64 target_page, const void *machine_code_4k, u64 *out_ghost_page)
+// 一键安装托管 ghost：准备资源、发布 slot、启用 UXN，一次完成。
+static inline int arm64_dbi_ghost_install(pid_t pid, u64 target_page, const void *machine_code_4k, u64 *out_ghost_page)
 {
     struct arm64_dbi_ghost *prepared;
     struct arm64_dbi_ghost_slot *slot;
     unsigned long flags;
     u64 ghost_page = 0;
+    pteval_t armed_pte;
     int status = 0;
 
     if (pid <= 0 || (target_page & ~PAGE_MASK))
@@ -1199,7 +1123,7 @@ static inline int arm64_dbi_ghost_install_managed(pid_t pid, u64 target_page, co
     }
     spin_unlock_irqrestore(&g_arm64_dbi_ghost_lock, flags);
 
-    status = arm64_dbi_ghost_prepare(pid, target_page, machine_code_4k, prepared);
+    status = arm64_dbi_ghost_prepare_resource(pid, target_page, machine_code_4k, prepared);
     if (status)
         goto out_unlock;
 
@@ -1217,15 +1141,21 @@ static inline int arm64_dbi_ghost_install_managed(pid_t pid, u64 target_page, co
     slot->pid = pid;
     slot->ghost = *prepared;
     /*
-     * 这里先把 armed 状态发布给 fault handler，再写目标页 UXN。
-     * 如果 UXN 写入后第一条异常立刻进来，handler 已经能查到 ghost。
-     */
+            这里先把 slot 和 armed 状态发布给 fault handler，再写目标页 UXN。
+                如果 UXN 写入后第一条异常立刻进来，异常入口只需要查询托管表。
+    */
     slot->ghost.armed = true;
     ghost_page = slot->ghost.ghost_page;
     __builtin_memset(prepared, 0, sizeof(*prepared));
     spin_unlock_irqrestore(&g_arm64_dbi_ghost_lock, flags);
 
-    status = arm64_dbi_ghost_enable_uxn(pid, &slot->ghost);
+    armed_pte = arm64_dbi_ghost_build_armed_pte(slot->ghost.saved_pte);
+    if (armed_pte != slot->ghost.saved_pte)
+    {
+        status = write_user_pte_value_by_pid(pid, slot->ghost.target_page, armed_pte);
+        if (!status)
+            flush_tlb_all();
+    }
     if (status)
     {
         __builtin_memset(&g_arm64_dbi_ghost_release_slots[0], 0, sizeof(g_arm64_dbi_ghost_release_slots[0]));
@@ -1248,7 +1178,7 @@ out_unlock:
 }
 
 // fault handler 使用：在托管表里查找已 armed 的 ghost，并返回 target PC 对应的 ghost PC。
-static inline bool arm64_dbi_ghost_lookup_pc_managed(pid_t pid, u64 target_page, u64 target_pc, u64 *out_ghost_pc)
+static inline bool arm64_dbi_ghost_lookup_pc(pid_t pid, u64 target_page, u64 target_pc, u64 *out_ghost_pc)
 {
     struct arm64_dbi_ghost_slot *slot;
     unsigned long flags;
@@ -1264,7 +1194,7 @@ static inline bool arm64_dbi_ghost_lookup_pc_managed(pid_t pid, u64 target_page,
     slot = arm64_dbi_ghost_find_slot_locked(pid, target_page);
     if (slot && slot->ghost.armed)
     {
-        ghost_pc = arm64_dbi_ghost_target_to_ghost_pc(&slot->ghost, target_pc);
+        ghost_pc = arm64_dbi_target_to_ghost_pc(&slot->ghost.dbi, target_pc);
         found = true;
     }
     spin_unlock_irqrestore(&g_arm64_dbi_ghost_lock, flags);
@@ -1275,7 +1205,7 @@ static inline bool arm64_dbi_ghost_lookup_pc_managed(pid_t pid, u64 target_page,
 }
 
 // 按 pid 移除所有托管 ghost，供上层在没有逐页列表时兜底清理。
-static inline void arm64_dbi_ghost_remove_all_managed(pid_t pid)
+static inline void arm64_dbi_ghost_remove_all(pid_t pid)
 {
     unsigned long flags;
     int slot_index;

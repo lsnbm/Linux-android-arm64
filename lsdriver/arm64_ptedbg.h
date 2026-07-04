@@ -18,26 +18,19 @@
 #define PTEBP_ESR_FSC_PERM_MAX 0x0f
 
 /*
- * PTEBP 当前只保留执行断点：目标页写 UXN，lower EL 取指权限异常进
- * work_trampoline_ptebp，然后把 PC 重定向到 DBI 生成的 ghost 页。
- * ghost 页资源和 pid + target_page 状态由 arm64_dbi_ghost.h 托管。
+ PTEBP 当前只保留执行断点：目标页写 UXN，lower EL 取指权限异常进
+  work_trampoline_ptebp，然后把 PC 重定向到 DBI 生成的 ghost 页。
+  ghost 页资源和 pid + target_page 状态由 arm64_dbi_ghost.h 托管。
  */
-
-struct ptebp_hit
-{
-	// do_mem_abort 阶段的临时命中信息，只在本次页异常处理过程中使用。
-	struct bp_point *point;
-	uint64_t ghost_pc;
-};
 
 static struct break_point *g_ptebp_info;
 static DEFINE_SPINLOCK(g_ptebp_lock);
 static DEFINE_MUTEX(g_ptebp_remove_mutex);
 
-// 判断单个 PTEBP 点位是否具备安装和派发条件。
+// 判断单个 PTEBP 点位是否是执行断点安装目标。
 static inline bool ptebp_point_is_active(struct bp_point *point)
 {
-	return point && point->hit_addr != 0 && point->on_hit && (point->bt & BP_BREAKPOINT_X);
+	return point && point->hit_addr != 0 && (point->bt & BP_BREAKPOINT_X);
 }
 
 // 判断一个 break_point 配置中是否至少存在一个有效 PTEBP 点位。
@@ -64,7 +57,7 @@ static inline bool ptebp_current_task_matches(pid_t target_pid)
 }
 
 // 派发精确命中的 PTEBP 回调，让断点 handler 记录或修改寄存器现场。
-static inline void arm64_ptedbg_monitor_dispatch_hit(struct pt_regs *regs, struct bp_point *point)
+static inline void ptebp_dispatch_hit(struct pt_regs *regs, struct bp_point *point)
 {
 	if (!regs || !point || !point->on_hit)
 		return;
@@ -96,7 +89,8 @@ static int work_trampoline_ptebp(struct pt_regs *hook_regs)
 	bool exact_hit = false;
 	bool page_hit = false;
 	struct break_point *info;
-	struct ptebp_hit hit;
+	struct bp_point *hit_point = NULL;
+	uint64_t ghost_pc = 0;
 	struct pt_regs *regs;
 
 	if (!hook_regs)
@@ -119,7 +113,6 @@ static int work_trampoline_ptebp(struct pt_regs *hook_regs)
 
 	fault_addr = regs->pc & ~0x3ULL;
 	fault_page = fault_addr & PAGE_MASK;
-	__builtin_memset(&hit, 0, sizeof(hit));
 
 	spin_lock_irqsave(&g_ptebp_lock, flags);
 	info = g_ptebp_info;
@@ -130,7 +123,7 @@ static int work_trampoline_ptebp(struct pt_regs *hook_regs)
 		return 0;
 	}
 
-	page_hit = arm64_dbi_ghost_lookup_pc_managed(info->pid, fault_page, fault_addr, &hit.ghost_pc);
+	page_hit = arm64_dbi_ghost_lookup_pc(info->pid, fault_page, fault_addr, &ghost_pc);
 	if (page_hit)
 	{
 		// 只有命中已 armed 的 PTEBP 页，才可能是我们故意制造的执行权限异常。
@@ -144,7 +137,7 @@ static int work_trampoline_ptebp(struct pt_regs *hook_regs)
 
 			if (ptebp_addr_matches(point, fault_addr))
 			{
-				hit.point = point;
+				hit_point = point;
 				exact_hit = true;
 				break;
 			}
@@ -155,15 +148,15 @@ static int work_trampoline_ptebp(struct pt_regs *hook_regs)
 	if (exact_hit)
 	{
 		old_pc = regs->pc;
-		arm64_ptedbg_monitor_dispatch_hit(regs, hit.point);
+		ptebp_dispatch_hit(regs, hit_point);
 		// 回调如果改了 PC，说明它已经决定后续执行位置；否则执行 ghost 中的原指令。
 		if ((regs->pc & ~0x3ULL) != (old_pc & ~0x3ULL))
 			handled = 1;
 		else
 		{
-			if (hit.ghost_pc)
+			if (ghost_pc)
 			{
-				regs->pc = hit.ghost_pc;
+				regs->pc = ghost_pc;
 				handled = 1;
 			}
 		}
@@ -171,9 +164,9 @@ static int work_trampoline_ptebp(struct pt_regs *hook_regs)
 	else if (page_hit)
 	{
 		// 同页非目标指令也会被目标页 UXN 拦住，直接跳到 DBI ghost 对应位置。
-		if (hit.ghost_pc)
+		if (ghost_pc)
 		{
-			regs->pc = hit.ghost_pc;
+			regs->pc = ghost_pc;
 			handled = 1;
 		}
 	}
@@ -190,7 +183,7 @@ static struct hook_entry g_ptebp_hooks[] = {
 };
 
 // 卸载 PTEBP monitor，恢复所有仍 armed 的页面并移除 do_mem_abort hook。
-static inline void arm64_ptedbg_monitor_remove(void)
+static inline void stop_ptebp_monitor(void)
 {
 	unsigned long flags;
 	pid_t pid = 0;
@@ -203,36 +196,35 @@ static inline void arm64_ptedbg_monitor_remove(void)
 	g_ptebp_info = NULL;
 	spin_unlock_irqrestore(&g_ptebp_lock, flags);
 
-	arm64_dbi_ghost_remove_all_managed(pid);
+	arm64_dbi_ghost_remove_all(pid);
 
 	inline_hook_remove(g_ptebp_hooks);
 	mutex_unlock(&g_ptebp_remove_mutex);
 }
 
-// 安装目标进程的 PTEBP monitor，并为每个目标页记录原始 PTE 状态。
-static inline int arm64_ptedbg_monitor_set(struct break_point *info)
+// 安装目标进程的 PTEBP monitor，并为每个目标页准备托管 ghost。
+static inline int start_ptebp_monitor(struct break_point *info)
 {
 	int status;
 	int point_slot;
-	int page_count = 0;
 	unsigned long flags;
 
-	// 检查 info 里有没有有效执行断点，只接受 BP_BREAKPOINT_X
+	// 只接受执行断点，PTEBP 不再处理读写断点。
 	if (!ptebp_info_has_active_point(info))
 		return -EINVAL;
-	//   清掉旧 PTEBP 状态，恢复旧页面 PTE，移除旧 hook
-	arm64_ptedbg_monitor_remove();
-	// 安装 do_mem_abort hook
+	// 清掉旧 PTEBP 状态，恢复旧页面 PTE，移除旧 hook。
+	stop_ptebp_monitor();
+
 	status = inline_hook_install(g_ptebp_hooks);
 	if (status)
 		return status;
 
-	// 传递断点配置给全局，方便fault和其他所有代码访问
+	// 发布断点配置，供 fault handler 判断命中。
 	spin_lock_irqsave(&g_ptebp_lock, flags);
 	g_ptebp_info = info;
 	spin_unlock_irqrestore(&g_ptebp_lock, flags);
 
-	// 遍历 info->points[]，对每个执行断点，根据 hit_addr 算出 target_page
+	// 遍历执行断点，按目标页安装托管 ghost。
 	for (point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
 	{
 		struct bp_point *point = &info->points[point_slot];
@@ -240,25 +232,18 @@ static inline int arm64_ptedbg_monitor_set(struct break_point *info)
 
 		if (!ptebp_point_is_active(point))
 			continue;
-		// 算所在页
+
 		target_page = point->hit_addr & PAGE_MASK;
 
-		status = arm64_dbi_ghost_install_managed(info->pid, target_page, NULL, NULL);
+		status = arm64_dbi_ghost_install(info->pid, target_page, NULL, NULL);
 		if (status)
 			goto err_out;
-		page_count++;
-	}
-
-	if (page_count == 0)
-	{
-		status = -EINVAL;
-		goto err_out;
 	}
 
 	return 0;
 
 err_out:
-	arm64_ptedbg_monitor_remove();
+	stop_ptebp_monitor();
 	return status;
 }
 

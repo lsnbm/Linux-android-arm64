@@ -596,11 +596,11 @@ static inline int set_process_ptebp(struct break_point *info)
 
     prepare_break_point_handlers(info);
 
-    return arm64_ptedbg_monitor_set(info);
+    return start_ptebp_monitor(info);
 }
 
 static inline void remove_process_ptebp(void)
 {
-    arm64_ptedbg_monitor_remove();
+    stop_ptebp_monitor();
 }
 #endif // BREAK_POINT_H
