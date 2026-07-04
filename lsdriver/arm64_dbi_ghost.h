@@ -209,7 +209,11 @@ static inline int arm64_dbi_emit(struct arm64_dbi_ctx *ctx, u32 insn)
 {
     // 所有重写指令都走统一出口，集中做 ghost 容量保护。
     if (ctx->ghost_count >= ctx->ghost_capacity)
+    {
+        pr_debug("[ptebp] ghost instruction capacity exhausted target=0x%llx count=%d capacity=%d\n",
+                 ctx->target_page, ctx->ghost_count, ctx->ghost_capacity);
         return -ENOSPC;
+    }
     ctx->ghost[ctx->ghost_count++] = insn;
     return 0;
 }
@@ -286,7 +290,11 @@ static inline int arm64_dbi_queue_branch(struct arm64_dbi_ctx *ctx, int ghost_id
 {
     // 前向同页分支目标尚未生成，先记录占位指令下标和原页目标下标。
     if (ctx->n_pending >= ARM64_DBI_MAX_PENDING_BRANCHES)
+    {
+        pr_debug("[ptebp] pending branch capacity exhausted target=0x%llx pending=%d max=%d\n",
+                 ctx->target_page, ctx->n_pending, ARM64_DBI_MAX_PENDING_BRANCHES);
         return -ENOSPC;
+    }
     ctx->pending[ctx->n_pending].ghost_idx = ghost_idx;
     ctx->pending[ctx->n_pending].enc_template = enc_template;
     ctx->pending[ctx->n_pending].target_tidx = target_tidx;
@@ -754,64 +762,115 @@ static inline int arm64_dbi_ghost_restore_target_pte(pid_t pid, const struct arm
 // 在已持有 mmap 写锁的情况下，从 near 附近找一段没有 VMA 且 PTE 为空的用户 VA 空洞。
 static inline u64 arm64_dbi_ghost_find_hole_locked(struct mm_struct *mm, u64 near, size_t size)
 {
-    // ghost VA 尽量放在目标页附近，降低重写后相对分支超范围的概率。
-    const u64 range = 16UL * 1024 * 1024;
+    static const u64 ranges[] = {
+        16ULL * 1024 * 1024,
+        128ULL * 1024 * 1024,
+        1024ULL * 1024 * 1024,
+        16ULL * 1024 * 1024 * 1024,
+        ~0ULL,
+    };
     u64 near_page = near & PAGE_MASK;
-    u64 lo = near_page > range ? near_page - range : PAGE_SIZE;
-    u64 hi = PAGE_ALIGN(near_page + range);
-    u64 addr = lo & PAGE_MASK;
-    u64 best = 0;
-    u64 best_dist = ~0ULL;
+    u64 user_hi;
+    int range_index;
 
-    while (addr < hi)
+    if (!mm || !size)
+        return 0;
+
+    user_hi = (u64)mm->task_size & PAGE_MASK;
+    if (user_hi <= PAGE_SIZE || size > user_hi - PAGE_SIZE)
+        return 0;
+
+    /*
+     * Prefer a nearby ghost VA, but do not fail just because the target SO text
+     * area is densely mapped. The DBI rewriter already emits absolute far jumps
+     * for branches that cannot stay PC-relative.
+     */
+    for (range_index = 0; range_index < ARRAY_SIZE(ranges); range_index++)
     {
-        struct vm_area_struct *vma = find_vma(mm, addr);
-        u64 gap_start;
-        u64 gap_end;
-        u64 candidate;
-        u64 dist;
+        u64 range = ranges[range_index];
+        u64 lo;
+        u64 hi;
+        u64 addr;
+        u64 best = 0;
+        u64 best_dist = ~0ULL;
 
-        if (!vma || vma->vm_start >= hi)
+        if (range == ~0ULL)
         {
-            gap_start = addr;
-            gap_end = hi;
-        }
-        else if (vma->vm_start > addr)
-        {
-            gap_start = addr;
-            gap_end = vma->vm_start;
+            lo = PAGE_SIZE;
+            hi = user_hi;
         }
         else
         {
-            addr = PAGE_ALIGN(vma->vm_end);
-            continue;
-        }
-
-        gap_start = PAGE_ALIGN(gap_start);
-        gap_end &= PAGE_MASK;
-        if (gap_end >= gap_start + size)
-        {
-            if (near_page >= gap_start && near_page + size <= gap_end)
-                candidate = near_page;
-            else if (near_page < gap_start)
-                candidate = gap_start;
+            lo = near_page > range ? near_page - range : PAGE_SIZE;
+            if (near_page > ~0ULL - range)
+                hi = user_hi;
             else
-                candidate = gap_end - size;
-
-            dist = candidate > near_page ? candidate - near_page : near_page - candidate;
-            if (dist < best_dist && user_pte_range_empty(mm, candidate, size))
-            {
-                best = candidate;
-                best_dist = dist;
-            }
+                hi = PAGE_ALIGN(near_page + range);
+            if (hi > user_hi || hi < lo)
+                hi = user_hi;
         }
 
-        if (!vma || vma->vm_start >= hi)
-            break;
-        addr = PAGE_ALIGN(vma->vm_end);
+        lo &= PAGE_MASK;
+        if (lo < PAGE_SIZE)
+            lo = PAGE_SIZE;
+        hi &= PAGE_MASK;
+        if (hi <= lo || hi - lo < size)
+            continue;
+
+        addr = lo;
+        while (addr < hi)
+        {
+            struct vm_area_struct *vma = find_vma(mm, addr);
+            u64 gap_start;
+            u64 gap_end;
+            u64 candidate;
+            u64 dist;
+
+            if (!vma || vma->vm_start >= hi)
+            {
+                gap_start = addr;
+                gap_end = hi;
+            }
+            else if (vma->vm_start > addr)
+            {
+                gap_start = addr;
+                gap_end = vma->vm_start;
+            }
+            else
+            {
+                addr = PAGE_ALIGN(vma->vm_end);
+                continue;
+            }
+
+            gap_start = PAGE_ALIGN(gap_start);
+            gap_end &= PAGE_MASK;
+            if (gap_end >= gap_start + size)
+            {
+                if (near_page >= gap_start && near_page + size <= gap_end)
+                    candidate = near_page;
+                else if (near_page < gap_start)
+                    candidate = gap_start;
+                else
+                    candidate = gap_end - size;
+
+                dist = candidate > near_page ? candidate - near_page : near_page - candidate;
+                if (dist < best_dist && user_pte_range_empty(mm, candidate, size))
+                {
+                    best = candidate;
+                    best_dist = dist;
+                }
+            }
+
+            if (!vma || vma->vm_start >= hi)
+                break;
+            addr = PAGE_ALIGN(vma->vm_end);
+        }
+
+        if (best)
+            return best;
     }
 
-    return best;
+    return 0;
 }
 
 // 内核写完 ghost_copy 后，刷新到用户态取指可见。
@@ -1017,12 +1076,15 @@ static inline int arm64_dbi_ghost_prepare_resource(pid_t pid, u64 target_page, c
     mmap_write_lock(mm);
     ghost->ghost_page = arm64_dbi_ghost_find_hole_locked(mm, target_page, ghost_size);
     mmap_write_unlock(mm);
-    mmput(mm);
     if (!ghost->ghost_page)
     {
+        pr_debug("[ptebp] no ghost VA hole pid=%d target=0x%llx size=0x%zx task_size=0x%llx\n",
+                 pid, target_page, ghost_size, (u64)mm->task_size);
+        mmput(mm);
         status = -ENOSPC;
         goto err_out;
     }
+    mmput(mm);
 
     // 根据 target_page 和 ghost_page 重写整页指令，并填充 target PC -> ghost PC 映射表。
     ghost->dbi.target_page = target_page;
@@ -1031,6 +1093,10 @@ static inline int arm64_dbi_ghost_prepare_resource(pid_t pid, u64 target_page, c
     ghost->dbi.ghost = ghost->ghost_copy;
     ghost->dbi.ghost_capacity = ARM64_DBI_GHOST_MAX_INSNS;
     status = arm64_dbi_recompile_page(&ghost->dbi);
+    if (status)
+        pr_debug("[ptebp] DBI recompile failed pid=%d target=0x%llx ghost=0x%llx status=%d count=%d pending=%d failed=%d\n",
+                 pid, target_page, ghost->ghost_page, status, ghost->dbi.ghost_count,
+                 ghost->dbi.n_pending, ghost->dbi.failed);
     if (status)
         goto err_out;
 
@@ -1133,6 +1199,8 @@ static inline int arm64_dbi_ghost_install(pid_t pid, u64 target_page, const void
     {
         spin_unlock_irqrestore(&g_arm64_dbi_ghost_lock, flags);
         arm64_dbi_ghost_release(pid, prepared);
+        pr_debug("[ptebp] ghost slot exhausted pid=%d target=0x%llx slots=%d\n",
+                 pid, target_page, ARM64_DBI_GHOST_SLOT_COUNT);
         status = -ENOSPC;
         goto out_unlock;
     }

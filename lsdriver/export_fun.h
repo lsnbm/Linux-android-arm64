@@ -110,14 +110,21 @@ __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
 
 //------------------下面是通用，但未导出，未定义函数-----------------
 
+#define TLBI_VADDR_MASK ((1ULL << 44) - 1ULL)
+
+static inline uint64_t make_tlbi_addr(uint64_t addr)
+{
+        return (addr >> 12) & TLBI_VADDR_MASK;
+}
+
 // 用 ARM64 TLBI 指令刷新全部cpu一个用户 VA 对应的所有 ASID TLB 项
 static inline void flush_user_tlb_addr_all_asid(uint64_t addr)
 {
-        uint64_t tlbi_addr = addr >> PAGE_SHIFT;
+        uint64_t tlbi_addr = make_tlbi_addr(addr);
 
         asm volatile(
             "dsb ishst\n\t"
-            "tlbi vaae1is, %[tlbi_addr]\n\t" // 需要所有cpu，因为写的是目标用户态的页，随时都能被其他cpu执行
+            "tlbi vaale1is, %[tlbi_addr]\n\t" // 需要所有cpu，因为写的是目标用户态的页，随时都能被其他cpu执行
             "dsb ish\n\t"
             "isb\n\t"
             :
@@ -128,11 +135,11 @@ static inline void flush_user_tlb_addr_all_asid(uint64_t addr)
 // 用 ARM64 TLBI 指令刷新当前 CPU 上一个用户 VA 对应的所有 ASID TLB 项
 static inline void flush_user_tlb_addr_all_asid_current_cpu(uint64_t addr)
 {
-        uint64_t tlbi_addr = addr >> PAGE_SHIFT;
+        uint64_t tlbi_addr = make_tlbi_addr(addr);
 
         asm volatile(
             "dsb nshst\n\t"
-            "tlbi vaae1, %[tlbi_addr]\n\t"
+            "tlbi vaale1, %[tlbi_addr]\n\t"
             "dsb nsh\n\t"
             "isb\n\t"
             :
@@ -143,11 +150,11 @@ static inline void flush_user_tlb_addr_all_asid_current_cpu(uint64_t addr)
 // 用 ARM64 TLBI 指令刷新全部cpu一个内核 VA 对应的所有 ASID TLB 项
 static inline void flush_kernel_tlb_addr_all_asid(uint64_t addr)
 {
-        uint64_t tlbi_addr = addr >> PAGE_SHIFT;
+        uint64_t tlbi_addr = make_tlbi_addr(addr);
 
         asm volatile(
             "dsb ishst\n\t"
-            "tlbi vaae1is, %[tlbi_addr]\n\t"
+            "tlbi vaale1is, %[tlbi_addr]\n\t"
             "dsb ish\n\t"
             "isb\n\t"
             :
@@ -158,11 +165,11 @@ static inline void flush_kernel_tlb_addr_all_asid(uint64_t addr)
 // 用 ARM64 TLBI 指令刷新当前 CPU 上一个内核 VA 对应的所有 ASID TLB 项
 static inline void flush_kernel_tlb_addr_all_asid_current_cpu(uint64_t addr)
 {
-        uint64_t tlbi_addr = addr >> PAGE_SHIFT;
+        uint64_t tlbi_addr = make_tlbi_addr(addr);
 
         asm volatile(
             "dsb nshst\n\t"
-            "tlbi vaae1, %[tlbi_addr]\n\t"
+            "tlbi vaale1, %[tlbi_addr]\n\t"
             "dsb nsh\n\t"
             "isb\n\t"
             :

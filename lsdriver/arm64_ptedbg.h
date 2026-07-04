@@ -237,7 +237,11 @@ static inline int start_ptebp_monitor(struct break_point *info)
 
 		status = arm64_dbi_ghost_install(info->pid, target_page, NULL, NULL);
 		if (status)
+		{
+			pr_debug("[ptebp] ghost install failed pid=%d point=%d addr=0x%llx page=0x%llx status=%d\n",
+					 info->pid, point_slot, point->hit_addr, target_page, status);
 			goto err_out;
+		}
 	}
 
 	return 0;

@@ -338,6 +338,9 @@ static int hook_entry_install(struct hook_entry *e)
 
     // 保存原始指令，入口会被4条指令的ret跳板覆盖
     hook_save_orig_insns(e->target_addr, e->saved_insn, HOOK_STUB_WORDS);
+    pr_debug("[hook] original %s: 0x%llx: %08x %08x %08x %08x\n",
+             e->target_sym ? e->target_sym : "<addr>", e->target_addr,
+             e->saved_insn[0], e->saved_insn[1], e->saved_insn[2], e->saved_insn[3]);
 
     // return_addr = handler + 16(跳过被我们覆盖的4条指令)
     return_addr = e->target_addr + HOOK_STUB_BYTES;
@@ -370,7 +373,10 @@ static int hook_entry_install(struct hook_entry *e)
     }
 
     e->installed = true;
-    pr_debug("[hook] installed %s: 0x%llx -> trampoline 0x%llx\n", e->target_sym, e->target_addr, (uint64_t)e->trampoline);
+    pr_debug("[hook] installed %s: target=0x%llx trampoline=0x%llx slot=%d work=0x%llx return=0x%llx hook=%08x %08x %08x %08x\n",
+             e->target_sym ? e->target_sym : "<addr>", e->target_addr, (uint64_t)e->trampoline,
+             e->slot_index, (uint64_t)e->work_fn, return_addr,
+             hook_code[0], hook_code[1], hook_code[2], hook_code[3]);
     return 0;
 }
 

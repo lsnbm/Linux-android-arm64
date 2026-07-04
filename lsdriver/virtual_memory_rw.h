@@ -148,10 +148,13 @@ static inline void *pte_map_page(phys_addr_t paddr, size_t size, const void *buf
     // 修改 PTE 指向目标物理页
     set_pte(pte_info.pte_address, pfn_pte(pfn, __pgprot(FLAGS)));
 
-    // 刷新当前 CPU 上该内核 VA 对应的 TLB 项
+    // 刷新该VA的TLB缓存，同步到当前cpu
     flush_kernel_tlb_addr_all_asid_current_cpu((uint64_t)pte_info.base_address);
 
-    // flush_tlb_all();//刷新全部cpu核心TLB
+    // 刷新该页的 TLB, 内部含：dsb(ish) + TLBI + dsb(ish)+isb(),手写刷新需取消dsbisb注释
+    // flush_tlb_kernel_range((uint64_t)pte_info.base_address, (uint64_t)pte_info.base_address + PAGE_SIZE);
+    // 刷新全部cpu核心TLB
+    // flush_tlb_all();
 
     return (uint8_t *)pte_info.base_address + (paddr & ~PAGE_MASK);
 }
@@ -159,8 +162,6 @@ static inline void *pte_map_page(phys_addr_t paddr, size_t size, const void *buf
 // 读取
 static inline int pte_read_physical(phys_addr_t paddr, void *buffer, size_t size)
 {
-    // 这不能被抢占，被抢占可能会导致运行cpu迁移,pte_map_page里面刷新的当前cpu，可能是cpu0上刷新,被抢占后memcpy运行在cpu1
-    // 正常来说运行读写进来后都是一个cpu上线性跑完的
     void *mapped = pte_map_page(paddr, size, buffer);
     if (IS_ERR(mapped))
     {
