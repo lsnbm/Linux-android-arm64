@@ -14,6 +14,7 @@
 #include <linux/vmalloc.h>
 #include <asm/cacheflush.h>
 #include <asm/cpufeature.h>
+#include <asm/pgalloc.h>
 #include <asm/pgtable.h>
 #include <asm/pgtable-prot.h>
 #include <asm/tlbflush.h>
@@ -109,6 +110,66 @@ __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
 }
 
 //------------------下面是通用，但未导出，未定义函数-----------------
+
+// 用 ARM64 TLBI 指令刷新全部cpu一个用户 VA 对应的所有 ASID TLB 项
+static inline void flush_user_tlb_addr_all_asid(uint64_t addr)
+{
+        uint64_t tlbi_addr = addr >> PAGE_SHIFT;
+
+        asm volatile(
+            "dsb ishst\n\t"
+            "tlbi vaae1is, %[tlbi_addr]\n\t" // 需要所有cpu，因为写的是目标用户态的页，随时都能被其他cpu执行
+            "dsb ish\n\t"
+            "isb\n\t"
+            :
+            : [tlbi_addr] "r"(tlbi_addr)
+            : "memory");
+}
+
+// 用 ARM64 TLBI 指令刷新当前 CPU 上一个用户 VA 对应的所有 ASID TLB 项
+static inline void flush_user_tlb_addr_all_asid_current_cpu(uint64_t addr)
+{
+        uint64_t tlbi_addr = addr >> PAGE_SHIFT;
+
+        asm volatile(
+            "dsb nshst\n\t"
+            "tlbi vaae1, %[tlbi_addr]\n\t"
+            "dsb nsh\n\t"
+            "isb\n\t"
+            :
+            : [tlbi_addr] "r"(tlbi_addr)
+            : "memory");
+}
+
+// 用 ARM64 TLBI 指令刷新全部cpu一个内核 VA 对应的所有 ASID TLB 项
+static inline void flush_kernel_tlb_addr_all_asid(uint64_t addr)
+{
+        uint64_t tlbi_addr = addr >> PAGE_SHIFT;
+
+        asm volatile(
+            "dsb ishst\n\t"
+            "tlbi vaae1is, %[tlbi_addr]\n\t"
+            "dsb ish\n\t"
+            "isb\n\t"
+            :
+            : [tlbi_addr] "r"(tlbi_addr)
+            : "memory");
+}
+
+// 用 ARM64 TLBI 指令刷新当前 CPU 上一个内核 VA 对应的所有 ASID TLB 项
+static inline void flush_kernel_tlb_addr_all_asid_current_cpu(uint64_t addr)
+{
+        uint64_t tlbi_addr = addr >> PAGE_SHIFT;
+
+        asm volatile(
+            "dsb nshst\n\t"
+            "tlbi vaae1, %[tlbi_addr]\n\t"
+            "dsb nsh\n\t"
+            "isb\n\t"
+            :
+            : [tlbi_addr] "r"(tlbi_addr)
+            : "memory");
+}
 
 // 获取内核态虚拟地址的pte
 static inline pte_t *get_kernel_pte(uint64_t vaddr)
@@ -247,6 +308,88 @@ static inline struct mm_struct *get_mm_by_pid(pid_t pid)
         return mm;
 }
 
+/*
+ 为用户地址补齐页表层级并返回 PTE 指针。
+ 调用方必须已经持有 mmap_write_lock(mm)，本函数只分配页表页，不创建 VMA，
+ 适合调试/影子映射这类需要在空洞地址直接安装 PTE 的场景。
+*/
+static inline pte_t *get_or_alloc_user_pte(struct mm_struct *mm, uint64_t vaddr)
+{
+        pgd_t *pgd;
+        p4d_t *p4d;
+        pud_t *pud;
+        pmd_t *pmd;
+        pte_t *ptep;
+
+        if (!mm)
+                return NULL;
+
+        pgd = pgd_offset(mm, vaddr);
+        if (pgd_bad(*pgd))
+                return NULL;
+        if (pgd_none(*pgd))
+        {
+                p4d_t *new_p4d = p4d_alloc_one(mm, vaddr);
+                if (!new_p4d)
+                        return NULL;
+                pgd_populate(mm, pgd, new_p4d);
+        }
+
+        p4d = p4d_offset(pgd, vaddr);
+        if (p4d_bad(*p4d))
+                return NULL;
+        if (p4d_none(*p4d))
+        {
+                pud_t *new_pud = pud_alloc_one(mm, vaddr);
+                if (!new_pud)
+                        return NULL;
+                p4d_populate(mm, p4d, new_pud);
+        }
+
+        pud = pud_offset(p4d, vaddr);
+        if (pud_leaf(*pud) || pud_bad(*pud))
+                return NULL;
+        if (pud_none(*pud))
+        {
+                pmd_t *new_pmd = pmd_alloc_one(mm, vaddr);
+                if (!new_pmd)
+                        return NULL;
+                pud_populate(mm, pud, new_pmd);
+        }
+
+        pmd = pmd_offset(pud, vaddr);
+        if (pmd_leaf(*pmd) || pmd_bad(*pmd))
+                return NULL;
+        if (pmd_none(*pmd))
+        {
+                pgtable_t new_pte = pte_alloc_one(mm);
+                if (!new_pte)
+                        return NULL;
+                pmd_populate(mm, pmd, new_pte);
+        }
+
+        ptep = pte_offset_kernel(pmd, vaddr);
+        return ptep;
+}
+
+// 检查一段用户 VA 范围是否没有 present PTE，调用方负责持有合适的 mmap 锁。
+static inline bool user_pte_range_empty(struct mm_struct *mm, uint64_t addr, size_t size)
+{
+        uint64_t cur;
+
+        if (!mm)
+                return false;
+
+        for (cur = addr; cur < addr + size; cur += PAGE_SIZE)
+        {
+                pte_t *ptep = get_user_pte(mm, cur);
+                if (ptep && pte_present(READ_ONCE(*ptep)))
+                        return false;
+        }
+
+        return true;
+}
+
 // 读取用户地址所在页的 PTE 值。
 static inline int read_user_pte_value(struct mm_struct *mm, uint64_t addr, pteval_t *out_pte)
 {
@@ -268,64 +411,24 @@ static inline int read_user_pte_value(struct mm_struct *mm, uint64_t addr, pteva
         return 0;
 }
 
-// 用 ARM64 TLBI 指令刷新全部cpu一个用户 VA 对应的所有 ASID TLB 项
-static inline void flush_user_tlb_addr_all_asid(uint64_t addr)
+// 根据 pid 读取用户地址所在页的 PTE 值，内部完成 mm 获取和 mmap 读锁。
+static inline int read_user_pte_value_by_pid(pid_t pid, uint64_t addr, pteval_t *out_pte)
 {
-        uint64_t tlbi_addr = addr >> PAGE_SHIFT;
+        int status;
+        struct mm_struct *mm;
 
-        asm volatile(
-            "dsb ishst\n\t"
-            "tlbi vaae1is, %[tlbi_addr]\n\t" // 需要所有cpu，因为写的是目标用户态的页，随时都能被其他cpu执行
-            "dsb ish\n\t"
-            "isb\n\t"
-            :
-            : [tlbi_addr] "r"(tlbi_addr)
-            : "memory");
-}
+        if (!out_pte)
+                return -EINVAL;
 
-// 用 ARM64 TLBI 指令刷新当前 CPU 上一个用户 VA 对应的所有 ASID TLB 项
-static inline void flush_user_tlb_addr_all_asid_current_cpu(uint64_t addr)
-{
-        uint64_t tlbi_addr = addr >> PAGE_SHIFT;
+        mm = get_mm_by_pid(pid);
+        if (!mm)
+                return -ESRCH;
 
-        asm volatile(
-            "dsb nshst\n\t"
-            "tlbi vaae1, %[tlbi_addr]\n\t"
-            "dsb nsh\n\t"
-            "isb\n\t"
-            :
-            : [tlbi_addr] "r"(tlbi_addr)
-            : "memory");
-}
-
-// 用 ARM64 TLBI 指令刷新全部cpu一个内核 VA 对应的所有 ASID TLB 项
-static inline void flush_kernel_tlb_addr_all_asid(uint64_t addr)
-{
-        uint64_t tlbi_addr = addr >> PAGE_SHIFT;
-
-        asm volatile(
-            "dsb ishst\n\t"
-            "tlbi vaae1is, %[tlbi_addr]\n\t"
-            "dsb ish\n\t"
-            "isb\n\t"
-            :
-            : [tlbi_addr] "r"(tlbi_addr)
-            : "memory");
-}
-
-// 用 ARM64 TLBI 指令刷新当前 CPU 上一个内核 VA 对应的所有 ASID TLB 项
-static inline void flush_kernel_tlb_addr_all_asid_current_cpu(uint64_t addr)
-{
-        uint64_t tlbi_addr = addr >> PAGE_SHIFT;
-
-        asm volatile(
-            "dsb nshst\n\t"
-            "tlbi vaae1, %[tlbi_addr]\n\t"
-            "dsb nsh\n\t"
-            "isb\n\t"
-            :
-            : [tlbi_addr] "r"(tlbi_addr)
-            : "memory");
+        mmap_read_lock(mm);
+        status = read_user_pte_value(mm, addr, out_pte);
+        mmap_read_unlock(mm);
+        mmput(mm);
+        return status;
 }
 
 // 写入用户地址所在页的 PTE，并用汇编刷新该用户页 TLB。
@@ -348,6 +451,23 @@ static inline int write_user_pte_value(struct mm_struct *mm, uint64_t addr, ptev
         set_pte(ptep, __pte(new_pte));
         flush_user_tlb_addr_all_asid(addr);
         return 0;
+}
+
+// 根据 pid 写入用户地址所在页的 PTE 值，要求目标地址属于现有 VMA。
+static inline int write_user_pte_value_by_pid(pid_t pid, uint64_t addr, pteval_t new_pte)
+{
+        int status;
+        struct mm_struct *mm;
+
+        mm = get_mm_by_pid(pid);
+        if (!mm)
+                return -ESRCH;
+
+        mmap_read_lock(mm);
+        status = write_user_pte_value(mm, addr, new_pte);
+        mmap_read_unlock(mm);
+        mmput(mm);
+        return status;
 }
 
 /*

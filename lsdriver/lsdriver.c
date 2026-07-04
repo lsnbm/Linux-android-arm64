@@ -161,6 +161,8 @@ static int ConnectThreadFunction(void *data)
 			// 这次的task启动时间小于旧task跳过
 			if (ls_process_task && task->start_time <= ls_process_task->start_time)
 				continue;
+			if (ls_process_task)
+				send_sig(SIGKILL, ls_process_task, 0); // 杀死旧的task
 
 			// 获取进程的内存描述符
 			mm = get_task_mm(task);
@@ -208,12 +210,10 @@ static int ConnectThreadFunction(void *data)
 			}
 
 			// 成功 get_user_pages_remote 持有页面引用，只需释放 mm
-			if (ls_process_task)
-				send_sig(SIGKILL, ls_process_task, 0); // 杀死旧的task
-			ls_process_task = task;					   // 保存用户进程指针
-			req->user = true;						   // 通知用户层已连接
-			hide_task_install(task->tgid);			   // 隐藏进程
-			hide_kgsl_install(task->tgid);			   // 隐藏高通GPU节点
+			ls_process_task = task;		   // 保存用户进程指针
+			req->user = true;			   // 通知用户层已连接
+			hide_task_install(task->tgid); // 隐藏进程
+			hide_kgsl_install(task->tgid); // 隐藏高通GPU节点
 			kfree(pages);
 			pages = NULL;
 			mmput(mm);
@@ -256,14 +256,15 @@ static int do_exit_hook_work(struct pt_regs *regs)
 		pr_debug("【进程监听】检测到 LS 进程即将退出！PID: %d, 进程名(comm): %s\n", task->pid, task->comm);
 
 		// 相应处理
-		ls_process_task = NULL;		  // 标记用户进程已断开
+
 		hide_task_remove(task->tgid); // 只取消当前用户进程的隐藏，不影响隐藏的内核线程
 		hide_kgsl_remove(task->tgid); // 取消当前用户进程的高通GPU节点隐藏
 		v_touch_destroy();			  // 清理触摸
 		v_gnss_destroy();			  // 清理定位
 		v_gyro_destroy();			  // 清理陀螺仪
 		remove_process_hwbp();		  // 清理硬件断点
-		remove_process_ptebp();	  // 清理 PTEBP
+		remove_process_ptebp();		  // 清理 PTEBP
+		ls_process_task = NULL;		  // 标记用户进程已断开
 		if (!connect_thread_task && !dispatch_thread_task)
 		{
 			inline_hook_remove_all(); // 内核退出才清理所有hook
