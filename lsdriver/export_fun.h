@@ -5,7 +5,6 @@
 #include <linux/version.h>
 #include <linux/kprobes.h>
 #include <linux/types.h>
-#include <linux/kprobes.h>
 #include <linux/mm.h>
 #include <linux/pid.h>
 #include <linux/sched.h>
@@ -169,6 +168,52 @@ static inline void flush_kernel_tlb_addr_all_asid_current_cpu(uint64_t addr)
             :
             : [tlbi_addr] "r"(tlbi_addr)
             : "memory");
+}
+
+// 返回 32 位位图中最低置位下标；没有置位时返回 32。
+static inline uint32_t lowest_set_bit32(uint32_t value)
+{
+        uint32_t bit;
+
+        for (bit = 0; bit < 32; bit++)
+        {
+                if (value & (1U << bit))
+                        return bit;
+        }
+
+        return 32;
+}
+
+// 返回 32 位位图中最高置位下标；没有置位时返回 32。
+static inline uint32_t highest_set_bit32(uint32_t value)
+{
+        int bit;
+
+        for (bit = 31; bit >= 0; bit--)
+        {
+                if (value & (1U << bit))
+                        return (uint32_t)bit;
+        }
+
+        return 32;
+}
+
+// 把已按指令单位计算好的有符号立即数写入 ARM64 指令字段。
+static inline int arm64_patch_signed_imm_field(uint32_t *insn, uint32_t enc_template, int64_t imm, int imm_bits, int imm_shift)
+{
+        int64_t limit;
+        uint32_t mask;
+
+        if (!insn || imm_bits <= 0 || imm_bits > 31 || imm_shift < 0 || imm_bits + imm_shift > 32)
+                return -EINVAL;
+
+        limit = 1LL << (imm_bits - 1);
+        if (imm < -limit || imm >= limit)
+                return -ERANGE;
+
+        mask = (uint32_t)((1ULL << imm_bits) - 1ULL);
+        *insn = enc_template | (((uint32_t)imm & mask) << imm_shift);
+        return 0;
 }
 
 // 获取内核态虚拟地址的pte

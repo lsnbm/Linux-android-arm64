@@ -192,34 +192,6 @@ static int hw_breakpoint_parse(struct bp_point *point, bool is_compat, struct ar
     return 0;
 }
 
-// 返回 BAS 位图中最低的有效字节位；没有有效位时返回 32。
-static uint32_t hwbp_lowest_set_bit(uint32_t value)
-{
-    uint32_t bit;
-
-    for (bit = 0; bit < 32; bit++)
-    {
-        if (value & (1U << bit))
-            return bit;
-    }
-
-    return 32;
-}
-
-// 返回 BAS 位图中最高的有效字节位；没有有效位时返回 32。
-static uint32_t hwbp_highest_set_bit(uint32_t value)
-{
-    int bit;
-
-    for (bit = 31; bit >= 0; bit--)
-    {
-        if (value & (1U << bit))
-            return (uint32_t)bit;
-    }
-
-    return 32;
-}
-
 // ARM64 watchpoint 可能上报 watched bytes 附近的地址；按策略计算距离。
 static uint64_t ls_get_distance_from_watchpoint(uint64_t fault_addr, uint64_t watch_addr, struct arch_hw_breakpoint_ctrl *ctrl)
 {
@@ -232,8 +204,8 @@ static uint64_t ls_get_distance_from_watchpoint(uint64_t fault_addr, uint64_t wa
         return ~0ULL;
 
     fault_addr = untagged_addr(fault_addr);
-    lens = hwbp_lowest_set_bit(ctrl->len);
-    lene = hwbp_highest_set_bit(ctrl->len);
+    lens = lowest_set_bit32(ctrl->len);
+    lene = highest_set_bit32(ctrl->len);
     if (lens >= 32 || lene >= 32)
         return ~0ULL;
 
