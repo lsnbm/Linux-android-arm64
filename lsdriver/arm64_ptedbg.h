@@ -1,6 +1,17 @@
 ﻿#ifndef ARM64_PTEDBG_H
 #define ARM64_PTEDBG_H
 
+/*
+ 已知限制：PTEBP 的 exact hit 只发生在原始 UXN 页触发 instruction abort 时。
+ 如果同页非监控地址先异常并被重定向到 DBI ghost，后续执行流到达监控地址时
+ 已经不再从原始页取指，因此不会再次进入 work_trampoline_ptebp 命中该地址。
+ 比如监控0x75e3dc2874
+ 它所在页是0x75e3dc2000
+ 页前面的0x75e3dc2888先触发
+ 直接把后面的相邻0x75e3dc2874一起带进DBI ghost了
+ 真正要监控的0x75e3dc2874在 DBI ghost就永远不命中
+ */
+
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/mutex.h>

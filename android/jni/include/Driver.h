@@ -1037,11 +1037,12 @@ private: // 私有实现，外部无需关系
             return -1;
 
         req->op = op;
+        req->status = 0;
         if (op == request_op_hwbp_set)
         {
+            __builtin_memset(&req->bp_info, 0, sizeof(req->bp_info));
             req->pid = global_pid;
             req->bp_info.pid = global_pid;
-            __builtin_memset(req->bp_info.points, 0, sizeof(req->bp_info.points));
             const size_t count = std::min(points.size(), std::size(req->bp_info.points));
             for (size_t i = 0; i < count; ++i)
             {
@@ -1063,11 +1064,12 @@ private: // 私有实现，外部无需关系
             return -1;
 
         req->op = op;
+        req->status = 0;
         if (op == request_op_ptebp_set)
         {
+            __builtin_memset(&req->bp_info, 0, sizeof(req->bp_info));
             req->pid = global_pid;
             req->bp_info.pid = global_pid;
-            __builtin_memset(req->bp_info.points, 0, sizeof(req->bp_info.points));
             const size_t count = std::min(points.size(), std::size(req->bp_info.points));
             for (size_t index = 0; index < count; ++index)
             {

