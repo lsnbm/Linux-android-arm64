@@ -544,6 +544,43 @@ def android_ptebp_clear_all() -> dict[str, Any]:
 
 
 @mcp.tool()
+def android_stepbp_list() -> dict[str, Any]:
+    """List STEPBP state; the backend reuses the same bp_info.points[] payload shape."""
+    return _call_bridge_operation("stepbp.info")
+
+
+@mcp.tool()
+def android_stepbp_set(points: list[dict[str, Any]]) -> dict[str, Any]:
+    """Create one or more STEPBP points from bp_point-style configs."""
+    normalized_points: list[dict[str, Any]] = []
+    for point in points:
+        if not isinstance(point, dict):
+            raise ValueError("points must contain objects with address, bp_type, bp_scope, length")
+        clamped_length = max(1, min(8, int(point["length"])))
+        normalized_points.append(
+            {
+                "address": format_address(point["address"]),
+                "bp_type": point["bp_type"],
+                "bp_scope": point["bp_scope"],
+                "length": clamped_length,
+            }
+        )
+    if not normalized_points:
+        raise ValueError("points must not be empty")
+
+    return _call_bridge_operation(
+        "stepbp.set",
+        {"points": normalized_points},
+    )
+
+
+@mcp.tool()
+def android_stepbp_clear_all() -> dict[str, Any]:
+    """Remove all active STEPBP state from the current target process."""
+    return _call_bridge_operation("stepbp.clear")
+
+
+@mcp.tool()
 def android_breakpoint_record_remove(index: int) -> dict[str, Any]:
     """Remove one saved hardware breakpoint record by index."""
     return _call_bridge_operation("breakpoint.record.remove", {"index": index})
@@ -882,6 +919,37 @@ TOOL_META: dict[str, dict[str, Any]] = {
         "example": {},
         "parameter_notes": {},
         "result_notes": "Clears runtime PTEBP state.",
+    },
+    "android_stepbp_list": {
+        "group": "Breakpoints",
+        "use_when": "Inspect active STEPBP info. The backend returns the same bp_info.points[] shape as hardware breakpoints.",
+        "example": {},
+        "parameter_notes": {},
+        "result_notes": "Returns raw stepbp.info payload.",
+    },
+    "android_stepbp_set": {
+        "group": "Breakpoints",
+        "use_when": "Create one or more STEPBP points.",
+        "example": {
+            "points": [
+                {"address": "0x12345678", "bp_type": "execute", "bp_scope": "main", "length": 4},
+            ]
+        },
+        "parameter_notes": {
+            "points": "List of bp_point configs. Each item creates one monitored PC entry.",
+            "points[].address": "Target instruction address.",
+            "points[].bp_type": "Service token: read/write/read_write/execute. STEPBP filters by PC address, so execute is the natural choice.",
+            "points[].bp_scope": "Service token: main/other/all. Numeric tokens 0/1/2 are also accepted.",
+            "points[].length": "Breakpoint length in bytes, 1..8.",
+        },
+        "result_notes": "Creates one or more STEPBP point entries.",
+    },
+    "android_stepbp_clear_all": {
+        "group": "Breakpoints",
+        "use_when": "Remove all active STEPBP state.",
+        "example": {},
+        "parameter_notes": {},
+        "result_notes": "Clears runtime STEPBP state.",
     },
     "android_breakpoint_record_remove": {
         "group": "Breakpoints",

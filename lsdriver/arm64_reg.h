@@ -8,6 +8,8 @@
 #include <linux/of.h>
 #include <linux/string.h>
 
+#include "lsdriver_log.h"
+
 // 直接从硬件寄存器获取内核页表基地址
 static inline pgd_t *get_kernel_pgd_base(void)
 {
@@ -185,7 +187,7 @@ static uint64_t read_wb_reg(int reg, int n)
         GEN_READ_WB_REG_CASES(AARCH64_DBG_REG_WVR, AARCH64_DBG_REG_NAME_WVR, val);
         GEN_READ_WB_REG_CASES(AARCH64_DBG_REG_WCR, AARCH64_DBG_REG_NAME_WCR, val);
     default:
-        pr_debug("[driver] attempt to read from unknown breakpoint register %d\n", n);
+        ls_log_tag("driver", "attempt to read from unknown breakpoint register %d\n", n);
     }
 
     return val;
@@ -201,7 +203,7 @@ static void write_wb_reg(int reg, int n, uint64_t val)
         GEN_WRITE_WB_REG_CASES(AARCH64_DBG_REG_WVR, AARCH64_DBG_REG_NAME_WVR, val);
         GEN_WRITE_WB_REG_CASES(AARCH64_DBG_REG_WCR, AARCH64_DBG_REG_NAME_WCR, val);
     default:
-        pr_debug("[driver] attempt to write to unknown breakpoint register %d\n", n);
+        ls_log_tag("driver", "attempt to write to unknown breakpoint register %d\n", n);
     }
     isb();
 }
@@ -454,7 +456,7 @@ static void print_smccc_arch_feature(enum arm_smccc_conduit conduit,
 
     arm_smccc_call_conduit(conduit, ARM_SMCCC_ARCH_FEATURES_FUNC_ID,
                            func_id, 0, 0, 0, 0, 0, 0, &res);
-    pr_debug("SMCCC feature %-22s: %ld (0x%lx)\n", name, res.a0, res.a0);
+    ls_log("SMCCC feature %-22s: %ld (0x%lx)\n", name, res.a0, res.a0);
 }
 
 // 强制使用 HVC 探测 SMCCC
@@ -465,28 +467,28 @@ static void print_smccc_probe(unsigned int current_el, unsigned int el2_implemen
     // enum arm_smccc_conduit kernel_conduit;
     enum arm_smccc_conduit conduit = SMCCC_CONDUIT_HVC;
 
-    pr_debug("===== SMCCC Probe =====\n");
+    ls_log("===== SMCCC Probe =====\n");
 
     if (current_el != 1)
     {
-        pr_debug("SMCCC probe        : skipped (CurrentEL is EL%u)\n", current_el);
+        ls_log("SMCCC probe        : skipped (CurrentEL is EL%u)\n", current_el);
         return;
     }
 
     // 调用未导出的 arm_smccc_1_1_get_conduit()
-    pr_debug("SMCCC kernel conduit: UNKNOWN (symbol not exported)\n");
-    pr_debug("SMCCC active conduit: HVC (forced)\n");
+    ls_log("SMCCC kernel conduit: UNKNOWN (symbol not exported)\n");
+    ls_log("SMCCC active conduit: HVC (forced)\n");
 
     if (!el2_implemented)
     {
-        pr_debug("SMCCC HVC probe    : skipped (EL2 not implemented)\n");
+        ls_log("SMCCC HVC probe    : skipped (EL2 not implemented)\n");
         return;
     }
 
     arm_smccc_call_conduit(conduit, ARM_SMCCC_VERSION_FUNC_ID,
                            0, 0, 0, 0, 0, 0, 0, &res);
-    pr_debug("SMCCC version      : 0x%lx (major=%lu minor=%lu)\n",
-             res.a0, (res.a0 >> 16) & 0xffff, res.a0 & 0xffff);
+    ls_log("SMCCC version      : 0x%lx (major=%lu minor=%lu)\n",
+           res.a0, (res.a0 >> 16) & 0xffff, res.a0 & 0xffff);
 
     print_smccc_arch_feature(conduit, ARM_SMCCC_VERSION_FUNC_ID, "SMCCC_VERSION");
     print_smccc_arch_feature(conduit, ARM_SMCCC_ARCH_FEATURES_FUNC_ID, "ARCH_FEATURES");
@@ -496,8 +498,8 @@ static void print_smccc_probe(unsigned int current_el, unsigned int el2_implemen
 
     arm_smccc_call_conduit(conduit, ARM_SMCCC_VENDOR_HYP_CALL_UID_FUNC_ID,
                            0, 0, 0, 0, 0, 0, 0, &res);
-    pr_debug("Vendor hyp UID     : %08lx-%08lx-%08lx-%08lx\n",
-             res.a0, res.a1, res.a2, res.a3);
+        ls_log("Vendor hyp UID     : %08lx-%08lx-%08lx-%08lx\n",
+            res.a0, res.a1, res.a2, res.a3);
 }
 
 // 输出Hypervisor相关信息
@@ -545,31 +547,31 @@ static void print_el2_status(void)
     */
     sctlr_el1 = read_sctlr_el1();
 
-    pr_debug("===== EL2 Detection =====\n");
+        ls_log("===== EL2 Detection =====\n");
 
     // 打印当前运行级别。
-    pr_debug("CurrentEL          : EL%u\n", current_el);
+        ls_log("CurrentEL          : EL%u\n", current_el);
 
     // 打印硬件是否实现 EL2。
-    pr_debug("EL2 implemented    : %s (ID_AA64PFR0_EL1[11:8] = %u)\n",
-             el2_implemented ? "YES" : "NO",
-             el2_implemented);
+        ls_log("EL2 implemented    : %s (ID_AA64PFR0_EL1[11:8] = %u)\n",
+            el2_implemented ? "YES" : "NO",
+            el2_implemented);
 
     // 打印硬件是否支持 VHE。注意：硬件支持 VHE，不代表当前系统已经启用 VHE。
-    pr_debug("VHE supported      : %s (ID_AA64MMFR1_EL1[11:8] = %u)\n",
-             vhe_supported ? "YES" : "NO",
-             vhe_supported);
+        ls_log("VHE supported      : %s (ID_AA64MMFR1_EL1[11:8] = %u)\n",
+            vhe_supported ? "YES" : "NO",
+            vhe_supported);
 
     // 打印 SCTLR_EL1 的当前值。该值主要用于辅助观察当前控制寄存器状态。
-    pr_debug("SCTLR_EL1          : 0x%016lx\n", sctlr_el1);
+        ls_log("SCTLR_EL1          : 0x%016lx\n", sctlr_el1);
 
     // 判断 VHE 是否 active。
-    pr_debug("VHE mode active    : %s\n",
-             current_el == 2 ? "YES" : "NO");
+        ls_log("VHE mode active    : %s\n",
+            current_el == 2 ? "YES" : "NO");
 
     // 判断当前是否可以直接访问 EL2 寄存器。
-    pr_debug("EL2 regs accessible: %s\n",
-             current_el == 2 ? "YES" : "NO (trap)");
+        ls_log("EL2 regs accessible: %s\n",
+            current_el == 2 ? "YES" : "NO (trap)");
 
     // 运行在 EL2 时，读取 HCR_EL2。
     if (current_el == 2)
@@ -583,17 +585,17 @@ static void print_el2_status(void)
             :
             :);
 
-        pr_debug("HCR_EL2            : 0x%016lx\n", hcr_el2);
-        pr_debug("  E2H bit[34]      : %lu (VHE=%s)\n",
-                 (hcr_el2 >> 34) & 1,
-                 ((hcr_el2 >> 34) & 1) ? "enabled" : "disabled");
+        ls_log("HCR_EL2            : 0x%016lx\n", hcr_el2);
+        ls_log("  E2H bit[34]      : %lu (VHE=%s)\n",
+               (hcr_el2 >> 34) & 1,
+               ((hcr_el2 >> 34) & 1) ? "enabled" : "disabled");
     }
     else
     {
-        pr_debug("HCR_EL2            : NOT readable from EL1 (would trap)\n");
+        ls_log("HCR_EL2            : NOT readable from EL1 (would trap)\n");
     }
 
-    pr_debug("===== Hypervisor / TrustZone / Platform Probe =====\n");
+    ls_log("===== Hypervisor / TrustZone / Platform Probe =====\n");
 
     /*
     查看是否有高通 Hypervisor (Gunyah/Haven)
@@ -617,10 +619,10 @@ static void print_el2_status(void)
     np = of_find_node_by_path("/hypervisor");
     if (np)
     {
-        pr_debug("DT /hypervisor     : present\n");
+        ls_log("DT /hypervisor     : present\n");
         of_property_for_each_string(np, "compatible", prop, str)
         {
-            pr_debug("  compatible       : %s\n", str);
+            ls_log("  compatible       : %s\n", str);
 
             if (strnstr(str, "gunyah", strlen(str)) ||
                 strnstr(str, "haven", strlen(str)) ||
@@ -635,18 +637,18 @@ static void print_el2_status(void)
     }
     else
     {
-        pr_debug("DT /hypervisor     : no hyp node\n");
+        ls_log("DT /hypervisor     : no hyp node\n");
     }
     np = of_find_node_by_path("/psci");
     if (!np)
         np = of_find_node_by_path("/firmware/psci");
     if (np)
     {
-        pr_debug("DT PSCI            : present\n");
+        ls_log("DT PSCI            : present\n");
 
         of_property_for_each_string(np, "compatible", prop, str)
         {
-            pr_debug("  compatible       : %s\n", str);
+            ls_log("  compatible       : %s\n", str);
 
             if (strnstr(str, "psci", strlen(str)) ||
                 strnstr(str, "arm,psci", strlen(str)))
@@ -659,7 +661,7 @@ static void print_el2_status(void)
     }
     else
     {
-        pr_debug("DT PSCI            : not found\n");
+        ls_log("DT PSCI            : not found\n");
     }
 
     // 直接看芯片/平台型号
@@ -667,16 +669,16 @@ static void print_el2_status(void)
     if (np)
     {
         if (!of_property_read_string(np, "model", &model))
-            pr_debug("DT model           : %s\n", model);
+            ls_log("DT model           : %s\n", model);
         else
-            pr_debug("DT model           : unavailable\n");
+            ls_log("DT model           : unavailable\n");
 
         of_property_for_each_string(np, "compatible", prop, str)
         {
-            pr_debug("DT compatible      : %s\n", str);
+            ls_log("DT compatible      : %s\n", str);
 
             if (strnstr(str, "qcom", strlen(str)))
-                pr_debug("  platform hint    : Qualcomm SoC / board\n");
+                ls_log("  platform hint    : Qualcomm SoC / board\n");
 
             if (strnstr(str, "gunyah", strlen(str)) ||
                 strnstr(str, "haven", strlen(str)) ||
@@ -691,15 +693,15 @@ static void print_el2_status(void)
     }
     else
     {
-        pr_debug("DT root            : unavailable\n");
+        ls_log("DT root            : unavailable\n");
     }
 
-    pr_debug("HV keyword hint    : %s\n", hyp_hint ? "YES" : "NO");
-    pr_debug("TZ/PSCI hint       : %s\n", tz_hint ? "YES" : "NO");
+    ls_log("HV keyword hint    : %s\n", hyp_hint ? "YES" : "NO");
+    ls_log("TZ/PSCI hint       : %s\n", tz_hint ? "YES" : "NO");
 
     print_smccc_probe(current_el, el2_implemented);
 
-    pr_debug("=========================\n");
+    ls_log("=========================\n");
 }
 
 

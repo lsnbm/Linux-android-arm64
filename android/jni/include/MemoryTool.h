@@ -641,7 +641,6 @@ namespace MemUtils
     // 按指定类型读取内存并转为字符串。
     inline std::string ReadAsString(uintptr_t addr, DataType type)
     {
-        addr = Normalize(addr);
         if (!addr)
             return "??";
         return DispatchType(type, [&]<typename T>() -> std::string
@@ -655,7 +654,6 @@ namespace MemUtils
     // 把字符串按指定类型写入目标地址。
     inline bool WriteFromString(uintptr_t addr, DataType type, std::string_view str)
     {
-        addr = Normalize(addr);
         if (!addr || str.empty())
             return false;
         try
@@ -673,7 +671,6 @@ namespace MemUtils
     // 读取指针值并格式化为十六进制文本。
     inline std::string ReadAsText(uintptr_t addr, size_t maxLen = 64)
     {
-        addr = Normalize(addr);
         if (!addr)
             return "??";
 
@@ -690,7 +687,6 @@ namespace MemUtils
 
     inline bool WriteText(uintptr_t addr, std::string_view str)
     {
-        addr = Normalize(addr);
         if (!addr || str.empty())
             return false;
 
@@ -701,7 +697,6 @@ namespace MemUtils
 
     inline std::string ReadAsPointerString(uintptr_t addr)
     {
-        addr = Normalize(addr);
         if (!addr)
             return "??";
         int64_t value = 0;
@@ -713,7 +708,6 @@ namespace MemUtils
     // 把十六进制文本解析后写入指针值。
     inline bool WritePointerFromString(uintptr_t addr, std::string_view str)
     {
-        addr = Normalize(addr);
         if (!addr || str.empty())
             return false;
         try
@@ -2980,7 +2974,7 @@ private:
                 sym.arrayIndex = r.arrayIndex;
 
                 uintptr_t objAddr = 0;
-                if (dr->Read(MemUtils::Normalize(r.arrayBase) + r.arrayIndex * sizeof(uintptr_t), &objAddr, sizeof(objAddr)) != static_cast<int>(sizeof(objAddr)))
+                if (dr->Read(r.arrayBase + r.arrayIndex * sizeof(uintptr_t), &objAddr, sizeof(objAddr)) != static_cast<int>(sizeof(objAddr)))
                     objAddr = 0;
                 sym.start = MemUtils::Normalize(objAddr);
                 char arrName[128];

@@ -180,6 +180,7 @@ class TcpTestWindow(QWidget):
         self.bp_info_data: dict | None = None
         self.hwbp_active = False
         self.ptebp_active = False
+        self.stepbp_active = False
         self.bp_active_mode = ""
         self.hwbp_selected_index: int | None = None
         self.hwbp_point_rows: list[dict[str, object]] = []
@@ -761,6 +762,14 @@ class TcpTestWindow(QWidget):
         self.ptebp_remove_button = QPushButton("移除PTEBP")
         self.ptebp_remove_button.clicked.connect(self.on_ptebp_remove_all)
         action_row.addWidget(self.ptebp_remove_button)
+
+        self.stepbp_set_button = QPushButton("设置STEPBP")
+        self.stepbp_set_button.clicked.connect(self.on_stepbp_set)
+        action_row.addWidget(self.stepbp_set_button)
+
+        self.stepbp_remove_button = QPushButton("移除STEPBP")
+        self.stepbp_remove_button.clicked.connect(self.on_stepbp_remove_all)
+        action_row.addWidget(self.stepbp_remove_button)
         action_row.addStretch(1)
         config_layout.addLayout(action_row)
         self._apply_hwbp_active_state()
@@ -2010,6 +2019,7 @@ class TcpTestWindow(QWidget):
         mode_text = str(info.get("active_mode") or ("hwbp" if self.hwbp_active else "")).strip().lower()
         self.bp_active_mode = mode_text
         self.ptebp_active = self.hwbp_active and mode_text == "ptebp"
+        self.stepbp_active = self.hwbp_active and mode_text == "stepbp"
         num_brps = self._safe_int(bp_info.get("num_brps"), 0)
         num_wrps = self._safe_int(bp_info.get("num_wrps"), 0)
         self.hwbp_num_brps_label.setText(f"bp_info.num_brps: {num_brps}")
@@ -2032,7 +2042,7 @@ class TcpTestWindow(QWidget):
             )
         points_text = "; ".join(point_parts) if point_parts else "[]"
         if self.hwbp_active:
-            active_mode = "PTEBP" if self.ptebp_active else "HWBP"
+            active_mode = "STEPBP" if self.stepbp_active else ("PTEBP" if self.ptebp_active else "HWBP")
             self.hwbp_points_label.setText(f"bp_info.points: {points_text}  active: true  mode: {active_mode}")
         else:
             self.hwbp_points_label.setText(f"bp_info.points: {points_text}  active: false")
@@ -2042,7 +2052,7 @@ class TcpTestWindow(QWidget):
         self._render_hwbp_tree(bp_info)
 
     def _apply_hwbp_active_state(self) -> None:
-        hwbp_mode_active = self.hwbp_active and not self.ptebp_active
+        hwbp_mode_active = self.hwbp_active and not self.ptebp_active and not self.stepbp_active
         if hasattr(self, "hwbp_set_button"):
             self.hwbp_set_button.setEnabled(not self.hwbp_active)
         if hasattr(self, "hwbp_remove_button"):
@@ -2051,6 +2061,10 @@ class TcpTestWindow(QWidget):
             self.ptebp_set_button.setEnabled(not self.hwbp_active)
         if hasattr(self, "ptebp_remove_button"):
             self.ptebp_remove_button.setEnabled(self.ptebp_active)
+        if hasattr(self, "stepbp_set_button"):
+            self.stepbp_set_button.setEnabled(not self.hwbp_active)
+        if hasattr(self, "stepbp_remove_button"):
+            self.stepbp_remove_button.setEnabled(self.stepbp_active)
         if hasattr(self, "hwbp_add_point_button"):
             self.hwbp_add_point_button.setEnabled((not self.hwbp_active) and len(self.hwbp_point_rows) < 16)
         if hasattr(self, "hwbp_remove_point_button"):
@@ -3377,6 +3391,7 @@ class TcpTestWindow(QWidget):
             return
         self.hwbp_active = True
         self.ptebp_active = False
+        self.stepbp_active = False
         self.bp_active_mode = "hwbp"
         self._apply_hwbp_active_state()
         self._set_status(f"设置硬件断点成功: {len(points)} 个 points")
@@ -3386,8 +3401,8 @@ class TcpTestWindow(QWidget):
         if not self.hwbp_active:
             self._set_status("断点未激活，无需移除")
             return
-        if self.ptebp_active:
-            QMessageBox.information(self, "提示", "当前激活的是 PTEBP，请使用移除PTEBP。")
+        if self.ptebp_active or self.stepbp_active:
+            QMessageBox.information(self, "提示", "当前激活的不是 HWBP，请使用对应的移除按钮。")
             return
 
         response = self._request_ok("breakpoint.clear", error_title="移除失败")
@@ -3395,6 +3410,7 @@ class TcpTestWindow(QWidget):
             return
         self.hwbp_active = False
         self.ptebp_active = False
+        self.stepbp_active = False
         self.bp_active_mode = ""
         self._apply_hwbp_active_state()
         self._set_status("已移除进程硬件断点")
@@ -3420,6 +3436,7 @@ class TcpTestWindow(QWidget):
             return
         self.hwbp_active = True
         self.ptebp_active = True
+        self.stepbp_active = False
         self.bp_active_mode = "ptebp"
         self._apply_hwbp_active_state()
         self._set_status(f"设置 PTEBP 成功: {len(points)} 个 points")
@@ -3435,9 +3452,52 @@ class TcpTestWindow(QWidget):
             return
         self.hwbp_active = False
         self.ptebp_active = False
+        self.stepbp_active = False
         self.bp_active_mode = ""
         self._apply_hwbp_active_state()
         self._set_status("已移除进程 PTEBP")
+        self.on_hwbp_refresh(silent=True)
+
+    def on_stepbp_set(self) -> None:
+        if self.hwbp_active:
+            QMessageBox.information(self, "提示", "断点已激活，请先移除当前断点。")
+            return
+
+        try:
+            points = self._collect_hwbp_points()
+        except ValueError as exc:
+            QMessageBox.warning(self, "输入提示", str(exc))
+            return
+        response = self._request_ok(
+            "stepbp.set",
+            {"points": points},
+            error_title="设置失败",
+            status_on_error="设置 STEPBP 失败",
+        )
+        if response is None:
+            return
+        self.hwbp_active = True
+        self.ptebp_active = False
+        self.stepbp_active = True
+        self.bp_active_mode = "stepbp"
+        self._apply_hwbp_active_state()
+        self._set_status(f"设置 STEPBP 成功: {len(points)} 个 points")
+        self.on_hwbp_refresh(silent=True)
+
+    def on_stepbp_remove_all(self) -> None:
+        if not self.stepbp_active:
+            self._set_status("STEPBP 未激活，无需移除")
+            return
+
+        response = self._request_ok("stepbp.clear", error_title="移除失败")
+        if response is None:
+            return
+        self.hwbp_active = False
+        self.ptebp_active = False
+        self.stepbp_active = False
+        self.bp_active_mode = ""
+        self._apply_hwbp_active_state()
+        self._set_status("已移除进程 STEPBP")
         self.on_hwbp_refresh(silent=True)
 
     def on_hwbp_tree_current_item_changed(self, current: QTreeWidgetItem | None, _previous: QTreeWidgetItem | None) -> None:

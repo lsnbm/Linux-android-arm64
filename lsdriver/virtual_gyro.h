@@ -2,11 +2,11 @@
 
 #include <linux/kernel.h>
 #include <linux/mutex.h>
-#include <linux/printk.h>
 #include <linux/types.h>
 #include <linux/uaccess.h>
 #include <linux/vmalloc.h>
 #include "inline_hook_frame.h"
+#include "lsdriver_log.h"
 
 /*
   Android sensors_event_t / ASensorEvent:
@@ -338,12 +338,12 @@ static int vgyro_handle_sendto(struct pt_regs *regs, enum vgyro_sendto_arg_mode 
         unsigned long missing = copy_to_user(ubuf, kbuf, len);
 
         if (missing)
-            pr_debug("vgyro: sendto copy back missing=%lu len=%zu\n",
-                     missing, len);
+            ls_log_tag("vgyro", "sendto copy back missing=%lu len=%zu\n",
+                       missing, len);
         else
-            pr_debug("vgyro: sendto patched %d gyro event(s) len=%zu mode=%d mrad=%d/%d/%d\n",
-                     patched, len, mode, READ_ONCE(vg.gyro_x),
-                     READ_ONCE(vg.gyro_y), READ_ONCE(vg.gyro_z));
+            ls_log_tag("vgyro", "sendto patched %d gyro event(s) len=%zu mode=%d mrad=%d/%d/%d\n",
+                       patched, len, mode, READ_ONCE(vg.gyro_x),
+                       READ_ONCE(vg.gyro_y), READ_ONCE(vg.gyro_z));
     }
 
 out:
@@ -393,13 +393,13 @@ static int vgyro_install_hook_locked(void)
         ret = inline_hook_install(vgyro_sendto_hook_targets[i]);
         if (!ret)
         {
-            pr_debug("vgyro: inline hook on %s registered\n",
-                     vgyro_sendto_hook_targets[i][0].target_sym);
+            ls_log_tag("vgyro", "inline hook on %s registered\n",
+                       vgyro_sendto_hook_targets[i][0].target_sym);
             return 0;
         }
 
-        pr_warn("vgyro: inline hook on %s failed: %d\n",
-                vgyro_sendto_hook_targets[i][0].target_sym, ret);
+        ls_log_tag("vgyro", "inline hook on %s failed: %d\n",
+                   vgyro_sendto_hook_targets[i][0].target_sym, ret);
     }
 
     return ret;
@@ -420,7 +420,7 @@ static inline int v_gyro_init(void)
 
     mutex_unlock(&vgyro_lock);
 
-    pr_debug("vgyro: init sendto_inline_hook=%d active=1\n", ret);
+    ls_log_tag("vgyro", "init sendto_inline_hook=%d active=1\n", ret);
     return ret;
 }
 
@@ -432,8 +432,8 @@ static inline int v_gyro_report(int gyro_x, int gyro_y, int gyro_z)
     WRITE_ONCE(vg.gyro_z, gyro_z);
     WRITE_ONCE(vg.active, true);
 
-    pr_debug("vgyro: report mrad=%d/%d/%d hook=%d\n",
-             gyro_x, gyro_y, gyro_z, vgyro_sendto_hook_installed());
+    ls_log_tag("vgyro", "report mrad=%d/%d/%d hook=%d\n",
+               gyro_x, gyro_y, gyro_z, vgyro_sendto_hook_installed());
     return 0;
 }
 
@@ -452,9 +452,9 @@ static inline void v_gyro_destroy(void)
     for (i = 0; i < ARRAY_SIZE(vgyro_sendto_hook_targets); i++)
         inline_hook_remove(vgyro_sendto_hook_targets[i]);
 
-    pr_debug("vgyro: inline hook unregistered\n");
+    ls_log_tag("vgyro", "inline hook unregistered\n");
 
-    pr_debug("vgyro: destroy\n");
+    ls_log_tag("vgyro", "destroy\n");
 
     mutex_unlock(&vgyro_lock);
 }

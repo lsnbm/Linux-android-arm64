@@ -11,6 +11,7 @@
 
 #include "export_fun.h"
 #include "inline_hook_frame.h"
+#include "lsdriver_log.h"
 
 /*
 在高通设备上可查询 GPU/KGSL 信息的路径：
@@ -226,10 +227,10 @@ int hide_kgsl_install(pid_t pid)
     ret = inline_hook_install(g_kgsl_hooks);
     if (ret)
     {
-        pr_err("kgsl_hide: inline hook install failed: %d\n", ret);
+        ls_log_tag("kgsl_hide", "inline hook install failed: %d\n", ret);
         goto out_unlock;
     }
-    pr_debug("kgsl_hide: inline hook installed\n");
+    ls_log_tag("kgsl_hide", "inline hook installed\n");
 
     // hook 安装成功后再写隐藏表，避免表里有 PID 但拦截点没生效。
     for (i = 0; i < HIDE_KGSL_MAX_PIDS; i++)
@@ -249,7 +250,7 @@ int hide_kgsl_install(pid_t pid)
     }
 
     WRITE_ONCE(g_hide_kgsl_pids[empty], pid);
-    pr_debug("kgsl_hide: hidden PID %d\n", pid);
+    ls_log_tag("kgsl_hide", "hidden PID %d\n", pid);
 
 out_unlock:
     mutex_unlock(&g_hide_kgsl_lock);

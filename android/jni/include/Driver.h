@@ -13,7 +13,6 @@
 #include <dirent.h>
 #include <elf.h>
 #include <fcntl.h>
-#include <format>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -23,7 +22,6 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <print>
 #include <ranges>
 #include <set>
 #include <shared_mutex>
@@ -350,6 +348,9 @@ public: // 共有结构体和锁
 
         request_op_tls_get_tpidr_el0, // 获取指定线程 TPIDR_EL0
 
+        request_op_stepbp_set,    // 设置单步 PC breakpoint
+        request_op_stepbp_remove, // 删除单步 PC breakpoint
+
         request_op_kernel_exit // 内核线程退出
     };
 
@@ -391,7 +392,6 @@ public: // 外部初始化
 
     ~Driver()
     {
-        // ExitKernel();
     }
 
 public:
@@ -404,8 +404,9 @@ public:
     void ExitKernel()
     {
         // 内核停止运行
+        std::scoped_lock<SpinLock> lock(m_mutex);
         req->op = request_op_kernel_exit;
-        req->kernel = true;
+        IoCommitAndWait();
     }
 
     int GetPid(std::string_view packageName)
@@ -528,7 +529,7 @@ public: // 外部获取内存信息
     {
         if (HandleVirtualMemoryInfo() != 0)
         {
-            std::println("获取内存信息失败!!!");
+            std::printf("获取内存信息失败!!!\n");
             __builtin_memset(&req->vmem_info, 0, sizeof(req->vmem_info));
         }
         return req->vmem_info;
@@ -539,7 +540,7 @@ public: // 外部获取内存信息
     {
         if (!outAddress)
         {
-            std::println(stderr, "outAddress 为空指针");
+            std::fprintf(stderr, "outAddress 为空指针\n");
             return false;
         }
 
@@ -547,7 +548,7 @@ public: // 外部获取内存信息
 
         if (HandleVirtualMemoryInfo() != 0)
         {
-            std::println(stderr, "驱动获取内存信息失败");
+            std::fprintf(stderr, "驱动获取内存信息失败\n");
             return false;
         }
 
@@ -568,24 +569,24 @@ public: // 外部获取内存信息
             if (fullPath.substr(pos) != moduleName)
                 continue;
 
-            std::println(stderr, "========== 模块信息 ==========");
-            std::println(stderr, "  模块索引  : {}", i);
-            std::println(stderr, "  模块名称  : {}", mod.name);
-            std::println(stderr, "  区段数量  : {}", mod.seg_count);
-            std::println(stderr, "  ----------------------------");
+            std::fprintf(stderr, "========== 模块信息 ==========\n");
+            std::fprintf(stderr, "  模块索引  : %d\n", i);
+            std::fprintf(stderr, "  模块名称  : %s\n", mod.name);
+            std::fprintf(stderr, "  区段数量  : %d\n", mod.seg_count);
+            std::fprintf(stderr, "  ----------------------------\n");
 
             for (int j = 0; j < mod.seg_count; ++j)
             {
                 const auto &seg = mod.segs[j];
-                std::println(stderr, "  区段[{}]:", j);
-                std::println(stderr, "    index : {}", seg.index);
-                std::println(stderr, "    start : 0x{:016X}", seg.start);
-                std::println(stderr, "    end   : 0x{:016X}", seg.end);
-                std::println(stderr, "    size  : 0x{:X} ({} bytes)", seg.end - seg.start, seg.end - seg.start);
-                std::println(stderr, "    prot  : {}", seg.prot);
+                std::fprintf(stderr, "  区段[%d]:\n", j);
+                std::fprintf(stderr, "    index : %d\n", seg.index);
+                std::fprintf(stderr, "    start : 0x%016llX\n", (unsigned long long)seg.start);
+                std::fprintf(stderr, "    end   : 0x%016llX\n", (unsigned long long)seg.end);
+                std::fprintf(stderr, "    size  : 0x%llX (%llu bytes)\n", (unsigned long long)(seg.end - seg.start), (unsigned long long)(seg.end - seg.start));
+                std::fprintf(stderr, "    prot  : %d\n", seg.prot);
             }
 
-            std::println(stderr, "==============================");
+            std::fprintf(stderr, "==============================\n");
 
             // 查找目标区段
             for (int j = 0; j < mod.seg_count; ++j)
@@ -598,11 +599,11 @@ public: // 外部获取内存信息
                 return true;
             }
 
-            std::println(stderr, " 模块 '{}' 中未找到区段索引 {}", moduleName, segmentIndex);
+            std::fprintf(stderr, " 模块 '%.*s' 中未找到区段索引 %d\n", (int)moduleName.size(), moduleName.data(), segmentIndex);
             return false;
         }
 
-        std::println(stderr, " 未找到模块 '{}'", moduleName);
+        std::fprintf(stderr, " 未找到模块 '%.*s'\n", (int)moduleName.size(), moduleName.data());
         return false;
     }
     // 驱动获取扫描区域
@@ -612,7 +613,7 @@ public: // 外部获取内存信息
 
         if (HandleVirtualMemoryInfo() != 0)
         {
-            std::println(stderr, "驱动获取内存信息失败");
+            std::fprintf(stderr, "驱动获取内存信息失败\n");
             return regions;
         }
 
@@ -654,7 +655,7 @@ public: // 外部获取内存信息
     {
         if (moduleName.empty())
         {
-            std::println(stderr, "[-] Dump: 模块名为空");
+            std::fprintf(stderr, "[-] Dump: 模块名为空\n");
             return false;
         }
 
@@ -691,7 +692,7 @@ public: // 外部获取内存信息
 
         if (dumpSegs.empty())
         {
-            std::println(stderr, "[-] Dump: 未找到模块 '{}' 或模块没有有效区段", moduleName);
+            std::fprintf(stderr, "[-] Dump: 未找到模块 '%.*s' 或模块没有有效区段\n", (int)moduleName.size(), moduleName.data());
             return false;
         }
 
@@ -723,16 +724,16 @@ public: // 外部获取内存信息
 
         if (baseAddr >= maxEnd || baseAddr == ~0ULL || spanSize == 0 || spanSize > MAX_DUMP_SIZE)
         {
-            std::println(stderr, "[-] Dump: 模块边界无效或大小过大 (0x{:X} 字节)", spanSize);
+            std::fprintf(stderr, "[-] Dump: 模块边界无效或大小过大 (0x%llX 字节)\n", (unsigned long long)spanSize);
             return false;
         }
 
-        std::println(stdout, "[*] 模块: {}", moduleName);
-        std::println(stdout, "[*] 匹配模块: {} 个, 区段: {} 个", matchedModuleCount, dumpSegs.size());
-        std::println(stdout, "[*] 基址: 0x{:X}", baseAddr);
-        std::println(stdout, "[*] 结束: 0x{:X}", maxEnd);
-        std::println(stdout, "[*] 地址跨度: 0x{:X} ({} MB)", spanSize, spanSize / 1024 / 1024);
-        std::println(stdout, "[*] 输出大小: 0x{:X} ({} MB)", spanSize, spanSize / 1024 / 1024);
+        std::fprintf(stdout, "[*] 模块: %.*s\n", (int)moduleName.size(), moduleName.data());
+        std::fprintf(stdout, "[*] 匹配模块: %d 个, 区段: %zu 个\n", matchedModuleCount, dumpSegs.size());
+        std::fprintf(stdout, "[*] 基址: 0x%llX\n", (unsigned long long)baseAddr);
+        std::fprintf(stdout, "[*] 结束: 0x%llX\n", (unsigned long long)maxEnd);
+        std::fprintf(stdout, "[*] 地址跨度: 0x%llX (%llu MB)\n", (unsigned long long)spanSize, (unsigned long long)(spanSize / 1024 / 1024));
+        std::fprintf(stdout, "[*] 输出大小: 0x%llX (%llu MB)\n", (unsigned long long)spanSize, (unsigned long long)(spanSize / 1024 / 1024));
 
         mkdir("/sdcard/dump", 0777); // 忽略已存在错误
 
@@ -743,7 +744,7 @@ public: // 外部获取内存信息
         FILE *fp = fopen(outPath.c_str(), "wb");
         if (!fp)
         {
-            std::println(stderr, "[-] Dump: 无法创建文件 {} (请检查读写权限)", outPath);
+            std::fprintf(stderr, "[-] Dump: 无法创建文件 %s (请检查读写权限)\n", outPath.c_str());
             return false;
         }
 
@@ -773,20 +774,20 @@ public: // 外部获取内存信息
 
             if (fwrite(page.data(), 1, toRead, fp) != toRead)
             {
-                std::println(stderr, "[-] Dump: 写入文件失败 {} ({})", outPath, std::strerror(errno));
+                std::fprintf(stderr, "[-] Dump: 写入文件失败 %s (%s)\n", outPath.c_str(), std::strerror(errno));
                 fclose(fp);
                 return false;
             }
         }
 
         fclose(fp);
-        std::println(stdout, "[*] 读取完成: 成功 0x{:X} 字节, 失败 {} 页", totalRead, failedPages);
+        std::fprintf(stdout, "[*] 读取完成: 成功 0x%zX 字节, 失败 %zu 页\n", totalRead, failedPages);
 
-        std::println(stdout, "[+] ==========================================");
-        std::println(stdout, "[+] Dump 完成!");
-        std::println(stdout, "[+] 路径: {}", outPath);
-        std::println(stdout, "[+] 大小: 0x{:X} ({} MB)", spanSize, spanSize / 1024 / 1024);
-        std::println(stdout, "[+] ==========================================");
+        std::fprintf(stdout, "[+] ==========================================\n");
+        std::fprintf(stdout, "[+] Dump 完成!\n");
+        std::fprintf(stdout, "[+] 路径: %s\n", outPath.c_str());
+        std::fprintf(stdout, "[+] 大小: 0x%llX (%llu MB)\n", (unsigned long long)spanSize, (unsigned long long)(spanSize / 1024 / 1024));
+        std::fprintf(stdout, "[+] ==========================================\n");
 
         return true;
     }
@@ -814,6 +815,14 @@ public: // 外部硬件断点接口
     void RemoveProcessPtebpRef()
     {
         HandlePtebpEvent(request_op_ptebp_remove);
+    }
+    int SetProcessStepbpRef(std::span<const bp_point> points)
+    {
+        return HandleStepbpEvent(request_op_stepbp_set, points);
+    }
+    void RemoveProcessStepbpRef()
+    {
+        HandleStepbpEvent(request_op_stepbp_remove);
     }
 
     // 删除指定索引内容
@@ -1114,6 +1123,33 @@ private: // 私有实现，外部无需关系
         __builtin_memcpy(req->tls_info.thread_name, threadName.data(), copyLen);
         IoCommitAndWait();
         return req->status == 0 ? req->tls_info.tpidr_el0 : 0;
+    }
+
+    // STEPBP 复用 bp_info.points 和 records 存储命中现场
+    int HandleStepbpEvent(request_op op, std::span<const bp_point> points = {})
+    {
+        std::scoped_lock<SpinLock> lock(m_mutex);
+        if (op != request_op_stepbp_set && op != request_op_stepbp_remove)
+            return -1;
+
+        req->op = op;
+        req->status = 0;
+        if (op == request_op_stepbp_set)
+        {
+            __builtin_memset(&req->bp_info, 0, sizeof(req->bp_info));
+            req->pid = global_pid;
+            req->bp_info.pid = global_pid;
+            const size_t count = std::min(points.size(), std::size(req->bp_info.points));
+            for (size_t index = 0; index < count; ++index)
+            {
+                req->bp_info.points[index].hit_addr = points[index].hit_addr;
+                req->bp_info.points[index].bt = points[index].bt;
+                req->bp_info.points[index].bl = points[index].bl;
+                req->bp_info.points[index].bs = points[index].bs;
+            }
+        }
+        IoCommitAndWait();
+        return req->status;
     }
 };
 

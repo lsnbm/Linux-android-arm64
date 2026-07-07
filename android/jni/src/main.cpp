@@ -244,6 +244,7 @@ private:
         int pointCount = 0;
         bool active = false;
         bool ptebpActive = false;
+        bool stepbpActive = false;
 
         int editingRecordIdx = -1;
         char regEditBuf[64] = {};
@@ -1351,14 +1352,16 @@ private:
 
         // 硬件信息
         const auto &info = dr->GetHwbpInfoRef();
-        const bool anyBpActive = bpParams_.active || bpParams_.ptebpActive;
+        const bool anyBpActive = bpParams_.active || bpParams_.ptebpActive || bpParams_.stepbpActive;
         UI::LabelValue(Colors::ADDR_CYAN, "执行断点寄存器: ", Colors::ADDR_GREEN,
                        "%llu", (unsigned long long)info.num_brps);
         ImGui::SameLine();
         UI::LabelValue(Colors::ADDR_CYAN, "  访问断点寄存器: ", Colors::ADDR_GREEN,
                        "%llu", (unsigned long long)info.num_wrps);
         UI::Text(bpParams_.ptebpActive ? Colors::OK : Colors::HINT,
-             bpParams_.ptebpActive ? "PTEBP: 已激活" : "PTEBP: 未激活");
+                 bpParams_.ptebpActive ? "PTEBP: 已激活" : "PTEBP: 未激活");
+        UI::Text(bpParams_.stepbpActive ? Colors::OK : Colors::HINT,
+                 bpParams_.stepbpActive ? "STEPBP: 已激活" : "STEPBP: 未激活");
 
         UI::Space(S(6));
         ImGui::Separator();
@@ -1424,6 +1427,8 @@ private:
                 if (dr->SetProcessHwbpRef(std::span<const Driver::bp_point>(points.data(), points.size())) == 0)
                 {
                     bpParams_.active = true;
+                    bpParams_.ptebpActive = false;
+                    bpParams_.stepbpActive = false;
                     auto &hwbp = MemoryTool::Hwbp();
                     hwbp.active = true;
                     hwbp.mode = "hwbp";
@@ -1436,11 +1441,13 @@ private:
         }
         ImGui::EndDisabled();
         ImGui::SameLine();
-        ImGui::BeginDisabled(!bpParams_.active || bpParams_.ptebpActive);
+        ImGui::BeginDisabled(!bpParams_.active || bpParams_.ptebpActive || bpParams_.stepbpActive);
         if (UI::Btn("移除HWBP", {halfW, S(52)}, {0.5f, 0.15f, 0.15f, 1}))
         {
             dr->RemoveProcessHwbpRef();
             bpParams_.active = false;
+            bpParams_.ptebpActive = false;
+            bpParams_.stepbpActive = false;
             bpParams_.pointCount = 0;
             MemoryTool::Hwbp().clear();
         }
@@ -1457,7 +1464,9 @@ private:
                 bpParams_.pointCount = static_cast<int>(points.size());
                 if (dr->SetProcessPtebpRef(std::span<const Driver::bp_point>(points.data(), points.size())) == 0)
                 {
+                    bpParams_.active = false;
                     bpParams_.ptebpActive = true;
+                    bpParams_.stepbpActive = false;
                     auto &hwbp = MemoryTool::Hwbp();
                     hwbp.active = true;
                     hwbp.mode = "ptebp";
@@ -1474,15 +1483,56 @@ private:
         if (UI::Btn("移除PTEBP", {halfW, S(52)}, {0.5f, 0.15f, 0.15f, 1}))
         {
             dr->RemoveProcessPtebpRef();
+            bpParams_.active = false;
             bpParams_.ptebpActive = false;
+            bpParams_.stepbpActive = false;
+            bpParams_.pointCount = 0;
+            MemoryTool::Hwbp().clear();
+        }
+        ImGui::EndDisabled();
+
+        UI::Space(S(6));
+        ImGui::BeginDisabled(anyBpActive);
+        if (UI::Btn("设置STEPBP", {halfW, S(52)}, Colors::BTN_BLUE))
+        {
+            auto points = buildHwbpPointsFromRows();
+            if (!points.empty())
+            {
+                bpParams_.address = points.front().hit_addr;
+                bpParams_.pointCount = static_cast<int>(points.size());
+                if (dr->SetProcessStepbpRef(std::span<const Driver::bp_point>(points.data(), points.size())) == 0)
+                {
+                    bpParams_.active = false;
+                    bpParams_.ptebpActive = false;
+                    bpParams_.stepbpActive = true;
+                    auto &hwbp = MemoryTool::Hwbp();
+                    hwbp.active = true;
+                    hwbp.mode = "stepbp";
+                    hwbp.address = points.front().hit_addr;
+                    hwbp.type = points.size() == 1 ? std::to_string(static_cast<int>(points.front().bt)) : "multi";
+                    hwbp.scope = points.size() == 1 ? std::to_string(static_cast<int>(points.front().bs)) : "multi";
+                    hwbp.length = points.size() == 1 ? static_cast<int>(points.front().bl) : 0;
+                }
+            }
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!bpParams_.stepbpActive);
+        if (UI::Btn("移除STEPBP", {halfW, S(52)}, {0.5f, 0.15f, 0.15f, 1}))
+        {
+            dr->RemoveProcessStepbpRef();
+            bpParams_.active = false;
+            bpParams_.ptebpActive = false;
+            bpParams_.stepbpActive = false;
             bpParams_.pointCount = 0;
             MemoryTool::Hwbp().clear();
         }
         ImGui::EndDisabled();
 
         UI::Space(S(8));
+        const char *activeMode = bpParams_.stepbpActive ? "STEPBP" : (bpParams_.ptebpActive ? "PTEBP" : "HWBP");
         anyBpActive
-            ? UI::Text(Colors::OK, "● 断点已激活  地址数: %d  首地址: 0x%lX  模式: %s", bpParams_.pointCount, bpParams_.address, bpParams_.ptebpActive ? "PTEBP" : "HWBP")
+            ? UI::Text(Colors::OK, "● 断点已激活  地址数: %d  首地址: 0x%lX  模式: %s", bpParams_.pointCount, bpParams_.address, activeMode)
             : UI::Text(Colors::HINT, "○ 断点未激活");
         for (const auto &point : info.points)
         {
@@ -2314,13 +2364,14 @@ int main()
 {
 
     std::println(stdout, "请选择启动模式：");
+    std::println(stdout, "  0) 停止驱动线程");
     std::println(stdout, "  1) 读写测试");
     std::println(stdout, "  2) 触摸测试");
     std::println(stdout, "  3) 内存工具");
     std::println(stdout, "  4) TCP服务器");
     std::println(stdout, "  5) 陀螺仪测试");
     std::println(stdout, "  6) 定位测试");
-    std::print(stdout, "请输入 [1/2/3/4/5/6]: ");
+    std::print(stdout, "请输入 [0/1/2/3/4/5/6]: ");
 
     int rc = 1;
     int mode = 0;
@@ -2331,7 +2382,7 @@ int main()
         std::println(stderr, "[错误] 输入无效。");
         return rc;
     }
-    if (mode < 1 || mode > 6)
+    if (mode < 0 || mode > 6)
     {
         std::println(stderr, "[错误] 未知选项: {}", mode);
         return rc;
@@ -2345,7 +2396,12 @@ int main()
 
     dr = new Driver((mode == 2 || mode == 3) ? 5 : 0, mode == 5, mode == 6);
 
-    if (mode == 1)
+    if (mode == 0)
+    {
+        dr->ExitKernel();
+        rc = 0;
+    }
+    else if (mode == 1)
     {
         rc = RunReadWriteTest();
     }

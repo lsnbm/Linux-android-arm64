@@ -15,6 +15,7 @@
 #include <asm/tlbflush.h>
 #include "arm64_reg.h"
 #include "export_fun.h"
+#include "lsdriver_log.h"
 
 /*
 inline hook框架
@@ -323,7 +324,7 @@ static int hook_entry_install(struct hook_entry *e)
         e->target_addr = generic_kallsyms_lookup_name(e->target_sym);
         if (!e->target_addr)
         {
-            pr_err("[hook] symbol not found: %s\n", e->target_sym);
+            ls_log_tag("hook", "symbol not found: %s\n", e->target_sym);
             return -ENOENT;
         }
     }
@@ -338,9 +339,9 @@ static int hook_entry_install(struct hook_entry *e)
 
     // 保存原始指令，入口会被4条指令的ret跳板覆盖
     hook_save_orig_insns(e->target_addr, e->saved_insn, HOOK_STUB_WORDS);
-    pr_debug("[hook] original %s: 0x%llx: %08x %08x %08x %08x\n",
-             e->target_sym ? e->target_sym : "<addr>", e->target_addr,
-             e->saved_insn[0], e->saved_insn[1], e->saved_insn[2], e->saved_insn[3]);
+    ls_log_tag("hook", "original %s: 0x%llx: %08x %08x %08x %08x\n",
+               e->target_sym ? e->target_sym : "<addr>", e->target_addr,
+               e->saved_insn[0], e->saved_insn[1], e->saved_insn[2], e->saved_insn[3]);
 
     // return_addr = handler + 16(跳过被我们覆盖的4条指令)
     return_addr = e->target_addr + HOOK_STUB_BYTES;
@@ -373,10 +374,10 @@ static int hook_entry_install(struct hook_entry *e)
     }
 
     e->installed = true;
-    pr_debug("[hook] installed %s: target=0x%llx trampoline=0x%llx slot=%d work=0x%llx return=0x%llx hook=%08x %08x %08x %08x\n",
-             e->target_sym ? e->target_sym : "<addr>", e->target_addr, (uint64_t)e->trampoline,
-             e->slot_index, (uint64_t)e->work_fn, return_addr,
-             hook_code[0], hook_code[1], hook_code[2], hook_code[3]);
+    ls_log_tag("hook", "installed %s: target=0x%llx trampoline=0x%llx slot=%d work=0x%llx return=0x%llx hook=%08x %08x %08x %08x\n",
+               e->target_sym ? e->target_sym : "<addr>", e->target_addr, (uint64_t)e->trampoline,
+               e->slot_index, (uint64_t)e->work_fn, return_addr,
+               hook_code[0], hook_code[1], hook_code[2], hook_code[3]);
     return 0;
 }
 
@@ -391,7 +392,7 @@ static void hook_entry_remove(struct hook_entry *e)
     e->slot_index = -1;
     e->trampoline = NULL;
     e->installed = false;
-    pr_debug("[hook] removed %s\n", e->target_sym);
+    ls_log_tag("hook", "removed %s\n", e->target_sym);
 }
 
 // 批量安装卸载接口
@@ -440,7 +441,7 @@ void inline_hook_remove_all(void)
 
         hook_patch_words(target_addr, &trampoline[TRAMP_ORIG_INSN_INDEX], HOOK_STUB_WORDS);
         slot_free(i);
-        pr_debug("[hook] force removed slot %d, target 0x%llx\n", i, target_addr);
+        ls_log_tag("hook", "force removed slot %d, target 0x%llx\n", i, target_addr);
     }
 }
 

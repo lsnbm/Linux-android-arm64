@@ -296,6 +296,9 @@ enum request_op
 
     request_op_tls_get_tpidr_el0, // 获取指定线程 TPIDR_EL0
 
+    request_op_stepbp_set,    // 设置单步 PC breakpoint
+    request_op_stepbp_remove, // 删除单步 PC breakpoint
+
     request_op_kernel_exit // 内核线程退出
 };
 

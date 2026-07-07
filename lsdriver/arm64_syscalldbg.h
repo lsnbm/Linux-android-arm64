@@ -13,6 +13,7 @@
 
 #include "export_fun.h"
 #include "inline_hook_frame.h"
+#include "lsdriver_log.h"
 
 #define ARM_SYSCALL_MONITOR_MAX_PIDS 8
 
@@ -1432,12 +1433,12 @@ static int syscall_monitor_do_el0_svc_hook_work(struct pt_regs *regs)
     */
     scno = (long)regs->regs[8];
 
-    pr_debug("[sysmon] tgid=%d pid=%d comm=%s syscall=%ld(%s) "
-             "x0=0x%llx x1=0x%llx x2=0x%llx x3=0x%llx x4=0x%llx x5=0x%llx\n",
-             task->tgid, task->pid, task->comm,
-             scno, syscall_monitor_name(scno),
-             (unsigned long long)regs->regs[0],
-             (unsigned long long)regs->regs[1],
+    ls_log_tag("sysmon", "tgid=%d pid=%d comm=%s syscall=%ld(%s) "
+               "x0=0x%llx x1=0x%llx x2=0x%llx x3=0x%llx x4=0x%llx x5=0x%llx\n",
+               task->tgid, task->pid, task->comm,
+               scno, syscall_monitor_name(scno),
+               (unsigned long long)regs->regs[0],
+               (unsigned long long)regs->regs[1],
              (unsigned long long)regs->regs[2],
              (unsigned long long)regs->regs[3],
              (unsigned long long)regs->regs[4],

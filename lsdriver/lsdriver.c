@@ -16,6 +16,7 @@
 #include "io_struct.h"
 #include "export_fun.h"
 #include "inline_hook_frame.h"
+#include "lsdriver_log.h"
 #include "hide_task.h"
 #include "hide_kgsl.h"
 #include "arm64_syscalldbg.h"
@@ -30,26 +31,27 @@
 
 static struct request_obj *req = NULL;
 
-struct task_struct *connect_thread_task = 0;
-struct task_struct *dispatch_thread_task = 0;
-struct task_struct *ls_process_task = 0;
+struct task_struct *volatile connect_thread_task = 0;
+struct task_struct *volatile dispatch_thread_task = 0;
+struct task_struct *volatile ls_process_task = 0;
 
 static int DispatchThreadFunction(void *data)
 {
 	// 自旋计数器：用来记录我们空转了多久
 	int spin_count = 0;
-
+	// 编译器屏障，这里读写任意内存，前后的内存访问不能跨过这个点重排，不能之前从内存读到的值在屏障之后假设仍然寄存器值有效
+	asm volatile("" ::: "memory");
 	while (dispatch_thread_task)
 	{
+		asm volatile("" ::: "memory");
 		if (ls_process_task)
 		{
-			// 确实有任务
-			if (req->kernel)
+			asm volatile("" ::: "memory");
+			if (req->kernel) // 确实有任务
 			{
 				// 有活干，重置计数器
 				spin_count = 0;
 
-				// 编译器屏障，这里读写任意内存，前后的内存访问不能跨过这个点重排，不能之前从内存读到的值在屏障之后假设仍然寄存器值有效
 				asm volatile("" ::: "memory");
 				req->kernel = false; // 清除请求标志
 
@@ -101,6 +103,12 @@ static int DispatchThreadFunction(void *data)
 					req->tls_info.tpidr_el0 = get_tpidr_el0_by_name(req->pid, req->tls_info.thread_name);
 					req->status = req->tls_info.tpidr_el0 ? 0 : -ESRCH;
 					break;
+				case request_op_stepbp_set:
+					req->status = set_process_stepbp(&req->bp_info);
+					break;
+				case request_op_stepbp_remove:
+					remove_process_stepbp();
+					break;
 				case request_op_kernel_exit:
 					hide_task_remove(connect_thread_task->pid);
 					hide_task_remove(dispatch_thread_task->pid);
@@ -151,6 +159,7 @@ static int ConnectThreadFunction(void *data)
 	int ret;
 
 	// 和内核线程在运行
+	asm volatile("" ::: "memory");
 	while (connect_thread_task)
 	{
 
@@ -166,9 +175,7 @@ static int ConnectThreadFunction(void *data)
 			// 这次的task启动时间小于旧task跳过
 			if (ls_process_task && task->start_time <= ls_process_task->start_time)
 				continue;
-			if (ls_process_task)
-				send_sig(SIGKILL, ls_process_task, 0); // 杀死旧的task
-
+	
 			// 获取进程的内存描述符
 			mm = get_task_mm(task);
 			if (!mm)
@@ -181,7 +188,7 @@ static int ConnectThreadFunction(void *data)
 			pages = kmalloc_array(num_pages, sizeof(struct page *), GFP_KERNEL);
 			if (!pages)
 			{
-				pr_debug("kmalloc_array 失败\n");
+				ls_log_tag("core", "kmalloc_array 失败\n");
 				goto out_put_mm;
 			}
 
@@ -202,7 +209,7 @@ static int ConnectThreadFunction(void *data)
 
 			if (ret < num_pages)
 			{
-				pr_debug("get_user_pages_remote 失败, ret=%d\n", ret);
+				ls_log_tag("core", "get_user_pages_remote 失败, ret=%d\n", ret);
 				goto out_put_pages;
 			}
 
@@ -210,9 +217,11 @@ static int ConnectThreadFunction(void *data)
 			req = vmap(pages, num_pages, VM_MAP, PAGE_KERNEL);
 			if (!req)
 			{
-				pr_debug("vmap 失败\n");
+				ls_log_tag("core", "vmap 失败\n");
 				goto out_put_pages;
 			}
+			if (ls_process_task)
+				send_sig(SIGKILL, ls_process_task, 0); // 杀死旧的task
 
 			// 成功 get_user_pages_remote 持有页面引用，只需释放 mm
 			ls_process_task = task;		   // 保存用户进程指针
@@ -258,7 +267,7 @@ static int do_exit_hook_work(struct pt_regs *regs)
 	// 比如 "com.ss.android.LS" 可能会变成 "com.ss.android."
 	if (__builtin_strstr(task->comm, "ls") != NULL || __builtin_strstr(task->comm, "LS") != NULL)
 	{
-		pr_debug("【进程监听】检测到 LS 进程即将退出！PID: %d, 进程名(comm): %s\n", task->pid, task->comm);
+		ls_log_tag("core", "【进程监听】检测到 LS 进程即将退出！PID: %d, 进程名(comm): %s\n", task->pid, task->comm);
 
 		// 相应处理
 
@@ -269,6 +278,7 @@ static int do_exit_hook_work(struct pt_regs *regs)
 		v_gyro_destroy();			  // 清理陀螺仪
 		remove_process_hwbp();		  // 清理硬件断点
 		remove_process_ptebp();		  // 清理 PTEBP
+		remove_process_stepbp();	  // 清理单步断点
 		ls_process_task = NULL;		  // 标记用户进程已断开
 		if (!connect_thread_task && !dispatch_thread_task)
 		{
@@ -288,7 +298,7 @@ static int do_exit_init(void)
 	ret = inline_hook_install(do_exit_hook);
 	if (ret < 0)
 	{
-		pr_err("安装 inline hook(do_exit) 失败，错误码: %d\n", ret);
+		ls_log_tag("core", "安装 inline hook(do_exit) 失败，错误码: %d\n", ret);
 		return ret;
 	}
 
@@ -340,7 +350,7 @@ static int __init lsdriver_init(void)
 {
 	//*(volatile int *)0 = 0;
 
-	print_el2_status(); // 输出Hypervisor相关信息
+	// print_el2_status(); // 输出Hypervisor相关信息
 
 	bypass_cfi(); // 先尝试绕过 5系的cfi
 
@@ -351,14 +361,14 @@ static int __init lsdriver_init(void)
 	connect_thread_task = kthread_run(ConnectThreadFunction, NULL, "ext4-rsv-conver");
 	if (IS_ERR(connect_thread_task))
 	{
-		pr_debug("创建连接线程失败\n");
+		ls_log_tag("core", "创建连接线程失败\n");
 		return PTR_ERR(connect_thread_task);
 	}
 
 	dispatch_thread_task = kthread_run(DispatchThreadFunction, NULL, "ext4-rsv-conver");
 	if (IS_ERR(dispatch_thread_task))
 	{
-		pr_debug("创建调度线程失败\n");
+		ls_log_tag("core", "创建调度线程失败\n");
 		return PTR_ERR(dispatch_thread_task);
 	}
 
