@@ -286,6 +286,34 @@ class TcpTestWindow(QWidget):
         self.sync_pid_button.clicked.connect(self.on_sync_pid)
         status_row.addWidget(self.sync_pid_button)
 
+        tls_row = QHBoxLayout()
+        tls_row.setContentsMargins(0, 0, 0, 0)
+        tls_row.setSpacing(8)
+
+        tls_thread_prefix = QLabel("线程名")
+        tls_thread_prefix.setObjectName("metricTitle")
+        tls_row.addWidget(tls_thread_prefix)
+
+        self.tls_thread_input = QLineEdit()
+        self.tls_thread_input.setPlaceholderText("task->comm，最多 15 字符")
+        self.tls_thread_input.setMaxLength(15)
+        self.tls_thread_input.setMinimumWidth(180)
+        self.tls_thread_input.returnPressed.connect(self.on_get_tls_tpidr_el0)
+        tls_row.addWidget(self.tls_thread_input)
+
+        self.get_tls_button = QPushButton("获取 TPIDR_EL0")
+        self.get_tls_button.clicked.connect(self.on_get_tls_tpidr_el0)
+        tls_row.addWidget(self.get_tls_button)
+
+        tls_result_prefix = QLabel("TLS")
+        tls_result_prefix.setObjectName("metricTitle")
+        tls_row.addWidget(tls_result_prefix)
+
+        self.tls_result_label = QLabel("--")
+        self.tls_result_label.setObjectName("metricValue")
+        self.tls_result_label.setMinimumWidth(180)
+        tls_row.addWidget(self.tls_result_label, 1)
+
         connection_row = QHBoxLayout()
         connection_row.setContentsMargins(0, 0, 0, 0)
         connection_row.setSpacing(8)
@@ -319,6 +347,7 @@ class TcpTestWindow(QWidget):
         connection_row.addWidget(self.test_button)
         hero_layout.addLayout(connection_row)
         hero_layout.addLayout(status_row)
+        hero_layout.addLayout(tls_row)
 
         root.addWidget(hero_card)
 
@@ -984,6 +1013,8 @@ class TcpTestWindow(QWidget):
             self.tabs.setTabEnabled(i, True)
         self.pid_input.setEnabled(connected)
         self.sync_pid_button.setEnabled(connected)
+        self.tls_thread_input.setEnabled(connected)
+        self.get_tls_button.setEnabled(connected)
 
     def _discover_lan_devices(self) -> list[tuple[str, str]]:
         return [(device.host, device.mac) for device in discover_lan_devices()]
@@ -3240,6 +3271,32 @@ class TcpTestWindow(QWidget):
 
         self.global_pid_label.setText(str(current_pid))
         self._set_status(f"同步成功：全局PID={current_pid}")
+
+    def on_get_tls_tpidr_el0(self) -> None:
+        thread_name = self.tls_thread_input.text().strip()
+        if not thread_name:
+            QMessageBox.warning(self, "输入提示", "请输入线程名。")
+            return
+
+        data = self._request_data_dict(
+            "tls.get_tpidr_el0",
+            {"thread_name": thread_name},
+            error_title="TLS 获取失败",
+            error_prefix="获取 TPIDR_EL0 失败：",
+            parse_title="TLS 获取失败",
+            parse_error_text="TLS 响应格式异常。",
+            status_on_error="TLS 获取失败",
+        )
+        if data is None:
+            return
+
+        tpidr_text = str(data.get("tpidr_el0_hex") or "").strip()
+        if not tpidr_text:
+            tpidr_value = self._safe_int(data.get("tpidr_el0"), 0)
+            tpidr_text = f"0x{tpidr_value:016X}" if tpidr_value else "0x0"
+
+        self.tls_result_label.setText(tpidr_text)
+        self._set_status(f"TLS 获取成功：{thread_name} TPIDR_EL0={tpidr_text}")
 
     def on_refresh_memory_info(self) -> None:
         response = self._send_operation("memory.info.full")
