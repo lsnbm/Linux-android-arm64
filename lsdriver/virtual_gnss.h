@@ -6,11 +6,11 @@
 #include <linux/ioctl.h>
 #include <linux/kernel.h>
 #include <linux/mutex.h>
-#include <linux/printk.h>
 #include <linux/types.h>
 #include <linux/uaccess.h>
 #include <linux/vmalloc.h>
 #include "inline_hook_frame.h"
+#include "lsdriver_log.h"
 
 /*
   Android Location Parcelable / Parcel:
@@ -391,10 +391,10 @@ static int vgnss_patch_transaction(const struct vgnss_binder_transaction_data *t
     unsigned long missing = copy_to_user(user_buffer, parcel, data_size);
 
     if (missing)
-      pr_debug("vgnss: parcel copy back missing=%lu size=%zu\n", missing, data_size);
+      ls_log_tag("vgnss", "parcel copy back missing=%lu size=%zu\n", missing, data_size);
     else
-      pr_debug("vgnss: patched %d Location object(s) size=%zu e7=%d/%d\n",
-               patched, data_size, READ_ONCE(vgps.latitude_e7), READ_ONCE(vgps.longitude_e7));
+      ls_log_tag("vgnss", "patched %d Location object(s) size=%zu e7=%d/%d\n",
+                 patched, data_size, READ_ONCE(vgps.latitude_e7), READ_ONCE(vgps.longitude_e7));
   }
 
   vfree(parcel);
@@ -523,13 +523,13 @@ static int vgnss_install_hook_locked(void)
     ret = inline_hook_install(vgnss_ioctl_hook_targets[i]);
     if (!ret)
     {
-      pr_debug("vgnss: inline hook on %s registered\n",
-               vgnss_ioctl_hook_targets[i][0].target_sym);
+      ls_log_tag("vgnss", "inline hook on %s registered\n",
+                 vgnss_ioctl_hook_targets[i][0].target_sym);
       return 0;
     }
 
-    pr_warn("vgnss: inline hook on %s failed: %d\n",
-            vgnss_ioctl_hook_targets[i][0].target_sym, ret);
+    ls_log_tag("vgnss", "inline hook on %s failed: %d\n",
+               vgnss_ioctl_hook_targets[i][0].target_sym, ret);
   }
 
   return ret;
@@ -550,7 +550,7 @@ static inline int v_gnss_init(void)
 
   mutex_unlock(&vgnss_lock);
 
-  pr_debug("vgnss: init binder_ioctl_inline_hook=%d enabled=1\n", ret);
+  ls_log_tag("vgnss", "init binder_ioctl_inline_hook=%d enabled=1\n", ret);
   return ret;
 }
 
@@ -567,7 +567,7 @@ static inline int v_gnss_report(int latitude_e7, int longitude_e7)
   WRITE_ONCE(vgps.has_fix, true);
   WRITE_ONCE(vgps.enabled, true);
 
-  pr_debug("vgnss: report e7=%d/%d\n", latitude_e7, longitude_e7);
+  ls_log_tag("vgnss", "report e7=%d/%d\n", latitude_e7, longitude_e7);
   return 0;
 }
 
@@ -586,8 +586,8 @@ static inline void v_gnss_destroy(void)
   for (i = 0; i < ARRAY_SIZE(vgnss_ioctl_hook_targets); i++)
     inline_hook_remove(vgnss_ioctl_hook_targets[i]);
 
-  pr_debug("vgnss: inline hook unregistered\n");
-  pr_debug("vgnss: destroy\n");
+  ls_log_tag("vgnss", "inline hook unregistered\n");
+  ls_log_tag("vgnss", "destroy\n");
 
   mutex_unlock(&vgnss_lock);
 }

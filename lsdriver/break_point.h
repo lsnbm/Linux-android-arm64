@@ -603,4 +603,20 @@ static inline void remove_process_ptebp(void)
 {
     stop_ptebp_monitor();
 }
+
+#include "arm64_stepdbg.h"
+static inline int set_process_stepbp(struct break_point *info)
+{
+    if (!info)
+        return -EINVAL;
+
+    prepare_break_point_handlers(info);
+
+    return start_stepbp_monitor(info);
+}
+
+static inline void remove_process_stepbp(void)
+{
+    stop_stepbp_monitor();
+}
 #endif // BREAK_POINT_H

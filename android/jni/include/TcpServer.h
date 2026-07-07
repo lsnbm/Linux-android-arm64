@@ -647,12 +647,13 @@ namespace
         return root;
     }
 
-    // 构建 PTEBP 信息 JSON
-    json buildPtebpInfoJson(const auto &info)
+    // 构建 PTEBP/STEPBP 信息 JSON
+    json buildPtebpInfoJson(const auto &info, std::string_view expectedMode = "ptebp")
     {
         json root;
+        const std::string expectedModeText(expectedMode);
         const auto &hwbp = MemoryTool::Hwbp();
-        root["active"] = hwbp.active && hwbp.mode == "ptebp";
+        root["active"] = hwbp.active && hwbp.mode == expectedModeText;
         root["active_mode"] = hwbp.mode;
 
         json ptebpInfo;
@@ -849,6 +850,9 @@ namespace
                 "ptebp.info",
                 "ptebp.set",
                 "ptebp.clear",
+                "stepbp.info",
+                "stepbp.set",
+                "stepbp.clear",
                 "signature.scan_address",
                 "signature.scan_file",
                 "signature.scan_pattern",
@@ -1434,24 +1438,27 @@ namespace
             if (!hwbp.active)
                 return okData({{"active", false}, {"cleared", false}});
             if (!hwbp.mode.empty() && hwbp.mode != "hwbp")
-                return fail("当前激活的是 PTEBP，请先执行 ptebp.clear");
+                return fail("当前激活的不是硬件断点，请先执行对应模式的 clear");
 
             dr->RemoveProcessHwbpRef();
             hwbp.clear();
             return okData({{"active", false}, {"cleared", true}});
         }
 
-        if (op == "ptebp.info")
+        if (op == "ptebp.info" || op == "stepbp.info")
         {
             const auto &info = dr->GetHwbpInfoRef();
-            return okData(buildPtebpInfoJson(info));
+            return okData(buildPtebpInfoJson(info, op == "stepbp.info" ? "stepbp" : "ptebp"));
         }
 
-        if (op == "ptebp.set")
+        if (op == "ptebp.set" || op == "stepbp.set")
         {
+            const bool isStepbp = op == "stepbp.set";
+            const char *modeName = isStepbp ? "stepbp" : "ptebp";
+            const char *modeLabel = isStepbp ? "STEPBP" : "PTEBP";
             auto &hwbp = MemoryTool::Hwbp();
             if (hwbp.active)
-                return fail("PTEBP 已激活，请先执行 ptebp.clear");
+                return fail(std::format("{} 设置前请先移除当前断点", modeLabel));
 
             const int pid = dr->GetGlobalPid();
             if (pid <= 0)
@@ -1459,7 +1466,7 @@ namespace
 
             const auto pointsIt = params.find("points");
             if (pointsIt == params.end() || !pointsIt->is_array() || pointsIt->empty())
-                return fail("operation=ptebp.set 缺少参数 points");
+                return fail(std::format("operation={}.set 缺少参数 points", modeName));
 
             auto parseUInt64Value = [&](const json &value) -> std::optional<std::uint64_t>
             {
@@ -1541,11 +1548,13 @@ namespace
             if (points.empty())
                 return fail("points 为空");
 
-            const int status = dr->SetProcessPtebpRef(std::span<const Driver::bp_point>(points.data(), points.size()));
+            const int status = isStepbp
+                                   ? dr->SetProcessStepbpRef(std::span<const Driver::bp_point>(points.data(), points.size()))
+                                   : dr->SetProcessPtebpRef(std::span<const Driver::bp_point>(points.data(), points.size()));
             if (status != 0)
-                return fail(std::format("设置 PTEBP 失败 status={}", status));
+                return fail(std::format("设置 {} 失败 status={}", modeLabel, status));
             hwbp.active = true;
-            hwbp.mode = "ptebp";
+            hwbp.mode = modeName;
             hwbp.address = points.front().hit_addr;
             hwbp.type = points.size() == 1 ? std::string(bpTypeToToken(points.front().bt)) : "multi";
             hwbp.scope = points.size() == 1 ? std::string(bpScopeToToken(points.front().bs)) : "multi";
@@ -1566,15 +1575,21 @@ namespace
             return okData({{"status", status}, {"active", true}, {"point_count", points.size()}, {"points", std::move(outPoints)}});
         }
 
-        if (op == "ptebp.clear")
+        if (op == "ptebp.clear" || op == "stepbp.clear")
         {
+            const bool isStepbp = op == "stepbp.clear";
+            const char *modeName = isStepbp ? "stepbp" : "ptebp";
+            const char *modeLabel = isStepbp ? "STEPBP" : "PTEBP";
             auto &hwbp = MemoryTool::Hwbp();
             if (!hwbp.active)
                 return okData({{"active", false}, {"cleared", false}});
-            if (hwbp.mode != "ptebp")
-                return fail("当前激活的是硬件断点，请先执行 breakpoint.clear");
+            if (hwbp.mode != modeName)
+                return fail(std::format("当前激活的不是 {}，请先执行对应模式的 clear", modeLabel));
 
-            dr->RemoveProcessPtebpRef();
+            if (isStepbp)
+                dr->RemoveProcessStepbpRef();
+            else
+                dr->RemoveProcessPtebpRef();
             hwbp.clear();
             return okData({{"active", false}, {"cleared", true}});
         }

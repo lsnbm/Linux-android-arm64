@@ -23,6 +23,7 @@
 #include <asm/memory.h>
 #include <asm/barrier.h>
 #include <linux/sched.h>
+#include "lsdriver_log.h"
 #include <linux/sched/mm.h>
 #include <linux/sched/signal.h>
 #include <linux/pid.h>
@@ -48,7 +49,7 @@ static inline int allocate_physical_page_info(void)
 
     if (in_atomic())
     {
-        pr_debug("原子上下文禁止调用 vmalloc\n");
+        ls_log_tag("vmem", "原子上下文禁止调用 vmalloc\n");
         return -EPERM;
     }
 
@@ -58,7 +59,7 @@ static inline int allocate_physical_page_info(void)
     vaddr = (uint64_t)vmalloc(PAGE_SIZE);
     if (!vaddr)
     {
-        pr_debug("vmalloc 失败\n");
+        ls_log_tag("vmem", "vmalloc 失败\n");
         return -ENOMEM;
     }
 
@@ -69,7 +70,7 @@ static inline int allocate_physical_page_info(void)
     ptep = get_kernel_pte(vaddr);
     if (!ptep)
     {
-        pr_debug("获取 PTE 失败\n");
+        ls_log_tag("vmem", "获取 PTE 失败\n");
         goto err_out;
     }
 
@@ -517,7 +518,7 @@ static inline int virtual_memory_rw(enum request_op op, pid_t pid, uint64_t vadd
     static phys_addr_t s_last_ppage_base = 0;
 
     phys_addr_t paddr_of_page = 0;
-    uint64_t current_vaddr = vaddr;
+    uint64_t current_vaddr = untagged_addr(vaddr);
     size_t bytes_remaining = size;
     size_t bytes_copied = 0;
     size_t bytes_done = 0;
@@ -568,6 +569,12 @@ static inline int virtual_memory_rw(enum request_op op, pid_t pid, uint64_t vadd
             防止有人才传入一个看起来正常的虚拟地址，但是根本不存在的虚拟地址打崩硬件翻译，
             部分设备体质不行，伪造虚拟地址mmu翻译时引发同步外部中止（Synchronous External Abort，简称 SEA） 是一种非常严重的硬件级保护和故障中断。
             总线,内存控制器外部错误
+            因为传入的虚拟地址（va）是编造的，它并不在目标进程的合法地址空间内。
+            其对应的页表项物理内存里可能残留着未初始化的脏数据（垃圾值）。MMU 读取到了这个非零的垃圾值，误认为它是一个“合法的下一级页表物理基地址”。
+            并通过 AXI/AHB 系统总线发送读请求，试图去读取这个所谓的“下一级描述符”。
+            垃圾物理地址指向了一个物理上不存在的芯片空洞，总线控制器在限定周期内等不到硬件响应，触发总线超时
+            物理地址指向了高通联发科芯片中受保护的区域（例如 TrustZone 运行的物理 SRAM/DRAM 区域、敏感数据区）
+            抛出最高优先级的 Synchronous External Abort，
             */
             uint64_t task_size = READ_ONCE(s_last_mm->task_size);
             if (current_vaddr >= task_size || bytes_this_page > task_size - current_vaddr)

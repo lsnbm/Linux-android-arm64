@@ -7,6 +7,7 @@
 #include <linux/slab.h>
 #include <linux/version.h>
 #include <linux/compiler.h>
+#include "lsdriver_log.h"
 
 /*
 在 Linux 输入子系统中，上报一个手指的事件不是通过一个结构体一次性发过去的，而是像下面这样流式（Stream）分步发送的：
@@ -288,14 +289,14 @@ static inline int v_touch_init(int request_virtual_slots, int *max_x, int *max_y
     input_class = (struct class *)generic_kallsyms_lookup_name("input_class");
     if (!input_class)
     {
-        pr_debug("vtouch: input_class 查找失败\n");
+        ls_log_tag("vtouch", "input_class 查找失败\n");
         return -EFAULT;
     }
 
     class_for_each_device(input_class, NULL, &found, match_touchscreen);
     if (!found)
     {
-        pr_debug("vtouch: 未找到触摸屏设备\n");
+        ls_log_tag("vtouch", "未找到触摸屏设备\n");
         return -ENODEV;
     }
 
@@ -305,7 +306,7 @@ static inline int v_touch_init(int request_virtual_slots, int *max_x, int *max_y
     ret = hijack_init_slots(found);
     if (ret)
     {
-        pr_debug("vtouch: MT 劫持失败\n");
+        ls_log_tag("vtouch", "MT 劫持失败\n");
         put_device(&found->dev);
         vt.dev = NULL;
         return ret;

@@ -2,6 +2,7 @@
 #include <linux/kernel.h>
 #include <linux/kallsyms.h>
 #include <linux/memory.h>
+#include <linux/percpu.h>
 #include <linux/smp.h>
 #include <linux/stop_machine.h>
 #include <linux/version.h>
@@ -13,6 +14,7 @@
 #include "export_fun.h"
 #include "arm64_reg.h"
 #include "inline_hook_frame.h"
+#include "lsdriver_log.h"
 #include "io_struct.h"
 #include "emulate_insn.h"
 
@@ -30,6 +32,7 @@ int num_brps, num_wrps; // 硬件执行和访问槽位总数
 static struct perf_event * __percpu * bp_on_reg;
 static struct perf_event * __percpu * wp_on_reg;
 static void (*fn_perf_bp_event)(struct perf_event *event, void *data);
+static DEFINE_PER_CPU(unsigned long, g_finish_task_switch_orig_lr);
 
 // 判断单个断点点位是否具备安装和派发条件。
 static bool hwbp_point_is_active(struct bp_point *point)
@@ -238,86 +241,6 @@ static bool watchpoint_access_matches(struct arch_hw_breakpoint *info, uint64_t 
     return !!(info->ctrl.type & ARM_BREAKPOINT_LOAD);
 }
 
-// 禁用当前 CPU 上的硬件断点/观察点控制寄存器，保留原有配置位
-static void clear_hwbp_regs_on_cpu(void *data)
-{
-    int i;
-    int point_slot;
-    uint32_t ctrl;
-    uint32_t expected_ctrl;
-    uint64_t addr;
-    struct arch_hw_breakpoint info;
-    struct break_point *bp_info = g_bp_info;
-    bool should_disable;
-
-    (void)data;
-
-    if (!bp_info)
-        return;
-
-    for (i = 0; i < num_brps; i++)
-    {
-        addr = read_wb_reg(AARCH64_DBG_REG_BVR, i);
-        ctrl = read_wb_reg(AARCH64_DBG_REG_BCR, i);
-
-        if (!(ctrl & 0x1) || addr == 0)
-            continue;
-
-        should_disable = false;
-        for (point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
-        {
-            struct bp_point *point = &bp_info->points[point_slot];
-
-            if (!hwbp_point_is_active(point) ||
-                point->bt != BP_BREAKPOINT_X ||
-                hw_breakpoint_parse(point, 0, &info) ||
-                info.ctrl.type != ARM_BREAKPOINT_EXECUTE ||
-                info.address != addr)
-                continue;
-
-            expected_ctrl = encode_ctrl_reg(info.ctrl);
-            if ((expected_ctrl & ~0x1) != (ctrl & ~0x1))
-                continue;
-
-            should_disable = true;
-        }
-
-        if (should_disable)
-            write_wb_reg(AARCH64_DBG_REG_BCR, i, ctrl & ~0x1);
-    }
-
-    for (i = 0; i < num_wrps; i++)
-    {
-        addr = read_wb_reg(AARCH64_DBG_REG_WVR, i);
-        ctrl = read_wb_reg(AARCH64_DBG_REG_WCR, i);
-
-        if (!(ctrl & 0x1) || addr == 0)
-            continue;
-
-        should_disable = false;
-        for (point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
-        {
-            struct bp_point *point = &bp_info->points[point_slot];
-
-            if (!hwbp_point_is_active(point) ||
-                point->bt == BP_BREAKPOINT_X ||
-                hw_breakpoint_parse(point, 0, &info) ||
-                info.ctrl.type == ARM_BREAKPOINT_EXECUTE ||
-                info.address != addr)
-                continue;
-
-            expected_ctrl = encode_ctrl_reg(info.ctrl);
-            if ((expected_ctrl & ~0x1) != (ctrl & ~0x1))
-                continue;
-
-            should_disable = true;
-        }
-
-        if (should_disable)
-            write_wb_reg(AARCH64_DBG_REG_WCR, i, ctrl & ~0x1);
-    }
-}
-
 // 执行断异常处理跳板工作函数
 static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
 {
@@ -444,18 +367,16 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
                 命中自己的执行断点后不继续跑原 breakpoint_handler：并手动补发当前槽位给 perf。
                 只补发当前槽位，遍历全部 slots 会把其他 perf 断点重复计数。
                 */
-                slots = this_cpu_ptr(bp_on_reg);
-                if (slot >= 0 && slot < num_brps)
-                {
-                    bp = READ_ONCE(slots[slot]);
-                    if (bp)
-                        fn_perf_bp_event(bp, regs);
-                }
-
-                // 给 breakpoint_handler返回 0，表示已处理异常
-                hook_regs->regs[0] = 0;
-                // 给hook框架返回1，表示跳过原函数
-                return 1;
+                // slots = this_cpu_ptr(bp_on_reg);
+                // if (slot >= 0 && slot < num_brps)
+                // {
+                //     bp = READ_ONCE(slots[slot]);
+                //     if (bp)
+                //         fn_perf_bp_event(bp, regs);
+                // }
+                // hook_regs->regs[0] = 0;// 给 breakpoint_handler返回 0，表示已处理异常
+                // return 1;     // 给hook框架返回1，表示跳过原函数
+                return 0;
             }
         }
     }
@@ -539,16 +460,16 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
         write_wb_reg(AARCH64_DBG_REG_WCR, hit_slot, hit_ctrl & ~0x1);
     }
 
-    slots = this_cpu_ptr(wp_on_reg);
-    if (hit_slot >= 0 && hit_slot < num_wrps)
-    {
-        bp = READ_ONCE(slots[hit_slot]);
-        if (bp)
-            fn_perf_bp_event(bp, regs);
-    }
-
-    hook_regs->regs[0] = 0;
-    return 1;
+    // slots = this_cpu_ptr(wp_on_reg);
+    // if (hit_slot >= 0 && hit_slot < num_wrps)
+    // {
+    //     bp = READ_ONCE(slots[hit_slot]);
+    //     if (bp)
+    //         fn_perf_bp_event(bp, regs);
+    // }
+    // hook_regs->regs[0] = 0;
+    // return 1;
+    return 0;
 }
 
 // 声明硬件调试异常 hook 表
@@ -557,149 +478,254 @@ static struct hook_entry g_debug_exception_hooks[] = {
     HOOK_ENTRY("watchpoint_handler", work_trampoline_watchpoint),
 };
 
-// __switch_to(prev, next) 入口 hook：AArch64 参数 x0=prev, x1=next。
-static int work_trampoline_switch_to(struct pt_regs *hook_regs)
+// 返回地址hook 跳板
+static unsigned long __attribute__((used, __noinline__)) ret_work_finish_task_switch(void);
+__attribute__((naked, used)) void ret_trampoline_finish_task_switch(void)
 {
-    struct task_struct *prev = (struct task_struct *)hook_regs->regs[0];
-    struct task_struct *next = (struct task_struct *)hook_regs->regs[1];
-    struct break_point *bp_info = g_bp_info;
-    int i;
+    asm volatile(
+        "str x0, [sp, #-16]!\n"
+        "bl ret_work_finish_task_switch\n"
+        "mov x16, x0\n"
+        "ldr x0, [sp], #16\n"
+        "ret x16\n");
+}
+
+// 在当前 CPU 上安装硬件断点/观察点寄存器。
+static void install_hwbp_regs_on_cpu(struct break_point *bp_info)
+{
+    int brp_slot = 0;
+    int wrp_slot = 0;
     int j;
-    bool next_active;
-    bool prev_active;
 
-    if (!prev || !next || !bp_info)
-        return 0;
+    if (!bp_info)
+        return;
 
-    // 检查切入/切走的进程pid是否在断点配置中设置
-    next_active = hwbp_info_has_pid(bp_info, next->tgid);
-    prev_active = hwbp_info_has_pid(bp_info, prev->tgid);
-
-    /*
-    prev现在正在跑、准备离开 CPU 的 task
-    CPU 从目标线程组切到别的线程组时，清掉当前 CPU 上残留的断点寄存器，避免断点漏到别的进程里。
-    同线程组内相互切换，不要清理，下面线程组内只要有一个task切换就重复安装上断点防止被关掉
-    注意了：使用fork后的子进程在内核中是单独的一个线程组也是单独的一个进程，要装断点也是给子线程组 装
-    */
-    if (prev_active && prev->tgid != next->tgid)
+    for (j = 0; j < BP_CONFIG_MAX; j++)
     {
-        if (prev->pid == prev->tgid)
+        struct bp_point *point = &bp_info->points[j];
+        struct arch_hw_breakpoint info;
+        int reg_slot;
+
+        if (!hwbp_point_is_active(point))
+            continue;
+
+        if (hw_breakpoint_parse(point, 0, &info))
+            continue;
+
+        if (info.ctrl.type == ARM_BREAKPOINT_EXECUTE)
         {
-            pr_debug("目标进程的主线程被切换走: pid=%d comm=%s cpu=%d\n", prev->pid, prev->comm, raw_smp_processor_id());
+            if (brp_slot >= num_brps)
+                continue;
+
+            reg_slot = brp_slot++;
+            write_wb_reg(AARCH64_DBG_REG_BVR, reg_slot, info.address);
+            write_wb_reg(AARCH64_DBG_REG_BCR, reg_slot, encode_ctrl_reg(info.ctrl) | 0x1);
         }
         else
         {
-            pr_debug("目标进程的子线程被切换走: pid=%d comm=%s cpu=%d\n", prev->pid, prev->comm, raw_smp_processor_id());
+            if (wrp_slot >= num_wrps)
+                continue;
+
+            reg_slot = wrp_slot++;
+            write_wb_reg(AARCH64_DBG_REG_WVR, reg_slot, info.address);
+            write_wb_reg(AARCH64_DBG_REG_WCR, reg_slot, encode_ctrl_reg(info.ctrl) | 0x1);
+        }
+    }
+}
+
+// 禁用当前 CPU 上的硬件断点/观察点控制寄存器，保留原有配置位
+static void clear_hwbp_regs_on_cpu(void *data)
+{
+    int i;
+    int point_slot;
+    uint32_t ctrl;
+    uint32_t expected_ctrl;
+    uint64_t addr;
+    struct arch_hw_breakpoint info;
+    struct break_point *bp_info = g_bp_info;
+    bool should_disable;
+
+    (void)data;
+
+    if (!bp_info)
+        return;
+
+    for (i = 0; i < num_brps; i++)
+    {
+        addr = read_wb_reg(AARCH64_DBG_REG_BVR, i);
+        ctrl = read_wb_reg(AARCH64_DBG_REG_BCR, i);
+
+        if (!(ctrl & 0x1) || addr == 0)
+            continue;
+
+        should_disable = false;
+        for (point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
+        {
+            struct bp_point *point = &bp_info->points[point_slot];
+
+            if (!hwbp_point_is_active(point) ||
+                point->bt != BP_BREAKPOINT_X ||
+                hw_breakpoint_parse(point, 0, &info) ||
+                info.ctrl.type != ARM_BREAKPOINT_EXECUTE ||
+                info.address != addr)
+                continue;
+
+            expected_ctrl = encode_ctrl_reg(info.ctrl);
+            if ((expected_ctrl & ~0x1) != (ctrl & ~0x1))
+                continue;
+
+            should_disable = true;
         }
 
-        for (i = 0; i < num_brps; i++)
-            write_wb_reg(AARCH64_DBG_REG_BCR, i, 0);
-
-        for (i = 0; i < num_wrps; i++)
-            write_wb_reg(AARCH64_DBG_REG_WCR, i, 0);
-
-        if (!next_active)
-            // 线程组被切走cpu进行关闭OS+开启硬件调试
-            disable_hardware_debug_on_cpu(NULL);
+        if (should_disable)
+            write_wb_reg(AARCH64_DBG_REG_BCR, i, ctrl & ~0x1);
     }
 
-    // 目标进程的线程组被切入(线程组id就是进程的pid)
-    if (next_active)
+    for (i = 0; i < num_wrps; i++)
     {
-        int brp_slot = 0;
-        int wrp_slot = 0;
+        addr = read_wb_reg(AARCH64_DBG_REG_WVR, i);
+        ctrl = read_wb_reg(AARCH64_DBG_REG_WCR, i);
 
-        // 线程id==线程组id就是主线程,否则子线程
-        if (next->pid == next->tgid)
+        if (!(ctrl & 0x1) || addr == 0)
+            continue;
+
+        should_disable = false;
+        for (point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
         {
-            pr_debug("目标进程的主线程被切换进来: pid=%d comm=%s cpu=%d\n", next->pid, next->comm, raw_smp_processor_id());
-        }
-        else
-        {
-            pr_debug("目标进程的子线程被切换进来: pid=%d comm=%s cpu=%d\n", next->pid, next->comm, raw_smp_processor_id());
-        }
+            struct bp_point *point = &bp_info->points[point_slot];
 
-        // task被切入到cpu进行解锁OS+开启硬件调试
-        enable_hardware_debug_on_cpu(NULL);
-
-        // 遍历所有观点分配槽位安装进cpu
-        for (j = 0; j < BP_CONFIG_MAX; j++)
-        {
-            struct bp_point *point = &bp_info->points[j];
-            struct arch_hw_breakpoint info;
-            int reg_slot;
-
-            // 为空的观点不设置
-            if (!hwbp_point_is_active(point) || bp_info->pid != next->tgid)
+            if (!hwbp_point_is_active(point) ||
+                point->bt == BP_BREAKPOINT_X ||
+                hw_breakpoint_parse(point, 0, &info) ||
+                info.ctrl.type == ARM_BREAKPOINT_EXECUTE ||
+                info.address != addr)
                 continue;
 
-            // 把观点的断点描述信息转化为arm架构内部格式
-            if (hw_breakpoint_parse(point, 0, &info))
+            expected_ctrl = encode_ctrl_reg(info.ctrl);
+            if ((expected_ctrl & ~0x1) != (ctrl & ~0x1))
                 continue;
 
-            // 根据不同观点类型分配不同槽位
-            if (info.ctrl.type == ARM_BREAKPOINT_EXECUTE)
+            should_disable = true;
+        }
+
+        if (should_disable)
+            write_wb_reg(AARCH64_DBG_REG_WCR, i, ctrl & ~0x1);
+    }
+}
+
+static unsigned long __attribute__((used, __noinline__)) ret_work_finish_task_switch(void)
+{
+    unsigned long orig_lr = this_cpu_read(g_finish_task_switch_orig_lr);
+    struct break_point *bp_info = g_bp_info;
+
+    if (bp_info)
+    {
+        if (hwbp_info_has_pid(bp_info, current->tgid))
+        {
+            if (current->pid == current->tgid)
             {
-                if (brp_slot >= num_brps)
-                    continue;
-
-                reg_slot = brp_slot++;
-                // 执行地址寄存器
-                write_wb_reg(AARCH64_DBG_REG_BVR, reg_slot, info.address);
-                // 执行控制寄存器
-                //"| 0x1"表示立即生效,
-                //"& ~0x1"表示写入的寄存器配置，但是禁用不生效
-                //"0"给控制寄存器清0，就删除了断点
-                write_wb_reg(AARCH64_DBG_REG_BCR, reg_slot, encode_ctrl_reg(info.ctrl) | 0x1);
+                ls_log_tag("hwbp", "目标进程的主线程被切换进来: pid=%d comm=%s cpu=%d\n", current->pid, current->comm, raw_smp_processor_id());
             }
             else
             {
-                if (wrp_slot >= num_wrps)
-                    continue;
-
-                reg_slot = wrp_slot++;
-                // 访问地址寄存器
-                write_wb_reg(AARCH64_DBG_REG_WVR, reg_slot, info.address);
-                // 访问控制寄存器
-                //"| 0x1"表示立即生效,
-                //"& ~0x1"表示写入的寄存器配置，但是禁用不生效
-                //"0"给控制寄存器清0就删除了断点
-                write_wb_reg(AARCH64_DBG_REG_WCR, reg_slot, encode_ctrl_reg(info.ctrl) | 0x1);
+                ls_log_tag("hwbp", "目标进程的子线程被切换进来: pid=%d comm=%s cpu=%d\n", current->pid, current->comm, raw_smp_processor_id());
             }
+
+            enable_hardware_debug_on_cpu(NULL);
+            install_hwbp_regs_on_cpu(bp_info);
+        }
+        else
+        {
+            clear_hwbp_regs_on_cpu(NULL);
+            disable_hardware_debug_on_cpu(NULL);
         }
     }
+
+    this_cpu_write(g_finish_task_switch_orig_lr, 0);
+    return orig_lr;
+}
+
+// finish_task_switch(prev) 入口 hook：函数返回后再覆盖 perf 写入的硬件断点寄存器。
+static int work_trampoline_finish_task_switch(struct pt_regs *hook_regs)
+{
+    if (!g_bp_info)
+        return 0;
+
+    if (this_cpu_read(g_finish_task_switch_orig_lr))
+        return 0;
+
+    this_cpu_write(g_finish_task_switch_orig_lr, hook_regs->regs[30]);
+    hook_regs->regs[30] = (unsigned long)ret_trampoline_finish_task_switch;
 
     return 0;
 }
 
-static struct hook_entry g_switch_to_hook[] = {
+static struct hook_entry g_finish_task_switch_ret_hooks[] = {
     /*
-     调度切换大致顺序：
-     __schedule()
-       prev = current;
-       next = pick_next_task(...);
-       -> trace_sched_switch(..., prev, next, prev_state)
-          register_trace_sched_switch() 注册的 sched_switch tracepoint 回调在这里执行
-       -> context_switch(rq, prev, next, &rf)
-          -> prepare_task_switch(rq, prev, next)
-          -> arch_start_context_switch(prev)
-          -> switch_mm_irqs_off(..., next)
-          -> prepare_lock_switch(rq, next, rf)
-          -> switch_to(prev, next, prev)
-             -> __switch_to(prev, next)
-                -> fpsimd_thread_switch(next)
-                -> tls_thread_switch(next)
-                -> hw_breakpoint_thread_switch(next)
-                -> contextidr_thread_switch(next)
-                -> entry_task_switch(next)
-                -> cpu_switch_to(prev, next)
-          -> finish_task_switch(prev)
+      __schedule() 调度切换层级：
+
+      __schedule()
+        prev = current;
+        next = pick_next_task(...);
+
+        if (prev != next) {
+          -> trace_sched_switch(..., prev, next, prev_state)
+             register_trace_sched_switch() 注册的 sched_switch tracepoint 回调在这里执行
+
+          -> context_switch(rq, prev, next, &rf)
+             -> prepare_task_switch(rq, prev, next)
+             -> arch_start_context_switch(prev)
+             -> switch_mm_irqs_off(..., next)
+             -> prepare_lock_switch(rq, next, rf)
+
+             -> switch_to(prev, next, prev)
+                -> __switch_to(prev, next)
+                   -> fpsimd_thread_switch(next)
+                   -> tls_thread_switch(next)
+                   -> hw_breakpoint_thread_switch(next) // 硬件断点 perf 收到线程切换
+                   -> contextidr_thread_switch(next)
+                   -> entry_task_switch(next)
+                   -> cpu_switch_to(prev, next)
+
+             -> finish_task_switch(prev)
+                -> vtime_task_switch(prev)
+                -> perf_event_task_sched_in(prev, current)
+                -> finish_task(prev)
+
+                5.10：
+                  -> finish_lock_switch(rq)
+                  -> finish_arch_post_lock_switch()
+                  -> kcov_finish_switch(current)
+                  -> fire_sched_in_preempt_notifiers(current)
+                  -> tick_nohz_task_switch()
+
+                5.15 / 6.1 / 6.6 / 6.12：
+                  -> tick_nohz_task_switch()
+                  -> finish_lock_switch(rq)
+                     -> __balance_callbacks(rq)
+                  -> finish_arch_post_lock_switch()
+                  -> kcov_finish_switch(current)
+                  -> fire_sched_in_preempt_notifiers(current)
+        } else {
+          5.10：
+            -> rq_unlock_irq(rq, &rf)
+
+          5.15 / 6.1 / 6.6 / 6.12：
+            -> rq_unpin_lock(rq, &rf)
+            -> __balance_callbacks(rq)
+           -> raw_spin_rq_unlock_irq(rq)
+       }
+
+       5.10：
+         -> balance_callback(rq)
 
      不管是之前使用 register_trace_sched_switch() 注册 sched_switch tracepoint 回调，
-     还是现在 hook __switch_to，写寄存器安装断点的位置都在 hw_breakpoint_thread_switch(next)之前，
-     目标程序自己给自己下断点后面就会被它会被perf系统覆盖掉。
-     不过实测这样引入了一个全新的完美机制,注意注意注意！！！！！！！！！，这是我的猜测实际情况过于复杂，但是真的不知道具体为何自己的能命中，perf的一样的命中，2个都能正常命中
-     先解释一下内核perf子系统的硬件断点2种情况:
+      还是 hook __switch_to / cpu_switch_to 入口，写寄存器安装断点的位置都在
+      finish_task_switch(prev) -> perf_event_task_sched_in(prev, current) 之前，
+      后面的 perf_event_task_sched_in(prev, current) 仍然可能再次覆盖这里写入的硬件断点寄存器。
+      如果要在 perf 调度后覆盖回去，5.15+ 可以考虑 __balance_callbacks(rq)；
+      5.10 没有同样通用的普通函数入口，更稳的是 finish_task_switch 返回 hook。
+ 先解释一下内核perf子系统的硬件断点2种情况:
         情况1按task : 硬件断点想做到跟着某个 task 走原理(也就是对用户态断点)
             内核必须有一个地方长期保存这个 task 拥有哪些 perf_event 事件。这个地方就是 task 的 perf_event_context链表
             硬件寄存器只是当前 CPU 上的瞬时编程状态，task没有长期拥有关系，task 跑到哪个 CPU，就把它需要的断点装到那个 CPU 的寄存器里。
@@ -717,26 +743,18 @@ static struct hook_entry g_switch_to_hook[] = {
             比如0x7000000000编程进cpu7
             调度到这个cpu7上所有的task，只要跑过这个0x7000000000，都会直接被命中,不区分是那个进程的虚拟地址空间
 
-    好了解释完perf子系统的规则，能发现有一个关键的机制，就是跟随task的硬件断点需要知道task被调度到cpu上
-    这个规则是实现全新的完美机制的关键
-    既然需要知道task被调度到cpu上perf是怎么知道的呢，就是调度切换中调用的hw_breakpoint_thread_switch，用于通知perf
-    然后我们hook的线程调度是__switch_to，比hw_breakpoint_thread_switch先调用，
-    我们就先收到通知安装断点命中后，
-    perf后收到通知在安装命中
-    这样这种我们自己的断点不仅可以命中，目标进程使用perf的硬件断点一样命中，
-    打收到调度的时间差实现互不干扰，无法槽位检测，命中记录检测，命中寄存器现场检测，因为用户态硬件断点都是依赖perf,我们先运行，perf后运行，2者互不干扰
-    */
-    HOOK_ENTRY("__switch_to", work_trampoline_switch_to),
+   */
+    HOOK_ENTRY("finish_task_switch", work_trampoline_finish_task_switch),
 };
 
-// 注册线程切换回调，开始监听
+// 安装硬件调试异常 hook 和 finish_task_switch return hook，开始监听
 static int start_task_run_monitor(struct break_point *bp_info)
 {
     int ret;
 
     if (!bp_info || !hwbp_info_has_active_point(bp_info))
     {
-        pr_debug("breakpoint info error\n");
+        ls_log_tag("hwbp", "breakpoint info error\n");
         return -EINVAL;
     }
 
@@ -747,7 +765,7 @@ static int start_task_run_monitor(struct break_point *bp_info)
         num_wrps = get_wrps_num();
         bp_info->num_brps = num_brps;
         bp_info->num_wrps = num_wrps;
-        pr_debug("monitor config updated\n");
+        ls_log_tag("hwbp", "monitor config updated\n");
         return 0;
     }
 
@@ -762,7 +780,7 @@ static int start_task_run_monitor(struct break_point *bp_info)
     fn_perf_bp_event = (void (*)(struct perf_event *, void *))generic_kallsyms_lookup_name("perf_bp_event");
     if (!bp_on_reg || !wp_on_reg || !fn_perf_bp_event)
     {
-        pr_debug("lookup bp_on_reg/wp_on_reg/perf_bp_event failed\n");
+        ls_log_tag("hwbp", "lookup bp_on_reg/wp_on_reg/perf_bp_event failed\n");
         g_bp_info = NULL;
         return -ENOENT;
     }
@@ -773,26 +791,26 @@ static int start_task_run_monitor(struct break_point *bp_info)
     ret = inline_hook_install(g_debug_exception_hooks);
     if (ret)
     {
-        pr_debug("inline_hook_install debug exception hooks failed: %d\n", ret);
+        ls_log_tag("hwbp", "inline_hook_install debug exception hooks failed: %d\n", ret);
         g_bp_info = NULL;
         return ret;
     }
 
-    // 安装线程切换 inline hook
-    ret = inline_hook_install(g_switch_to_hook);
+    // 安装 finish_task_switch return hook
+    ret = inline_hook_install(g_finish_task_switch_ret_hooks);
     if (ret)
     {
-        pr_debug("inline_hook_install __switch_to failed: %d\n", ret);
+        ls_log_tag("hwbp", "inline_hook_install finish_task_switch return hook failed: %d\n", ret);
         g_bp_info = NULL;
         inline_hook_remove(g_debug_exception_hooks);
         return ret;
     }
-    pr_debug("task switch hook installed: __switch_to\n");
-    pr_debug("monitor start\n");
+    ls_log_tag("hwbp", "finish_task_switch return hook installed\n");
+    ls_log_tag("hwbp", "monitor start\n");
     return 0;
 }
 
-// 注销回调，取消监听
+// 注销 hook，取消监听
 static void stop_task_run_monitor(void)
 {
     int cpu;
@@ -805,9 +823,9 @@ static void stop_task_run_monitor(void)
         smp_call_function_single(cpu, clear_hwbp_regs_on_cpu, NULL, 1);
 
     g_bp_info = NULL;
-    pr_debug("monitor config removed\n");
+    ls_log_tag("hwbp", "monitor config removed\n");
 
-    pr_debug("monitor stop\n");
-    inline_hook_remove(g_switch_to_hook);
+    ls_log_tag("hwbp", "monitor stop\n");
+    inline_hook_remove(g_finish_task_switch_ret_hooks);
     inline_hook_remove(g_debug_exception_hooks);
 }

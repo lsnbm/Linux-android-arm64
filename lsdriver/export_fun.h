@@ -18,6 +18,7 @@
 #include <asm/pgtable-prot.h>
 #include <asm/tlbflush.h>
 #include "arm64_reg.h"
+#include "lsdriver_log.h"
 
 /*
 还有注意所有地方使用函数指针调用内核api，参数类型和返回值类型一定要与内核对齐，比如这里的 unsigned long就不能写为uint64_t
@@ -626,7 +627,7 @@ static void release_gup_pages(struct page **pages, int nr)
 
         if (!fn_release_pages)
         {
-                pr_debug("严重错误！无法找到 release_pages，跳过 %d 个页引用回收\n", nr);
+                ls_log_tag("export", "严重错误！无法找到 release_pages，跳过 %d 个页引用回收\n", nr);
                 return;
         }
 

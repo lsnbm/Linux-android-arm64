@@ -16,6 +16,7 @@
 #include <asm/tlbflush.h>
 
 #include "export_fun.h"
+#include "lsdriver_log.h"
 
 /*
  ARM64 单页 DBI 重编译器：输入一页原始指令和对应 ghost 页地址，输出可在
@@ -210,8 +211,8 @@ static inline int arm64_dbi_emit(struct arm64_dbi_ctx *ctx, u32 insn)
     // 所有重写指令都走统一出口，集中做 ghost 容量保护。
     if (ctx->ghost_count >= ctx->ghost_capacity)
     {
-        pr_debug("[ptebp] ghost instruction capacity exhausted target=0x%llx count=%d capacity=%d\n",
-                 ctx->target_page, ctx->ghost_count, ctx->ghost_capacity);
+        ls_log_tag("ptebp", "ghost instruction capacity exhausted target=0x%llx count=%d capacity=%d\n",
+                   ctx->target_page, ctx->ghost_count, ctx->ghost_capacity);
         return -ENOSPC;
     }
     ctx->ghost[ctx->ghost_count++] = insn;
@@ -291,8 +292,8 @@ static inline int arm64_dbi_queue_branch(struct arm64_dbi_ctx *ctx, int ghost_id
     // 前向同页分支目标尚未生成，先记录占位指令下标和原页目标下标。
     if (ctx->n_pending >= ARM64_DBI_MAX_PENDING_BRANCHES)
     {
-        pr_debug("[ptebp] pending branch capacity exhausted target=0x%llx pending=%d max=%d\n",
-                 ctx->target_page, ctx->n_pending, ARM64_DBI_MAX_PENDING_BRANCHES);
+        ls_log_tag("ptebp", "pending branch capacity exhausted target=0x%llx pending=%d max=%d\n",
+                   ctx->target_page, ctx->n_pending, ARM64_DBI_MAX_PENDING_BRANCHES);
         return -ENOSPC;
     }
     ctx->pending[ctx->n_pending].ghost_idx = ghost_idx;
@@ -1078,8 +1079,8 @@ static inline int arm64_dbi_ghost_prepare_resource(pid_t pid, u64 target_page, c
     mmap_write_unlock(mm);
     if (!ghost->ghost_page)
     {
-        pr_debug("[ptebp] no ghost VA hole pid=%d target=0x%llx size=0x%zx task_size=0x%llx\n",
-                 pid, target_page, ghost_size, (u64)mm->task_size);
+        ls_log_tag("ptebp", "no ghost VA hole pid=%d target=0x%llx size=0x%zx task_size=0x%llx\n",
+                   pid, target_page, ghost_size, (u64)mm->task_size);
         mmput(mm);
         status = -ENOSPC;
         goto err_out;
@@ -1094,9 +1095,9 @@ static inline int arm64_dbi_ghost_prepare_resource(pid_t pid, u64 target_page, c
     ghost->dbi.ghost_capacity = ARM64_DBI_GHOST_MAX_INSNS;
     status = arm64_dbi_recompile_page(&ghost->dbi);
     if (status)
-        pr_debug("[ptebp] DBI recompile failed pid=%d target=0x%llx ghost=0x%llx status=%d count=%d pending=%d failed=%d\n",
-                 pid, target_page, ghost->ghost_page, status, ghost->dbi.ghost_count,
-                 ghost->dbi.n_pending, ghost->dbi.failed);
+        ls_log_tag("ptebp", "DBI recompile failed pid=%d target=0x%llx ghost=0x%llx status=%d count=%d pending=%d failed=%d\n",
+                   pid, target_page, ghost->ghost_page, status, ghost->dbi.ghost_count,
+                   ghost->dbi.n_pending, ghost->dbi.failed);
     if (status)
         goto err_out;
 
@@ -1199,8 +1200,8 @@ static inline int arm64_dbi_ghost_install(pid_t pid, u64 target_page, const void
     {
         spin_unlock_irqrestore(&g_arm64_dbi_ghost_lock, flags);
         arm64_dbi_ghost_release(pid, prepared);
-        pr_debug("[ptebp] ghost slot exhausted pid=%d target=0x%llx slots=%d\n",
-                 pid, target_page, ARM64_DBI_GHOST_SLOT_COUNT);
+        ls_log_tag("ptebp", "ghost slot exhausted pid=%d target=0x%llx slots=%d\n",
+               pid, target_page, ARM64_DBI_GHOST_SLOT_COUNT);
         status = -ENOSPC;
         goto out_unlock;
     }

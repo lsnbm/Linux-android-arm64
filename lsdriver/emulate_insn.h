@@ -15,32 +15,31 @@
   算出来：分支类更新 PC，访存类完成内存读写并 PC+=4。以此跳过该指令，
   不必依赖硬件单步 (MDSCR_EL1.SS)，避免反复进出调试异常。
 
-  【返回值约定】emulate_insn() 返回 bool：
-    true  : 指令已被识别并完整模拟。PC 已按语义更新
-            (分支落到目标地址；访存 / ADR / 被当作 nop 的字面量 PRFM 为 PC+=4)。
-    false : 未真正模拟，分两种情况，靠 PC 是否变化区分：
-            - 跳过 (标签 next_insn)：不支持或无需副作用的指令，已 PC+=4。
-            - 取指/访存失败 (标签 fault)：__get_user / __put_user 出错，
-              PC 保持不变，交由硬件缺页/重放机制处理。
+    【返回值约定】emulate_insn() 返回 bool：
+        true  : 指令已被识别并完整模拟。PC 已按语义更新
+                        (分支落到目标地址；访存 / ADR / 被当作 nop 的字面量 PRFM 为 PC+=4)。
+        false : 指令未被完整模拟，分两种情况，靠 PC 是否变化区分：
+                        - handler 返回 EMU_INSN_SKIP：不支持或无需副作用的指令，外层统一 PC+=4。
+                        - 取指失败或 handler 返回 EMU_INSN_FAULT：__get_user / __put_user 出错，
+                            PC 保持不变，交由硬件缺页/重放机制处理。
 
-  【分发结构】按 ARM64 顶层编码组 (iclass = insn[28:25]) 逐层分流：
-    第一部分  分支 / 异常 / 系统组      (iclass & 0xE) == 0xA
-        -> B, BL, BR/BLR/RET, B.cond, CBZ/CBNZ, TBZ/TBNZ
-           其余成员 (SVC/HVC/SMC/BRK、MSR/MRS/系统、HINT 等) 落到 next_insn 跳过。
-    第二部分  PC 相对地址计算           (insn & 0x1F000000) == 0x10000000
-        -> ADR, ADRP。
-    第三部分  Load/Store 访存           三条入口掩码 (LDP/STP 对 / 单寄存器 / 字面量)
-        -> 成对：LDP/STP/LDNP/STNP (含 LDPSW)
-           单个：LDR/STR —— unsigned-imm、unscaled(LDUR/STUR)、pre/post-index、
-                 register-offset(含 UXTW/SXTW/LSL/SXTX)
-           字面：LDR(literal)、LDRSW(literal)
-           整数 (X/W) 与浮点/SIMD (B/H/S/D/Q) 在此统一处理。
-    第四部分  数据处理指令 (常见于函数序言/寄存器搬运)
-        -> ADD/SUB 立即数     (insn & 0x1F800000)==0x11000000  含 SP 语义、ADDS/SUBS
-           ADD/SUB 移位寄存器 (insn & 0x1F200000)==0x0B000000  LSL/LSR/ASR
-           ADD/SUB 扩展寄存器 (insn & 0x1FE00000)==0x0B200000  含 SP 与 U/SXTB..X
-           逻辑 移位寄存器    (insn & 0x1F000000)==0x0A000000  AND/BIC/ORR/ORN/EOR/EON/ANDS/BICS
-           宽立即数           (insn & 0x1F800000)==0x12800000  MOVN/MOVZ/MOVK
+    【分发结构】：emulate_insn() 只负责取指、按 ARM64 顶层编码组分发、收敛 EMU_INSN_* 结果；
+        具体语义拆给 emu_simulate_* 小函数
+
+        - emu_simulate_branch_insn()
+                B, BL, BR/BLR/RET, B.cond, CBZ/CBNZ, TBZ/TBNZ。
+                其余成员 (SVC/HVC/SMC/BRK、MSR/MRS/系统、HINT 等) 返回 EMU_INSN_SKIP。
+        - emu_simulate_adr_adrp()
+                ADR, ADRP。
+        - emu_simulate_load_store_insn()
+                成对：LDP/STP/LDNP/STNP (含 LDPSW)
+                单个：LDR/STR —— unsigned-imm、unscaled(LDUR/STUR)、pre/post-index、
+                            register-offset(含 UXTW/SXTW/LSL/SXTX)
+                字面：LDR(literal)、LDRSW(literal)、PRFM(literal 按 nop)
+                整数 (X/W) 与浮点/SIMD (B/H/S/D/Q) 在此统一处理。
+        - emu_simulate_data_processing_insn()
+                ADD/SUB 立即数、ADD/SUB 移位寄存器、ADD/SUB 扩展寄存器、
+            逻辑立即数/移位寄存器、位域/EXTR、条件选择、二/三源整数运算、MOVN/MOVZ/MOVK。
 
   【已支持指令】(全寄存器 + 全位宽)
     - 分支跳转：B, BL, BR, BLR, RET, B.cond, CBZ, CBNZ, TBZ, TBNZ (含条件码求值)
@@ -54,12 +53,13 @@
           FP 通路进入时读入全部 Q 寄存器，仅 Load 命中后才整体回写。
     - 数据处理 (整数, 32/64 位)：
         ADD/SUB (立即数/移位寄存器/扩展寄存器)、ADDS/SUBS/CMP/CMN (更新 NZCV)、
-        AND/BIC/ORR/ORN/EOR/EON/ANDS/BICS (移位寄存器)、MOV/MVN (别名)、MOVN/MOVZ/MOVK
+        AND/BIC/ORR/ORN/EOR/EON/ANDS/BICS (立即数/移位寄存器)、MOV/MVN (别名)、MOVN/MOVZ/MOVK、
+        SBFM/UBFM/BFM (含 SXT/UXT/LSL/LSR/ASR/BFI/BFXIL 等别名)、EXTR/ROR(别名)、
+        CSEL/CSINC/CSINV/CSNEG、UDIV/SDIV、LSLV/LSRV/ASRV/RORV、MADD/MSUB/MUL/MNEG(别名)
         * 立即数/扩展寄存器形态正确区分 SP 与 XZR 语义；移位含 LSL/LSR/ASR/ROR。
 
   【暂不支持】(遇到即跳过：仅 PC+=4，不产生其它副作用)
-    - 数据处理(未覆盖)：逻辑立即数(AND/ORR/EOR #bimm)、位域 SBFM/UBFM/BFM、
-        EXTR、条件选择 CSEL/CSINC、乘除 MADD/MUL/UDIV/SDIV、CCMP、地址无关的 REV/CLZ 等
+    - 数据处理(未覆盖)：CCMP/CCMN、REV/REV16/REV32、CLZ/CLS、RBIT、ADC/SBC、CRC 等
     - 独占/有序访存：LDXR/STXR/LDAXR/STLXR/LDAR/STLR (编码段不同，天然不进入本模块)
     - LSE 原子：SWP/CAS/CASP/LDADD/LDSET/LDCLR/LDEOR/LDSMAX/LDSMIN/... (识别后跳过)
     - 指针认证加载：LDRAA/LDRAB (识别后跳过)
@@ -68,11 +68,11 @@
     - 向量结构化访存：LD1/ST1/LD1R 等 Advanced SIMD 多元素访存
 
   【后续扩展指令的方法】
-    1) 判断新指令属于哪个顶层编码组，在对应部分新增解码分支；
+        1) 判断新指令属于哪个顶层编码组，在对应 emu_simulate_* 分发函数里新增解码分支；
     2) 命中后按语义写回：PC / 通用寄存器用 reg_write(XZR 语义)、基址用 addr_reg_*(SP 语义)；
-    3) 访问用户内存一律用 __get_user / __put_user，失败 goto fault；
+        3) 访问用户内存一律用 __get_user / __put_user，失败返回 EMU_INSN_FAULT；
     4) 需要浮点寄存器时用 read_q_reg / write_q_reg，Load 修改后置 fp_dirty 触发回写；
-    5) 能完整模拟的返回 true，无法处理但可安全跳过的走 next_insn。
+        5) 能完整模拟的返回 EMU_INSN_HANDLED，无法处理但可安全跳过的返回 EMU_INSN_SKIP。
 
   【辅助函数】(均定义在 emulate_insn 之前，遵循"定义在前、使用在后")
     reg_read / reg_write     : X/W 通用寄存器，n==31 视为 XZR (读 0 / 写丢弃)
@@ -80,10 +80,12 @@
     eval_cond_fast           : 依据 PSTATE.NZCV 求条件码 (供 B.cond)
     emu_read_mem             : 按 1/2/4/8/16 字节从用户内存读入 128 位缓冲(高位零扩展)
     emu_write_mem            : 按 1/2/4/8/16 字节把值的低位写回用户内存
-                               二者失败返回 -EFAULT，是三类访存分支共用的读写内核。
+                                                             二者失败返回 -EFAULT，是访存 handler 共用的读写核心。
     emu_set_nzcv_addsub      : 依加/减结果刷新 PSTATE.NZCV (供 ADDS/SUBS/CMP/CMN)
     emu_shift_reg            : 寄存器移位 LSL/LSR/ASR/ROR (供移位寄存器类)
     emu_extend_reg           : 寄存器扩展 U/SXTB..X + 左移 (供 ADD/SUB 扩展寄存器)
+        emu_*_displacement       : 分支和 literal 指令的带符号位移提取
+        emu_simulate_*           : 每类指令的小模拟器，返回 EMU_INSN_HANDLED/SKIP/FAULT
   ========================================================================= */
 
 // 整数寄存器与条件执行辅助
@@ -139,7 +141,7 @@ static __always_inline bool eval_cond_fast(uint64_t pstate, uint32_t cond)
 /* ---- 用户内存定宽读写：Load/Store 各分支共用的通用逻辑 ----
    bytes 仅取 1/2/4/8/16，覆盖 B/H/S/W/D/X/Q 全部访存位宽。
    读出的值一律零扩展进 128 位缓冲(高位清零)，符号扩展交由调用方按需处理。
-   成功返回 0，__get_user/__put_user 失败返回 -EFAULT (调用方据此 goto fault)。 */
+    成功返回 0，__get_user/__put_user 失败返回 -EFAULT (调用方据此返回 EMU_INSN_FAULT)。 */
 static __always_inline int emu_read_mem(uint64_t addr, int bytes, __uint128_t *out)
 {
     __uint128_t v = 0;
@@ -217,13 +219,14 @@ static __always_inline int emu_write_mem(uint64_t addr, int bytes, __uint128_t v
     }
 }
 
-/* ---- 数据处理指令通用逻辑：供第四部分各分支复用 ---- */
+/* ---- 数据处理指令通用逻辑：供 emu_simulate_data_processing_insn() 各分支复用 ---- */
 
 // 依据 a (加/减) b 的结果刷新 PSTATE.NZCV，供 ADDS/SUBS/CMP/CMN。
 // op_sub=false 为加法、true 为减法；sf=true 为 64 位、false 为 32 位。
 static __always_inline void emu_set_nzcv_addsub(struct pt_regs *regs, uint64_t a, uint64_t b, bool op_sub, bool sf)
 {
     bool n, z, c, v;
+    uint64_t pstate;
 
     if (sf)
     {
@@ -259,7 +262,7 @@ static __always_inline void emu_set_nzcv_addsub(struct pt_regs *regs, uint64_t a
         z = (res == 0);
     }
 
-    uint64_t pstate = regs->pstate & ~((1ULL << 31) | (1ULL << 30) | (1ULL << 29) | (1ULL << 28));
+    pstate = regs->pstate & ~((1ULL << 31) | (1ULL << 30) | (1ULL << 29) | (1ULL << 28));
     if (n)
         pstate |= (1ULL << 31);
     if (z)
@@ -339,227 +342,367 @@ static __always_inline uint64_t emu_extend_reg(uint64_t val, uint32_t option, ui
     return x << shift;
 }
 
-// 模拟执行函数
-static __always_inline bool emulate_insn(struct pt_regs *regs)
+static __always_inline uint64_t emu_ror_width(uint64_t val, uint32_t shift, uint32_t width)
 {
-    uint32_t insn;
-    uint64_t pc = regs->pc;
+    uint64_t mask = (width == 64) ? ~0ULL : ((1ULL << width) - 1);
 
-    if (__get_user(insn, (uint32_t __user *)pc))
-        goto fault;
+    shift &= width - 1;
+    val &= mask;
+    if (!shift)
+        return val;
+    return ((val >> shift) | (val << (width - shift))) & mask;
+}
 
-    uint32_t iclass = (insn >> 25) & 0xF;
+static __always_inline uint64_t emu_ror(uint64_t val, uint32_t shift, bool sf)
+{
+    return emu_ror_width(val, shift, sf ? 64 : 32);
+}
 
-    // --- 第一部分：跳转指令 ---
-    if ((iclass & 0xE) == 0xA)
+static __always_inline uint64_t emu_replicate_bits(uint64_t val, uint32_t esize, bool sf)
+{
+    uint32_t width = sf ? 64 : 32;
+    uint64_t result = 0;
+    uint64_t mask = (esize == 64) ? ~0ULL : ((1ULL << esize) - 1);
+    uint32_t pos;
+
+    val &= mask;
+    for (pos = 0; pos < width; pos += esize)
+        result |= val << pos;
+    return sf ? result : (uint32_t)result;
+}
+
+static __always_inline bool emu_decode_bitmask_imm(uint32_t n, uint32_t immr, uint32_t imms, bool sf, uint64_t *out)
+{
+    uint32_t len = 0;
+    uint32_t levels, s, r, esize;
+    uint64_t pattern;
+    uint32_t value = (n << 6) | (~imms & 0x3F);
+    int bit;
+
+    for (bit = 6; bit >= 0; bit--)
     {
-        uint32_t op_branch = insn & 0xFC000000;
-        if (op_branch == 0x14000000) // B
+        if (value & (1U << bit))
         {
-            regs->pc = pc + sign_extend64((s64)(insn & 0x3FFFFFF) << 2, 27);
-            return true;
+            len = bit;
+            break;
         }
-        if (op_branch == 0x94000000) // BL
+    }
+    if (bit < 1)
+        return false;
+    if (!sf && len == 6)
+        return false;
+
+    levels = (1U << len) - 1;
+    s = imms & levels;
+    r = immr & levels;
+    if (s == levels)
+        return false;
+
+    esize = 1U << len;
+    pattern = (s == 63) ? ~0ULL : ((1ULL << (s + 1)) - 1);
+    pattern = emu_ror_width(pattern, r, esize);
+    *out = emu_replicate_bits(pattern, esize, sf);
+    return true;
+}
+
+static __always_inline bool emu_decode_bitfield_masks(uint32_t n, uint32_t immr, uint32_t imms, bool sf,
+                                                      uint64_t *wmask, uint64_t *tmask)
+{
+    uint32_t len = 0;
+    uint32_t levels, s, r, diff, esize;
+    uint64_t ones, pattern;
+    uint32_t value = (n << 6) | (~imms & 0x3F);
+    int bit;
+
+    for (bit = 6; bit >= 0; bit--)
+    {
+        if (value & (1U << bit))
         {
-            regs->regs[30] = pc + 4;
-            regs->pc = pc + sign_extend64((s64)(insn & 0x3FFFFFF) << 2, 27);
-            return true;
+            len = bit;
+            break;
         }
-        if ((insn & 0xFF9F0000) == 0xD61F0000) // BR/BLR/RET
-        {
-            uint32_t rn = (insn >> 5) & 0x1F, opc = (insn >> 21) & 0x3;
-            if (opc == 1)
-                regs->regs[30] = pc + 4;
-            if (opc <= 2)
-            {
-                regs->pc = reg_read(regs, rn);
-                return true;
-            }
-        }
-        if ((insn & 0xFF000010) == 0x54000000) // B.cond
-        {
-            s64 offset = sign_extend64((s64)((insn >> 5) & 0x7FFFF) << 2, 20);
-            regs->pc = eval_cond_fast(regs->pstate, insn & 0xF) ? (pc + offset) : (pc + 4);
-            return true;
-        }
-        if ((insn & 0x7E000000) == 0x34000000) // CBZ/CBNZ
-        {
-            uint32_t rt = insn & 0x1F;
-            uint64_t val = ((insn >> 31) & 1) ? reg_read(regs, rt) : (uint32_t)reg_read(regs, rt);
-            bool jump = ((insn >> 24) & 1) ? (val != 0) : (val == 0);
-            regs->pc = jump ? (pc + sign_extend64((s64)((insn >> 5) & 0x7FFFF) << 2, 20)) : (pc + 4);
-            return true;
-        }
-        if ((insn & 0x7E000000) == 0x36000000) // TBZ/TBNZ
-        {
-            uint32_t rt = insn & 0x1F, pos = (((insn >> 31) & 1) << 5) | ((insn >> 19) & 0x1F);
-            bool jump = (((reg_read(regs, rt) >> pos) & 1) == ((insn >> 24) & 1));
-            regs->pc = jump ? (pc + sign_extend64((s64)((insn >> 5) & 0x3FFF) << 2, 15)) : (pc + 4);
-            return true;
-        }
-        goto next_insn;
+    }
+    if (bit < 1)
+        return false;
+    if (!sf && len == 6)
+        return false;
+
+    levels = (1U << len) - 1;
+    s = imms & levels;
+    r = immr & levels;
+    diff = (s - r) & levels;
+    esize = 1U << len;
+
+    ones = (s == 63) ? ~0ULL : ((1ULL << (s + 1)) - 1);
+    *wmask = emu_replicate_bits(emu_ror_width(ones, r, esize), esize, sf);
+
+    pattern = (diff == 63) ? ~0ULL : ((1ULL << (diff + 1)) - 1);
+    *tmask = emu_replicate_bits(pattern, esize, sf);
+    return true;
+}
+
+static __always_inline uint64_t emu_mask_for_width(bool sf)
+{
+    return sf ? ~0ULL : 0xFFFFFFFFULL;
+}
+
+enum emu_insn_result
+{
+    EMU_INSN_HANDLED,
+    EMU_INSN_SKIP,
+    EMU_INSN_FAULT,
+};
+
+/* ---- 指令位移与小模拟器：按内核 probes/simulate-insn.c 的风格拆分 ---- */
+
+static __always_inline s64 emu_bbl_displacement(uint32_t insn)
+{
+    return sign_extend64((s64)(insn & 0x3FFFFFF) << 2, 27);
+}
+
+static __always_inline s64 emu_bcond_displacement(uint32_t insn)
+{
+    return sign_extend64((s64)((insn >> 5) & 0x7FFFF) << 2, 20);
+}
+
+static __always_inline s64 emu_cbz_displacement(uint32_t insn)
+{
+    return sign_extend64((s64)((insn >> 5) & 0x7FFFF) << 2, 20);
+}
+
+static __always_inline s64 emu_tbz_displacement(uint32_t insn)
+{
+    return sign_extend64((s64)((insn >> 5) & 0x3FFF) << 2, 15);
+}
+
+static __always_inline s64 emu_ldr_literal_displacement(uint32_t insn)
+{
+    return sign_extend64((s64)((insn >> 5) & 0x7FFFF) << 2, 20);
+}
+
+static __always_inline void emu_simulate_b_bl(struct pt_regs *regs, uint32_t insn, uint64_t pc)
+{
+    if (insn & (1U << 31))
+        regs->regs[30] = pc + 4;
+    regs->pc = pc + emu_bbl_displacement(insn);
+}
+
+static __always_inline enum emu_insn_result emu_simulate_br_blr_ret(struct pt_regs *regs, uint32_t insn, uint64_t pc)
+{
+    uint32_t rn = (insn >> 5) & 0x1F;
+    uint32_t opc = (insn >> 21) & 0x3;
+    uint64_t target;
+
+    if (opc > 2)
+        return EMU_INSN_SKIP;
+
+    target = reg_read(regs, rn);
+    regs->pc = target;
+    if (opc == 1)
+        regs->regs[30] = pc + 4;
+
+    return EMU_INSN_HANDLED;
+}
+
+static __always_inline void emu_simulate_b_cond(struct pt_regs *regs, uint32_t insn, uint64_t pc)
+{
+    regs->pc = eval_cond_fast(regs->pstate, insn & 0xF) ? (pc + emu_bcond_displacement(insn)) : (pc + 4);
+}
+
+static __always_inline void emu_simulate_cbz_cbnz(struct pt_regs *regs, uint32_t insn, uint64_t pc)
+{
+    uint32_t rt = insn & 0x1F;
+    uint64_t val = ((insn >> 31) & 1) ? reg_read(regs, rt) : (uint32_t)reg_read(regs, rt);
+    bool jump = ((insn >> 24) & 1) ? (val != 0) : (val == 0);
+
+    regs->pc = jump ? (pc + emu_cbz_displacement(insn)) : (pc + 4);
+}
+
+static __always_inline void emu_simulate_tbz_tbnz(struct pt_regs *regs, uint32_t insn, uint64_t pc)
+{
+    uint32_t rt = insn & 0x1F;
+    uint32_t pos = (((insn >> 31) & 1) << 5) | ((insn >> 19) & 0x1F);
+    bool jump = (((reg_read(regs, rt) >> pos) & 1) == ((insn >> 24) & 1));
+
+    regs->pc = jump ? (pc + emu_tbz_displacement(insn)) : (pc + 4);
+}
+
+static __always_inline enum emu_insn_result emu_simulate_branch_insn(struct pt_regs *regs, uint32_t insn, uint64_t pc)
+{
+    uint32_t op_branch = insn & 0xFC000000;
+
+    if (op_branch == 0x14000000 || op_branch == 0x94000000)
+    {
+        emu_simulate_b_bl(regs, insn, pc);
+        return EMU_INSN_HANDLED;
+    }
+    if ((insn & 0xFF9F0000) == 0xD61F0000)
+        return emu_simulate_br_blr_ret(regs, insn, pc);
+    if ((insn & 0xFF000010) == 0x54000000)
+    {
+        emu_simulate_b_cond(regs, insn, pc);
+        return EMU_INSN_HANDLED;
+    }
+    if ((insn & 0x7E000000) == 0x34000000)
+    {
+        emu_simulate_cbz_cbnz(regs, insn, pc);
+        return EMU_INSN_HANDLED;
+    }
+    if ((insn & 0x7E000000) == 0x36000000)
+    {
+        emu_simulate_tbz_tbnz(regs, insn, pc);
+        return EMU_INSN_HANDLED;
     }
 
-    // --- 第二部分：地址计算 ADR / ADRP ---
-    if ((insn & 0x1F000000) == 0x10000000)
+    return EMU_INSN_SKIP;
+}
+
+static __always_inline void emu_simulate_adr_adrp(struct pt_regs *regs, uint32_t insn, uint64_t pc)
+{
+    uint32_t rd = insn & 0x1F;
+    s64 imm = sign_extend64(((insn >> 5) & 0x7FFFF) << 2 | ((insn >> 29) & 0x3), 20);
+
+    // Rd=31 在 ADR/ADRP 中表示丢弃结果(XZR)；pt_regs.regs[] 只有 0..30，不能写 regs[31]。
+    if (rd != 31)
+        regs->regs[rd] = (insn & 0x80000000) ? ((pc & ~0xFFFULL) + (imm << 12)) : (pc + imm);
+    regs->pc = pc + 4;
+}
+
+static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct pt_regs *regs, uint32_t insn, uint64_t pc)
+{
+    bool is_fp = (insn & 0x04000000) != 0;
+    uint32_t size = (insn >> 30) & 0x3;
+    __uint128_t fp_regs[32];
+    uint32_t fpsr = 0, fpcr = 0;
+    bool fp_dirty = false;
+
+    if (is_fp)
     {
-        uint32_t rd = insn & 0x1F;
-        s64 imm = sign_extend64(((insn >> 5) & 0x7FFFF) << 2 | ((insn >> 29) & 0x3), 20);
-        // Rd=31 在 ADR/ADRP 中表示丢弃结果(XZR)；pt_regs.regs[] 只有 0..30，
-        // 直接写 regs[31] 会越界踩到紧邻的 sp 字段，必须跳过。
-        if (rd != 31)
-            regs->regs[rd] = (insn & 0x80000000) ? ((pc & ~0xFFFULL) + (imm << 12)) : (pc + imm);
-        regs->pc += 4;
-        return true;
+        int i;
+
+        for (i = 0; i < 32; i++)
+            read_q_reg(i, &fp_regs[i]);
+        fpsr = read_fpsr();
+        fpcr = read_fpcr();
     }
 
-    // --- 第三部分：Load/Store 访存 ---
-    // 高级掩码过滤：忽略了第26位(V位)，同时精准捕获整数和浮点访存指令
-    if (((insn & 0x3A000000) == 0x28000000) || // LDP/STP (成对访存)
-        ((insn & 0x3A000000) == 0x38000000) || // LDR/STR (单寄存器)
-        ((insn & 0x3B000000) == 0x18000000))   // LDR (基于 PC 的字面量)
+    if ((insn & 0x3B000000) == 0x18000000)
     {
-        // 说明：LDXR/STXR/CAS/LDAR/STLR 等独占与有序访存属于 bits[29:24]=001000 编码段，
-        // 三个入口掩码都要求 bit27=1 且 bit29/bit28 至少一个为 1，因此它们根本进不来；
-        // 而 LSE 原子操作(SWP/LDADD...)会命中单寄存器掩码，统一在下方寻址分支识别并跳过。
+        uint32_t rt = insn & 0x1F;
+        uint64_t addr = pc + emu_ldr_literal_displacement(insn);
 
-        // V位 (第26位) 为 1 时，代表这是浮点/SIMD指令
-        bool is_fp = (insn & 0x04000000) != 0;
-        uint32_t size = (insn >> 30) & 0x3;
-
-        __uint128_t fp_regs[32];
-        uint32_t fpsr = 0, fpcr = 0;
-        bool fp_dirty = false;
-
-        // 仅当确认是浮点指令时，按需拉取物理 CPU 当前的 FPU 状态
         if (is_fp)
         {
-            int i;
+            int bytes = (size == 0) ? 4 : ((size == 1) ? 8 : 16);
+            __uint128_t val;
 
-            for (i = 0; i < 32; i++)
-                read_q_reg(i, &fp_regs[i]);
-            fpsr = read_fpsr();
-            fpcr = read_fpcr();
-        }
-
-        // 字面量加载 LDR (Literal) [PC 相对寻址]
-        if ((insn & 0x3B000000) == 0x18000000)
-        {
-            uint32_t rt = insn & 0x1F;
-            uint64_t addr = pc + sign_extend64((s64)((insn >> 5) & 0x7FFFF) << 2, 20);
-
-            if (is_fp)
-            {
-                // 浮点字面量: opc(=size)=0(S/4B), 1(D/8B), 2(Q/16B)
-                int bytes = (size == 0) ? 4 : ((size == 1) ? 8 : 16);
-                __uint128_t v;
-                if (emu_read_mem(addr, bytes, &v))
-                    goto fault;
-                fp_regs[rt] = v;
-                fp_dirty = true;
-            }
-            else
-            {
-                // 字面量整数加载 opc(=size): 00=LDR Wt(4B 零扩展), 01=LDR Xt(8B),
-                // 10=LDRSW(4B 符号扩展到 64 位), 11=PRFM(预取, 不写寄存器)
-                __uint128_t v;
-                if (size == 0)
-                {
-                    if (emu_read_mem(addr, 4, &v))
-                        goto fault;
-                    reg_write(regs, rt, (u64)v, false); // LDR Wt
-                }
-                else if (size == 1)
-                {
-                    if (emu_read_mem(addr, 8, &v))
-                        goto fault;
-                    reg_write(regs, rt, (u64)v, true); // LDR Xt
-                }
-                else if (size == 2)
-                {
-                    if (emu_read_mem(addr, 4, &v))
-                        goto fault;
-                    reg_write(regs, rt, (s64)(s32)(u32)v, true); // LDRSW
-                }
-                // size == 3 为 PRFM (literal) 预取，无寄存器写入，落到 done_ldst 仅 PC+=4
-            }
-            goto done_ldst;
-        }
-
-        // LDP / STP (Load/Store Pair 成对读写)
-        if ((insn & 0x3A000000) == 0x28000000)
-        {
-            uint32_t opc_pair = (insn >> 30) & 0x3, l = (insn >> 22) & 1, idx = (insn >> 23) & 0x3;
-            uint32_t rn = (insn >> 5) & 0x1F, rt = insn & 0x1F, rt2 = (insn >> 10) & 0x1F;
-
-            // 每个寄存器字节数: 浮点 opc=0/1/2 -> S(4)/D(8)/Q(16); 整数 opc=2 -> X(8), 否则 W(4)
-            int bytes = is_fp ? (4 << opc_pair) : ((opc_pair == 2) ? 8 : 4);
-            s64 off = sign_extend64((s64)((insn >> 15) & 0x7F), 6) * bytes;
-            uint64_t base = addr_reg_read(regs, rn), addr = (idx == 1) ? base : (base + off);
-            // idx: 0=LDNP/STNP(非临时,base+off,无回写), 1=post-index, 2=offset, 3=pre-index
-            // 四种都按 base±off 正常访存; idx=0 与 offset 等价(无回写), 无需特殊跳过。
-            // 成对的两个元素分别位于 addr 与 addr+bytes。
-
-            if (l)
-            { // Load Pair
-                __uint128_t v1, v2;
-                if (emu_read_mem(addr, bytes, &v1) || emu_read_mem(addr + bytes, bytes, &v2))
-                    goto fault;
-                if (is_fp)
-                {
-                    fp_regs[rt] = v1;
-                    fp_regs[rt2] = v2;
-                    fp_dirty = true;
-                }
-                else if (opc_pair == 1)
-                { // LDPSW: 32 位符号扩展到 64 位
-                    reg_write(regs, rt, (s64)(s32)(u32)v1, true);
-                    reg_write(regs, rt2, (s64)(s32)(u32)v2, true);
-                }
-                else
-                { // LDP: opc=0(W,32位) / opc=2(X,64位)
-                    reg_write(regs, rt, (u64)v1, bytes == 8);
-                    reg_write(regs, rt2, (u64)v2, bytes == 8);
-                }
-            }
-            else
-            { // Store Pair
-                __uint128_t v1 = is_fp ? fp_regs[rt] : (__uint128_t)reg_read(regs, rt);
-                __uint128_t v2 = is_fp ? fp_regs[rt2] : (__uint128_t)reg_read(regs, rt2);
-                if (emu_write_mem(addr, bytes, v1) || emu_write_mem(addr + bytes, bytes, v2))
-                    goto fault;
-            }
-            if (idx & 1)
-                addr_reg_write(regs, rn, base + off); // 回写基址 Write-back
-            goto done_ldst;
-        }
-
-        // LDR / STR (单寄存器基础寻址)
-        uint32_t rn = (insn >> 5) & 0x1F, rt = insn & 0x1F, opc = (insn >> 22) & 0x3;
-        uint64_t base = addr_reg_read(regs, rn), addr = base;
-
-        int bytes;
-        if (is_fp)
-        {
-            // 浮点 128-bit (Q) 寄存器: size=00 且 bit23=1 (opc=10 存 Q / opc=11 取 Q)
-            if (size == 0 && (opc & 2))
-                bytes = 16;
-            else
-                bytes = (1 << size); // 支持 B(1字节), H(2字节), S(4字节), D(8字节)
+            if (emu_read_mem(addr, bytes, &val))
+                return EMU_INSN_FAULT;
+            fp_regs[rt] = val;
+            fp_dirty = true;
         }
         else
         {
-            bytes = (1 << size); // 整数: B(1), H(2), W(4), X(8)
+            __uint128_t val;
+
+            if (size == 0)
+            {
+                if (emu_read_mem(addr, 4, &val))
+                    return EMU_INSN_FAULT;
+                reg_write(regs, rt, (u64)val, false);
+            }
+            else if (size == 1)
+            {
+                if (emu_read_mem(addr, 8, &val))
+                    return EMU_INSN_FAULT;
+                reg_write(regs, rt, (u64)val, true);
+            }
+            else if (size == 2)
+            {
+                if (emu_read_mem(addr, 4, &val))
+                    return EMU_INSN_FAULT;
+                reg_write(regs, rt, (s64)(s32)(u32)val, true);
+            }
+        }
+        goto done_ldst;
+    }
+
+    if ((insn & 0x3A000000) == 0x28000000)
+    {
+        uint32_t opc_pair = (insn >> 30) & 0x3;
+        uint32_t load = (insn >> 22) & 1;
+        uint32_t idx = (insn >> 23) & 0x3;
+        uint32_t rn = (insn >> 5) & 0x1F;
+        uint32_t rt = insn & 0x1F;
+        uint32_t rt2 = (insn >> 10) & 0x1F;
+        int bytes = is_fp ? (4 << opc_pair) : ((opc_pair == 2) ? 8 : 4);
+        s64 off = sign_extend64((s64)((insn >> 15) & 0x7F), 6) * bytes;
+        uint64_t base = addr_reg_read(regs, rn);
+        uint64_t addr = (idx == 1) ? base : (base + off);
+
+        if (load)
+        {
+            __uint128_t val1, val2;
+
+            if (emu_read_mem(addr, bytes, &val1) || emu_read_mem(addr + bytes, bytes, &val2))
+                return EMU_INSN_FAULT;
+            if (is_fp)
+            {
+                fp_regs[rt] = val1;
+                fp_regs[rt2] = val2;
+                fp_dirty = true;
+            }
+            else if (opc_pair == 1)
+            {
+                reg_write(regs, rt, (s64)(s32)(u32)val1, true);
+                reg_write(regs, rt2, (s64)(s32)(u32)val2, true);
+            }
+            else
+            {
+                reg_write(regs, rt, (u64)val1, bytes == 8);
+                reg_write(regs, rt2, (u64)val2, bytes == 8);
+            }
+        }
+        else
+        {
+            __uint128_t val1 = is_fp ? fp_regs[rt] : (__uint128_t)reg_read(regs, rt);
+            __uint128_t val2 = is_fp ? fp_regs[rt2] : (__uint128_t)reg_read(regs, rt2);
+
+            if (emu_write_mem(addr, bytes, val1) || emu_write_mem(addr + bytes, bytes, val2))
+                return EMU_INSN_FAULT;
+        }
+        if (idx & 1)
+            addr_reg_write(regs, rn, base + off);
+        goto done_ldst;
+    }
+
+    {
+        uint32_t rn = (insn >> 5) & 0x1F;
+        uint32_t rt = insn & 0x1F;
+        uint32_t opc = (insn >> 22) & 0x3;
+        uint64_t base = addr_reg_read(regs, rn);
+        uint64_t addr = base;
+        int bytes;
+        bool is_load;
+
+        if (is_fp)
+        {
+            if (size == 0 && (opc & 2))
+                bytes = 16;
+            else
+                bytes = (1 << size);
+        }
+        else
+        {
+            bytes = (1 << size);
         }
 
-        // 整数域 size=11 且 opc=1x 为 PRFM 预取(及未分配编码): 无数据搬运，且若继续
-        // 走有符号加载会触发 1<<64 的未定义移位，这里在计算地址前直接按 nop 跳过。
         if (!is_fp && size == 3 && opc >= 2)
-            goto next_insn;
+            return EMU_INSN_SKIP;
 
         if ((insn >> 24) & 1)
         {
-            addr = base + (((insn >> 10) & 0xFFF) * bytes); // 严格乘以真实字节数，确保 Q(16) 和 D(8) 正确
+            addr = base + (((insn >> 10) & 0xFFF) * bytes);
         }
         else
         {
@@ -567,51 +710,49 @@ static __always_inline bool emulate_insn(struct pt_regs *regs)
             bool reg_form = ((insn >> 21) & 1) != 0;
             s64 imm9 = sign_extend64((s64)((insn >> 12) & 0x1FF), 8);
 
-            // bit21=1 时唯一能当普通访存模拟的是"寄存器偏移"(bits[11:10]=10, 即 idx==2)。
-            // 其余 bit21=1 组合是 LSE 原子操作(SWP/LDADD/LDSET/LDCLR...)或指针认证加载
-            // (LDRAA/LDRAB)，语义无法用一次普通读写替代，直接交由硬件重放。
             if (reg_form && idx != 2)
-                goto next_insn;
+                return EMU_INSN_SKIP;
 
             if (idx == 0)
-                addr = base + imm9; // 无扩展 (Unscaled: LDUR/STUR)
+                addr = base + imm9;
             else if (idx == 1 || idx == 3)
-                addr = (idx == 3) ? (base + imm9) : base; // Pre / Post-index
+                addr = (idx == 3) ? (base + imm9) : base;
             else if (idx == 2 && reg_form)
-            { // 寄存器偏移 (如 LDR X0, [X1, W2, UXTW #3])
+            {
                 uint32_t rm = (insn >> 16) & 0x1F, opt = (insn >> 13) & 0x7;
                 s64 ext = reg_read(regs, rm);
+                int shift;
+
                 if (opt == 6)
                     ext = (s64)(s32)ext;
                 else if (opt == 2)
-                    ext = (uint64_t)(uint32_t)ext;                         // 严格区分带符号(SXTW)和无符号(UXTW)
-                int shift = ((insn >> 12) & 1) ? __builtin_ctz(bytes) : 0; // 自动推导 LSL 移位量: Q移4, D移3, S移2, H移1
+                    ext = (uint64_t)(uint32_t)ext;
+                shift = ((insn >> 12) & 1) ? __builtin_ctz(bytes) : 0;
                 addr = base + (ext << shift);
             }
             else
-                goto next_insn; // idx==2 但 bit21=0，非法编码，跳过
+                return EMU_INSN_SKIP;
             if (idx & 1)
-                addr_reg_write(regs, rn, base + imm9); // Write-back
+                addr_reg_write(regs, rn, base + imm9);
         }
 
-        // 判断是 Load 还是 Store
-        bool is_load = is_fp ? ((insn >> 22) & 1) : (opc != 0);
-
+        is_load = is_fp ? ((insn >> 22) & 1) : (opc != 0);
         if (is_load)
-        { // Load 单一寄存器
-            __uint128_t v;
-            if (emu_read_mem(addr, bytes, &v))
-                goto fault;
+        {
+            __uint128_t val;
+
+            if (emu_read_mem(addr, bytes, &val))
+                return EMU_INSN_FAULT;
             if (is_fp)
             {
-                fp_regs[rt] = v; // 128 位缓冲已把高位清零
+                fp_regs[rt] = val;
                 fp_dirty = true;
             }
             else
             {
-                u64 raw = (u64)v;
+                u64 raw = (u64)val;
                 if (opc >= 2)
-                { // 有符号 Load (LDRSB/LDRSH/LDRSW)：自最高有效位起符号扩展
+                {
                     int b = (bytes << 3) - 1;
                     if (raw & (1ULL << b))
                         raw |= ~((1ULL << (b + 1)) - 1);
@@ -620,207 +761,505 @@ static __always_inline bool emulate_insn(struct pt_regs *regs)
             }
         }
         else
-        { // Store 单一寄存器：整数只读低 64 位，浮点直接取 128 位
-            __uint128_t v = is_fp ? fp_regs[rt] : (__uint128_t)reg_read(regs, rt);
-            if (emu_write_mem(addr, bytes, v))
-                goto fault;
-        }
-
-    done_ldst:
-        // 如果处理了浮点指令，并且是一条 Load (产生了数据修改)，则强制回写到物理 CPU
-        if (is_fp && fp_dirty)
         {
-            int i;
+            __uint128_t val = is_fp ? fp_regs[rt] : (__uint128_t)reg_read(regs, rt);
 
-            for (i = 0; i < 32; i++)
-                write_q_reg(i, &fp_regs[i]);
-            write_fpsr(fpsr);
-            write_fpcr(fpcr);
+            if (emu_write_mem(addr, bytes, val))
+                return EMU_INSN_FAULT;
         }
-        regs->pc += 4;
-        return true;
     }
 
-    // --- 第四部分：数据处理指令 (常见于函数序言/寄存器搬运) ---
-    // ADD/SUB (立即数)：覆盖 SUB SP,SP,#N、ADD X29,SP,#N、MOV Xd,SP(=ADD #0) 等。
-    // 立即数形态 Rn/Rd=31 表示 SP(非 XZR)；但 ADDS/SUBS 的 Rd=31 表示 XZR(即 CMP/CMN)。
-    if ((insn & 0x1F800000) == 0x11000000)
+done_ldst:
+    if (is_fp && fp_dirty)
     {
-        bool sf = (insn >> 31) & 1;
-        bool op_sub = (insn >> 30) & 1;   // 0=ADD, 1=SUB
-        bool setflags = (insn >> 29) & 1; // 1=ADDS/SUBS
-        uint32_t sh = (insn >> 22) & 1;   // 1 => 立即数左移 12
-        uint64_t imm = (insn >> 10) & 0xFFF;
-        uint32_t rn = (insn >> 5) & 0x1F, rd = insn & 0x1F;
-        uint64_t a, result;
+        int i;
 
-        if (sh)
-            imm <<= 12;
-
-        a = addr_reg_read(regs, rn); // Rn=31 读 SP
-        result = op_sub ? (a - imm) : (a + imm);
-        if (!sf)
-            result = (uint32_t)result;
-
-        if (setflags)
-        {
-            emu_set_nzcv_addsub(regs, a, imm, op_sub, sf);
-            reg_write(regs, rd, result, sf); // Rd=31 => XZR(丢弃)
-        }
-        else
-        {
-            addr_reg_write(regs, rd, result); // Rd=31 => SP
-        }
-        regs->pc += 4;
-        return true;
+        for (i = 0; i < 32; i++)
+            write_q_reg(i, &fp_regs[i]);
+        write_fpsr(fpsr);
+        write_fpcr(fpcr);
     }
+    regs->pc = pc + 4;
+    return EMU_INSN_HANDLED;
+}
 
-    // ADD/SUB (移位寄存器)：Rn/Rd/Rm=31 均为 XZR。SUBS Rd=31 即 CMP。
-    if ((insn & 0x1F200000) == 0x0B000000)
+static __always_inline enum emu_insn_result emu_simulate_add_sub_imm(struct pt_regs *regs, uint32_t insn)
+{
+    bool sf = (insn >> 31) & 1;
+    bool op_sub = (insn >> 30) & 1;
+    bool setflags = (insn >> 29) & 1;
+    uint32_t sh = (insn >> 22) & 1;
+    uint64_t imm = (insn >> 10) & 0xFFF;
+    uint32_t rn = (insn >> 5) & 0x1F, rd = insn & 0x1F;
+    uint64_t a, result;
+
+    if (sh)
+        imm <<= 12;
+
+    a = addr_reg_read(regs, rn);
+    result = op_sub ? (a - imm) : (a + imm);
+    if (!sf)
+        result = (uint32_t)result;
+
+    if (setflags)
     {
-        bool sf = (insn >> 31) & 1;
-        bool op_sub = (insn >> 30) & 1;
-        bool setflags = (insn >> 29) & 1;
-        uint32_t shift_type = (insn >> 22) & 0x3;
-        uint32_t rm = (insn >> 16) & 0x1F, imm6 = (insn >> 10) & 0x3F;
-        uint32_t rn = (insn >> 5) & 0x1F, rd = insn & 0x1F;
-        uint64_t a, b, result;
-
-        if (shift_type == 3) // ROR 对 add/sub 非法
-            goto next_insn;
-        if (!sf && (imm6 & 0x20)) // 32 位时移位量 >=32 非法
-            goto next_insn;
-
-        a = reg_read(regs, rn);
-        b = emu_shift_reg(reg_read(regs, rm), shift_type, imm6, sf);
-        result = op_sub ? (a - b) : (a + b);
-        if (!sf)
-            result = (uint32_t)result;
-
-        if (setflags)
-            emu_set_nzcv_addsub(regs, a, b, op_sub, sf);
+        emu_set_nzcv_addsub(regs, a, imm, op_sub, sf);
         reg_write(regs, rd, result, sf);
-        regs->pc += 4;
-        return true;
     }
-
-    // ADD/SUB (扩展寄存器)：Rn/Rd=31 为 SP(ADDS/SUBS 的 Rd=31 为 XZR)，Rm 按 option 扩展。
-    if ((insn & 0x1FE00000) == 0x0B200000)
+    else
     {
-        bool sf = (insn >> 31) & 1;
-        bool op_sub = (insn >> 30) & 1;
-        bool setflags = (insn >> 29) & 1;
-        uint32_t rm = (insn >> 16) & 0x1F, option = (insn >> 13) & 0x7, imm3 = (insn >> 10) & 0x7;
-        uint32_t rn = (insn >> 5) & 0x1F, rd = insn & 0x1F;
-        uint64_t a, b, result;
-
-        if (imm3 > 4) // 扩展左移量合法范围 0..4
-            goto next_insn;
-
-        a = addr_reg_read(regs, rn); // Rn=31 读 SP
-        b = emu_extend_reg(reg_read(regs, rm), option, imm3);
-        result = op_sub ? (a - b) : (a + b);
-        if (!sf)
-            result = (uint32_t)result;
-
-        if (setflags)
-        {
-            emu_set_nzcv_addsub(regs, a, b, op_sub, sf);
-            reg_write(regs, rd, result, sf); // Rd=31 => XZR
-        }
-        else
-        {
-            addr_reg_write(regs, rd, result); // Rd=31 => SP
-        }
-        regs->pc += 4;
-        return true;
+        addr_reg_write(regs, rd, result);
     }
-
-    // 逻辑 (移位寄存器)：AND/BIC/ORR/ORN/EOR/EON/ANDS/BICS，含别名 MOV Xd,Xm / MVN。
-    if ((insn & 0x1F000000) == 0x0A000000)
-    {
-        bool sf = (insn >> 31) & 1;
-        uint32_t opc = (insn >> 29) & 0x3; // 00=AND 01=ORR 10=EOR 11=ANDS
-        uint32_t shift_type = (insn >> 22) & 0x3;
-        bool invert = (insn >> 21) & 1; // N: 1 => BIC/ORN/EON/BICS
-        uint32_t rm = (insn >> 16) & 0x1F, imm6 = (insn >> 10) & 0x3F;
-        uint32_t rn = (insn >> 5) & 0x1F, rd = insn & 0x1F;
-        uint64_t a, b, result;
-
-        if (!sf && (imm6 & 0x20)) // 32 位时移位量 >=32 非法
-            goto next_insn;
-
-        a = reg_read(regs, rn);
-        b = emu_shift_reg(reg_read(regs, rm), shift_type, imm6, sf);
-        if (invert)
-            b = ~b;
-
-        switch (opc)
-        {
-        case 0:
-            result = a & b;
-            break; // AND / BIC
-        case 1:
-            result = a | b;
-            break; // ORR / ORN (含 MOV/MVN)
-        case 2:
-            result = a ^ b;
-            break; // EOR / EON
-        default:
-            result = a & b;
-            break; // ANDS / BICS
-        }
-        if (!sf)
-            result = (uint32_t)result;
-
-        if (opc == 3) // ANDS/BICS 更新 NZCV：N/Z 依结果，C=V=0
-        {
-            uint64_t pstate = regs->pstate & ~((1ULL << 31) | (1ULL << 30) | (1ULL << 29) | (1ULL << 28));
-            if (sf ? ((result >> 63) & 1) : ((result >> 31) & 1))
-                pstate |= (1ULL << 31);
-            if (result == 0)
-                pstate |= (1ULL << 30);
-            regs->pstate = pstate;
-        }
-        reg_write(regs, rd, result, sf);
-        regs->pc += 4;
-        return true;
-    }
-
-    // 宽立即数搬运：MOVN(00)/MOVZ(10)/MOVK(11)，opc=01 未分配。
-    if ((insn & 0x1F800000) == 0x12800000)
-    {
-        bool sf = (insn >> 31) & 1;
-        uint32_t opc = (insn >> 29) & 0x3;
-        uint32_t hw = (insn >> 21) & 0x3, shift = hw * 16;
-        uint64_t imm16 = (insn >> 5) & 0xFFFF;
-        uint32_t rd = insn & 0x1F;
-        uint64_t result;
-
-        if (opc == 1) // 未分配编码
-            goto next_insn;
-        if (!sf && (hw & 0x2)) // 32 位时 hw 只能是 0/1
-            goto next_insn;
-
-        if (opc == 0)
-            result = ~(imm16 << shift); // MOVN
-        else if (opc == 2)
-            result = (imm16 << shift); // MOVZ
-        else
-            result = (reg_read(regs, rd) & ~(0xFFFFULL << shift)) | (imm16 << shift); // MOVK
-
-        reg_write(regs, rd, result, sf); // sf=0 时截断到 32 位
-        regs->pc += 4;
-        return true;
-    }
-
-next_insn:
-    // 如果遇到完全无法解析、或无需副作用的指令，静默跳过执行
     regs->pc += 4;
-    return false;
+    return EMU_INSN_HANDLED;
+}
 
-fault:
-    // 触发读写异常时，绝不可强制修改 PC，原样返回交由硬件机制介入
+static __always_inline enum emu_insn_result emu_simulate_add_sub_shifted(struct pt_regs *regs, uint32_t insn)
+{
+    bool sf = (insn >> 31) & 1;
+    bool op_sub = (insn >> 30) & 1;
+    bool setflags = (insn >> 29) & 1;
+    uint32_t shift_type = (insn >> 22) & 0x3;
+    uint32_t rm = (insn >> 16) & 0x1F, imm6 = (insn >> 10) & 0x3F;
+    uint32_t rn = (insn >> 5) & 0x1F, rd = insn & 0x1F;
+    uint64_t a, b, result;
+
+    if (shift_type == 3)
+        return EMU_INSN_SKIP;
+    if (!sf && (imm6 & 0x20))
+        return EMU_INSN_SKIP;
+
+    a = reg_read(regs, rn);
+    b = emu_shift_reg(reg_read(regs, rm), shift_type, imm6, sf);
+    result = op_sub ? (a - b) : (a + b);
+    if (!sf)
+        result = (uint32_t)result;
+
+    if (setflags)
+        emu_set_nzcv_addsub(regs, a, b, op_sub, sf);
+    reg_write(regs, rd, result, sf);
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
+}
+
+static __always_inline enum emu_insn_result emu_simulate_add_sub_extended(struct pt_regs *regs, uint32_t insn)
+{
+    bool sf = (insn >> 31) & 1;
+    bool op_sub = (insn >> 30) & 1;
+    bool setflags = (insn >> 29) & 1;
+    uint32_t rm = (insn >> 16) & 0x1F, option = (insn >> 13) & 0x7, imm3 = (insn >> 10) & 0x7;
+    uint32_t rn = (insn >> 5) & 0x1F, rd = insn & 0x1F;
+    uint64_t a, b, result;
+
+    if (imm3 > 4)
+        return EMU_INSN_SKIP;
+
+    a = addr_reg_read(regs, rn);
+    b = emu_extend_reg(reg_read(regs, rm), option, imm3);
+    result = op_sub ? (a - b) : (a + b);
+    if (!sf)
+        result = (uint32_t)result;
+
+    if (setflags)
+    {
+        emu_set_nzcv_addsub(regs, a, b, op_sub, sf);
+        reg_write(regs, rd, result, sf);
+    }
+    else
+    {
+        addr_reg_write(regs, rd, result);
+    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
+}
+
+static __always_inline enum emu_insn_result emu_simulate_logic_shifted(struct pt_regs *regs, uint32_t insn)
+{
+    bool sf = (insn >> 31) & 1;
+    uint32_t opc = (insn >> 29) & 0x3;
+    uint32_t shift_type = (insn >> 22) & 0x3;
+    bool invert = (insn >> 21) & 1;
+    uint32_t rm = (insn >> 16) & 0x1F, imm6 = (insn >> 10) & 0x3F;
+    uint32_t rn = (insn >> 5) & 0x1F, rd = insn & 0x1F;
+    uint64_t a, b, result;
+
+    if (!sf && (imm6 & 0x20))
+        return EMU_INSN_SKIP;
+
+    a = reg_read(regs, rn);
+    b = emu_shift_reg(reg_read(regs, rm), shift_type, imm6, sf);
+    if (invert)
+        b = ~b;
+
+    switch (opc)
+    {
+    case 0:
+        result = a & b;
+        break;
+    case 1:
+        result = a | b;
+        break;
+    case 2:
+        result = a ^ b;
+        break;
+    default:
+        result = a & b;
+        break;
+    }
+    if (!sf)
+        result = (uint32_t)result;
+
+    if (opc == 3)
+    {
+        uint64_t pstate = regs->pstate & ~((1ULL << 31) | (1ULL << 30) | (1ULL << 29) | (1ULL << 28));
+        if (sf ? ((result >> 63) & 1) : ((result >> 31) & 1))
+            pstate |= (1ULL << 31);
+        if (result == 0)
+            pstate |= (1ULL << 30);
+        regs->pstate = pstate;
+    }
+    reg_write(regs, rd, result, sf);
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
+}
+
+static __always_inline enum emu_insn_result emu_simulate_move_wide(struct pt_regs *regs, uint32_t insn)
+{
+    bool sf = (insn >> 31) & 1;
+    uint32_t opc = (insn >> 29) & 0x3;
+    uint32_t hw = (insn >> 21) & 0x3, shift = hw * 16;
+    uint64_t imm16 = (insn >> 5) & 0xFFFF;
+    uint32_t rd = insn & 0x1F;
+    uint64_t result;
+
+    if (opc == 1)
+        return EMU_INSN_SKIP;
+    if (!sf && (hw & 0x2))
+        return EMU_INSN_SKIP;
+
+    if (opc == 0)
+        result = ~(imm16 << shift);
+    else if (opc == 2)
+        result = (imm16 << shift);
+    else
+        result = (reg_read(regs, rd) & ~(0xFFFFULL << shift)) | (imm16 << shift);
+
+    reg_write(regs, rd, result, sf);
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
+}
+
+static __always_inline enum emu_insn_result emu_simulate_logic_imm(struct pt_regs *regs, uint32_t insn)
+{
+    bool sf = (insn >> 31) & 1;
+    uint32_t opc = (insn >> 29) & 0x3;
+    uint32_t n = (insn >> 22) & 1;
+    uint32_t immr = (insn >> 16) & 0x3F;
+    uint32_t imms = (insn >> 10) & 0x3F;
+    uint32_t rn = (insn >> 5) & 0x1F, rd = insn & 0x1F;
+    uint64_t imm, a, result;
+
+    if (!emu_decode_bitmask_imm(n, immr, imms, sf, &imm))
+        return EMU_INSN_SKIP;
+
+    a = reg_read(regs, rn) & emu_mask_for_width(sf);
+    switch (opc)
+    {
+    case 0:
+        result = a & imm;
+        break;
+    case 1:
+        result = a | imm;
+        break;
+    case 2:
+        result = a ^ imm;
+        break;
+    default:
+        result = a & imm;
+        break;
+    }
+    result &= emu_mask_for_width(sf);
+
+    if (opc == 3)
+    {
+        uint64_t pstate = regs->pstate & ~((1ULL << 31) | (1ULL << 30) | (1ULL << 29) | (1ULL << 28));
+
+        if (sf ? ((result >> 63) & 1) : ((result >> 31) & 1))
+            pstate |= (1ULL << 31);
+        if (result == 0)
+            pstate |= (1ULL << 30);
+        regs->pstate = pstate;
+    }
+
+    reg_write(regs, rd, result, sf);
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
+}
+
+static __always_inline enum emu_insn_result emu_simulate_bitfield(struct pt_regs *regs, uint32_t insn)
+{
+    bool sf = (insn >> 31) & 1;
+    uint32_t opc = (insn >> 29) & 0x3;
+    uint32_t n = (insn >> 22) & 1;
+    uint32_t immr = (insn >> 16) & 0x3F;
+    uint32_t imms = (insn >> 10) & 0x3F;
+    uint32_t rn = (insn >> 5) & 0x1F, rd = insn & 0x1F;
+    uint32_t width = sf ? 64 : 32;
+    uint64_t src, dst, bot, result, wmask, tmask;
+
+    if (opc == 3)
+        return EMU_INSN_SKIP;
+    if (sf != !!n)
+        return EMU_INSN_SKIP;
+    if (!sf && ((immr | imms) & 0x20))
+        return EMU_INSN_SKIP;
+    if (!emu_decode_bitfield_masks(n, immr, imms, sf, &wmask, &tmask))
+        return EMU_INSN_SKIP;
+
+    src = reg_read(regs, rn) & emu_mask_for_width(sf);
+    dst = reg_read(regs, rd) & emu_mask_for_width(sf);
+    bot = emu_ror(src, immr, sf) & wmask;
+
+    switch (opc)
+    {
+    case 0:
+    {
+        uint64_t sign_bit = (tmask == emu_mask_for_width(sf)) ? (1ULL << (width - 1)) : ((tmask + 1) >> 1);
+
+        result = bot & tmask;
+        if (bot & sign_bit)
+            result |= ~tmask;
+        break;
+    }
+    case 1:
+        result = (dst & ~wmask) | (bot & wmask);
+        break;
+    case 2:
+        result = bot & tmask;
+        break;
+    default:
+        return EMU_INSN_SKIP;
+    }
+
+    reg_write(regs, rd, result, sf);
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
+}
+
+static __always_inline enum emu_insn_result emu_simulate_extract(struct pt_regs *regs, uint32_t insn)
+{
+    bool sf = (insn >> 31) & 1;
+    uint32_t n = (insn >> 22) & 1;
+    uint32_t rm = (insn >> 16) & 0x1F;
+    uint32_t imms = (insn >> 10) & 0x3F;
+    uint32_t rn = (insn >> 5) & 0x1F, rd = insn & 0x1F;
+    uint32_t width = sf ? 64 : 32;
+    uint64_t high, low, result;
+
+    if (sf != !!n)
+        return EMU_INSN_SKIP;
+    if (imms >= width)
+        return EMU_INSN_SKIP;
+
+    high = reg_read(regs, rn) & emu_mask_for_width(sf);
+    low = reg_read(regs, rm) & emu_mask_for_width(sf);
+    if (!imms)
+        result = low;
+    else
+        result = (low >> imms) | (high << (width - imms));
+
+    reg_write(regs, rd, result, sf);
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
+}
+
+static __always_inline enum emu_insn_result emu_simulate_cond_select(struct pt_regs *regs, uint32_t insn)
+{
+    bool sf = (insn >> 31) & 1;
+    bool op = (insn >> 30) & 1;
+    bool op2 = (insn >> 10) & 1;
+    uint32_t fixed = (insn >> 11) & 1;
+    uint32_t rm = (insn >> 16) & 0x1F;
+    uint32_t cond = (insn >> 12) & 0xF;
+    uint32_t rn = (insn >> 5) & 0x1F, rd = insn & 0x1F;
+    uint64_t result;
+
+    if (fixed)
+        return EMU_INSN_SKIP;
+
+    if (eval_cond_fast(regs->pstate, cond))
+    {
+        result = reg_read(regs, rn);
+    }
+    else
+    {
+        result = reg_read(regs, rm);
+        if (op)
+            result = ~result;
+        if (op2)
+            result++;
+    }
+
+    reg_write(regs, rd, result, sf);
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
+}
+
+static __always_inline enum emu_insn_result emu_simulate_data2(struct pt_regs *regs, uint32_t insn)
+{
+    bool sf = (insn >> 31) & 1;
+    uint32_t opcode = (insn >> 10) & 0x3F;
+    uint32_t rm = (insn >> 16) & 0x1F;
+    uint32_t rn = (insn >> 5) & 0x1F, rd = insn & 0x1F;
+    uint32_t width = sf ? 64 : 32;
+    uint64_t a = reg_read(regs, rn) & emu_mask_for_width(sf);
+    uint64_t b = reg_read(regs, rm) & emu_mask_for_width(sf);
+    uint64_t result;
+    uint32_t shift;
+
+    switch (opcode)
+    {
+    case 2:
+        result = b ? (a / b) : 0;
+        break;
+    case 3:
+        if (b == 0)
+        {
+            result = 0;
+        }
+        else if (sf && a == (1ULL << 63) && b == ~0ULL)
+        {
+            result = a;
+        }
+        else if (!sf && (uint32_t)a == (1U << 31) && (uint32_t)b == 0xFFFFFFFFU)
+        {
+            result = (uint32_t)a;
+        }
+        else if (sf)
+        {
+            result = (uint64_t)((s64)a / (s64)b);
+        }
+        else
+        {
+            result = (uint32_t)((s32)(uint32_t)a / (s32)(uint32_t)b);
+        }
+        break;
+    case 8:
+        shift = b & (width - 1);
+        result = a << shift;
+        break;
+    case 9:
+        shift = b & (width - 1);
+        result = a >> shift;
+        break;
+    case 10:
+        shift = b & (width - 1);
+        result = sf ? (uint64_t)((s64)a >> shift) : (uint32_t)((s32)(uint32_t)a >> shift);
+        break;
+    case 11:
+        shift = b & (width - 1);
+        result = emu_ror(a, shift, sf);
+        break;
+    default:
+        return EMU_INSN_SKIP;
+    }
+
+    reg_write(regs, rd, result, sf);
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
+}
+
+static __always_inline enum emu_insn_result emu_simulate_data3(struct pt_regs *regs, uint32_t insn)
+{
+    bool sf = (insn >> 31) & 1;
+    bool op = (insn >> 15) & 1;
+    uint32_t rm = (insn >> 16) & 0x1F;
+    uint32_t ra = (insn >> 10) & 0x1F;
+    uint32_t rn = (insn >> 5) & 0x1F, rd = insn & 0x1F;
+    uint64_t multiplicand = reg_read(regs, rn) & emu_mask_for_width(sf);
+    uint64_t multiplier = reg_read(regs, rm) & emu_mask_for_width(sf);
+    uint64_t addend = reg_read(regs, ra) & emu_mask_for_width(sf);
+    uint64_t product, result;
+
+    if (sf)
+        product = multiplicand * multiplier;
+    else
+        product = (uint32_t)multiplicand * (uint32_t)multiplier;
+
+    result = op ? (addend - product) : (addend + product);
+    reg_write(regs, rd, result, sf);
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
+}
+
+static __always_inline enum emu_insn_result emu_simulate_data_processing_insn(struct pt_regs *regs, uint32_t insn)
+{
+    if ((insn & 0x1F800000) == 0x11000000)
+        return emu_simulate_add_sub_imm(regs, insn);
+    if ((insn & 0x1F800000) == 0x12000000)
+        return emu_simulate_logic_imm(regs, insn);
+    if ((insn & 0x7F800000) == 0x13000000 ||
+        (insn & 0x7F800000) == 0x33000000 ||
+        (insn & 0x7F800000) == 0x53000000)
+        return emu_simulate_bitfield(regs, insn);
+    if ((insn & 0x7FA00000) == 0x13800000)
+        return emu_simulate_extract(regs, insn);
+    if ((insn & 0x1F200000) == 0x0B000000)
+        return emu_simulate_add_sub_shifted(regs, insn);
+    if ((insn & 0x1FE00000) == 0x0B200000)
+        return emu_simulate_add_sub_extended(regs, insn);
+    if ((insn & 0x1F000000) == 0x0A000000)
+        return emu_simulate_logic_shifted(regs, insn);
+    if ((insn & 0x3FE00000) == 0x1A800000)
+        return emu_simulate_cond_select(regs, insn);
+    if ((insn & 0x7FE00000) == 0x1AC00000)
+        return emu_simulate_data2(regs, insn);
+    if ((insn & 0x7FE08000) == 0x1B000000)
+        return emu_simulate_data3(regs, insn);
+    if ((insn & 0x1F800000) == 0x12800000)
+        return emu_simulate_move_wide(regs, insn);
+
+    return EMU_INSN_SKIP;
+}
+
+// 取指后只做顶层分发；具体语义由 emu_simulate_* handler 完成。
+static __always_inline bool emulate_insn(struct pt_regs *regs)
+{
+    uint32_t insn;
+    uint64_t pc = regs->pc;
+    uint32_t iclass;
+    enum emu_insn_result result = EMU_INSN_SKIP;
+
+    if (__get_user(insn, (uint32_t __user *)pc))
+        return false;
+
+    iclass = (insn >> 25) & 0xF;
+
+    if ((iclass & 0xE) == 0xA)
+    {
+        result = emu_simulate_branch_insn(regs, insn, pc);
+    }
+    else if ((insn & 0x1F000000) == 0x10000000)
+    {
+        emu_simulate_adr_adrp(regs, insn, pc);
+        result = EMU_INSN_HANDLED;
+    }
+    else if (((insn & 0x3A000000) == 0x28000000) ||
+             ((insn & 0x3A000000) == 0x38000000) ||
+             ((insn & 0x3B000000) == 0x18000000))
+    {
+        result = emu_simulate_load_store_insn(regs, insn, pc);
+    }
+    else
+    {
+        result = emu_simulate_data_processing_insn(regs, insn);
+    }
+
+    if (result == EMU_INSN_HANDLED)
+        return true;
+    if (result == EMU_INSN_SKIP)
+        regs->pc = pc + 4;
+
     return false;
 }
 
