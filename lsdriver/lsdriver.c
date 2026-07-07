@@ -19,6 +19,7 @@
 #include "hide_task.h"
 #include "hide_kgsl.h"
 #include "arm64_syscalldbg.h"
+#include "arm64_tls.h"
 
 #include "virtual_input.h"
 #include "virtual_gyro.h"
@@ -95,6 +96,10 @@ static int DispatchThreadFunction(void *data)
 					break;
 				case request_op_ptebp_remove:
 					remove_process_ptebp();
+					break;
+				case request_op_tls_get_tpidr_el0:
+					req->tls_info.tpidr_el0 = get_tpidr_el0_by_name(req->pid, req->tls_info.thread_name);
+					req->status = req->tls_info.tpidr_el0 ? 0 : -ESRCH;
 					break;
 				case request_op_kernel_exit:
 					hide_task_remove(connect_thread_task->pid);

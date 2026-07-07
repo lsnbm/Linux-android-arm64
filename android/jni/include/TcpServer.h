@@ -824,6 +824,7 @@ namespace
                 "target.pid.set",
                 "target.pid.current",
                 "target.attach.package",
+                "tls.get_tpidr_el0",
                 "memory.info.full",
                 "module.resolve",
                 "scan.start",
@@ -999,6 +1000,22 @@ namespace
                 return fail("未找到进程");
             dr->SetGlobalPid(pid);
             return okData({{"pid", pid}});
+        }
+
+        if (op == "tls.get_tpidr_el0")
+        {
+            const auto threadName = requiredString("thread_name", "thread_name");
+            if (std::holds_alternative<json>(threadName))
+                return std::get<json>(threadName);
+
+            const int pid = dr->GetGlobalPid();
+            if (pid <= 0)
+                return fail("全局PID未设置，请先执行 target.pid.set 或 target.attach.package");
+
+            const auto value = dr->GetTpidrEl0ByName(std::get<std::string>(threadName));
+            if (!value)
+                return fail("未找到线程或 TPIDR_EL0 为 0");
+            return okData({{"pid", pid}, {"thread_name", std::get<std::string>(threadName)}, {"tpidr_el0", value}, {"tpidr_el0_hex", std::format("0x{:X}", value)}});
         }
 
         if (op == "memory.info.full")

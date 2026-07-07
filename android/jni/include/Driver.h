@@ -316,6 +316,14 @@ public: // 共有结构体和锁
         int size;                    // 读写的大小
     };
 
+#define TLS_THREAD_NAME_LEN 16
+
+    struct tls_info
+    {
+        char thread_name[TLS_THREAD_NAME_LEN];
+        uint64_t tpidr_el0;
+    };
+
     enum request_op
     {
         request_op_none,       // 空调用
@@ -339,6 +347,8 @@ public: // 共有结构体和锁
 
         request_op_ptebp_set,    // 设置 PTE UXN breakpoint
         request_op_ptebp_remove, // 删除 PTE UXN breakpoint
+
+        request_op_tls_get_tpidr_el0, // 获取指定线程 TPIDR_EL0
 
         request_op_kernel_exit // 内核线程退出
     };
@@ -364,6 +374,8 @@ public: // 共有结构体和锁
         struct virtual_gyro vgyro_info;
         // 虚拟定位信息
         struct virtual_gnss vgnss_info;
+        // TLS 信息
+        struct tls_info tls_info;
         // 断点信息
         struct break_point bp_info;
     };
@@ -442,6 +454,11 @@ public:
     void SetGlobalPid(int pid)
     {
         global_pid = pid;
+    }
+
+    uint64_t GetTpidrEl0ByName(std::string_view threadName)
+    {
+        return HandleTlsGetTpidrEl0(threadName);
     }
 
 public: // 外部读写接口
@@ -1081,6 +1098,22 @@ private: // 私有实现，外部无需关系
         }
         IoCommitAndWait();
         return req->status;
+    }
+
+    uint64_t HandleTlsGetTpidrEl0(std::string_view threadName)
+    {
+        std::scoped_lock<SpinLock> lock(m_mutex);
+        if (global_pid <= 0 || threadName.empty())
+            return 0;
+
+        req->op = request_op_tls_get_tpidr_el0;
+        req->pid = global_pid;
+        req->status = 0;
+        __builtin_memset(&req->tls_info, 0, sizeof(req->tls_info));
+        const size_t copyLen = std::min(threadName.size(), static_cast<size_t>(TLS_THREAD_NAME_LEN - 1));
+        __builtin_memcpy(req->tls_info.thread_name, threadName.data(), copyLen);
+        IoCommitAndWait();
+        return req->status == 0 ? req->tls_info.tpidr_el0 : 0;
     }
 };
 

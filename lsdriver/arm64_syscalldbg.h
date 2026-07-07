@@ -1509,45 +1509,4 @@ static void syscall_monitor_remove(pid_t target_tgid)
     mutex_unlock(&g_syscall_monitor_lock);
 }
 
-// 额外函数：通过进程TGID和线程名获取TPIDR_EL0
-uint64_t get_tpidr_el0_by_name(int32_t tgid, const char *thread_name)
-{
-    struct task_struct *p, *t;
-    uint64_t tpidr_val = 0;
-
-    if (!thread_name || tgid <= 0)
-        return 0;
-
-    // 查找主进程结构体
-    p = get_task_by_pid(tgid);
-    if (!p)
-        return 0;
-
-    //  遍历线程组
-    for_each_thread(p, t)
-    {
-        // 比较线程名，注意 task->comm 长度限制为 16 字节
-        if (strncmp(t->comm, thread_name, 16) == 0)
-        {
-
-            // 提取 TPIDR_EL0
-            if (t == current)
-            {
-                // 如果恰好是当前 CPU 正在运行该线程
-                tpidr_val = (uint64_t)read_sysreg(tpidr_el0);
-            }
-            else
-            {
-                // 否则从线程保存的上下文镜像中读取
-                // task_user_tls 返回的是指向保存地址的指针，需要解引用
-                tpidr_val = (uint64_t)(*task_user_tls(t));
-            }
-            break;
-        }
-    }
-
-    put_task_struct(p); // 释放 task 引用
-    return tpidr_val;
-}
-
 #endif /* ARM64_SYSCALLDBG_H */

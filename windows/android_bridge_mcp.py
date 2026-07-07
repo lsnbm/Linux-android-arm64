@@ -276,6 +276,15 @@ def android_target_current() -> dict[str, Any]:
 
 
 @mcp.tool()
+def android_tls_get_tpidr_el0(thread_name: str) -> dict[str, Any]:
+    """Read TPIDR_EL0, the ARM64 userspace TLS base, for a named thread in the current target process."""
+    name = str(thread_name).strip()
+    if not name:
+        raise ValueError("thread_name must not be empty")
+    return _call_bridge_operation("tls.get_tpidr_el0", {"thread_name": name})
+
+
+@mcp.tool()
 def android_memory_regions() -> dict[str, Any]:
     """Fetch module and segment information only; scan regions are not returned to MCP clients."""
     return _strip_scan_regions(_call_bridge_operation("memory.info.full"))
@@ -672,6 +681,13 @@ TOOL_META: dict[str, dict[str, Any]] = {
         "example": {},
         "parameter_notes": {},
         "result_notes": "Returns active PID used by scan/view/breakpoint operations.",
+    },
+    "android_tls_get_tpidr_el0": {
+        "group": "Target Selection",
+        "use_when": "Read ARM64 TPIDR_EL0 userspace TLS base for a named thread in the current target process.",
+        "example": {"thread_name": "UnityMain"},
+        "parameter_notes": {"thread_name": "Linux task comm, truncated by the kernel to 15 visible characters."},
+        "result_notes": "Returns data.tpidr_el0 and data.tpidr_el0_hex.",
     },
     "android_memory_regions": {
         "group": "Target Selection",
