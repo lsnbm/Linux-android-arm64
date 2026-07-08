@@ -200,7 +200,7 @@ static int hw_breakpoint_parse(struct bp_point *point, bool is_compat, struct ar
 }
 
 // ARM64 watchpoint 可能上报 watched bytes 附近的地址；按策略计算距离。
-static uint64_t ls_get_distance_from_watchpoint(uint64_t fault_addr, uint64_t watch_addr, struct arch_hw_breakpoint_ctrl *ctrl)
+static uint64_t get_distance_from_watchpoint(uint64_t fault_addr, uint64_t watch_addr, struct arch_hw_breakpoint_ctrl *ctrl)
 {
     uint64_t wp_low;
     uint64_t wp_high;
@@ -357,8 +357,7 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
 
                 point->on_hit((void *)regs, (void *)point);
                 // 模拟指令步过,失败走禁用进行步过
-                enum emu_insn_result emu_result = emulate_insn(regs);
-                if (emu_result != EMU_INSN_HANDLED && emu_result != EMU_INSN_NOP)
+                if (!emulate_insn(regs))
                 {
                     // 只清 enable 位，保留原有寄存器配置，继续走原异常处理链
                     write_wb_reg(AARCH64_DBG_REG_BCR, slot, ctrl & ~0x1);
@@ -437,7 +436,7 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
             内核 perf 可以在没有精确命中时选择最近 watchpoint 兜底；
             这里做自定义断点计数，非精确命中会把相邻访问归到第一个点位，必须跳过。
             */
-            dist = ls_get_distance_from_watchpoint(fault_addr, addr, &info.ctrl);
+            dist = get_distance_from_watchpoint(fault_addr, addr, &info.ctrl);
             if (dist != 0)
                 continue;
 
@@ -457,9 +456,7 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
 
     // 模拟指令步过,失败走禁用进行步过
     {
-        enum emu_insn_result emu_result = emulate_insn(regs);
-
-        if (emu_result != EMU_INSN_HANDLED && emu_result != EMU_INSN_NOP)
+        if (!emulate_insn(regs))
         {
             // 只清 enable 位，保留原有寄存器配置，继续走原异常处理链
             write_wb_reg(AARCH64_DBG_REG_WCR, hit_slot, hit_ctrl & ~0x1);

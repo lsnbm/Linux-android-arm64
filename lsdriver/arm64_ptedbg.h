@@ -236,28 +236,6 @@ static void ptebp_restore_if_live(struct ptebp_slot *slot)
     mmput(live_mm);
 }
 
-static void ptebp_log_emulate_failed(uint64_t pc)
-{
-    uint32_t insn;
-
-    if (__get_user(insn, (uint32_t __user *)pc))
-    {
-        ls_log_tag("ptebp", "emulate_insn failed pc=0x%llx insn_read_failed pid=%d tgid=%d\n",
-                   (unsigned long long)pc, current->pid, current->tgid);
-        return;
-    }
-
-    ls_log_tag("ptebp", "emulate_insn failed pc=0x%llx insn=0x%08x bytes=%02x %02x %02x %02x pid=%d tgid=%d\n",
-               (unsigned long long)pc,
-               insn,
-               insn & 0xff,
-               (insn >> 8) & 0xff,
-               (insn >> 16) & 0xff,
-               (insn >> 24) & 0xff,
-               current->pid,
-               current->tgid);
-}
-
 static int ptebp_handle_fault(uint64_t far, uint64_t esr, struct pt_regs *regs)
 {
     uint64_t pc;
@@ -325,16 +303,12 @@ out_unlock:
         return handled;
 
     {
-        enum emu_insn_result emu_result = emulate_insn(regs);
-
-        if (emu_result == EMU_INSN_HANDLED || emu_result == EMU_INSN_NOP)
+        if (emulate_insn(regs))
         {
             ptebp_dec_min_flt();
             return 1;
         }
     }
-
-    ptebp_log_emulate_failed(pc);
 
     memset(drop_mms, 0, sizeof(drop_mms));
     spin_lock_irqsave(&g_ptebp_lock, flags);

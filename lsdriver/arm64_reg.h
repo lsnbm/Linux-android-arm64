@@ -94,7 +94,7 @@ static inline void disable_hardware_debug_on_cpu(void *unused)
         : "x0", "memory");
 }
 
-// 读写调试寄存器的宏
+// 读写系统寄存器的宏
 #ifndef read_sysreg
 #define read_sysreg(r) ({                                  \
     uint64_t __val;                                        \
@@ -113,6 +113,7 @@ static inline void disable_hardware_debug_on_cpu(void *unused)
     } while (0)
 #endif
 
+// 读写调试寄存器
 #ifndef AARCH64_DBG_READ
 #define AARCH64_DBG_READ(N, REG, VAL)         \
     do                                        \
@@ -355,8 +356,6 @@ static inline void write_fpsr(uint32_t val)
                  : "r"(v));
 }
 
-
-
 // 读取 CurrentEL
 static inline unsigned int read_current_el(void)
 {
@@ -498,8 +497,8 @@ static void print_smccc_probe(unsigned int current_el, unsigned int el2_implemen
 
     arm_smccc_call_conduit(conduit, ARM_SMCCC_VENDOR_HYP_CALL_UID_FUNC_ID,
                            0, 0, 0, 0, 0, 0, 0, &res);
-        ls_log("Vendor hyp UID     : %08lx-%08lx-%08lx-%08lx\n",
-            res.a0, res.a1, res.a2, res.a3);
+    ls_log("Vendor hyp UID     : %08lx-%08lx-%08lx-%08lx\n",
+           res.a0, res.a1, res.a2, res.a3);
 }
 
 // 输出Hypervisor相关信息
@@ -547,31 +546,31 @@ static void print_el2_status(void)
     */
     sctlr_el1 = read_sctlr_el1();
 
-        ls_log("===== EL2 Detection =====\n");
+    ls_log("===== EL2 Detection =====\n");
 
     // 打印当前运行级别。
-        ls_log("CurrentEL          : EL%u\n", current_el);
+    ls_log("CurrentEL          : EL%u\n", current_el);
 
     // 打印硬件是否实现 EL2。
-        ls_log("EL2 implemented    : %s (ID_AA64PFR0_EL1[11:8] = %u)\n",
-            el2_implemented ? "YES" : "NO",
-            el2_implemented);
+    ls_log("EL2 implemented    : %s (ID_AA64PFR0_EL1[11:8] = %u)\n",
+           el2_implemented ? "YES" : "NO",
+           el2_implemented);
 
     // 打印硬件是否支持 VHE。注意：硬件支持 VHE，不代表当前系统已经启用 VHE。
-        ls_log("VHE supported      : %s (ID_AA64MMFR1_EL1[11:8] = %u)\n",
-            vhe_supported ? "YES" : "NO",
-            vhe_supported);
+    ls_log("VHE supported      : %s (ID_AA64MMFR1_EL1[11:8] = %u)\n",
+           vhe_supported ? "YES" : "NO",
+           vhe_supported);
 
     // 打印 SCTLR_EL1 的当前值。该值主要用于辅助观察当前控制寄存器状态。
-        ls_log("SCTLR_EL1          : 0x%016lx\n", sctlr_el1);
+    ls_log("SCTLR_EL1          : 0x%016lx\n", sctlr_el1);
 
     // 判断 VHE 是否 active。
-        ls_log("VHE mode active    : %s\n",
-            current_el == 2 ? "YES" : "NO");
+    ls_log("VHE mode active    : %s\n",
+           current_el == 2 ? "YES" : "NO");
 
     // 判断当前是否可以直接访问 EL2 寄存器。
-        ls_log("EL2 regs accessible: %s\n",
-            current_el == 2 ? "YES" : "NO (trap)");
+    ls_log("EL2 regs accessible: %s\n",
+           current_el == 2 ? "YES" : "NO (trap)");
 
     // 运行在 EL2 时，读取 HCR_EL2。
     if (current_el == 2)
@@ -703,6 +702,5 @@ static void print_el2_status(void)
 
     ls_log("=========================\n");
 }
-
 
 #endif
