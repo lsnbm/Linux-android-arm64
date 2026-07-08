@@ -20,8 +20,8 @@ static inline pgd_t *get_kernel_pgd_base(void)
     // 读取 TTBR1_EL1 寄存器 (存放内核页表物理地址)
     asm volatile("mrs %0, ttbr1_el1" : "=r"(ttbr1));
 
-    // TTBR1 包含 ASID 或其他控制位，通常低 48 位是物理地址
-    // 这里做一个简单的掩码处理 (64位用48位物理寻址)
+    // TTBR1 包含 ASID/CnP 等控制位；这里按 48-bit PA + 4K 对齐的常见配置取 BADDR。
+    // 更通用的实现需要结合 TCR_EL1.IPS/TGx 按 ARM ARM 的 TTBRx.BADDR 规则解析。
     // 将物理地址转为内核虚拟地址
     return (pgd_t *)phys_to_virt(ttbr1 & 0x0000FFFFFFFFF000ULL);
 }
@@ -385,13 +385,13 @@ static inline unsigned int read_el2_implemented(void)
     return (unsigned int)val;
 }
 
-// 读取 ID_AA64MMFR1_EL1
+// 读取 ID_AA64MMFR1_EL1.VH[11:8]，非 0 表示支持 Virtualization Host Extensions。
 static inline unsigned int read_vhe_support(void)
 {
     unsigned long val;
     asm volatile(
         "mrs %0, ID_AA64MMFR1_EL1\n\t"
-        "lsr %0, %0, #4\n\t"
+        "lsr %0, %0, #8\n\t"
         "and %0, %0, #0xF"
         : "=r"(val)
         :

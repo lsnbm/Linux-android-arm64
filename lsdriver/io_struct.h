@@ -18,6 +18,14 @@
 #include <asm/ptrace.h>
 #include "arm64_reg.h"
 
+#define TLS_THREAD_NAME_LEN 16
+
+struct tls_info
+{
+    char thread_name[TLS_THREAD_NAME_LEN];
+    uint64_t tpidr_el0;
+};
+
 // 寄存器操作类型定义
 #define BP_OP_NONE 0x0  // 00: 不操作
 #define BP_OP_READ 0x1  // 01: 读
@@ -262,14 +270,6 @@ struct virtual_memoryrw
     int size;                    // 读写的大小
 };
 
-#define TLS_THREAD_NAME_LEN 16
-
-struct tls_info
-{
-    char thread_name[TLS_THREAD_NAME_LEN];
-    uint64_t tpidr_el0;
-};
-
 enum request_op
 {
     request_op_none,       // 空调用
@@ -294,10 +294,10 @@ enum request_op
     request_op_ptebp_set,    // 设置 PTE UXN breakpoint
     request_op_ptebp_remove, // 删除 PTE UXN breakpoint
 
-    request_op_tls_get_tpidr_el0, // 获取指定线程 TPIDR_EL0
-
     request_op_stepbp_set,    // 设置单步 PC breakpoint
     request_op_stepbp_remove, // 删除单步 PC breakpoint
+
+    request_op_tls_get_tpidr_el0, // 获取指定线程 TPIDR_EL0
 
     request_op_kernel_exit // 内核线程退出
 };
@@ -323,10 +323,10 @@ struct request_obj
     struct virtual_gyro vgyro_info;
     // 虚拟定位信息
     struct virtual_gnss vgnss_info;
-    // TLS 信息
-    struct tls_info tls_info;
     // 断点信息
     struct break_point bp_info;
+    // TLS 信息
+    struct tls_info tls_info;
 };
 
 #endif // IO_STRUCT_H

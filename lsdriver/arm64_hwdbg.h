@@ -354,9 +354,11 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
                 ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) == (ctrl & ~0x1ULL)) &&
                 bp_info->pid == current->tgid)
             {
+
                 point->on_hit((void *)regs, (void *)point);
                 // 模拟指令步过,失败走禁用进行步过
-                if (!emulate_insn(regs))
+                enum emu_insn_result emu_result = emulate_insn(regs);
+                if (emu_result != EMU_INSN_HANDLED && emu_result != EMU_INSN_NOP)
                 {
                     // 只清 enable 位，保留原有寄存器配置，继续走原异常处理链
                     write_wb_reg(AARCH64_DBG_REG_BCR, slot, ctrl & ~0x1);
@@ -454,10 +456,14 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
     hit_point->on_hit((void *)regs, (void *)hit_point);
 
     // 模拟指令步过,失败走禁用进行步过
-    if (!emulate_insn(regs))
     {
-        // 只清 enable 位，保留原有寄存器配置，继续走原异常处理链
-        write_wb_reg(AARCH64_DBG_REG_WCR, hit_slot, hit_ctrl & ~0x1);
+        enum emu_insn_result emu_result = emulate_insn(regs);
+
+        if (emu_result != EMU_INSN_HANDLED && emu_result != EMU_INSN_NOP)
+        {
+            // 只清 enable 位，保留原有寄存器配置，继续走原异常处理链
+            write_wb_reg(AARCH64_DBG_REG_WCR, hit_slot, hit_ctrl & ~0x1);
+        }
     }
 
     // slots = this_cpu_ptr(wp_on_reg);

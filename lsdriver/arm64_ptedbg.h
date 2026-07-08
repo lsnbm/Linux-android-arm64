@@ -13,6 +13,7 @@
 #include "inline_hook_frame.h"
 #include "io_struct.h"
 #include "lsdriver_log.h"
+#include "emulate_insn.h"
 
 #ifndef PTEBP_UXN
 #define PTEBP_UXN (_AT(pteval_t, 1) << 54)
@@ -23,10 +24,6 @@
 #define PTEBP_ESR_FSC_PERM_L3 0x0f
 #define PTEBP_ADDR_MASK 0xFFFFFFFFFFFFULL
 
-#define PTEBP_STATE_INACTIVE 0
-#define PTEBP_STATE_ARMED 1
-#define PTEBP_STATE_STICKY 2
-
 struct ptebp_slot
 {
     pid_t pid;
@@ -34,12 +31,7 @@ struct ptebp_slot
     struct mm_struct *mm;
     pte_t *ptep;
     pte_t orig_pte;
-    struct bp_point *point;
-    uint64_t target_vaddr;
     uint64_t page_vaddr;
-    int state;
-    pid_t sticky_pid;
-    uint64_t sticky_page;
 };
 
 static struct break_point *g_ptebp_info;
@@ -47,14 +39,15 @@ static struct ptebp_slot g_ptebp_slots[BP_CONFIG_MAX];
 static DEFINE_SPINLOCK(g_ptebp_lock);
 static DEFINE_MUTEX(g_ptebp_mutex);
 static struct hook_entry g_ptebp_fault_hook = HOOK_ENTRY("do_mem_abort", NULL);
-static struct hook_entry g_ptebp_switch_hook = HOOK_ENTRY("__switch_to", NULL);
-static bool g_ptebp_fault_hooked;
-static bool g_ptebp_switch_hooked;
-static bool g_ptebp_rearm_enabled;
 
 static inline bool ptebp_point_is_active(struct bp_point *point)
 {
     return point && point->hit_addr != 0 && (point->bt & BP_BREAKPOINT_X);
+}
+
+static inline bool ptebp_slot_active(struct ptebp_slot *slot)
+{
+    return slot && slot->mm;
 }
 
 static inline bool ptebp_info_has_active_point(struct break_point *info)
@@ -122,7 +115,7 @@ static bool ptebp_page_already_installed_locked(struct mm_struct *mm, uint64_t p
     {
         struct ptebp_slot *slot = &g_ptebp_slots[point_slot];
 
-        if (slot->state != PTEBP_STATE_INACTIVE && slot->mm == mm && slot->page_vaddr == page_vaddr)
+        if (ptebp_slot_active(slot) && slot->mm == mm && slot->page_vaddr == page_vaddr)
             return true;
     }
 
@@ -164,12 +157,6 @@ static inline void ptebp_dec_min_flt(void)
 {
     if (current->min_flt > 0)
         current->min_flt--;
-}
-
-static inline void ptebp_clear_sticky_locked(struct ptebp_slot *slot)
-{
-    slot->sticky_pid = 0;
-    slot->sticky_page = 0;
 }
 
 static bool ptebp_validate_slot(struct ptebp_slot *slot)
@@ -249,61 +236,26 @@ static void ptebp_restore_if_live(struct ptebp_slot *slot)
     mmput(live_mm);
 }
 
-static bool ptebp_try_rearm_from_sticky_locked(struct ptebp_slot *slot, struct mm_struct **drop_mm)
+static void ptebp_log_emulate_failed(uint64_t pc)
 {
-    if (!ptebp_validate_slot(slot))
+    uint32_t insn;
+
+    if (__get_user(insn, (uint32_t __user *)pc))
     {
-        if (drop_mm)
-            *drop_mm = ptebp_deactivate_locked(slot);
-        return false;
+        ls_log_tag("ptebp", "emulate_insn failed pc=0x%llx insn_read_failed pid=%d tgid=%d\n",
+                   (unsigned long long)pc, current->pid, current->tgid);
+        return;
     }
 
-    ptebp_set_uxn(slot, true);
-    slot->state = PTEBP_STATE_ARMED;
-    ptebp_clear_sticky_locked(slot);
-    return true;
-}
-
-static int work_trampoline_ptebp_switch(struct pt_regs *hook_regs)
-{
-    struct task_struct *prev;
-    struct task_struct *next;
-    struct mm_struct *drop_mm = NULL;
-    unsigned long flags;
-    int point_slot;
-
-    if (!hook_regs)
-        return 0;
-
-    prev = (struct task_struct *)hook_regs->regs[0];
-    next = (struct task_struct *)hook_regs->regs[1];
-
-    if (!prev || !prev->mm || (prev->flags & PF_EXITING))
-        return 0;
-
-    spin_lock_irqsave(&g_ptebp_lock, flags);
-    if (g_ptebp_rearm_enabled)
-    {
-        for (point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
-        {
-            struct ptebp_slot *slot = &g_ptebp_slots[point_slot];
-
-            if (slot->state == PTEBP_STATE_STICKY &&
-                slot->mm == prev->mm &&
-                slot->tgid == prev->tgid &&
-                (!next || next->tgid != slot->tgid))
-            {
-                ptebp_try_rearm_from_sticky_locked(slot, &drop_mm);
-                break;
-            }
-        }
-    }
-    spin_unlock_irqrestore(&g_ptebp_lock, flags);
-
-    if (drop_mm)
-        mmdrop(drop_mm);
-
-    return 0;
+    ls_log_tag("ptebp", "emulate_insn failed pc=0x%llx insn=0x%08x bytes=%02x %02x %02x %02x pid=%d tgid=%d\n",
+               (unsigned long long)pc,
+               insn,
+               insn & 0xff,
+               (insn >> 8) & 0xff,
+               (insn >> 16) & 0xff,
+               (insn >> 24) & 0xff,
+               current->pid,
+               current->tgid);
 }
 
 static int ptebp_handle_fault(uint64_t far, uint64_t esr, struct pt_regs *regs)
@@ -315,10 +267,11 @@ static int ptebp_handle_fault(uint64_t far, uint64_t esr, struct pt_regs *regs)
     unsigned long flags;
     int point_slot;
     int handled = 0;
-    bool exact_hit = false;
+    bool should_emulate = false;
     struct ptebp_slot *slot = NULL;
     struct bp_point *hit_point = NULL;
     struct mm_struct *drop_mm = NULL;
+    struct mm_struct *drop_mms[BP_CONFIG_MAX];
 
     if (!regs || !current->mm || !user_mode(regs) || (current->flags & PF_EXITING))
         return 0;
@@ -336,7 +289,7 @@ static int ptebp_handle_fault(uint64_t far, uint64_t esr, struct pt_regs *regs)
     {
         struct ptebp_slot *candidate = &g_ptebp_slots[point_slot];
 
-        if (candidate->state != PTEBP_STATE_INACTIVE &&
+        if (ptebp_slot_active(candidate) &&
             candidate->mm == current->mm &&
             (pc_page == candidate->page_vaddr || fault_page == candidate->page_vaddr))
         {
@@ -348,33 +301,7 @@ static int ptebp_handle_fault(uint64_t far, uint64_t esr, struct pt_regs *regs)
     if (!slot)
         goto out_unlock;
 
-    if (slot->state == PTEBP_STATE_STICKY)
-    {
-        if (pc_page == slot->sticky_page || fault_page == slot->sticky_page)
-        {
-            if (ifsc == PTEBP_ESR_FSC_PERM_L3 && fault_page == slot->sticky_page)
-            {
-                if (ptebp_validate_slot(slot))
-                {
-                    ptebp_set_uxn(slot, false);
-                    ptebp_dec_min_flt();
-                    handled = 1;
-                }
-                else
-                    drop_mm = ptebp_deactivate_locked(slot);
-            }
-            goto out_unlock;
-        }
-
-        if (slot->sticky_pid != current->pid)
-            goto out_unlock;
-
-        ptebp_try_rearm_from_sticky_locked(slot, &drop_mm);
-        goto out_unlock;
-    }
-
-    if (slot->state != PTEBP_STATE_ARMED || ifsc != PTEBP_ESR_FSC_PERM_L3 ||
-        pc_page != slot->page_vaddr || fault_page != slot->page_vaddr)
+    if (ifsc != PTEBP_ESR_FSC_PERM_L3 || pc_page != slot->page_vaddr || fault_page != slot->page_vaddr)
         goto out_unlock;
 
     if (!ptebp_validate_slot(slot))
@@ -385,28 +312,58 @@ static int ptebp_handle_fault(uint64_t far, uint64_t esr, struct pt_regs *regs)
 
     hit_point = ptebp_find_point_on_page_locked(slot->page_vaddr, pc);
     if (hit_point)
-    {
-        exact_hit = true;
-    }
-
-    if (exact_hit)
         ptebp_dispatch_hit(regs, hit_point);
 
-    // PTEBP 是页粒度。非目标同页 fault 或精确命中后都先放开整页并进入 STICKY，
-    // 避免页内前置指令反复触发，导致目标地址永远执行不到。
-    ptebp_set_uxn(slot, false);
-    slot->state = PTEBP_STATE_STICKY;
-    slot->sticky_pid = current->pid;
-    slot->sticky_page = slot->page_vaddr;
-    ptebp_dec_min_flt();
-    handled = 1;
+    should_emulate = true;
 
 out_unlock:
     spin_unlock_irqrestore(&g_ptebp_lock, flags);
     if (drop_mm)
         mmdrop(drop_mm);
 
-    return handled;
+    if (!should_emulate)
+        return handled;
+
+    {
+        enum emu_insn_result emu_result = emulate_insn(regs);
+
+        if (emu_result == EMU_INSN_HANDLED || emu_result == EMU_INSN_NOP)
+        {
+            ptebp_dec_min_flt();
+            return 1;
+        }
+    }
+
+    ptebp_log_emulate_failed(pc);
+
+    memset(drop_mms, 0, sizeof(drop_mms));
+    spin_lock_irqsave(&g_ptebp_lock, flags);
+    if (g_ptebp_info)
+    {
+        memset(g_ptebp_info, 0, sizeof(*g_ptebp_info));
+        g_ptebp_info = NULL;
+    }
+
+    for (point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
+    {
+        slot = &g_ptebp_slots[point_slot];
+        if (!ptebp_slot_active(slot))
+            continue;
+
+        if (ptebp_validate_slot(slot))
+            ptebp_restore_orig(slot);
+        drop_mms[point_slot] = ptebp_deactivate_locked(slot);
+    }
+    spin_unlock_irqrestore(&g_ptebp_lock, flags);
+
+    for (point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
+    {
+        if (drop_mms[point_slot])
+            mmdrop(drop_mms[point_slot]);
+    }
+
+    ptebp_dec_min_flt();
+    return 1;
 }
 
 static int work_trampoline_ptebp(struct pt_regs *hook_regs)
@@ -442,7 +399,7 @@ static void ptebp_clear_slots_locked(struct ptebp_slot old_slots[BP_CONFIG_MAX],
 
     for (point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
     {
-        if (g_ptebp_slots[point_slot].state == PTEBP_STATE_INACTIVE)
+        if (!ptebp_slot_active(&g_ptebp_slots[point_slot]))
             continue;
 
         old_slots[point_slot] = g_ptebp_slots[point_slot];
@@ -467,7 +424,6 @@ static inline void stop_ptebp_monitor(void)
 
     spin_lock_irqsave(&g_ptebp_lock, flags);
     g_ptebp_info = NULL;
-    g_ptebp_rearm_enabled = false;
     ptebp_clear_slots_locked(old_slots, have_old, drop_mms);
     spin_unlock_irqrestore(&g_ptebp_lock, flags);
 
@@ -479,19 +435,8 @@ static inline void stop_ptebp_monitor(void)
             mmdrop(drop_mms[point_slot]);
     }
 
-    if (g_ptebp_fault_hooked)
-    {
-        hook_entry_remove(&g_ptebp_fault_hook);
-        synchronize_rcu();
-        g_ptebp_fault_hooked = false;
-    }
-
-    if (g_ptebp_switch_hooked)
-    {
-        hook_entry_remove(&g_ptebp_switch_hook);
-        synchronize_rcu();
-        g_ptebp_switch_hooked = false;
-    }
+    hook_entry_remove(&g_ptebp_fault_hook);
+    synchronize_rcu();
 
     mutex_unlock(&g_ptebp_mutex);
 }
@@ -554,10 +499,7 @@ static int ptebp_install_slot(struct break_point *info, int point_slot)
         .mm = mm,
         .ptep = ptep,
         .orig_pte = orig_pte,
-        .point = point,
-        .target_vaddr = point->hit_addr,
         .page_vaddr = page_vaddr,
-        .state = PTEBP_STATE_ARMED,
     };
     ptebp_set_uxn(slot, true);
     spin_unlock_irqrestore(&g_ptebp_lock, flags);
@@ -585,18 +527,9 @@ static inline int start_ptebp_monitor(struct break_point *info)
     status = hook_entry_install(&g_ptebp_fault_hook);
     if (status)
         goto out_unlock;
-    g_ptebp_fault_hooked = true;
-
-    g_ptebp_switch_hook.work_fn = work_trampoline_ptebp_switch;
-    status = hook_entry_install(&g_ptebp_switch_hook);
-    if (status)
-        ls_log_tag("ptebp", "__switch_to hook install failed status=%d\n", status);
-    else
-        g_ptebp_switch_hooked = true;
 
     spin_lock_irqsave(&g_ptebp_lock, flags);
     g_ptebp_info = info;
-    g_ptebp_rearm_enabled = true;
     spin_unlock_irqrestore(&g_ptebp_lock, flags);
 
     for (point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)

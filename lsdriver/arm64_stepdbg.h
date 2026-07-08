@@ -6,6 +6,7 @@
 #include <linux/kernel.h>
 #include <linux/mutex.h>
 #include <linux/sched.h>
+#include <linux/sched/signal.h>
 #include <linux/sched/task_stack.h>
 #include <linux/spinlock.h>
 #include <linux/thread_info.h>
@@ -21,9 +22,6 @@ static DEFINE_SPINLOCK(g_stepbp_lock);
 static DEFINE_MUTEX(g_stepbp_mutex);
 static pid_t g_stepbp_active_pid;
 static bool g_stepbp_stopping;
-static bool g_stepbp_hook_registered;
-static bool g_stepbp_rseq_hook_registered;
-static bool g_stepbp_switch_hook_registered;
 
 #define STEPBP_LOG_LIMITED(counter, limit, fmt, ...)  \
     do                                                \
@@ -37,6 +35,8 @@ static atomic_t g_stepbp_log_switch = ATOMIC_INIT(0);
 static atomic_t g_stepbp_log_syscall = ATOMIC_INIT(0);
 static atomic_t g_stepbp_log_rseq = ATOMIC_INIT(0);
 static atomic_t g_stepbp_log_hit = ATOMIC_INIT(0);
+
+static bool stepbp_rseq_hook_installed(void);
 
 static inline void stepbp_debug_reset(void)
 {
@@ -74,6 +74,20 @@ static inline bool stepbp_info_has_active_point(struct break_point *info)
     }
 
     return false;
+}
+
+static inline bool stepbp_monitor_active(void)
+{
+    return READ_ONCE(g_stepbp_info) &&
+           READ_ONCE(g_stepbp_active_pid) > 0 &&
+           !READ_ONCE(g_stepbp_stopping);
+}
+
+static inline void stepbp_publish_monitor(struct break_point *info, bool stopping)
+{
+    WRITE_ONCE(g_stepbp_info, info);
+    WRITE_ONCE(g_stepbp_active_pid, info ? info->pid : 0);
+    WRITE_ONCE(g_stepbp_stopping, stopping);
 }
 
 // 判断当前线程是否属于目标 pid/tgid。
@@ -127,28 +141,72 @@ static inline void stepbp_disable_task_single_step(struct task_struct *task)
     stepbp_clear_regs_single_step(task_pt_regs(task));
 }
 
-// 给目标进程下现有线程设置单步返回现场。
-static void stepbp_enable_pid_tasks(pid_t target_pid)
+static inline void stepbp_apply_task_single_step(struct task_struct *task, bool enable)
+{
+    if (enable)
+        stepbp_enable_task_single_step(task);
+    else
+        stepbp_disable_task_single_step(task);
+}
+
+static int stepbp_scan_pid_tasks_locked(pid_t target_pid, bool enable)
 {
     struct task_struct *process;
     struct task_struct *task;
-    int armed_count = 0;
+    int touched_count = 0;
 
-    if (target_pid <= 0)
-        return;
-
-    // rcu_read_lock() 保护进程/线程链表遍历期间 task_struct 不被并发释放。
-    rcu_read_lock();
-    // for_each_process_thread() 遍历系统内所有进程及其线程，这里筛选目标 pid/tgid 的线程。
     for_each_process_thread(process, task)
     {
-        if (stepbp_task_matches(task, target_pid))
+        if (!stepbp_task_matches(task, target_pid))
+            continue;
+
+        stepbp_apply_task_single_step(task, enable);
+        touched_count++;
+    }
+
+    return touched_count;
+}
+
+static int stepbp_apply_pid_tasks(pid_t target_pid, bool enable)
+{
+    struct task_struct *target_task;
+    struct task_struct *task;
+    int touched_count = 0;
+
+    if (target_pid <= 0)
+        return 0;
+
+    rcu_read_lock();
+    target_task = find_task_by_vpid(target_pid);
+    if (!target_task)
+    {
+        touched_count = stepbp_scan_pid_tasks_locked(target_pid, enable);
+        goto out_unlock;
+    }
+
+    if (target_task->tgid == target_pid)
+    {
+        for_each_thread(target_task, task)
         {
-            stepbp_enable_task_single_step(task);
-            armed_count++;
+            stepbp_apply_task_single_step(task, enable);
+            touched_count++;
         }
     }
+    else
+    {
+        stepbp_apply_task_single_step(target_task, enable);
+        touched_count = 1;
+    }
+
+out_unlock:
     rcu_read_unlock();
+    return touched_count;
+}
+
+// 给目标进程下现有线程设置单步返回现场。
+static void stepbp_enable_pid_tasks(pid_t target_pid)
+{
+    int armed_count = stepbp_apply_pid_tasks(target_pid, true);
 
     STEPBP_LOG_LIMITED(g_stepbp_log_enable, 2,
                        "enable pid=%d armed_tasks=%d current pid=%d tgid=%d comm=%s\n",
@@ -158,22 +216,7 @@ static void stepbp_enable_pid_tasks(pid_t target_pid)
 // 清理目标进程线程保存现场中的单步状态。
 static void stepbp_disable_pid_tasks(pid_t target_pid)
 {
-    struct task_struct *process;
-    struct task_struct *task;
-
-    if (target_pid <= 0)
-        return;
-
-    // 遍历 task 链表同样需要 RCU 读侧保护。
-    rcu_read_lock();
-    for_each_process_thread(process, task)
-    {
-        if (task->tgid == target_pid || task->pid == target_pid)
-        {
-            stepbp_disable_task_single_step(task);
-        }
-    }
-    rcu_read_unlock();
+    stepbp_apply_pid_tasks(target_pid, false);
 }
 
 // syscall_trace_exit() 会在 _TIF_SINGLESTEP 下调用 report_syscall(PTRACE_SYSCALL_EXIT)，
@@ -184,11 +227,13 @@ static void stepbp_disable_pid_tasks(pid_t target_pid)
 static int work_trampoline_stepbp_syscall_trace_exit(struct pt_regs *hook_regs)
 {
     struct pt_regs *regs;
+    pid_t target_pid;
 
     if (!hook_regs)
         return 0;
 
-    if (g_stepbp_stopping || !stepbp_current_task_matches(g_stepbp_active_pid))
+    target_pid = READ_ONCE(g_stepbp_active_pid);
+    if (!stepbp_monitor_active() || !stepbp_current_task_matches(target_pid))
         return 0;
 
     if (!test_thread_flag(TIF_SINGLESTEP))
@@ -198,7 +243,7 @@ static int work_trampoline_stepbp_syscall_trace_exit(struct pt_regs *hook_regs)
     if (!regs || !user_mode(regs))
         return 0;
 
-    if (!g_stepbp_rseq_hook_registered)
+    if (!stepbp_rseq_hook_installed())
     {
         STEPBP_LOG_LIMITED(g_stepbp_log_syscall, 2,
                            "syscall_exit fallback no_rseq pid=%d tgid=%d\n",
@@ -222,11 +267,13 @@ static int work_trampoline_stepbp_syscall_trace_exit(struct pt_regs *hook_regs)
 static int work_trampoline_stepbp_rseq_syscall(struct pt_regs *hook_regs)
 {
     struct pt_regs *regs;
+    pid_t target_pid;
 
     if (!hook_regs)
         return 0;
 
-    if (g_stepbp_stopping || !stepbp_current_task_matches(g_stepbp_active_pid))
+    target_pid = READ_ONCE(g_stepbp_active_pid);
+    if (!stepbp_monitor_active() || !stepbp_current_task_matches(target_pid))
         return 0;
 
     regs = (struct pt_regs *)hook_regs->regs[0];
@@ -248,21 +295,15 @@ static int work_trampoline_stepbp_rseq_syscall(struct pt_regs *hook_regs)
 static int work_trampoline_stepbp_switch(struct pt_regs *hook_regs)
 {
     struct task_struct *next;
-    unsigned long flags;
     pid_t target_pid;
-    bool active;
 
     if (!hook_regs)
         return 0;
 
     next = (struct task_struct *)hook_regs->regs[1];
+    target_pid = READ_ONCE(g_stepbp_active_pid);
 
-    spin_lock_irqsave(&g_stepbp_lock, flags);
-    target_pid = g_stepbp_active_pid;
-    active = g_stepbp_info && !g_stepbp_stopping;
-    spin_unlock_irqrestore(&g_stepbp_lock, flags);
-
-    if (active && stepbp_task_matches(next, target_pid))
+    if (stepbp_monitor_active() && stepbp_task_matches(next, target_pid))
     {
         stepbp_enable_task_single_step(next);
         STEPBP_LOG_LIMITED(g_stepbp_log_switch, 4,
@@ -298,7 +339,7 @@ static int work_trampoline_stepbp_single_step(struct pt_regs *hook_regs)
     // spin_lock_irqsave() 保护 g_stepbp_info，且适合异常上下文，避免本 CPU 中断打断后重入同一把锁。
     spin_lock_irqsave(&g_stepbp_lock, flags);
     info = g_stepbp_info;
-    target_task = info && stepbp_current_task_matches(info->pid);
+    target_task = info && !g_stepbp_stopping && stepbp_current_task_matches(info->pid);
     if (target_task)
     {
         for (point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
@@ -335,7 +376,7 @@ static int work_trampoline_stepbp_single_step(struct pt_regs *hook_regs)
     }
 
     // 跳过原 single_step_handler，由 STEPBP 维护下一发用户态单步。
-    if (!g_stepbp_stopping)
+    if (!READ_ONCE(g_stepbp_stopping))
         stepbp_enable_task_single_step(current);
     hook_regs->regs[0] = 0;
     return 1;
@@ -353,6 +394,11 @@ static struct hook_entry g_stepbp_rseq_hook[] = {
 static struct hook_entry g_stepbp_switch_hook[] = {
     HOOK_ENTRY("__switch_to", work_trampoline_stepbp_switch),
 };
+
+static bool stepbp_rseq_hook_installed(void)
+{
+    return READ_ONCE(g_stepbp_rseq_hook[0].installed);
+}
 
 static void stepbp_dump_hook_symbols(void)
 {
@@ -385,14 +431,12 @@ static void stepbp_install_optional_rseq_hook(void)
     status = inline_hook_install_count(g_stepbp_rseq_hook, sizeof(g_stepbp_rseq_hook) / sizeof(g_stepbp_rseq_hook[0]));
     if (status)
     {
-        g_stepbp_rseq_hook_registered = false;
         ls_log_tag("stepbp", "optional rseq hook skipped status=%d target=0x%llx\n",
                    status,
                    (unsigned long long)g_stepbp_rseq_hook[0].target_addr);
         return;
     }
 
-    g_stepbp_rseq_hook_registered = true;
     ls_log_tag("stepbp", "optional rseq hook ok target=0x%llx\n", (unsigned long long)g_stepbp_rseq_hook[0].target_addr);
 }
 static int stepbp_install_required_hooks(void)
@@ -441,14 +485,12 @@ static void stepbp_install_optional_switch_hook(void)
     status = inline_hook_install_count(g_stepbp_switch_hook, sizeof(g_stepbp_switch_hook) / sizeof(g_stepbp_switch_hook[0]));
     if (status)
     {
-        g_stepbp_switch_hook_registered = false;
         ls_log_tag("stepbp", "optional switch hook skipped status=%d target=0x%llx\n",
                    status,
                    (unsigned long long)g_stepbp_switch_hook[0].target_addr);
         return;
     }
 
-    g_stepbp_switch_hook_registered = true;
     ls_log_tag("stepbp", "optional switch hook ok target=0x%llx\n", (unsigned long long)g_stepbp_switch_hook[0].target_addr);
 }
 
@@ -466,36 +508,21 @@ static inline void stop_stepbp_monitor(void)
         target_pid = g_stepbp_info->pid;
     else
         target_pid = g_stepbp_active_pid;
-    g_stepbp_stopping = true;
+    stepbp_publish_monitor(g_stepbp_info, true);
     spin_unlock_irqrestore(&g_stepbp_lock, flags);
 
     if (target_pid > 0)
         stepbp_disable_pid_tasks(target_pid);
 
     spin_lock_irqsave(&g_stepbp_lock, flags);
-    g_stepbp_info = NULL;
+    stepbp_publish_monitor(NULL, true);
     spin_unlock_irqrestore(&g_stepbp_lock, flags);
 
-    if (g_stepbp_switch_hook_registered)
-    {
-        inline_hook_remove_count(g_stepbp_switch_hook, sizeof(g_stepbp_switch_hook) / sizeof(g_stepbp_switch_hook[0]));
-        g_stepbp_switch_hook_registered = false;
-    }
+    inline_hook_remove_count(g_stepbp_switch_hook, sizeof(g_stepbp_switch_hook) / sizeof(g_stepbp_switch_hook[0]));
+    inline_hook_remove_count(g_stepbp_rseq_hook, sizeof(g_stepbp_rseq_hook) / sizeof(g_stepbp_rseq_hook[0]));
+    stepbp_remove_required_hooks();
 
-    if (g_stepbp_rseq_hook_registered)
-    {
-        inline_hook_remove_count(g_stepbp_rseq_hook, sizeof(g_stepbp_rseq_hook) / sizeof(g_stepbp_rseq_hook[0]));
-        g_stepbp_rseq_hook_registered = false;
-    }
-
-    if (g_stepbp_hook_registered)
-    {
-        stepbp_remove_required_hooks();
-        g_stepbp_hook_registered = false;
-    }
-
-    g_stepbp_active_pid = 0;
-    g_stepbp_stopping = false;
+    stepbp_publish_monitor(NULL, false);
     mutex_unlock(&g_stepbp_mutex);
 }
 
@@ -521,15 +548,12 @@ static inline int start_stepbp_monitor(struct break_point *info)
         ls_log_tag("stepbp", "hook install failed pid=%d status=%d\n", info->pid, status);
         return status;
     }
-    g_stepbp_hook_registered = true;
 
     stepbp_install_optional_rseq_hook();
     stepbp_install_optional_switch_hook();
 
     spin_lock_irqsave(&g_stepbp_lock, flags);
-    g_stepbp_info = info;
-    g_stepbp_active_pid = info->pid;
-    g_stepbp_stopping = false;
+    stepbp_publish_monitor(info, false);
     spin_unlock_irqrestore(&g_stepbp_lock, flags);
 
     stepbp_enable_pid_tasks(info->pid);

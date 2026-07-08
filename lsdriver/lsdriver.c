@@ -99,15 +99,15 @@ static int DispatchThreadFunction(void *data)
 				case request_op_ptebp_remove:
 					remove_process_ptebp();
 					break;
-				case request_op_tls_get_tpidr_el0:
-					req->tls_info.tpidr_el0 = get_tpidr_el0_by_name(req->pid, req->tls_info.thread_name);
-					req->status = req->tls_info.tpidr_el0 ? 0 : -ESRCH;
-					break;
 				case request_op_stepbp_set:
 					req->status = set_process_stepbp(&req->bp_info);
 					break;
 				case request_op_stepbp_remove:
 					remove_process_stepbp();
+					break;
+				case request_op_tls_get_tpidr_el0:
+					req->tls_info.tpidr_el0 = get_tpidr_el0_by_name(req->pid, req->tls_info.thread_name);
+					req->status = req->tls_info.tpidr_el0 ? 0 : -ESRCH;
 					break;
 				case request_op_kernel_exit:
 					hide_task_remove(connect_thread_task->pid);
