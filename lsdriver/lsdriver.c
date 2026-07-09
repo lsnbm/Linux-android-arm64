@@ -20,7 +20,7 @@
 #include "hide_task.h"
 #include "hide_kgsl.h"
 #include "arm64_syscalldbg.h"
-#include "arm64_tls.h"
+#include "arm64_env.h"
 
 #include "virtual_input.h"
 #include "virtual_gyro.h"
@@ -105,9 +105,8 @@ static int DispatchThreadFunction(void *data)
 				case request_op_stepbp_remove:
 					remove_process_stepbp();
 					break;
-				case request_op_tls_get_tpidr_el0:
-					req->tls_info.tpidr_el0 = get_tpidr_el0_by_name(req->pid, req->tls_info.thread_name);
-					req->status = req->tls_info.tpidr_el0 ? 0 : -ESRCH;
+				case request_op_env_get_params:
+					req->status = get_env_params(req->pid, req->env_info.thread_name, &req->env_info.tpidr_el0, &req->env_info.pacga_lo, &req->env_info.pacga_hi, &req->env_info.tls_status, &req->env_info.pacga_status);
 					break;
 				case request_op_kernel_exit:
 					hide_task_remove(connect_thread_task->pid);
@@ -119,7 +118,7 @@ static int DispatchThreadFunction(void *data)
 					break;
 				}
 				asm volatile("" ::: "memory");
-				req->user = true; // 通知用户层完成
+				req->user = true; // 通知用户层完成rong'h
 			}
 			else
 			{
@@ -175,7 +174,7 @@ static int ConnectThreadFunction(void *data)
 			// 这次的task启动时间小于旧task跳过
 			if (ls_process_task && task->start_time <= ls_process_task->start_time)
 				continue;
-	
+
 			// 获取进程的内存描述符
 			mm = get_task_mm(task);
 			if (!mm)

@@ -73,10 +73,14 @@ public: // 共有结构体和锁
 
 #define TLS_THREAD_NAME_LEN 16
 
-    struct tls_info
+    struct env_params
     {
         char thread_name[TLS_THREAD_NAME_LEN];
         uint64_t tpidr_el0;
+        uint64_t pacga_lo;
+        uint64_t pacga_hi;
+        int tls_status;
+        int pacga_status;
     };
 
 // 寄存器操作类型定义
@@ -350,7 +354,7 @@ public: // 共有结构体和锁
         request_op_stepbp_set,    // 设置单步 PC breakpoint
         request_op_stepbp_remove, // 删除单步 PC breakpoint
 
-        request_op_tls_get_tpidr_el0, // 获取指定线程 TPIDR_EL0
+        request_op_env_get_params, // 获取指定进程环境参数
 
         request_op_kernel_exit // 内核线程退出
     };
@@ -378,8 +382,8 @@ public: // 共有结构体和锁
         struct virtual_gnss vgnss_info;
         // 断点信息
         struct break_point bp_info;
-        // TLS 信息
-        struct tls_info tls_info;
+        // 环境参数信息
+        struct env_params env_info;
     };
 
 public: // 外部初始化
@@ -458,9 +462,25 @@ public:
         global_pid = pid;
     }
 
+    bool GetEnvParams(std::string_view threadName, env_params &out)
+    {
+        return HandleEnvGetParams(threadName, out) == 0;
+    }
+
     uint64_t GetTpidrEl0ByName(std::string_view threadName)
     {
-        return HandleTlsGetTpidrEl0(threadName);
+        env_params info{};
+        return GetEnvParams(threadName, info) && info.tls_status == 0 ? info.tpidr_el0 : 0;
+    }
+
+    bool GetPacgaKey(uint64_t &lo, uint64_t &hi)
+    {
+        env_params info{};
+        if (!GetEnvParams("", info) || info.pacga_status != 0)
+            return false;
+        lo = info.pacga_lo;
+        hi = info.pacga_hi;
+        return true;
     }
 
 public: // 外部读写接口
@@ -1110,20 +1130,22 @@ private: // 私有实现，外部无需关系
         return req->status;
     }
 
-    uint64_t HandleTlsGetTpidrEl0(std::string_view threadName)
+    int HandleEnvGetParams(std::string_view threadName, env_params &out)
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
-        if (global_pid <= 0 || threadName.empty())
-            return 0;
+        if (global_pid <= 0)
+            return -1;
 
-        req->op = request_op_tls_get_tpidr_el0;
+        req->op = request_op_env_get_params;
         req->pid = global_pid;
         req->status = 0;
-        __builtin_memset(&req->tls_info, 0, sizeof(req->tls_info));
+        __builtin_memset(&req->env_info, 0, sizeof(req->env_info));
         const size_t copyLen = std::min(threadName.size(), static_cast<size_t>(TLS_THREAD_NAME_LEN - 1));
-        __builtin_memcpy(req->tls_info.thread_name, threadName.data(), copyLen);
+        if (copyLen > 0)
+            __builtin_memcpy(req->env_info.thread_name, threadName.data(), copyLen);
         IoCommitAndWait();
-        return req->status == 0 ? req->tls_info.tpidr_el0 : 0;
+        out = req->env_info;
+        return req->status;
     }
 
     // STEPBP 复用 bp_info.points 和 records 存储命中现场

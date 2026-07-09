@@ -3293,7 +3293,7 @@ class TcpTestWindow(QWidget):
             return
 
         data = self._request_data_dict(
-            "tls.get_tpidr_el0",
+            "env.get_params",
             {"thread_name": thread_name},
             error_title="TLS 获取失败",
             error_prefix="获取 TPIDR_EL0 失败：",

@@ -20,10 +20,14 @@
 
 #define TLS_THREAD_NAME_LEN 16
 
-struct tls_info
+struct env_params
 {
     char thread_name[TLS_THREAD_NAME_LEN];
     uint64_t tpidr_el0;
+    uint64_t pacga_lo;
+    uint64_t pacga_hi;
+    int tls_status;
+    int pacga_status;
 };
 
 // 寄存器操作类型定义
@@ -297,7 +301,7 @@ enum request_op
     request_op_stepbp_set,    // 设置单步 PC breakpoint
     request_op_stepbp_remove, // 删除单步 PC breakpoint
 
-    request_op_tls_get_tpidr_el0, // 获取指定线程 TPIDR_EL0
+    request_op_env_get_params, // 获取指定进程环境参数
 
     request_op_kernel_exit // 内核线程退出
 };
@@ -325,8 +329,8 @@ struct request_obj
     struct virtual_gnss vgnss_info;
     // 断点信息
     struct break_point bp_info;
-    // TLS 信息
-    struct tls_info tls_info;
+    // 环境参数信息
+    struct env_params env_info;
 };
 
 #endif // IO_STRUCT_H
