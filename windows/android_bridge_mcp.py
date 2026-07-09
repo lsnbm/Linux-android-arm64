@@ -276,12 +276,10 @@ def android_target_current() -> dict[str, Any]:
 
 
 @mcp.tool()
-def android_tls_get_tpidr_el0(thread_name: str) -> dict[str, Any]:
-    """Read TPIDR_EL0, the ARM64 userspace TLS base, for a named thread in the current target process."""
-    name = str(thread_name).strip()
-    if not name:
-        raise ValueError("thread_name must not be empty")
-    return _call_bridge_operation("tls.get_tpidr_el0", {"thread_name": name})
+def android_env_get_params(thread_name: str = "") -> dict[str, Any]:
+    """Read ARM64 environment parameters for the current target process."""
+    name = str(thread_name or "").strip()
+    return _call_bridge_operation("env.get_params", {"thread_name": name})
 
 
 @mcp.tool()
@@ -719,12 +717,12 @@ TOOL_META: dict[str, dict[str, Any]] = {
         "parameter_notes": {},
         "result_notes": "Returns active PID used by scan/view/breakpoint operations.",
     },
-    "android_tls_get_tpidr_el0": {
+    "android_env_get_params": {
         "group": "Target Selection",
-        "use_when": "Read ARM64 TPIDR_EL0 userspace TLS base for a named thread in the current target process.",
+        "use_when": "Read ARM64 environment parameters for the current target process, including TPIDR_EL0 and PACGA key fields.",
         "example": {"thread_name": "UnityMain"},
-        "parameter_notes": {"thread_name": "Linux task comm, truncated by the kernel to 15 visible characters."},
-        "result_notes": "Returns data.tpidr_el0 and data.tpidr_el0_hex.",
+        "parameter_notes": {"thread_name": "Linux task comm, truncated by the kernel to 15 visible characters; leave empty when only PACGA fields are needed."},
+        "result_notes": "Returns data.tpidr_el0/data.tpidr_el0_hex, data.pacga_lo/data.pacga_hi, and per-field status codes.",
     },
     "android_memory_regions": {
         "group": "Target Selection",

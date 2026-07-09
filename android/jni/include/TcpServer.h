@@ -825,7 +825,7 @@ namespace
                 "target.pid.set",
                 "target.pid.current",
                 "target.attach.package",
-                "tls.get_tpidr_el0",
+                "env.get_params",
                 "memory.info.full",
                 "module.resolve",
                 "scan.start",
@@ -1006,20 +1006,30 @@ namespace
             return okData({{"pid", pid}});
         }
 
-        if (op == "tls.get_tpidr_el0")
+        if (op == "env.get_params")
         {
-            const auto threadName = requiredString("thread_name", "thread_name");
-            if (std::holds_alternative<json>(threadName))
-                return std::get<json>(threadName);
+            const std::string threadName = optionalString("thread_name");
 
             const int pid = dr->GetGlobalPid();
             if (pid <= 0)
                 return fail("全局PID未设置，请先执行 target.pid.set 或 target.attach.package");
 
-            const auto value = dr->GetTpidrEl0ByName(std::get<std::string>(threadName));
-            if (!value)
-                return fail("未找到线程或 TPIDR_EL0 为 0");
-            return okData({{"pid", pid}, {"thread_name", std::get<std::string>(threadName)}, {"tpidr_el0", value}, {"tpidr_el0_hex", std::format("0x{:X}", value)}});
+            Driver::env_params info{};
+            if (!dr->GetEnvParams(threadName, info))
+                return fail("获取环境参数失败");
+
+            return okData({
+                {"pid", pid},
+                {"thread_name", threadName},
+                {"tpidr_el0", info.tpidr_el0},
+                {"tpidr_el0_hex", std::format("0x{:X}", info.tpidr_el0)},
+                {"pacga_lo", info.pacga_lo},
+                {"pacga_hi", info.pacga_hi},
+                {"pacga_lo_hex", std::format("0x{:X}", info.pacga_lo)},
+                {"pacga_hi_hex", std::format("0x{:X}", info.pacga_hi)},
+                {"tls_status", info.tls_status},
+                {"pacga_status", info.pacga_status},
+            });
         }
 
         if (op == "memory.info.full")
