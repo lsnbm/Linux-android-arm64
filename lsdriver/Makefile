@@ -4,7 +4,7 @@ obj-m += lsdriver.o
 
 
 # 开启debug输出，有pr_debug输出
-#ccflags-y += -DDEBUG
+ccflags-y += -DDEBUG
 
 #O3
 ccflags-y += -O3

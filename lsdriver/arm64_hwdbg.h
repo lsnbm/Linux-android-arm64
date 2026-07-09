@@ -357,7 +357,7 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
 
                 point->on_hit((void *)regs, (void *)point);
                 // 模拟指令步过,失败走禁用进行步过
-                if (!emulate_insn(regs))
+                if (!emulate_insn(regs, NULL))
                 {
                     // 只清 enable 位，保留原有寄存器配置，继续走原异常处理链
                     write_wb_reg(AARCH64_DBG_REG_BCR, slot, ctrl & ~0x1);
@@ -456,7 +456,7 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
 
     // 模拟指令步过,失败走禁用进行步过
     {
-        if (!emulate_insn(regs))
+        if (!emulate_insn(regs, NULL))
         {
             // 只清 enable 位，保留原有寄存器配置，继续走原异常处理链
             write_wb_reg(AARCH64_DBG_REG_WCR, hit_slot, hit_ctrl & ~0x1);
@@ -539,80 +539,62 @@ static void install_hwbp_regs_on_cpu(struct break_point *bp_info)
 // 禁用当前 CPU 上的硬件断点/观察点控制寄存器，保留原有配置位
 static void clear_hwbp_regs_on_cpu(void *data)
 {
-    int i;
+    int brp_slot = 0;
+    int wrp_slot = 0;
     int point_slot;
     uint32_t ctrl;
     uint32_t expected_ctrl;
     uint64_t addr;
     struct arch_hw_breakpoint info;
     struct break_point *bp_info = g_bp_info;
-    bool should_disable;
 
     (void)data;
 
     if (!bp_info)
         return;
 
-    for (i = 0; i < num_brps; i++)
+    for (point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
     {
-        addr = read_wb_reg(AARCH64_DBG_REG_BVR, i);
-        ctrl = read_wb_reg(AARCH64_DBG_REG_BCR, i);
+        struct bp_point *point = &bp_info->points[point_slot];
 
-        if (!(ctrl & 0x1) || addr == 0)
+        if (!hwbp_point_is_active(point) || hw_breakpoint_parse(point, 0, &info))
             continue;
 
-        should_disable = false;
-        for (point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
+        expected_ctrl = encode_ctrl_reg(info.ctrl);
+        if (info.ctrl.type == ARM_BREAKPOINT_EXECUTE)
         {
-            struct bp_point *point = &bp_info->points[point_slot];
-
-            if (!hwbp_point_is_active(point) ||
-                point->bt != BP_BREAKPOINT_X ||
-                hw_breakpoint_parse(point, 0, &info) ||
-                info.ctrl.type != ARM_BREAKPOINT_EXECUTE ||
-                info.address != addr)
+            if (brp_slot >= num_brps)
                 continue;
 
-            expected_ctrl = encode_ctrl_reg(info.ctrl);
-            if ((expected_ctrl & ~0x1) != (ctrl & ~0x1))
-                continue;
+            addr = read_wb_reg(AARCH64_DBG_REG_BVR, brp_slot);
+            ctrl = read_wb_reg(AARCH64_DBG_REG_BCR, brp_slot);
 
-            should_disable = true;
+            if ((ctrl & 0x1) &&
+                info.address == addr &&
+                ((expected_ctrl & ~0x1) == (ctrl & ~0x1)))
+            {
+                write_wb_reg(AARCH64_DBG_REG_BCR, brp_slot, ctrl & ~0x1);
+            }
+
+            brp_slot++;
         }
-
-        if (should_disable)
-            write_wb_reg(AARCH64_DBG_REG_BCR, i, ctrl & ~0x1);
-    }
-
-    for (i = 0; i < num_wrps; i++)
-    {
-        addr = read_wb_reg(AARCH64_DBG_REG_WVR, i);
-        ctrl = read_wb_reg(AARCH64_DBG_REG_WCR, i);
-
-        if (!(ctrl & 0x1) || addr == 0)
-            continue;
-
-        should_disable = false;
-        for (point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
+        else
         {
-            struct bp_point *point = &bp_info->points[point_slot];
-
-            if (!hwbp_point_is_active(point) ||
-                point->bt == BP_BREAKPOINT_X ||
-                hw_breakpoint_parse(point, 0, &info) ||
-                info.ctrl.type == ARM_BREAKPOINT_EXECUTE ||
-                info.address != addr)
+            if (wrp_slot >= num_wrps)
                 continue;
 
-            expected_ctrl = encode_ctrl_reg(info.ctrl);
-            if ((expected_ctrl & ~0x1) != (ctrl & ~0x1))
-                continue;
+            addr = read_wb_reg(AARCH64_DBG_REG_WVR, wrp_slot);
+            ctrl = read_wb_reg(AARCH64_DBG_REG_WCR, wrp_slot);
 
-            should_disable = true;
+            if ((ctrl & 0x1) &&
+                info.address == addr &&
+                ((expected_ctrl & ~0x1) == (ctrl & ~0x1)))
+            {
+                write_wb_reg(AARCH64_DBG_REG_WCR, wrp_slot, ctrl & ~0x1);
+            }
+
+            wrp_slot++;
         }
-
-        if (should_disable)
-            write_wb_reg(AARCH64_DBG_REG_WCR, i, ctrl & ~0x1);
     }
 }
 
@@ -640,7 +622,7 @@ static unsigned long __attribute__((used, __noinline__)) ret_work_finish_task_sw
         else
         {
             clear_hwbp_regs_on_cpu(NULL);
-            disable_hardware_debug_on_cpu(NULL);
+            // disable_hardware_debug_on_cpu(NULL);
         }
     }
 

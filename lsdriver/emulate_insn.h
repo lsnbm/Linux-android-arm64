@@ -56,6 +56,7 @@ enum emu_insn_result
 #define EMU_SYSREG_INSN_MASK 0xFFF00000U
 #define EMU_SYSREG_MRS_INSN 0xD5300000U
 #define EMU_SYSREG_MSR_INSN 0xD5100000U
+#define EMU_HINT_NOP_INSN 0xD503201FU
 #define EMU_SYSREG_KEY(OP0, OP1, CRN, CRM, OP2) \
     ((((OP0) & 0x3) << 14) | (((OP1) & 0x7) << 11) | (((CRN) & 0xF) << 7) | (((CRM) & 0xF) << 3) | ((OP2) & 0x7))
 #define EMU_SYSREG_KEY_FROM_INSN(INSN) (((INSN) >> 5) & 0xFFFFU)
@@ -208,17 +209,21 @@ static __always_inline uint64_t emu_mask_for_bytes(int bytes)
 static __always_inline bool emu_is_lse_atomic(uint32_t insn)
 {
     if ((insn & 0x3F200C00) == 0x38200000)
-        return true; // SWP / LDADD / LDCLR / LDEOR / LDSET / LD{S,U}{MAX,MIN}
+    {
+        uint32_t op = (insn >> 12) & 0xF;
+
+        if (op <= 8)
+            return true; // SWP / LDADD / LDCLR / LDEOR / LDSET / LD{S,U}{MAX,MIN}
+    }
     if ((insn & 0x3FA07C00) == 0x08A07C00)
         return true; // CAS / CASA / CASL / CASAL
-    if ((insn & 0x3F000000) == 0x08000000)
+    if ((insn & 0x3FA07C00) == 0x08207C00)
     {
         uint32_t size = (insn >> 30) & 0x3;
         uint32_t op = (insn >> 21) & 0xF;
         uint32_t rt2 = (insn >> 10) & 0x1F;
 
-        return !(size & 2) && rt2 == 31 &&
-               (op == 0x2 || op == 0x3 || op == 0x6 || op == 0x7);
+        return size < 2 && rt2 == 31 && (op == 0x1 || op == 0x3);
     }
     return false;
 }
@@ -1204,6 +1209,9 @@ static __always_inline void emu_fp_set_low64(__uint128_t *v, uint64_t x)
 
 static __always_inline enum emu_insn_result emu_simulate_system_insn(struct pt_regs *regs, uint32_t insn, uint64_t pc)
 {
+    if (insn == EMU_HINT_NOP_INSN)
+        return EMU_INSN_NOP;
+
     if (((insn & EMU_SYSREG_INSN_MASK) == EMU_SYSREG_MRS_INSN) ||
         ((insn & EMU_SYSREG_INSN_MASK) == EMU_SYSREG_MSR_INSN))
     {
@@ -1362,6 +1370,8 @@ static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct 
         uint64_t old, newval;
         __uint128_t mem;
 
+        if (op > 8)
+            return EMU_INSN_SKIP;
         if (addr & (bytes - 1))
             return EMU_INSN_FAULT;
         if (emu_read_mem(addr, bytes, &mem))
@@ -1452,8 +1462,8 @@ static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct 
     if (emu_is_lse_atomic(insn))
     {
         uint32_t op = (insn >> 21) & 0xF;
-        bool acquire = op & 0x4;
-        bool release = op & 0x1;
+        bool acquire = op & 0x2;
+        bool release = (insn >> 15) & 1;
         uint32_t rs = (insn >> 16) & 0x1F;
         uint32_t rn = (insn >> 5) & 0x1F;
         uint32_t rt = insn & 0x1F;
@@ -1746,7 +1756,14 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
     write_fpsr(fpsr);
     write_fpcr(fpcr);
 
-    if ((insn & 0xFF200C00) == 0x1E200800)
+    if ((insn & 0xFFFFFFE0) == 0x6F00E400) // MOVI Vd.2D, #0
+    {
+        uint32_t rd = insn & 0x1F;
+
+        fp_regs[rd] = 0;
+        result = EMU_INSN_HANDLED;
+    }
+    else if ((insn & 0xFF200C00) == 0x1E200800)
     {
         uint32_t type = (insn >> 22) & 0x3;
         uint32_t opcode = (insn >> 12) & 0xF;
@@ -2057,7 +2074,7 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
 
         result = EMU_INSN_HANDLED;
     }
-    else if ((insn & 0x7F3F7C00) == 0x1E260000)
+    else if ((insn & 0x7F3E7C00) == 0x1E260000)
     {
         bool sf = (insn >> 31) & 1;
         bool gp_to_fp = (insn >> 16) & 1;
@@ -2216,6 +2233,9 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
             break;
         case 0x1E22C000: // FCVT Dd, Sn
             EMU_FP_UN("fcvt d0, s1", &fp_regs[rd], &fp_regs[rn]);
+            break;
+        case 0x7E61D800: // UCVTF Dd, Dn
+            EMU_FP_UN("ucvtf d0, d1", &fp_regs[rd], &fp_regs[rn]);
             break;
         default:
             convert_handled = false;
@@ -3066,15 +3086,18 @@ static __always_inline enum emu_insn_result emu_simulate_data_processing_insn(st
     return EMU_INSN_SKIP;
 }
 
-// 取指后按大类分发；每个大类的具体语义由对应的大 handler 完成。
-static __always_inline bool emulate_insn(struct pt_regs *regs)
+static __always_inline bool emulate_insn(struct pt_regs *regs, const uint32_t *specified_insn)
 {
     uint32_t insn;
     uint64_t pc = regs->pc;
     uint32_t iclass;
     enum emu_insn_result result = EMU_INSN_SKIP;
 
-    if (__get_user(insn, (uint32_t __user *)pc))
+    if (specified_insn)
+    {
+        insn = *specified_insn;
+    }
+    else if (__get_user(insn, (uint32_t __user *)pc))
     {
         ls_log_tag("emulate_insn", "failed pc=0x%llx insn_read_failed\n",
                    (unsigned long long)pc);
@@ -3085,6 +3108,7 @@ static __always_inline bool emulate_insn(struct pt_regs *regs)
 
     if (((insn & EMU_SYSREG_INSN_MASK) == EMU_SYSREG_MRS_INSN) ||
         ((insn & EMU_SYSREG_INSN_MASK) == EMU_SYSREG_MSR_INSN) ||
+        insn == EMU_HINT_NOP_INSN ||
         ((insn & 0x1F000000) == 0x10000000))
     {
         result = emu_simulate_system_insn(regs, insn, pc);
