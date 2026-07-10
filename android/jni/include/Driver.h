@@ -58,19 +58,14 @@ public: // 共有结构体和锁
                     asm volatile("yield" ::: "memory");
                 }
             }
-
-            asm volatile("" ::: "memory");
         }
 
         void unlock() noexcept
         {
-            asm volatile("" ::: "memory");
             __atomic_store_n(&locked, 0, __ATOMIC_RELEASE);
-            asm volatile("" ::: "memory");
         }
     };
     SpinLock m_mutex;
-
 #define TLS_THREAD_NAME_LEN 16
 
     struct env_params
@@ -271,9 +266,9 @@ public: // 共有结构体和锁
 
     struct virtual_gyro
     {
-        int gyro_x;
-        int gyro_y;
-        int gyro_z;
+        int gyro_x_mrad_s;
+        int gyro_y_mrad_s;
+        int gyro_z_mrad_s;
     };
 
     struct virtual_input
@@ -462,27 +457,6 @@ public:
         global_pid = pid;
     }
 
-    bool GetEnvParams(std::string_view threadName, env_params &out)
-    {
-        return HandleEnvGetParams(threadName, out) == 0;
-    }
-
-    uint64_t GetTpidrEl0ByName(std::string_view threadName)
-    {
-        env_params info{};
-        return GetEnvParams(threadName, info) && info.tls_status == 0 ? info.tpidr_el0 : 0;
-    }
-
-    bool GetPacgaKey(uint64_t &lo, uint64_t &hi)
-    {
-        env_params info{};
-        if (!GetEnvParams("", info) || info.pacga_status != 0)
-            return false;
-        lo = info.pacga_lo;
-        hi = info.pacga_hi;
-        return true;
-    }
-
 public: // 外部读写接口
     template <typename T>
     T Read(uint64_t address)
@@ -534,9 +508,9 @@ public: // 外部输入接口
 
     void TouchUp(int slot) { HandleTouchEvent(request_op_touch_up, slot, 1, 1, 1, 1); }
 
-    void GyroReport(int gyro_x, int gyro_y, int gyro_z)
+    void GyroReport(int gyro_x_mrad_s, int gyro_y_mrad_s, int gyro_z_mrad_s)
     {
-        HandleGyroReport(gyro_x, gyro_y, gyro_z);
+        HandleGyroReport(gyro_x_mrad_s, gyro_y_mrad_s, gyro_z_mrad_s);
     }
 
     void GnssReport(int latitude_e7, int longitude_e7)
@@ -870,6 +844,19 @@ public: // 外部硬件断点接口
         }
     }
 
+public:
+    // 查询指定线程的 TLS 和目标进程的 PACGA 环境参数
+    bool GetEnvParams(std::string_view threadName)
+    {
+        return HandleEnvGetParams(threadName) == 0;
+    }
+
+    // 获取最近一次环境参数查询结果
+    const env_params &GetEnvParamsRef() const
+    {
+        return req->env_info;
+    }
+
 private: // 私有实现，外部无需关系
     struct request_obj *req = nullptr;
     int global_pid = 0;
@@ -878,19 +865,17 @@ private: // 私有实现，外部无需关系
     {
         asm volatile("" ::: "memory");
         req->kernel = true;
-        asm volatile("" ::: "memory");
 
         // 等内核完成
+        asm volatile("" ::: "memory");
         while (!req->user)
         {
-            asm volatile("yield" ::: "memory");
+            asm volatile("yield");
         }
 
-        asm volatile("" ::: "memory");
-
         // 消费完成标志
-        req->user = false;
         asm volatile("" ::: "memory");
+        req->user = false;
     }
 
     // 初始化驱动
@@ -977,7 +962,7 @@ private: // 私有实现，外部无需关系
                 break;
             }
         };
-
+        asm volatile("" ::: "memory");
         while (processed < size)
         {
             asm volatile("" ::: "memory");
@@ -987,12 +972,12 @@ private: // 私有实现，外部无需关系
             req->vmemrw_info.rw_addr = addr + processed;
             req->vmemrw_info.size = chunk;
 
+            asm volatile("" ::: "memory");
             if (!is_read)
                 copy_virtual_memory_chunk(req->vmemrw_info.user_buffer, static_cast<uint8_t *>(buffer) + processed, chunk);
-
-            asm volatile("" ::: "memory");
             IoCommitAndWait();
 
+            asm volatile("" ::: "memory");
             if (req->status <= 0)
                 return req->status;
 
@@ -1002,7 +987,7 @@ private: // 私有实现，外部无需关系
 
             processed += chunk;
         }
-
+        asm volatile("" ::: "memory");
         return req->status;
     }
 
@@ -1056,13 +1041,13 @@ private: // 私有实现，外部无需关系
     }
 
     // 陀螺仪事件，单位为 rad/s * 1000
-    void HandleGyroReport(int gyro_x, int gyro_y, int gyro_z)
+    void HandleGyroReport(int gyro_x_mrad_s, int gyro_y_mrad_s, int gyro_z_mrad_s)
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
         req->op = request_op_gyro_report;
-        req->vgyro_info.gyro_x = gyro_x;
-        req->vgyro_info.gyro_y = gyro_y;
-        req->vgyro_info.gyro_z = gyro_z;
+        req->vgyro_info.gyro_x_mrad_s = gyro_x_mrad_s;
+        req->vgyro_info.gyro_y_mrad_s = gyro_y_mrad_s;
+        req->vgyro_info.gyro_z_mrad_s = gyro_z_mrad_s;
         IoCommitAndWait();
     }
 
@@ -1130,24 +1115,6 @@ private: // 私有实现，外部无需关系
         return req->status;
     }
 
-    int HandleEnvGetParams(std::string_view threadName, env_params &out)
-    {
-        std::scoped_lock<SpinLock> lock(m_mutex);
-        if (global_pid <= 0)
-            return -1;
-
-        req->op = request_op_env_get_params;
-        req->pid = global_pid;
-        req->status = 0;
-        __builtin_memset(&req->env_info, 0, sizeof(req->env_info));
-        const size_t copyLen = std::min(threadName.size(), static_cast<size_t>(TLS_THREAD_NAME_LEN - 1));
-        if (copyLen > 0)
-            __builtin_memcpy(req->env_info.thread_name, threadName.data(), copyLen);
-        IoCommitAndWait();
-        out = req->env_info;
-        return req->status;
-    }
-
     // STEPBP 复用 bp_info.points 和 records 存储命中现场
     int HandleStepbpEvent(request_op op, std::span<const bp_point> points = {})
     {
@@ -1171,6 +1138,24 @@ private: // 私有实现，外部无需关系
                 req->bp_info.points[index].bs = points[index].bs;
             }
         }
+        IoCommitAndWait();
+        return req->status;
+    }
+
+    // 获取指定进程的线程 TLS 或 PACGA 环境参数
+    int HandleEnvGetParams(std::string_view threadName)
+    {
+        std::scoped_lock<SpinLock> lock(m_mutex);
+        if (global_pid <= 0)
+            return -1;
+
+        req->op = request_op_env_get_params;
+        req->pid = global_pid;
+        req->status = 0;
+        __builtin_memset(&req->env_info, 0, sizeof(req->env_info));
+        const size_t copyLen = std::min(threadName.size(), static_cast<size_t>(TLS_THREAD_NAME_LEN - 1));
+        if (copyLen > 0)
+            __builtin_memcpy(req->env_info.thread_name, threadName.data(), copyLen);
         IoCommitAndWait();
         return req->status;
     }

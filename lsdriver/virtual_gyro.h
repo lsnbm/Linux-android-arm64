@@ -13,7 +13,7 @@
     version(0), sensor(4), type(8), reserved0(12), timestamp(16), data[0](24)
   Gyroscope is SENSOR_TYPE_GYROSCOPE == 4. Values are rad/s.
 
-  用户层 ABI: gyro_x/y/z = rad/s * 1000
+    用户层 ABI: gyro_x_mrad_s/gyro_y_mrad_s/gyro_z_mrad_s = rad/s * 1000
   限制不建议使用float主要来自 Linux 内核对 FPU/NEON/SIMD 上下文的管理规则，
   不是 C 语言本身限制，也不是编译器语法限制。
   内核为了性能不会像用户态那样在每次内核进入/退出、抢占、中断时都自动保存和恢复浮点寄存器。
@@ -55,14 +55,14 @@ enum vgyro_sendto_arg_mode
 static struct
 {
     bool active;
-    int gyro_x;
-    int gyro_y;
-    int gyro_z;
+    int gyro_x_mrad_s;
+    int gyro_y_mrad_s;
+    int gyro_z_mrad_s;
 } vg = {
     .active = false,
-    .gyro_x = 0,
-    .gyro_y = 0,
-    .gyro_z = 0,
+    .gyro_x_mrad_s = 0,
+    .gyro_y_mrad_s = 0,
+    .gyro_z_mrad_s = 0,
 };
 
 static DEFINE_MUTEX(vgyro_lock);
@@ -266,9 +266,9 @@ static int vgyro_patch_kernel_events(char *buf, size_t len)
 {
     size_t off;
     int patched = 0;
-    u32 fx = vgyro_milli_to_float_bits(READ_ONCE(vg.gyro_x));
-    u32 fy = vgyro_milli_to_float_bits(READ_ONCE(vg.gyro_y));
-    u32 fz = vgyro_milli_to_float_bits(READ_ONCE(vg.gyro_z));
+    u32 fx = vgyro_milli_to_float_bits(READ_ONCE(vg.gyro_x_mrad_s));
+    u32 fy = vgyro_milli_to_float_bits(READ_ONCE(vg.gyro_y_mrad_s));
+    u32 fz = vgyro_milli_to_float_bits(READ_ONCE(vg.gyro_z_mrad_s));
 
     if (!buf || !vgyro_buffer_maybe_events(len))
         return 0;
@@ -342,8 +342,8 @@ static int vgyro_handle_sendto(struct pt_regs *regs, enum vgyro_sendto_arg_mode 
                        missing, len);
         else
             ls_log_tag("vgyro", "sendto patched %d gyro event(s) len=%zu mode=%d mrad=%d/%d/%d\n",
-                       patched, len, mode, READ_ONCE(vg.gyro_x),
-                       READ_ONCE(vg.gyro_y), READ_ONCE(vg.gyro_z));
+                       patched, len, mode, READ_ONCE(vg.gyro_x_mrad_s),
+                       READ_ONCE(vg.gyro_y_mrad_s), READ_ONCE(vg.gyro_z_mrad_s));
     }
 
 out:
@@ -412,9 +412,9 @@ static inline int v_gyro_init(void)
 
     mutex_lock(&vgyro_lock);
 
-    WRITE_ONCE(vg.gyro_x, 0);
-    WRITE_ONCE(vg.gyro_y, 0);
-    WRITE_ONCE(vg.gyro_z, 0);
+    WRITE_ONCE(vg.gyro_x_mrad_s, 0);
+    WRITE_ONCE(vg.gyro_y_mrad_s, 0);
+    WRITE_ONCE(vg.gyro_z_mrad_s, 0);
     WRITE_ONCE(vg.active, true);
     ret = vgyro_install_hook_locked();
 
@@ -425,15 +425,15 @@ static inline int v_gyro_init(void)
 }
 
 // 更新虚拟陀螺仪三轴偏移值，单位为 rad/s * 1000。
-static inline int v_gyro_report(int gyro_x, int gyro_y, int gyro_z)
+static inline int v_gyro_report(int gyro_x_mrad_s, int gyro_y_mrad_s, int gyro_z_mrad_s)
 {
-    WRITE_ONCE(vg.gyro_x, gyro_x);
-    WRITE_ONCE(vg.gyro_y, gyro_y);
-    WRITE_ONCE(vg.gyro_z, gyro_z);
+    WRITE_ONCE(vg.gyro_x_mrad_s, gyro_x_mrad_s);
+    WRITE_ONCE(vg.gyro_y_mrad_s, gyro_y_mrad_s);
+    WRITE_ONCE(vg.gyro_z_mrad_s, gyro_z_mrad_s);
     WRITE_ONCE(vg.active, true);
 
     ls_log_tag("vgyro", "report mrad=%d/%d/%d hook=%d\n",
-               gyro_x, gyro_y, gyro_z, vgyro_sendto_hook_installed());
+               gyro_x_mrad_s, gyro_y_mrad_s, gyro_z_mrad_s, vgyro_sendto_hook_installed());
     return 0;
 }
 
@@ -445,9 +445,9 @@ static inline void v_gyro_destroy(void)
     mutex_lock(&vgyro_lock);
 
     WRITE_ONCE(vg.active, false);
-    WRITE_ONCE(vg.gyro_x, 0);
-    WRITE_ONCE(vg.gyro_y, 0);
-    WRITE_ONCE(vg.gyro_z, 0);
+    WRITE_ONCE(vg.gyro_x_mrad_s, 0);
+    WRITE_ONCE(vg.gyro_y_mrad_s, 0);
+    WRITE_ONCE(vg.gyro_z_mrad_s, 0);
 
     for (i = 0; i < ARRAY_SIZE(vgyro_sendto_hook_targets); i++)
         inline_hook_remove(vgyro_sendto_hook_targets[i]);

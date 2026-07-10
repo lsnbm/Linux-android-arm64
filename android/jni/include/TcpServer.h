@@ -1014,9 +1014,9 @@ namespace
             if (pid <= 0)
                 return fail("全局PID未设置，请先执行 target.pid.set 或 target.attach.package");
 
-            Driver::env_params info{};
-            if (!dr->GetEnvParams(threadName, info))
+            if (!dr->GetEnvParams(threadName))
                 return fail("获取环境参数失败");
+            const auto &info = dr->GetEnvParamsRef();
 
             return okData({
                 {"pid", pid},

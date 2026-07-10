@@ -218,9 +218,9 @@ struct virtual_gnss
 
 struct virtual_gyro
 {
-    int gyro_x;
-    int gyro_y;
-    int gyro_z;
+    int gyro_x_mrad_s;
+    int gyro_y_mrad_s;
+    int gyro_z_mrad_s;
 };
 
 struct virtual_input
