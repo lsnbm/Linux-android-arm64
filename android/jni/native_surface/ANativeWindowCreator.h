@@ -15,6 +15,7 @@
 #include <unordered_map>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 // 解析符号的宏
@@ -682,10 +683,14 @@ namespace android
         {
             uint32_t currentLayerStack = 0;
             int32_t orientation = 0;
-            int32_t left = 0;
-            int32_t top = 0;
-            int32_t right = 0;
-            int32_t bottom = 0;
+            int32_t layerStackLeft = 0;
+            int32_t layerStackTop = 0;
+            int32_t layerStackRight = 0;
+            int32_t layerStackBottom = 0;
+            int32_t displayLeft = 0;
+            int32_t displayTop = 0;
+            int32_t displayRight = 0;
+            int32_t displayBottom = 0;
         };
 
         inline std::string_view SubStringView(const std::string_view &str, std::string_view start, std::string_view end, size_t startOffset = 0)
@@ -700,25 +705,80 @@ namespace android
             return str.substr(valueStart, endIt - valueStart);
         }
 
+        inline bool ParseDisplayRect(const std::string_view &value,
+                                     int32_t *left,
+                                     int32_t *top,
+                                     int32_t *right,
+                                     int32_t *bottom)
+        {
+            if (value.empty() || !left || !top || !right || !bottom)
+                return false;
+
+            const std::string rectString(value);
+            return std::sscanf(rectString.c_str(), "Rect(%d, %d - %d, %d)", left, top, right, bottom) == 4 ||
+                   std::sscanf(rectString.c_str(), "(%d, %d - %d, %d)", left, top, right, bottom) == 4;
+        }
+
+        inline int32_t ParseDisplayOrientation(const std::string_view &value)
+        {
+            if (value.find("ROTATION_90") != std::string_view::npos)
+                return 1;
+            if (value.find("ROTATION_180") != std::string_view::npos)
+                return 2;
+            if (value.find("ROTATION_270") != std::string_view::npos)
+                return 3;
+            if (value.find("ROTATION_0") != std::string_view::npos)
+                return 0;
+            return value.empty() ? 0 : std::stoi(std::string(value));
+        }
+
         inline std::vector<DumpDisplayInfo> ParseDumpDisplayInfo(const std::string_view &dumpDisplayInfo)
         {
             std::vector<DumpDisplayInfo> result;
             size_t dumpDisplayInfoIt = std::string_view::npos;
             while ((dumpDisplayInfoIt = dumpDisplayInfo.find("DisplayDeviceInfo", dumpDisplayInfoIt + 1)) != std::string_view::npos)
             {
-                auto currentLayerStack = SubStringView(dumpDisplayInfo, "mCurrentLayerStack=", "\n", dumpDisplayInfoIt);
-                auto currentLayerStackRect = SubStringView(dumpDisplayInfo, "mCurrentLayerStackRect=", "\n", dumpDisplayInfoIt);
-                auto orientation = SubStringView(dumpDisplayInfo, "mCurrentOrientation=", "\n", dumpDisplayInfoIt);
+                const size_t nextDisplayInfo = dumpDisplayInfo.find("DisplayDeviceInfo", dumpDisplayInfoIt + 1);
+                const size_t blockEnd = nextDisplayInfo == std::string_view::npos ? dumpDisplayInfo.size() : nextDisplayInfo;
+                const std::string_view displayBlock = dumpDisplayInfo.substr(dumpDisplayInfoIt, blockEnd - dumpDisplayInfoIt);
+
+                auto currentLayerStack = SubStringView(displayBlock, "mCurrentLayerStack=", "\n");
+                auto currentLayerStackRect = SubStringView(displayBlock, "mCurrentLayerStackRect=", "\n");
+                auto currentDisplayRect = SubStringView(displayBlock, "mCurrentDisplayRect=", "\n");
+                auto orientation = SubStringView(displayBlock, "mCurrentOrientation=", "\n");
                 if (currentLayerStack.empty() || currentLayerStack == "-1" || currentLayerStackRect.empty())
                     continue;
 
                 DumpDisplayInfo info{};
-                info.currentLayerStack = static_cast<uint32_t>(std::stoul(std::string(currentLayerStack)));
-                info.orientation = orientation.empty() ? 0 : std::stoi(std::string(orientation));
-                auto rectString = std::string(currentLayerStackRect);
-                if (std::sscanf(rectString.c_str(), "Rect(%d, %d - %d, %d)", &info.left, &info.top, &info.right, &info.bottom) != 4 &&
-                    std::sscanf(rectString.c_str(), "(%d, %d - %d, %d)", &info.left, &info.top, &info.right, &info.bottom) != 4)
+                try
+                {
+                    info.currentLayerStack = static_cast<uint32_t>(std::stoul(std::string(currentLayerStack)));
+                    info.orientation = ((ParseDisplayOrientation(orientation) % 4) + 4) % 4;
+                }
+                catch (...)
+                {
                     continue;
+                }
+
+                if (!ParseDisplayRect(currentLayerStackRect,
+                                      &info.layerStackLeft,
+                                      &info.layerStackTop,
+                                      &info.layerStackRight,
+                                      &info.layerStackBottom))
+                    continue;
+
+                if (!ParseDisplayRect(currentDisplayRect,
+                                      &info.displayLeft,
+                                      &info.displayTop,
+                                      &info.displayRight,
+                                      &info.displayBottom))
+                {
+                    // 部分 ROM 不输出 displayRect；退回 layerStackRect，仍保持旧行为。
+                    info.displayLeft = info.layerStackLeft;
+                    info.displayTop = info.layerStackTop;
+                    info.displayRight = info.layerStackRight;
+                    info.displayBottom = info.layerStackBottom;
+                }
 
                 result.emplace_back(info);
             }
@@ -736,12 +796,33 @@ namespace android
             int32_t height;
         };
 
+        struct RectInfo
+        {
+            int32_t left = 0;
+            int32_t top = 0;
+            int32_t right = 0;
+            int32_t bottom = 0;
+
+            int32_t Width() const { return std::abs(right - left); }
+            int32_t Height() const { return std::abs(bottom - top); }
+
+            bool operator==(const RectInfo &other) const
+            {
+                return left == other.left &&
+                       top == other.top &&
+                       right == other.right &&
+                       bottom == other.bottom;
+            }
+        };
+
         struct RecordDisplayInfo
         {
             uint32_t layerStack = 0;
             int32_t width = 0;
             int32_t height = 0;
             int32_t orientation = 0;
+            RectInfo layerStackRect{};
+            RectInfo displayRect{};
         };
 
     public:
@@ -749,6 +830,11 @@ namespace android
         {
             static detail::SurfaceComposerClient surfaceComposerClient;
             return surfaceComposerClient;
+        }
+
+        static bool SupportsRecordLayerStack()
+        {
+            return detail::Functionals::GetInstance().systemVersion >= 13;
         }
 
         static DisplayInfo GetDisplayInfo()
@@ -837,20 +923,27 @@ namespace android
                 if (displayInfo.currentLayerStack == 0)
                     continue;
 
-                int32_t rectWidth = std::abs(displayInfo.right - displayInfo.left);
-                int32_t rectHeight = std::abs(displayInfo.bottom - displayInfo.top);
-                if (rectWidth <= 0 || rectHeight <= 0)
+                int32_t layerStackWidth = std::abs(displayInfo.layerStackRight - displayInfo.layerStackLeft);
+                int32_t layerStackHeight = std::abs(displayInfo.layerStackBottom - displayInfo.layerStackTop);
+                int32_t displayWidth = std::abs(displayInfo.displayRight - displayInfo.displayLeft);
+                int32_t displayHeight = std::abs(displayInfo.displayBottom - displayInfo.displayTop);
+                if (layerStackWidth <= 0 || layerStackHeight <= 0)
                     continue;
 
                 int score = 0;
                 if (expectedWidth > 0 && expectedHeight > 0)
                 {
-                    int exactDelta = std::abs(rectWidth - expectedWidth) + std::abs(rectHeight - expectedHeight);
-                    int swappedDelta = std::abs(rectWidth - expectedHeight) + std::abs(rectHeight - expectedWidth);
-                    score -= std::min(exactDelta, swappedDelta);
-                    if (exactDelta == 0)
+                    int layerExactDelta = std::abs(layerStackWidth - expectedWidth) + std::abs(layerStackHeight - expectedHeight);
+                    int layerSwappedDelta = std::abs(layerStackWidth - expectedHeight) + std::abs(layerStackHeight - expectedWidth);
+                    int displayExactDelta = std::abs(displayWidth - expectedWidth) + std::abs(displayHeight - expectedHeight);
+                    int displaySwappedDelta = std::abs(displayWidth - expectedHeight) + std::abs(displayHeight - expectedWidth);
+                    int bestExactDelta = std::min(layerExactDelta, displayExactDelta);
+                    int bestSwappedDelta = std::min(layerSwappedDelta, displaySwappedDelta);
+                    int bestDelta = std::min(bestExactDelta, bestSwappedDelta);
+                    score -= bestDelta;
+                    if (bestExactDelta == 0)
                         score += 100000;
-                    else if (swappedDelta == 0)
+                    else if (bestSwappedDelta == 0)
                         score += 50000;
                 }
                 score += static_cast<int>(displayInfo.currentLayerStack);
@@ -860,9 +953,19 @@ namespace android
 
                 bestScore = score;
                 bestDisplay.layerStack = displayInfo.currentLayerStack;
-                bestDisplay.orientation = ((displayInfo.orientation % 4) + 4) % 4;
-                bestDisplay.width = rectWidth;
-                bestDisplay.height = rectHeight;
+                bestDisplay.orientation = displayInfo.orientation;
+                bestDisplay.layerStackRect = {
+                    displayInfo.layerStackLeft,
+                    displayInfo.layerStackTop,
+                    displayInfo.layerStackRight,
+                    displayInfo.layerStackBottom};
+                bestDisplay.displayRect = {
+                    displayInfo.displayLeft,
+                    displayInfo.displayTop,
+                    displayInfo.displayRight,
+                    displayInfo.displayBottom};
+                bestDisplay.width = layerStackWidth;
+                bestDisplay.height = layerStackHeight;
             }
             if (bestScore == INT_MIN)
                 return false;
@@ -884,6 +987,39 @@ namespace android
             auto nativeWindow = reinterpret_cast<ANativeWindow *>(rawSurface);
             m_cachedSurfaceControl.emplace(nativeWindow, std::move(surfaceControl));
             return nativeWindow;
+        }
+
+        // 将录屏 Surface 的缓冲坐标映射到目标 layerStack 坐标。
+        static bool ConfigureOnLayerStack(ANativeWindow *nativeWindow,
+                                          uint32_t layerStack,
+                                          float dsdx,
+                                          float dtdx,
+                                          float dtdy,
+                                          float dsdy,
+                                          float positionX,
+                                          float positionY)
+        {
+            if (!nativeWindow || !SupportsRecordLayerStack())
+                return false;
+
+            auto it = m_cachedSurfaceControl.find(nativeWindow);
+            if (it == m_cachedSurfaceControl.end() || !it->second.data)
+                return false;
+
+            detail::StrongPointer<void> surfaceControl{};
+            surfaceControl.pointer = it->second.data;
+
+            static detail::SurfaceComposerClientTransaction transaction;
+            if (!transaction.valid)
+                return false;
+
+            transaction.SetTrustedOverlay(surfaceControl, false);
+            transaction.SetLayerStack(surfaceControl, layerStack);
+            transaction.SetLayer(surfaceControl, INT_MAX);
+            transaction.SetMatrix(surfaceControl, dsdx, dtdx, dtdy, dsdy);
+            transaction.SetPosition(surfaceControl, positionX, positionY);
+            transaction.Show(surfaceControl);
+            return transaction.Apply(false, true) == 0;
         }
 
         static void Destroy(ANativeWindow *nativeWindow)

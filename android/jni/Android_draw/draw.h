@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <iostream>
 #include <thread>
 #include <chrono>
@@ -234,12 +235,27 @@ namespace RenderVK
     static android::ANativeWindowCreator::DisplayInfo displayInfo{};
     static bool s_preventCapture = true;
 
+    struct RecordTransform
+    {
+        float dsdx = 1.0f;
+        float dtdx = 0.0f;
+        float dtdy = 0.0f;
+        float dsdy = 1.0f;
+        float positionX = 0.0f;
+        float positionY = 0.0f;
+        bool valid = false;
+    };
+
     struct RecordSurfaceState
     {
         ANativeWindow *window = nullptr;
         uint32_t layerStack = 0;
         int32_t width = 0;
         int32_t height = 0;
+        int32_t sourceWidth = 0;
+        int32_t sourceHeight = 0;
+        android::ANativeWindowCreator::RecordDisplayInfo display{};
+        RecordTransform transform{};
         VkSurfaceKHR surface = VK_NULL_HANDLE;
         VkSwapchainKHR swapchain = VK_NULL_HANDLE;
         VkExtent2D extent = {};
@@ -265,8 +281,69 @@ namespace RenderVK
                                   const android::ANativeWindowCreator::RecordDisplayInfo &rhs)
     {
         return lhs.layerStack == rhs.layerStack &&
-               lhs.width == rhs.width &&
-               lhs.height == rhs.height;
+               lhs.orientation == rhs.orientation &&
+               lhs.layerStackRect == rhs.layerStackRect &&
+               lhs.displayRect == rhs.displayRect;
+    }
+
+    inline RecordTransform BuildRecordTransform(const android::ANativeWindowCreator::RecordDisplayInfo &target,
+                                                const VkExtent2D bufferExtent,
+                                                int32_t sourceWidth,
+                                                int32_t sourceHeight)
+    {
+        RecordTransform transform{};
+        if (bufferExtent.width == 0 || bufferExtent.height == 0 ||
+            sourceWidth <= 0 || sourceHeight <= 0)
+            return transform;
+
+        const float left = static_cast<float>(std::min(target.layerStackRect.left, target.layerStackRect.right));
+        const float top = static_cast<float>(std::min(target.layerStackRect.top, target.layerStackRect.bottom));
+        const float targetWidth = static_cast<float>(target.layerStackRect.Width());
+        const float targetHeight = static_cast<float>(target.layerStackRect.Height());
+        if (targetWidth <= 0.0f || targetHeight <= 0.0f)
+            return transform;
+
+        const float bufferWidth = static_cast<float>(bufferExtent.width);
+        const float bufferHeight = static_cast<float>(bufferExtent.height);
+        const bool sourceLandscape = sourceWidth >= sourceHeight;
+        const bool targetLandscape = targetWidth >= targetHeight;
+        const int32_t orientation = ((target.orientation % 4) + 4) % 4;
+        // AOSP 通常把 layerStackRect 输出为旋转后的逻辑坐标，此时无需再次旋转。
+        // 仅当录屏 ROM 输出的 layerStackRect 轴向与源坐标相反时，应用方向的逆变换。
+        const bool needsAxisSwap = (orientation == 1 || orientation == 3) &&
+                                   sourceLandscape != targetLandscape;
+
+        switch (needsAxisSwap ? orientation : 0)
+        {
+        case 0:
+            transform.dsdx = targetWidth / bufferWidth;
+            transform.dsdy = targetHeight / bufferHeight;
+            transform.positionX = left;
+            transform.positionY = top;
+            break;
+        case 1:
+            // Android ROTATION_90 的逆变换：横屏缓冲 -> 旋转前 layerStack。
+            transform.dsdx = 0.0f;
+            transform.dtdx = targetWidth / bufferHeight;
+            transform.dtdy = -targetHeight / bufferWidth;
+            transform.dsdy = 0.0f;
+            transform.positionX = left;
+            transform.positionY = top + targetHeight;
+            break;
+        case 3:
+            // Android ROTATION_270 的逆变换：横屏缓冲 -> 旋转前 layerStack。
+            transform.dsdx = 0.0f;
+            transform.dtdx = -targetWidth / bufferHeight;
+            transform.dtdy = targetHeight / bufferWidth;
+            transform.dsdy = 0.0f;
+            transform.positionX = left + targetWidth;
+            transform.positionY = top;
+            break;
+        default:
+            break;
+        }
+        transform.valid = true;
+        return transform;
     }
 
     inline void shutdown();
@@ -637,6 +714,13 @@ namespace RenderVK
                     s_hasPendingRecordDisplay = false;
                     s_pendingRecordDisplayHits = 0;
                 }
+                else if (scannedTarget.layerStack == s_cachedRecordDisplay.layerStack)
+                {
+                    // 同一虚拟显示的旋转/分辨率变化立即生效，下一步会重建副 Surface。
+                    s_cachedRecordDisplay = scannedTarget;
+                    s_hasPendingRecordDisplay = false;
+                    s_pendingRecordDisplayHits = 0;
+                }
                 else if (!s_hasPendingRecordDisplay || !SameRecordDisplay(scannedTarget, s_pendingRecordDisplay))
                 {
                     s_pendingRecordDisplay = scannedTarget;
@@ -661,25 +745,32 @@ namespace RenderVK
         }
 
         const auto &target = s_cachedRecordDisplay;
+        const int32_t sourceWidth = std::max(displayInfo.width, displayInfo.height);
+        const int32_t sourceHeight = std::min(displayInfo.width, displayInfo.height);
+        if (sourceWidth <= 0 || sourceHeight <= 0)
+            return false;
 
         if (s_recordSurface.window &&
-            s_recordSurface.layerStack == target.layerStack &&
-            s_recordSurface.width == target.width &&
-            s_recordSurface.height == target.height)
+            SameRecordDisplay(s_recordSurface.display, target) &&
+            s_recordSurface.sourceWidth == sourceWidth &&
+            s_recordSurface.sourceHeight == sourceHeight)
             return true;
 
         CleanupRecordSurface();
 
         s_recordSurface.layerStack = target.layerStack;
-        s_recordSurface.width = target.width;
-        s_recordSurface.height = target.height;
-        s_recordSurface.window = android::ANativeWindowCreator::CreateOnLayerStack("LarkRecord", target.width, target.height, target.layerStack);
+        s_recordSurface.width = sourceWidth;
+        s_recordSurface.height = sourceHeight;
+        s_recordSurface.sourceWidth = sourceWidth;
+        s_recordSurface.sourceHeight = sourceHeight;
+        s_recordSurface.display = target;
+        s_recordSurface.window = android::ANativeWindowCreator::CreateOnLayerStack("LarkRecord", sourceWidth, sourceHeight, target.layerStack);
         if (!s_recordSurface.window)
         {
             CleanupRecordSurface();
             return false;
         }
-        ANativeWindow_setBuffersGeometry(s_recordSurface.window, target.width, target.height, WINDOW_FORMAT_RGBA_8888);
+        ANativeWindow_setBuffersGeometry(s_recordSurface.window, sourceWidth, sourceHeight, WINDOW_FORMAT_RGBA_8888);
         ANativeWindow_acquire(s_recordSurface.window);
 
         VkAndroidSurfaceCreateInfoKHR surfaceInfo{};
@@ -704,8 +795,48 @@ namespace RenderVK
             return false;
         }
 
-        std::println(stderr, "[RenderVK] Record overlay surface ready layerStack={} size={}x{}",
-                     target.layerStack, target.width, target.height);
+        s_recordSurface.transform = BuildRecordTransform(
+            target,
+            s_recordSurface.extent,
+            s_recordSurface.sourceWidth,
+            s_recordSurface.sourceHeight);
+        if (!s_recordSurface.transform.valid ||
+            !android::ANativeWindowCreator::ConfigureOnLayerStack(
+                s_recordSurface.window,
+                target.layerStack,
+                s_recordSurface.transform.dsdx,
+                s_recordSurface.transform.dtdx,
+                s_recordSurface.transform.dtdy,
+                s_recordSurface.transform.dsdy,
+                s_recordSurface.transform.positionX,
+                s_recordSurface.transform.positionY))
+        {
+            CleanupRecordSurface();
+            return false;
+        }
+
+        std::println(stderr,
+                     "[RenderVK] Record overlay ready layerStack={} source={}x{} stackRect=({},{}-{},{}), displayRect=({},{}-{},{}), orientation={} extent={}x{} matrix=[{},{};{},{}] pos=({}, {})",
+                     target.layerStack,
+                     sourceWidth,
+                     sourceHeight,
+                     target.layerStackRect.left,
+                     target.layerStackRect.top,
+                     target.layerStackRect.right,
+                     target.layerStackRect.bottom,
+                     target.displayRect.left,
+                     target.displayRect.top,
+                     target.displayRect.right,
+                     target.displayRect.bottom,
+                     target.orientation,
+                     s_recordSurface.extent.width,
+                     s_recordSurface.extent.height,
+                     s_recordSurface.transform.dsdx,
+                     s_recordSurface.transform.dtdx,
+                     s_recordSurface.transform.dtdy,
+                     s_recordSurface.transform.dsdy,
+                     s_recordSurface.transform.positionX,
+                     s_recordSurface.transform.positionY);
         return true;
     }
 
@@ -750,14 +881,15 @@ namespace RenderVK
         renderPassInfo.pClearValues = &clearColor;
 
         vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-        ImVec2 oldDisplaySize = drawData->DisplaySize;
-        ImVec2 oldFramebufferScale = drawData->FramebufferScale;
-        drawData->DisplaySize = ImVec2(static_cast<float>(s_recordSurface.extent.width),
-                                       static_cast<float>(s_recordSurface.extent.height));
-        drawData->FramebufferScale = ImVec2(1.0f, 1.0f);
-        ImGui_ImplVulkan_RenderDrawData(drawData, cmd);
-        drawData->DisplaySize = oldDisplaySize;
-        drawData->FramebufferScale = oldFramebufferScale;
+        ImDrawData recordDrawData = *drawData;
+        recordDrawData.DisplayPos = ImVec2(0.0f, 0.0f);
+        recordDrawData.DisplaySize = ImVec2(
+            static_cast<float>(s_recordSurface.sourceWidth),
+            static_cast<float>(s_recordSurface.sourceHeight));
+        recordDrawData.FramebufferScale = ImVec2(
+            static_cast<float>(s_recordSurface.extent.width) / static_cast<float>(s_recordSurface.sourceWidth),
+            static_cast<float>(s_recordSurface.extent.height) / static_cast<float>(s_recordSurface.sourceHeight));
+        ImGui_ImplVulkan_RenderDrawData(&recordDrawData, cmd);
         vkCmdEndRenderPass(cmd);
         VK_CHECK(vkEndCommandBuffer(cmd));
 
@@ -805,12 +937,22 @@ namespace RenderVK
         int h = displayInfo.height;
         int max_side = (h > w ? h : w);
 
-        native_window = android::ANativeWindowCreator::Create("Lark", max_side, max_side, preventCapture);
+        // Android 13+ 双 Surface 模式：主层始终跳过镜像，录屏/投屏只接收 LarkRecord，
+        // 避免主层与副层在录屏中重复合成。旧系统仍沿用单 Surface 行为。
+        const bool useDualSurfaceCapture =
+            !preventCapture && android::ANativeWindowCreator::SupportsRecordLayerStack();
+        const bool skipMainCapture = preventCapture || useDualSurfaceCapture;
+        native_window = android::ANativeWindowCreator::Create("Lark", max_side, max_side, skipMainCapture);
         if (native_window == nullptr)
         {
             std::println(stderr, "[RenderVK Error] Failed to create ANativeWindow!");
             return false;
         }
+        std::println(stderr,
+                     "[RenderVK] Capture policy preventCapture={} dualSurface={} skipMainCapture={}",
+                     preventCapture,
+                     useDualSurfaceCapture,
+                     skipMainCapture);
         ANativeWindow_acquire(native_window);
 
         const char *instance_extensions[] = {"VK_KHR_surface", "VK_KHR_android_surface"};
@@ -1014,6 +1156,8 @@ namespace RenderVK
             if (rotated)
             {
                 UpdateScreenData(displayInfo.width, displayInfo.height, displayInfo.orientation);
+                // 不等待常规轮询周期，当前帧结束时立即刷新录屏投影。
+                s_lastRecordDisplayScan = {};
             }
             RecreateSwapchain();
             g_SwapChainRebuild = false;
