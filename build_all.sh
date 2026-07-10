@@ -5,7 +5,8 @@
 # ==============================================================
 #
 #  支持的内核版本:
-#    Bazel 构建: 6.6-Android15
+#    Bazel 构建:  6.12-Android16 / 6.6-Android15 / 6.1-Android14 / 5.15-Android13 / 5.10-Android13
+#    Legacy 构建: 5.10-Android12
 #
 #  用法:
 #    chmod +x build.sh && ./build.sh
@@ -17,18 +18,23 @@ set -euo pipefail
 BUILD_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 # 内核源码根目录 (各版本源码存放在此目录下的子文件夹)
-KERNELS_ROOT="/www/wwwroot/android-kernel"
+KERNELS_ROOT="/root"
 
 # 驱动源码路径
-DRIVER_SRC="/www/wwwroot/Linux-android-arm64/lsdriver"
+DRIVER_SRC="/mnt/e/1.CodeRepository/Android/Kernel/lsdriver"
 
 # 强制不剥离符号的版本列表 (剥离后无法加载)
-NO_STRIP_VERSIONS=("6.6-Android15")
+NO_STRIP_VERSIONS=("6.12-Android16" "6.6-Android15")
 
 # 编译外部模块时不导入内核导出的 Module.symvers，生成空 __versions 的版本列表。
 # 这样 ko 的 vermagic 仍然带 modversions，但不会携带具体符号 CRC
 NO_CRC_VERSIONS=(
+    "6.12-Android16"
     "6.6-Android15"
+    "6.1-Android14"
+    "5.15-Android13"
+    "5.10-Android13"
+    "5.10-Android12"
 )
 
 
@@ -170,9 +176,6 @@ build_kernel() {
     local extra_params="${4:-}"
 
     local kernel_dir="$KERNELS_ROOT/$version"
-    if [[ "$version" == "6.6-Android15" ]]; then
-        kernel_dir="$KERNELS_ROOT/android15-6.6"
-    fi
 
     log_title
     log_warn "正在开始编译内核版本: $version"
@@ -454,11 +457,38 @@ main() {
         [[ ${#requested_versions[@]} -eq 0 ]] || contains_version "$1" "${requested_versions[@]}"
     }
 
-    # Android 15 / Linux 6.6
-    should_build "6.6-Android15" && build_kernel "6.6-Android15" \
-        "$KERNELS_ROOT/android15-6.6/prebuilts/clang/host/linux-x86/clang-r510928" \
+    # 内核 6.12-Android16
+    should_build "6.12-Android16" && build_kernel "6.12-Android16" \
+        "$KERNELS_ROOT/6.12-Android16/prebuilts/clang/host/linux-x86/clang-r536225" \
         "aarch64-linux-gnu-" \
         "CLANG_TRIPLE=aarch64-linux-gnu-"
+
+    # 2. 内核 6.6-Android15
+    should_build "6.6-Android15" && build_kernel "6.6-Android15" \
+        "$KERNELS_ROOT/6.6-Android15/prebuilts/clang/host/linux-x86/clang-r510928" \
+        "aarch64-linux-gnu-" \
+        "CLANG_TRIPLE=aarch64-linux-gnu-"
+
+    # 3. 内核 6.1-Android14
+    should_build "6.1-Android14" && build_kernel "6.1-Android14" \
+        "$KERNELS_ROOT/6.1-Android14/prebuilts/clang/host/linux-x86/clang-r487747c" \
+        "aarch64-linux-gnu-" \
+        "LLVM_TOOLCHAIN_PATH=$KERNELS_ROOT/6.1-Android14/prebuilts/clang/host/linux-x86/clang-r487747c"
+
+    # 4. 内核 5.15-Android13
+    should_build "5.15-Android13" && build_kernel "5.15-Android13" \
+        "$KERNELS_ROOT/5.15-Android13/prebuilts/clang/host/linux-x86/clang-r450784e" \
+        "aarch64-linux-gnu-" \
+        "LLVM_TOOLCHAIN_PATH=$KERNELS_ROOT/5.15-Android13/prebuilts/clang/host/linux-x86/clang-r450784e"
+
+    # 5. 5.10-Android13
+    should_build "5.10-Android13" && build_kernel "5.10-Android13" \
+        "$KERNELS_ROOT/5.10-Android13/prebuilts/clang/host/linux-x86/clang-r450784e" \
+        "aarch64-linux-gnu-" \
+        "LLVM_TOOLCHAIN_PATH=$KERNELS_ROOT/5.10-Android13/prebuilts/clang/host/linux-x86/clang-r450784e KBUILD_MODPOST_WARN=1"
+
+    # 6. 5.10-Android12 (Legacy)
+    should_build "5.10-Android12" && build_legacy_kernel
 
     log_title
     echo ""
@@ -476,7 +506,7 @@ main() {
 
     echo -e "${BLUE}产物列表:${NC}"
     # shellcheck disable=SC2086
-    ls -lh "$DRIVER_SRC"/6.6-Android15.ko 2>/dev/null || \
+    ls -lh "$DRIVER_SRC"/[0-9]*-Android*.ko 2>/dev/null || \
         log_error "未找到任何 .ko 文件"
 
     if [[ -f "$BUILD_ROOT/install_driver.sh" ]]; then

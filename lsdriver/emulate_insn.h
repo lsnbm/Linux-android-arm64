@@ -120,11 +120,19 @@ static __always_inline bool emu_cond_test_hw(uint64_t pstate, uint32_t cond)
     }
 }
 
+typedef int (*emu_read_mem_fn)(void *ctx, uint64_t addr, int bytes, __uint128_t *out);
+
+struct emu_mem_access
+{
+    emu_read_mem_fn read;
+    void *ctx;
+};
+
 /* ---- 用户内存定宽读写：Load/Store 各分支共用的通用逻辑 ----
    bytes 仅取 1/2/4/8/16，覆盖 B/H/S/W/D/X/Q 全部访存位宽。
    读出的值一律零扩展进 128 位缓冲(高位清零)，符号扩展交由调用方按需处理。
     成功返回 0，__get_user/__put_user 失败返回 -EFAULT (调用方据此返回 EMU_INSN_FAULT)。 */
-static __always_inline int emu_read_mem(uint64_t addr, int bytes, __uint128_t *out)
+static __always_inline int emu_read_user_mem(uint64_t addr, int bytes, __uint128_t *out)
 {
     __uint128_t v = 0;
 
@@ -176,6 +184,25 @@ static __always_inline int emu_read_mem(uint64_t addr, int bytes, __uint128_t *o
 
     *out = v;
     return 0;
+}
+
+/*
+ * 自定义读取器返回 -EOPNOTSUPP 表示该地址不归它处理，继续使用 __get_user。
+ * PTEBP 用该入口绕过它主动移除的用户读权限，其他调试模式保持原有行为。
+ */
+static __always_inline int emu_read_mem(const struct emu_mem_access *access,
+                                        uint64_t addr, int bytes, __uint128_t *out)
+{
+    int status;
+
+    if (access && access->read)
+    {
+        status = access->read(access->ctx, addr, bytes, out);
+        if (status != -EOPNOTSUPP)
+            return status;
+    }
+
+    return emu_read_user_mem(addr, bytes, out);
 }
 
 // 把 val 的低 bytes 字节写入用户内存；bytes 取 1/2/4/8/16。成功 0，失败 -EFAULT。
@@ -1347,7 +1374,9 @@ static __always_inline enum emu_insn_result emu_simulate_branch_insn(struct pt_r
     return EMU_INSN_SKIP;
 }
 
-static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct pt_regs *regs, uint32_t insn, uint64_t pc)
+static __always_inline enum emu_insn_result emu_simulate_load_store_insn(
+    struct pt_regs *regs, uint32_t insn, uint64_t pc,
+    const struct emu_mem_access *mem_access)
 {
     bool is_fp = (insn & 0x04000000) != 0;
     uint32_t size = (insn >> 30) & 0x3;
@@ -1374,7 +1403,7 @@ static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct 
             return EMU_INSN_SKIP;
         if (addr & (bytes - 1))
             return EMU_INSN_FAULT;
-        if (emu_read_mem(addr, bytes, &mem))
+        if (emu_read_mem(mem_access, addr, bytes, &mem))
             return EMU_INSN_FAULT;
 
         old = (uint64_t)mem & mask;
@@ -1440,7 +1469,7 @@ static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct 
 
         if (addr & (bytes - 1))
             return EMU_INSN_FAULT;
-        if (emu_read_mem(addr, bytes, &mem))
+        if (emu_read_mem(mem_access, addr, bytes, &mem))
             return EMU_INSN_FAULT;
 
         old = (uint64_t)mem & mask;
@@ -1478,7 +1507,8 @@ static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct 
             return EMU_INSN_SKIP;
         if (addr & (total - 1))
             return EMU_INSN_FAULT;
-        if (emu_read_mem(addr, bytes, &mem0) || emu_read_mem(addr + bytes, bytes, &mem1))
+        if (emu_read_mem(mem_access, addr, bytes, &mem0) ||
+            emu_read_mem(mem_access, addr + bytes, bytes, &mem1))
             return EMU_INSN_FAULT;
 
         old0 = (uint64_t)mem0 & mask;
@@ -1527,7 +1557,7 @@ static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct 
 
             if (size > 2)
                 return EMU_INSN_SKIP;
-            if (emu_read_mem(addr, bytes, &val))
+            if (emu_read_mem(mem_access, addr, bytes, &val))
                 return EMU_INSN_FAULT;
             fp_regs[rt] = val;
             fp_dirty = true;
@@ -1540,19 +1570,19 @@ static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct 
                 return EMU_INSN_NOP;
             if (size == 0)
             {
-                if (emu_read_mem(addr, 4, &val))
+                if (emu_read_mem(mem_access, addr, 4, &val))
                     return EMU_INSN_FAULT;
                 reg_write(regs, rt, (u64)val, false);
             }
             else if (size == 1)
             {
-                if (emu_read_mem(addr, 8, &val))
+                if (emu_read_mem(mem_access, addr, 8, &val))
                     return EMU_INSN_FAULT;
                 reg_write(regs, rt, (u64)val, true);
             }
             else if (size == 2)
             {
-                if (emu_read_mem(addr, 4, &val))
+                if (emu_read_mem(mem_access, addr, 4, &val))
                     return EMU_INSN_FAULT;
                 reg_write(regs, rt, emu_sign_extend_hw((u64)val, 4), true);
             }
@@ -1596,7 +1626,8 @@ static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct 
         {
             __uint128_t val1, val2;
 
-            if (emu_read_mem(addr, bytes, &val1) || emu_read_mem(addr + bytes, bytes, &val2))
+            if (emu_read_mem(mem_access, addr, bytes, &val1) ||
+                emu_read_mem(mem_access, addr + bytes, bytes, &val2))
                 return EMU_INSN_FAULT;
             if (is_fp)
             {
@@ -1700,7 +1731,7 @@ static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct 
         {
             __uint128_t val;
 
-            if (emu_read_mem(addr, bytes, &val))
+            if (emu_read_mem(mem_access, addr, bytes, &val))
                 return EMU_INSN_FAULT;
             if (is_fp)
             {
@@ -3086,22 +3117,29 @@ static __always_inline enum emu_insn_result emu_simulate_data_processing_insn(st
     return EMU_INSN_SKIP;
 }
 
-static __always_inline bool emulate_insn(struct pt_regs *regs, const uint32_t *specified_insn)
+static __always_inline bool emulate_insn_with_mem(
+    struct pt_regs *regs, const uint32_t *specified_insn,
+    const struct emu_mem_access *mem_access)
 {
     uint32_t insn;
     uint64_t pc = regs->pc;
     uint32_t iclass;
+    __uint128_t fetched_insn;
     enum emu_insn_result result = EMU_INSN_SKIP;
 
     if (specified_insn)
     {
         insn = *specified_insn;
     }
-    else if (__get_user(insn, (uint32_t __user *)pc))
+    else if (emu_read_mem(mem_access, pc, sizeof(insn), &fetched_insn))
     {
         ls_log_tag("emulate_insn", "failed pc=0x%llx insn_read_failed\n",
                    (unsigned long long)pc);
         return false;
+    }
+    else
+    {
+        insn = (uint32_t)fetched_insn;
     }
 
     iclass = (insn >> 25) & 0xF;
@@ -3128,7 +3166,7 @@ static __always_inline bool emulate_insn(struct pt_regs *regs, const uint32_t *s
             ((insn & 0x3A000000) == 0x38000000) ||
             ((insn & 0x3B000000) == 0x18000000))
         {
-            result = emu_simulate_load_store_insn(regs, insn, pc);
+            result = emu_simulate_load_store_insn(regs, insn, pc, mem_access);
         }
         else
         {
@@ -3152,6 +3190,11 @@ static __always_inline bool emulate_insn(struct pt_regs *regs, const uint32_t *s
                (insn >> 16) & 0xff,
                (insn >> 24) & 0xff);
     return false;
+}
+
+static __always_inline bool emulate_insn(struct pt_regs *regs, const uint32_t *specified_insn)
+{
+    return emulate_insn_with_mem(regs, specified_insn, NULL);
 }
 
 #endif // EMULATE_INSN_H
