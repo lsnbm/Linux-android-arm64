@@ -79,7 +79,7 @@ static int DispatchThreadFunction(void *data)
 					req->status = v_gyro_init();
 					break;
 				case request_op_gyro_report:
-					req->status = v_gyro_report(req->vgyro_info.gyro_x, req->vgyro_info.gyro_y, req->vgyro_info.gyro_z);
+					req->status = v_gyro_report(req->vgyro_info.gyro_x_mrad_s, req->vgyro_info.gyro_y_mrad_s, req->vgyro_info.gyro_z_mrad_s);
 					break;
 				case request_op_gnss_init:
 					req->status = v_gnss_init();
