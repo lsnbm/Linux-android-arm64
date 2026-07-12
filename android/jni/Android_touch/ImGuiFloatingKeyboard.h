@@ -8,6 +8,13 @@
 
 namespace ImGuiFloatingKeyboard
 {
+    enum class Result
+    {
+        None,
+        Accepted,
+        Cancelled,
+    };
+
     namespace Internal
     {
         static bool is_visible = false;
@@ -18,6 +25,8 @@ namespace ImGuiFloatingKeyboard
         static std::string window_title = "Floating Keyboard";
         static bool request_focus = false;
         static int keyboard_mode = 0;
+        static char *result_buffer = nullptr;
+        static Result result = Result::None;
 
         static ImVec2 last_display_size = ImVec2(0, 0);
         static bool need_reposition = true;
@@ -25,12 +34,6 @@ namespace ImGuiFloatingKeyboard
         // ===== 缩放设置（固定1.4，不可修改）=====
         static constexpr float keyboard_scale = 1.4f;
     } // namespace Internal
-
-    // 获取缩放比例（只读）
-    inline float GetScale()
-    {
-        return Internal::keyboard_scale;
-    }
 
     inline void Open(char *buffer, size_t buffer_size, const char *title = "Keyboard")
     {
@@ -42,6 +45,8 @@ namespace ImGuiFloatingKeyboard
         Internal::window_title = title;
         Internal::request_focus = true;
         Internal::keyboard_mode = 0;
+        Internal::result_buffer = nullptr;
+        Internal::result = Result::None;
         Internal::need_reposition = true;
     }
 
@@ -54,6 +59,29 @@ namespace ImGuiFloatingKeyboard
     inline bool IsVisible()
     {
         return Internal::is_visible;
+    }
+
+    inline void Accept()
+    {
+        Internal::result_buffer = Internal::target_buffer;
+        Internal::result = Result::Accepted;
+        Close();
+    }
+
+    inline void Cancel()
+    {
+        Internal::result_buffer = Internal::target_buffer;
+        Internal::result = Result::Cancelled;
+        Close();
+    }
+
+    inline Result ConsumeResult(const char *buffer)
+    {
+        if (Internal::result_buffer != buffer) return Result::None;
+        const Result result = Internal::result;
+        Internal::result_buffer = nullptr;
+        Internal::result = Result::None;
+        return result;
     }
 
     // ========== 辅助函数 ==========
@@ -350,7 +378,7 @@ namespace ImGuiFloatingKeyboard
                 if (KeyButton(".", "period", ImVec2(punct_key_w, key_height))) InsertChar('.');
                 ImGui::SameLine();
 
-                if (KeyButton("OK", "enter", ImVec2(ok_key_w, key_height), ImVec4(0.2f, 0.5f, 0.3f, 1.0f))) Close();
+                if (KeyButton("OK", "enter", ImVec2(ok_key_w, key_height), ImVec4(0.2f, 0.5f, 0.3f, 1.0f))) Accept();
             }
             // ==================== 数字符号键盘1 ====================
             else if (Internal::keyboard_mode == 1)
@@ -410,7 +438,7 @@ namespace ImGuiFloatingKeyboard
                 if (KeyButton(".", "period2", ImVec2(punct_key_w, key_height))) InsertChar('.');
                 ImGui::SameLine();
 
-                if (KeyButton("OK", "enter2", ImVec2(ok_key_w, key_height), ImVec4(0.2f, 0.5f, 0.3f, 1.0f))) Close();
+                if (KeyButton("OK", "enter2", ImVec2(ok_key_w, key_height), ImVec4(0.2f, 0.5f, 0.3f, 1.0f))) Accept();
             }
             // ==================== 符号键盘2 ====================
             else if (Internal::keyboard_mode == 2)
@@ -470,13 +498,15 @@ namespace ImGuiFloatingKeyboard
                 if (KeyButton(".", "period3", ImVec2(punct_key_w, key_height))) InsertChar('.');
                 ImGui::SameLine();
 
-                if (KeyButton("OK", "enter3", ImVec2(ok_key_w, key_height), ImVec4(0.2f, 0.5f, 0.3f, 1.0f))) Close();
+                if (KeyButton("OK", "enter3", ImVec2(ok_key_w, key_height), ImVec4(0.2f, 0.5f, 0.3f, 1.0f))) Accept();
             }
 
             ImGui::PopStyleVar();
             ImGui::SetWindowFontScale(1.0f);
         }
         ImGui::End();
+
+        if (!Internal::is_visible && Internal::target_buffer) Cancel();
 
         ImGui::PopStyleVar(3);
         ImGui::PopStyleColor(3);

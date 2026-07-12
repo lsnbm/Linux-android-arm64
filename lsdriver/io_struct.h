@@ -303,7 +303,7 @@ enum request_op
     request_op_syscall_monitor_set,    // 监控指定进程的系统调用
     request_op_syscall_monitor_remove, // 取消指定进程的系统调用监控
 
-    request_op_env_get_params, // 获取指定进程环境参数
+    request_op_env_get_params, // 获取指定task环境参数
 
     request_op_kernel_exit // 内核线程退出
 };

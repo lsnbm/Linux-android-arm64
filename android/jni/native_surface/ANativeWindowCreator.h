@@ -750,7 +750,7 @@ namespace android
 
     class ANativeWindowCreator
     {
-      public:
+    public:
         struct DisplayInfo
         {
             int32_t orientation;
@@ -790,7 +790,7 @@ namespace android
             RectInfo displayRect{};
         };
 
-      public:
+    public:
         static detail::SurfaceComposerClient &GetComposerInstance()
         {
             static detail::SurfaceComposerClient surfaceComposerClient;
@@ -966,7 +966,7 @@ namespace android
             m_cachedSurfaceControl.erase(nativeWindow);
         }
 
-      private:
+    private:
         inline static std::unordered_map<ANativeWindow *, detail::SurfaceControl> m_cachedSurfaceControl;
     };
 } // namespace android

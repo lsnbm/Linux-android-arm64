@@ -42,13 +42,13 @@
 #define PAGE_SIZE 4096
 class Driver
 {
-  public: // 共有结构体和锁
+public: // 共有结构体和锁
     // 轻量高性能自旋锁
     class SpinLock
     {
         unsigned char locked = 0;
 
-      public:
+    public:
         void lock() noexcept
         {
             while (__atomic_exchange_n(&locked, 1, __ATOMIC_ACQUIRE))
@@ -352,7 +352,7 @@ class Driver
         request_op_syscall_monitor_set,    // 监控指定进程的系统调用
         request_op_syscall_monitor_remove, // 取消指定进程的系统调用监控
 
-        request_op_env_get_params, // 获取指定进程环境参数
+        request_op_env_get_params, // 获取指定task环境参数
 
         request_op_kernel_exit // 内核线程退出
     };
@@ -384,7 +384,7 @@ class Driver
         struct env_params env_info;
     };
 
-  public: // 外部初始化
+public: // 外部初始化
     Driver(int Vslot, bool initGyro, bool initGnss)
     {
         InitCommunication();
@@ -397,7 +397,7 @@ class Driver
     {
     }
 
-  public:
+public:
     void NullIo()
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
@@ -459,7 +459,7 @@ class Driver
         global_pid = pid;
     }
 
-  public: // 外部读写接口
+public: // 外部读写接口
     template <typename T> T Read(uint64_t address)
     {
         T value = {};
@@ -494,7 +494,7 @@ class Driver
         return HandleVirtualMemoryRWEvent(request_op_vmem_write, address, buffer, size);
     }
 
-  public: // 外部输入接口
+public: // 外部输入接口
     void TouchDown(int slot, int x, int y, int screenW, int screenH)
     {
         HandleTouchEvent(request_op_touch_down, slot, x, y, screenW, screenH);
@@ -520,7 +520,7 @@ class Driver
         HandleGnssReport(latitude_e7, longitude_e7);
     }
 
-  public: // 外部获取内存信息
+public: // 外部获取内存信息
     // 获取内部结构体实例 内部成员调用不需要显示使用this指针，隐式this
     const virtual_memory &GetMemoryInfoRef()
     {
@@ -641,93 +641,117 @@ class Driver
         return regions;
     }
 
-    // dump指定模块
-    bool DumpModule(std::string_view moduleName)
+    // Dump 模块或指定的半开内存区间 [start, end)。
+    bool DumpMemory(std::string_view target, std::string *dumpPath = nullptr)
     {
-        if (moduleName.empty())
+        const size_t first = target.find_first_not_of(" \t\r\n");
+        if (first == std::string_view::npos)
         {
-            std::fprintf(stderr, "[-] Dump: 模块名为空\n");
+            std::fprintf(stderr, "[-] Dump: 模块名或内存范围为空\n");
             return false;
         }
+        target = target.substr(first, target.find_last_not_of(" \t\r\n") - first + 1);
 
-        struct DumpSegment
+        auto parseAddress = [](std::string_view text, uint64_t *value)
         {
-            short index;
-            uint64_t start;
-            uint64_t end;
+            const size_t begin = text.find_first_not_of(" \t\r\n");
+            if (begin == std::string_view::npos) return false;
+            text = text.substr(begin, text.find_last_not_of(" \t\r\n") - begin + 1);
+
+            std::string token(text);
+            char *end = nullptr;
+            errno = 0;
+            const unsigned long long parsed = std::strtoull(token.c_str(), &end, 16);
+            if (errno == ERANGE || end == token.c_str() || *end != '\0') return false;
+            *value = static_cast<uint64_t>(parsed);
+            return true;
         };
 
-        const auto &info = GetMemoryInfoRef();
-        std::vector<DumpSegment> dumpSegs;
+        uint64_t baseAddr = 0;
+        uint64_t maxEnd = 0;
+        std::string outputName;
+        bool rangeDump = false;
         int matchedModuleCount = 0;
+        size_t segmentCount = 0;
 
-        // moduleName 使用包含匹配: 只要模块完整路径里包含该字符串，就收集该模块的所有有效区段。
-        // 如果名称过短，可能同时匹配多个模块，最终会把这些模块的区段一起按地址顺序写出。
-        for (int i = 0; i < info.module_count; ++i)
+        const size_t separator = target.find('-');
+        if (separator != std::string_view::npos)
         {
-            const auto &mod = info.modules[i];
-            std::string_view fullPath(mod.name);
-
-            if (fullPath.find(moduleName) == std::string_view::npos) continue;
-
-            matchedModuleCount++;
-            for (int j = 0; j < mod.seg_count; ++j)
+            uint64_t rangeStart = 0;
+            uint64_t rangeEnd = 0;
+            if (parseAddress(target.substr(0, separator), &rangeStart) && parseAddress(target.substr(separator + 1), &rangeEnd))
             {
-                const auto &seg = mod.segs[j];
-                if (seg.start >= seg.end) continue;
-                dumpSegs.push_back({seg.index, seg.start, seg.end});
+                baseAddr = rangeStart;
+                maxEnd = rangeEnd;
+                rangeDump = true;
+
+                char name[64]{};
+                std::snprintf(name, sizeof(name), "0x%llX-0x%llX.bin", (unsigned long long)baseAddr, (unsigned long long)maxEnd);
+                outputName = name;
             }
         }
 
-        if (dumpSegs.empty())
+        if (!rangeDump)
         {
-            std::fprintf(stderr, "[-] Dump: 未找到模块 '%.*s' 或模块没有有效区段\n", (int)moduleName.size(), moduleName.data());
-            return false;
+            const auto &info = GetMemoryInfoRef();
+            baseAddr = ~0ULL;
+
+            // 模块名使用包含匹配，命中的所有有效区段按完整地址跨度导出。
+            for (int i = 0; i < info.module_count; ++i)
+            {
+                const auto &mod = info.modules[i];
+                if (std::string_view(mod.name).find(target) == std::string_view::npos) continue;
+
+                matchedModuleCount++;
+                for (int j = 0; j < mod.seg_count; ++j)
+                {
+                    const auto &seg = mod.segs[j];
+                    if (seg.start >= seg.end) continue;
+                    baseAddr = std::min(baseAddr, seg.start);
+                    maxEnd = std::max(maxEnd, seg.end);
+                    segmentCount++;
+                }
+            }
+
+            if (segmentCount == 0)
+            {
+                std::fprintf(stderr, "[-] Dump: 未找到模块 '%.*s' 或模块没有有效区段\n", (int)target.size(), target.data());
+                return false;
+            }
+
+            const size_t slashPos = target.find_last_of("/\\");
+            std::string_view baseName = slashPos == std::string_view::npos ? target : target.substr(slashPos + 1);
+            const size_t extensionPos = baseName.find_last_of('.');
+            if (extensionPos != std::string_view::npos && extensionPos != 0) baseName = baseName.substr(0, extensionPos);
+            if (baseName.empty())
+            {
+                std::fprintf(stderr, "[-] Dump: 无法从模块名生成输出文件名\n");
+                return false;
+            }
+            outputName = std::string(baseName) + ".bin";
         }
 
-        // 只保证收集到的区段按内存地址从低到高排列。
-        // Dump 时按 [baseAddr, maxEnd) 整段展开。
-        // 无论是否命中模块区段，都尝试按页读取；只有读取失败时才补 0。
-        std::sort(dumpSegs.begin(), dumpSegs.end(),
-                  [](const DumpSegment &a, const DumpSegment &b)
-                  {
-                      if (a.start != b.start) return a.start < b.start;
-                      if (a.end != b.end) return a.end < b.end;
-                      return a.index < b.index;
-                  });
-
-        // 确定模块的内存跨度
-        uint64_t baseAddr = dumpSegs.front().start;
-        uint64_t maxEnd = 0;
-
-        for (const auto &seg : dumpSegs)
-        {
-            if (seg.start < baseAddr) baseAddr = seg.start;
-            if (seg.end > maxEnd) maxEnd = seg.end;
-        }
-
-        uint64_t spanSize = maxEnd - baseAddr;
         constexpr uint64_t MAX_DUMP_SIZE = 1024ULL * 1024 * 500; // 500MB 防御 OOM
-
+        const uint64_t spanSize = maxEnd - baseAddr;
         if (baseAddr >= maxEnd || baseAddr == ~0ULL || spanSize == 0 || spanSize > MAX_DUMP_SIZE)
         {
-            std::fprintf(stderr, "[-] Dump: 模块边界无效或大小过大 (0x%llX 字节)\n", (unsigned long long)spanSize);
+            std::fprintf(stderr, "[-] Dump: 地址范围无效或大小超过 500MB\n");
             return false;
         }
 
-        std::fprintf(stdout, "[*] 模块: %.*s\n", (int)moduleName.size(), moduleName.data());
-        std::fprintf(stdout, "[*] 匹配模块: %d 个, 区段: %zu 个\n", matchedModuleCount, dumpSegs.size());
+        std::fprintf(stdout, "[*] Dump 目标: %.*s\n", (int)target.size(), target.data());
+        if (!rangeDump) std::fprintf(stdout, "[*] 匹配模块: %d 个, 区段: %zu 个\n", matchedModuleCount, segmentCount);
         std::fprintf(stdout, "[*] 基址: 0x%llX\n", (unsigned long long)baseAddr);
         std::fprintf(stdout, "[*] 结束: 0x%llX\n", (unsigned long long)maxEnd);
-        std::fprintf(stdout, "[*] 地址跨度: 0x%llX (%llu MB)\n", (unsigned long long)spanSize, (unsigned long long)(spanSize / 1024 / 1024));
         std::fprintf(stdout, "[*] 输出大小: 0x%llX (%llu MB)\n", (unsigned long long)spanSize, (unsigned long long)(spanSize / 1024 / 1024));
 
-        mkdir("/sdcard/dump", 0777); // 忽略已存在错误
+        if (mkdir("/sdcard/dump", 0777) != 0 && errno != EEXIST)
+        {
+            std::fprintf(stderr, "[-] Dump: 无法创建 /sdcard/dump (%s)\n", std::strerror(errno));
+            return false;
+        }
 
-        size_t slashPos = moduleName.find_last_of('/');
-        std::string_view baseName = (slashPos == std::string_view::npos) ? moduleName : moduleName.substr(slashPos + 1);
-        std::string outPath = "/sdcard/dump/" + std::string(baseName) + ".dump.so";
-
+        const std::string outPath = "/sdcard/dump/" + outputName;
         FILE *fp = fopen(outPath.c_str(), "wb");
         if (!fp)
         {
@@ -737,37 +761,36 @@ class Driver
 
         std::vector<uint8_t> page(PAGE_SIZE, 0);
         size_t totalRead = 0;
-        size_t failedPages = 0;
+        size_t failedBlocks = 0;
 
         for (uint64_t addr = baseAddr; addr < maxEnd; addr += PAGE_SIZE)
         {
             size_t toRead = static_cast<size_t>(std::min<uint64_t>(PAGE_SIZE, maxEnd - addr));
-            bool read_ok = false;
-
             std::fill(page.begin(), page.begin() + toRead, 0);
 
-            if (HandleVirtualMemoryRWEvent(request_op_vmem_read, addr, page.data(), toRead) > 0)
+            const int readBytes = Read(addr, page.data(), toRead);
+            if (readBytes > 0)
             {
-                totalRead += toRead;
-                read_ok = true;
+                totalRead += std::min<size_t>(static_cast<size_t>(readBytes), toRead);
+                if (readBytes < static_cast<int>(toRead)) failedBlocks++;
             }
             else
             {
-                failedPages++;
+                failedBlocks++;
             }
-
-            if (!read_ok) std::fill(page.begin(), page.begin() + toRead, 0);
 
             if (fwrite(page.data(), 1, toRead, fp) != toRead)
             {
                 std::fprintf(stderr, "[-] Dump: 写入文件失败 %s (%s)\n", outPath.c_str(), std::strerror(errno));
                 fclose(fp);
+                remove(outPath.c_str());
                 return false;
             }
         }
 
         fclose(fp);
-        std::fprintf(stdout, "[*] 读取完成: 成功 0x%zX 字节, 失败 %zu 页\n", totalRead, failedPages);
+        if (dumpPath) *dumpPath = outPath;
+        std::fprintf(stdout, "[*] 读取完成: 成功 0x%zX 字节, 失败或部分读取 %zu 块\n", totalRead, failedBlocks);
 
         std::fprintf(stdout, "[+] ==========================================\n");
         std::fprintf(stdout, "[+] Dump 完成!\n");
@@ -778,7 +801,7 @@ class Driver
         return true;
     }
 
-  public: // 外部硬件断点接口
+public: // 外部硬件断点接口
     // 获取断点结构体信息
     const break_point &GetHwbpInfoRef()
     {
@@ -833,7 +856,7 @@ class Driver
         }
     }
 
-  public: // 外部系统调用监控接口
+public: // 外部系统调用监控接口
     int StartSyscallMonitor(int pid)
     {
         return HandleSyscallMonitorEvent(request_op_syscall_monitor_set, pid);
@@ -844,7 +867,7 @@ class Driver
         return HandleSyscallMonitorEvent(request_op_syscall_monitor_remove, pid);
     }
 
-  public:
+public:
     // 查询指定线程的 TLS 和目标进程的 PACGA 环境参数
     bool GetEnvParams(std::string_view threadName)
     {
@@ -857,7 +880,7 @@ class Driver
         return req->env_info;
     }
 
-  private: // 私有实现，外部无需关系
+private: // 私有实现，外部无需关系
     struct request_obj *req = nullptr;
     int global_pid = 0;
 
@@ -975,6 +998,7 @@ class Driver
 
             asm volatile("" ::: "memory");
             if (req->status <= 0) return req->status;
+            if (static_cast<size_t>(req->status) != chunk) return -EIO;
 
             asm volatile("" ::: "memory");
             if (is_read) copy_virtual_memory_chunk(static_cast<uint8_t *>(buffer) + processed, req->vmemrw_info.user_buffer, chunk);
@@ -982,7 +1006,7 @@ class Driver
             processed += chunk;
         }
         asm volatile("" ::: "memory");
-        return req->status;
+        return processed > static_cast<size_t>(INT_MAX) ? -EOVERFLOW : static_cast<int>(processed);
     }
 
     // 获取进程虚拟内存信息事件

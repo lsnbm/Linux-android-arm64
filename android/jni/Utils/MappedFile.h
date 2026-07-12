@@ -13,9 +13,12 @@ class MappedFile
     void *ptr_ = nullptr;
     size_t size_ = 0;
 
-  public:
+public:
     MappedFile() = default;
-    ~MappedFile() { release(); }
+    ~MappedFile()
+    {
+        release();
+    }
     MappedFile(const MappedFile &) = delete;
     MappedFile &operator=(const MappedFile &) = delete;
 
@@ -83,14 +86,26 @@ class MappedFile
         size_ = 0;
     }
 
-    template <typename T = void> T *as() noexcept { return static_cast<T *>(ptr_); }
+    template <typename T = void> T *as() noexcept
+    {
+        return static_cast<T *>(ptr_);
+    }
 
-    template <typename T = void> const T *as() const noexcept { return static_cast<const T *>(ptr_); }
+    template <typename T = void> const T *as() const noexcept
+    {
+        return static_cast<const T *>(ptr_);
+    }
 
     // 返回当前映射区域的字节大小。
-    size_t size() const noexcept { return size_; }
+    size_t size() const noexcept
+    {
+        return size_;
+    }
     // 判断当前映射指针是否有效。
-    bool valid() const noexcept { return ptr_ != nullptr; }
+    bool valid() const noexcept
+    {
+        return ptr_ != nullptr;
+    }
 
     // 向内核提示映射区域的访问模式。
     void advise(int advice)

@@ -32,7 +32,6 @@ int num_brps, num_wrps; // 硬件执行和访问槽位总数
 static struct perf_event * __percpu * bp_on_reg;
 static struct perf_event * __percpu * wp_on_reg;
 static void (*fn_perf_bp_event)(struct perf_event *event, void *data);
-static DEFINE_PER_CPU(unsigned long, g_finish_task_switch_orig_lr);
 
 // 判断单个断点点位是否具备安装和派发条件。
 static bool hwbp_point_is_active(struct bp_point *point)
@@ -444,13 +443,12 @@ static struct hook_entry g_debug_exception_hooks[] = {
 };
 
 // 返回地址hook 跳板
-static unsigned long __attribute__((used, __noinline__)) ret_work_finish_task_switch(void);
+static void __attribute__((used, __noinline__)) ret_work_finish_task_switch(void);
 __attribute__((naked, used)) void ret_trampoline_finish_task_switch(void)
 {
-    asm volatile("str x0, [sp, #-16]!\n"
+    asm volatile("str x0, [sp, #8]\n"
                  "bl ret_work_finish_task_switch\n"
-                 "mov x16, x0\n"
-                 "ldr x0, [sp], #16\n"
+                 "ldp x16, x0, [sp], #304\n"
                  "ret x16\n");
 }
 
@@ -546,9 +544,8 @@ static void clear_hwbp_regs_on_cpu(void *data)
     }
 }
 
-static unsigned long __attribute__((used, __noinline__)) ret_work_finish_task_switch(void)
+static void __attribute__((used, __noinline__)) ret_work_finish_task_switch(void)
 {
-    unsigned long orig_lr = this_cpu_read(g_finish_task_switch_orig_lr);
     struct break_point *bp_info = g_bp_info;
 
     if (bp_info)
@@ -573,9 +570,6 @@ static unsigned long __attribute__((used, __noinline__)) ret_work_finish_task_sw
             // disable_hardware_debug_on_cpu(NULL);
         }
     }
-
-    this_cpu_write(g_finish_task_switch_orig_lr, 0);
-    return orig_lr;
 }
 
 // finish_task_switch(prev) 入口 hook：函数返回后再覆盖 perf 写入的硬件断点寄存器。
@@ -583,9 +577,7 @@ static int work_trampoline_finish_task_switch(struct pt_regs *hook_regs)
 {
     if (!g_bp_info) return 0;
 
-    if (this_cpu_read(g_finish_task_switch_orig_lr)) return 0;
-
-    this_cpu_write(g_finish_task_switch_orig_lr, hook_regs->regs[30]);
+    *(unsigned long *)(hook_regs->sp = (unsigned long)hook_frame_metadata(hook_regs)) = hook_regs->regs[30];
     hook_regs->regs[30] = (unsigned long)ret_trampoline_finish_task_switch;
 
     return 0;

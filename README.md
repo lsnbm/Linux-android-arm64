@@ -65,7 +65,7 @@ TG:https://t.me/+ArHIx-Km9jkxNjZl
 - `ReadString` / `ReadWString`
 - `GetPid` / `SetGlobalPid`
 - `GetMemoryInformation` / `GetModuleAddress` / `GetScanRegions`
-- `DumpModule`，按枚举出的模块跨度 dump 并修复部分 ELF Program Header 和 Dynamic 表
+- `DumpMemory`，按模块名或 `start-end` 地址范围导出内存到 `.bin` 文件
 - `GetHwbpInfoRef` / `SetProcessHwbpRef` / `RemoveProcessHwbpRef` / `RemoveHwbpRecord`
 - `SignatureScanner`，基于驱动读内存和扫描区域完成特征生成、过滤和扫描
 
@@ -600,7 +600,7 @@ inline hook 表：
 - `GetMemoryInformation()` 走驱动 `op_m`。
 - `GetModuleAddress(moduleName, segmentIndex, outAddress, isStart)` 根据模块名后缀和区段 index 查询起止地址。
 - `GetScanRegions()` 合并匿名扫描区与所有模块区段，并按地址排序。
-- `DumpModule()` 根据模块跨度读取内存，按页抢救失败区域，输出到 `/sdcard/dump/<module>.dump.so`，并尝试修复 ELF Header、Program Header 和部分 Dynamic 指针。
+- `DumpMemory(target)` 同时支持模块名和半开地址范围 `[start, end)`。模块如 `unity` 输出 `/sdcard/dump/unity.bin`；范围如 `0x5000-0x6000` 输出 `/sdcard/dump/0x5000-0x6000.bin`。读取失败的块以零填充，单次最多导出 500MB。
 
 ### 11.3 触摸辅助
 

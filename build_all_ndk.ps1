@@ -1,7 +1,6 @@
 param(
     [string]$Root = $PSScriptRoot,
     [string]$NdkBuild = "E:\\android-ndk-r29\\ndk-build.cmd",
-    [string]$MkFileName = "Android.mk",
     [int]$Jobs = 12
 )
 
@@ -27,17 +26,17 @@ if (-not (Test-Path -LiteralPath $NdkBuild)) {
     throw ((Zh '\u672a\u627e\u5230 ndk-build: {0}') -f $NdkBuild)
 }
 
-$mkFiles = @(Get-ChildItem -Path $Root -Recurse -File -Filter $MkFileName |
+$mkFiles = @(Get-ChildItem -Path $Root -Recurse -File -Filter "Android.mk" |
     Where-Object { $_.Directory.Name -ieq "jni" } |
     Sort-Object -Property FullName)
 
 if (-not $mkFiles) {
-    Write-Host ((Zh '\u5728 Root={0} \u4e0b\u672a\u627e\u5230 jni/{1}') -f $Root, $MkFileName)
+    Write-Host ((Zh '\u5728 Root={0} \u4e0b\u672a\u627e\u5230 jni/Android.mk') -f $Root)
     exit 1
 }
 
 Write-Host ((Zh '\u5f00\u59cb\u7f16\u8bd1, Root={0}') -f $Root)
-Write-Host ((Zh '\u5171\u627e\u5230 {0} \u4e2a {1}') -f $mkFiles.Count, $MkFileName)
+Write-Host ((Zh '\u5171\u627e\u5230 {0} \u4e2a Android.mk') -f $mkFiles.Count)
 
 $results = @()
 
