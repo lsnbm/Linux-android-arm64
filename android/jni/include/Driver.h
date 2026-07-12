@@ -414,6 +414,8 @@ public:
 
     int GetPid(std::string_view packageName)
     {
+        if (packageName.empty()) return -1;
+
         DIR *dir = opendir("/proc");
         if (!dir) return -1;
         struct dirent *entry;
@@ -423,28 +425,29 @@ public:
 
         while ((entry = readdir(dir)) != nullptr)
         {
-            if (entry->d_type == DT_DIR && entry->d_name[0] >= '1' && entry->d_name[0] <= '9')
+            const std::string_view pidText(entry->d_name);
+            if (pidText.empty() || !std::ranges::all_of(pidText, [](char ch) { return ch >= '0' && ch <= '9'; })) continue;
+
+            int pid = 0;
+            const auto [ptr, ec] = std::from_chars(pidText.data(), pidText.data() + pidText.size(), pid);
+            if (ec != std::errc{} || ptr != pidText.data() + pidText.size() || pid <= 0) continue;
+
+            const int pathLength = snprintf(pathBuffer, sizeof(pathBuffer), "/proc/%d/cmdline", pid);
+            if (pathLength <= 0 || static_cast<size_t>(pathLength) >= sizeof(pathBuffer)) continue;
+
+            const int fd = open(pathBuffer, O_RDONLY | O_CLOEXEC);
+            if (fd < 0) continue;
+
+            const ssize_t bytesRead = read(fd, cmdlineBuffer, sizeof(cmdlineBuffer));
+            close(fd);
+            if (bytesRead <= 0) continue;
+
+            const size_t processNameLength = strnlen(cmdlineBuffer, static_cast<size_t>(bytesRead));
+            const std::string_view processName(cmdlineBuffer, processNameLength);
+            if (processName == packageName)
             {
-                snprintf(pathBuffer, sizeof(pathBuffer), "/proc/%s/cmdline", entry->d_name);
-                int fd = open(pathBuffer, O_RDONLY);
-                if (fd >= 0)
-                {
-
-                    ssize_t bytesRead = read(fd, cmdlineBuffer, sizeof(cmdlineBuffer) - 1);
-                    close(fd);
-
-                    if (bytesRead > 0)
-                    {
-
-                        cmdlineBuffer[bytesRead] = '\0';
-
-                        if (packageName == std::string_view(cmdlineBuffer))
-                        {
-                            closedir(dir);
-                            return atoi(entry->d_name);
-                        }
-                    }
-                }
+                closedir(dir);
+                return pid;
             }
         }
         closedir(dir);

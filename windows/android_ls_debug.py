@@ -1166,8 +1166,21 @@ class TcpTestWindow(QWidget):
         host, port = endpoint
         try:
             self.bridge_session.connect(host, port)
+            ping_response = self.bridge_session.call_operation("bridge.ping", {})
+            ping_response.require_ok()
+            target_response = self.bridge_session.call_operation("target.get", {})
+            target_response.require_ok()
         except BridgeConnectionError as exc:
+            self.bridge_session.disconnect()
             self._set_status(str(exc))
+            return
+        except BridgeError as exc:
+            self.bridge_session.disconnect()
+            error_text = str(exc).strip()
+            if "未知 operation" in error_text or "unknown operation" in error_text.lower():
+                error_text = "Android 端 TCP 程序版本过旧，请重新编译并部署当前源码中的可执行程序。"
+            QMessageBox.warning(self, "协议不兼容", error_text)
+            self._set_status(f"连接失败：{error_text}")
             return
 
         self._set_connection_ui(True)
@@ -3281,18 +3294,18 @@ class TcpTestWindow(QWidget):
                 "target.select",
                 {"pid": pid_value},
                 error_title="同步失败",
-                error_message="设置全局 PID 失败。",
-                status_on_error="同步失败：设置全局 PID 失败",
+                error_prefix="设置全局 PID 失败：",
+                status_on_error="同步失败：请查看服务端返回的具体原因",
             )
         else:
             data = self._request_data_dict(
                 "target.attach",
                 {"package_name": input_text},
                 error_title="同步失败",
-                error_message="包名附加目标失败。",
+                error_prefix="包名附加目标失败：",
                 parse_title="同步失败",
                 parse_error_text="包名附加目标响应异常。",
-                status_on_error="同步失败：包名附加目标失败",
+                status_on_error="同步失败：请查看服务端返回的具体原因",
             )
         current_pid = self._safe_int(data.get("pid"), 0) if isinstance(data, dict) else 0
         if current_pid <= 0:
