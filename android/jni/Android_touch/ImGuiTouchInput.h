@@ -66,12 +66,9 @@ inline void UpdateScreenData(int w, int h, uint32_t orientation_)
 static bool isMultiTouchDevice(int fd)
 {
     uint8_t abs_bits[(ABS_MAX + 8) / 8] = {};
-    if (ioctl(fd, EVIOCGBIT(EV_ABS, sizeof(abs_bits)), abs_bits) < 0)
-        return false;
+    if (ioctl(fd, EVIOCGBIT(EV_ABS, sizeof(abs_bits)), abs_bits) < 0) return false;
 
-    return testInputBit(ABS_MT_SLOT, abs_bits) &&
-           testInputBit(ABS_MT_POSITION_X, abs_bits) &&
-           testInputBit(ABS_MT_POSITION_Y, abs_bits);
+    return testInputBit(ABS_MT_SLOT, abs_bits) && testInputBit(ABS_MT_POSITION_X, abs_bits) && testInputBit(ABS_MT_POSITION_Y, abs_bits);
 }
 
 // 触摸事件处理线程
@@ -100,14 +97,12 @@ static void deviceHandlerThread(DeviceConfig *config)
     {
         // 使用 poll 等待输入事件，超时设置为 50ms 以便及时响应退出指令
         int poll_ret = poll(&pfd, 1, 50);
-        if (poll_ret <= 0)
-            continue; // 超时或被中断
+        if (poll_ret <= 0) continue; // 超时或被中断
 
         auto readSize = read(fd, inputEvents, sizeof(inputEvents));
         if (readSize <= 0)
         {
-            if (errno == EAGAIN || errno == EWOULDBLOCK)
-                continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
             break; // 设备断开
         }
 
@@ -122,8 +117,7 @@ static void deviceHandlerThread(DeviceConfig *config)
                 {
                 case ABS_MT_SLOT:
                     currentSlot = ie.value;
-                    if (currentSlot >= MAX_FINGERS)
-                        currentSlot = MAX_FINGERS - 1;
+                    if (currentSlot >= MAX_FINGERS) currentSlot = MAX_FINGERS - 1;
                     break;
                 case ABS_MT_TRACKING_ID:
                     if (ie.value == -1)
@@ -194,8 +188,7 @@ static void deviceHandlerThread(DeviceConfig *config)
 // 需在你的主循环中调用 (ImGui::NewFrame 之前)
 void Touch_UpdateImGui()
 {
-    if (!Touch_initialized.load(std::memory_order_acquire))
-        return;
+    if (!Touch_initialized.load(std::memory_order_acquire)) return;
 
     std::lock_guard<std::mutex> lock(touch_mutex);
     ImGuiIO &io = ImGui::GetIO();
@@ -212,8 +205,7 @@ void Touch_UpdateImGui()
                 break; // 仅取第一个手指给 ImGui
             }
         }
-        if (is_any_down)
-            break;
+        if (is_any_down) break;
     }
 
     io.MouseDown[0] = is_any_down;
@@ -221,12 +213,10 @@ void Touch_UpdateImGui()
 
 bool Touch_Init()
 {
-    if (Touch_initialized.load(std::memory_order_acquire))
-        return true;
+    if (Touch_initialized.load(std::memory_order_acquire)) return true;
 
     DIR *dir = opendir("/dev/input/");
-    if (!dir)
-        return false;
+    if (!dir) return false;
 
     dirent *ptr = NULL;
     char device_path[256];
@@ -245,8 +235,7 @@ bool Touch_Init()
             snprintf(device_path, sizeof(device_path), "/dev/input/%s", ptr->d_name);
             // 依然使用 O_NONBLOCK，配合 poll 完美运行
             int fd = open(device_path, O_RDONLY | O_NONBLOCK);
-            if (fd < 0)
-                continue;
+            if (fd < 0) continue;
 
             if (isMultiTouchDevice(fd))
             {
@@ -257,8 +246,7 @@ bool Touch_Init()
                 sscanf(ptr->d_name, "event%d", &info.eventNum);
 
                 input_absinfo absX, absY;
-                if (ioctl(fd, EVIOCGABS(ABS_MT_POSITION_X), &absX) == 0 &&
-                    ioctl(fd, EVIOCGABS(ABS_MT_POSITION_Y), &absY) == 0)
+                if (ioctl(fd, EVIOCGABS(ABS_MT_POSITION_X), &absX) == 0 && ioctl(fd, EVIOCGABS(ABS_MT_POSITION_Y), &absY) == 0)
                 {
                     uint8_t prop_bits[(INPUT_PROP_MAX + 8) / 8] = {};
                     if (ioctl(fd, EVIOCGPROP(sizeof(prop_bits)), prop_bits) == 0)
@@ -284,25 +272,22 @@ bool Touch_Init()
     }
     closedir(dir);
 
-    if (found_devices.empty())
-        return false;
+    if (found_devices.empty()) return false;
 
-    std::sort(found_devices.begin(), found_devices.end(), [](const DeviceInfo &a, const DeviceInfo &b)
+    std::sort(found_devices.begin(), found_devices.end(),
+              [](const DeviceInfo &a, const DeviceInfo &b)
               {
-                  if (a.isDirect != b.isDirect)
-                      return a.isDirect;
-                  if (a.isPointer != b.isPointer)
-                      return !a.isPointer;
+                  if (a.isDirect != b.isDirect) return a.isDirect;
+                  if (a.isPointer != b.isPointer) return !a.isPointer;
 
                   long long areaA = (long long)a.maxX * (long long)a.maxY;
                   long long areaB = (long long)b.maxX * (long long)b.maxY;
-                  if (areaA != areaB)
-                      return areaA > areaB;
+                  if (areaA != areaB) return areaA > areaB;
 
-                  return a.eventNum < b.eventNum; });
+                  return a.eventNum < b.eventNum;
+              });
 
-    for (size_t i = 1; i < found_devices.size(); ++i)
-        close(found_devices[i].fd);
+    for (size_t i = 1; i < found_devices.size(); ++i) close(found_devices[i].fd);
     found_devices.resize(1);
 
     Touch_initialized.store(true, std::memory_order_release);
@@ -322,8 +307,7 @@ bool Touch_Init()
         config_ref.maxX = dev_info.maxX;
         config_ref.maxY = dev_info.maxY;
 
-        config_ref.task = Utils::GlobalPool.push([config = &config_ref]
-                                                 { deviceHandlerThread(config); });
+        config_ref.task = Utils::GlobalPool.push([config = &config_ref] { deviceHandlerThread(config); });
     }
     return true;
 }
@@ -333,8 +317,7 @@ void SetInputBlocking(bool block)
 {
     for (const auto &dev : devices)
     {
-        if (dev.deviceFd >= 0)
-            ioctl(dev.deviceFd, EVIOCGRAB, block ? 1 : 0);
+        if (dev.deviceFd >= 0) ioctl(dev.deviceFd, EVIOCGRAB, block ? 1 : 0);
     }
 }
 
@@ -351,8 +334,7 @@ bool IsUserTouchingRect(float rx, float ry, float rw, float rh)
                 int touchX = fingers[d][f].x;
                 int touchY = fingers[d][f].y;
 
-                if (touchX >= rx && touchX <= rx + rw &&
-                    touchY >= ry && touchY <= ry + rh)
+                if (touchX >= rx && touchX <= rx + rw && touchY >= ry && touchY <= ry + rh)
                 {
                     return true;
                 }
@@ -364,14 +346,12 @@ bool IsUserTouchingRect(float rx, float ry, float rw, float rh)
 
 void Touch_Shutdown()
 {
-    if (!Touch_initialized.load(std::memory_order_acquire))
-        return;
+    if (!Touch_initialized.load(std::memory_order_acquire)) return;
 
     SetInputBlocking(false);
     Touch_initialized.store(false, std::memory_order_release);
 
     for (size_t i = 0; i < devices.size(); ++i)
-        if (devices[i].task.valid())
-            devices[i].task.wait();
+        if (devices[i].task.valid()) devices[i].task.wait();
     devices.clear();
 }

@@ -25,7 +25,7 @@
 #endif
 
 #define PTEBP_ESR_EC_DABT_LOW 0x24
-#define PTEBP_ESR_FSC_MASK 0x3f
+#define PTEBP_ESR_FSC_MASK    0x3f
 #define PTEBP_ESR_FSC_PERM_L3 0x0f
 
 struct ptebp_slot
@@ -76,24 +76,19 @@ static inline int ptebp_access_insn(struct ptebp_slot *slot, uint32_t *insn, boo
     uint32_t readback = 0;
     int status;
 
-    if (!pte_present(slot->orig_pte))
-        return -ESTALE;
+    if (!pte_present(slot->orig_pte)) return -ESTALE;
 
     pfn = pte_pfn(slot->orig_pte);
-    if (!pfn_valid(pfn))
-        return -EFAULT;
+    if (!pfn_valid(pfn)) return -EFAULT;
 
     paddr = PFN_PHYS(pfn) + offset_in_page(slot->hook_addr);
-    if (!write)
-        return pte_read_physical(paddr, insn, sizeof(*insn));
+    if (!write) return pte_read_physical(paddr, insn, sizeof(*insn));
 
     status = pte_write_physical(paddr, insn, sizeof(*insn));
-    if (status)
-        return status;
+    if (status) return status;
 
     status = pte_read_physical(paddr, &readback, sizeof(readback));
-    if (status)
-        return status;
+    if (status) return status;
     return readback == *insn ? 0 : -EIO;
 }
 
@@ -106,17 +101,14 @@ static bool ptebp_validate_slot(struct ptebp_slot *slot, struct mm_struct *mm)
     pteval_t mutable = 0;
     uint64_t page_vaddr;
 
-    if (!slot || !mm || !slot->hook_addr)
-        return false;
+    if (!slot || !mm || !slot->hook_addr) return false;
 
     page_vaddr = slot->hook_addr & PAGE_MASK;
     fresh_ptep = get_user_pte(mm, page_vaddr);
-    if (!fresh_ptep)
-        return false;
+    if (!fresh_ptep) return false;
 
     pte_now = READ_ONCE(*fresh_ptep);
-    if (!pte_present(pte_now) || !pfn_valid(pte_pfn(pte_now)))
-        return false;
+    if (!pte_present(pte_now) || !pfn_valid(pte_pfn(pte_now))) return false;
 
     expected_pte = __pte(ptebp_make_execute_only_pte(pte_val(slot->orig_pte)));
     changed = pte_val(pte_now) ^ pte_val(expected_pte);
@@ -159,22 +151,17 @@ static int ptebp_emu_read_mem(void *opaque, uint64_t addr, int bytes, __uint128_
     size_t patch_index;
     int status;
 
-    if (!ctx || !out || bytes <= 0 || bytes > sizeof(data))
-        return -EINVAL;
-    if (addr > U64_MAX - (uint64_t)bytes)
-        return -EFAULT;
+    if (!ctx || !out || bytes <= 0 || bytes > sizeof(data)) return -EINVAL;
+    if (addr > U64_MAX - (uint64_t)bytes) return -EFAULT;
 
     end = addr + (uint64_t)bytes;
     page_end = ctx->page_vaddr + PAGE_SIZE;
 
-    if (end <= ctx->page_vaddr || addr >= page_end)
-        return -EOPNOTSUPP;
-    if (addr < ctx->page_vaddr || end > page_end)
-        return -EFAULT;
+    if (end <= ctx->page_vaddr || addr >= page_end) return -EOPNOTSUPP;
+    if (addr < ctx->page_vaddr || end > page_end) return -EFAULT;
     paddr = ctx->page_paddr + offset_in_page(addr);
     status = linear_read_physical(paddr, data, bytes);
-    if (status)
-        return status;
+    if (status) return status;
 
     for (patch_index = 0; patch_index < ARRAY_SIZE(ctx->patches); patch_index++)
     {
@@ -186,22 +173,15 @@ static int ptebp_emu_read_mem(void *opaque, uint64_t addr, int bytes, __uint128_
         size_t insn_offset;
         size_t copy_size;
 
-        if (!patch->hook_addr)
-            continue;
-        if (start >= stop)
-            continue;
+        if (!patch->hook_addr) continue;
+        if (start >= stop) continue;
 
         data_offset = start - addr;
         insn_offset = start - patch->hook_addr;
         copy_size = stop - start;
-        if (data_offset > (size_t)bytes || copy_size > (size_t)bytes - data_offset ||
-            insn_offset > sizeof(patch->orig_insn) ||
-            copy_size > sizeof(patch->orig_insn) - insn_offset)
-            return -EFAULT;
+        if (data_offset > (size_t)bytes || copy_size > (size_t)bytes - data_offset || insn_offset > sizeof(patch->orig_insn) || copy_size > sizeof(patch->orig_insn) - insn_offset) return -EFAULT;
 
-        __builtin_memcpy(data + data_offset,
-                         (uint8_t *)&patch->orig_insn + insn_offset,
-                         copy_size);
+        __builtin_memcpy(data + data_offset, (uint8_t *)&patch->orig_insn + insn_offset, copy_size);
     }
 
     __builtin_memcpy(&value, data, bytes);
@@ -238,25 +218,18 @@ static void ptebp_drop_all_monitors(bool lock_mm)
     {
         struct ptebp_slot *slot = &slots[point_slot];
 
-        if (!slot->hook_addr)
-            continue;
-        if (ptebp_validate_slot(slot, mm))
-            (void)ptebp_access_insn(slot, &slot->orig_insn, true);
+        if (!slot->hook_addr) continue;
+        if (ptebp_validate_slot(slot, mm)) (void)ptebp_access_insn(slot, &slot->orig_insn, true);
     }
     for (point_slot = 0; point_slot < ARRAY_SIZE(slots); point_slot++)
     {
         struct ptebp_slot *slot = &slots[point_slot];
 
-        if (!slot->hook_addr)
-            continue;
-        if (ptebp_validate_slot(slot, mm))
-            (void)write_user_pte_value(mm, slot->hook_addr & PAGE_MASK,
-                                       pte_val(slot->orig_pte));
+        if (!slot->hook_addr) continue;
+        if (ptebp_validate_slot(slot, mm)) (void)write_user_pte_value(mm, slot->hook_addr & PAGE_MASK, pte_val(slot->orig_pte));
     }
-    if (lock_mm)
-        mmap_read_unlock(mm);
-    else
-        spin_unlock_irqrestore(&g_ptebp_lock, flags);
+    if (lock_mm) mmap_read_unlock(mm);
+    else spin_unlock_irqrestore(&g_ptebp_lock, flags);
     mmput(mm);
 }
 
@@ -269,25 +242,21 @@ static int ptebp_handle_brk(struct pt_regs *hook_regs)
     uint32_t emulate_insn_word;
     struct bp_point *hit_point = NULL;
 
-    if (!hook_regs)
-        return 0;
+    if (!hook_regs) return 0;
 
     regs = (struct pt_regs *)hook_regs->regs[2];
-    if (!regs || !current->mm || !user_mode(regs) || (current->flags & PF_EXITING))
-        return 0;
+    if (!regs || !current->mm || !user_mode(regs) || (current->flags & PF_EXITING)) return 0;
 
     pc = untagged_addr(regs->pc) & ~0x3ULL;
 
     spin_lock_irqsave(&g_ptebp_lock, flags);
-    if (!g_ptebp_info || g_ptebp_mm != current->mm)
-        goto out_unlock;
+    if (!g_ptebp_info || g_ptebp_mm != current->mm) goto out_unlock;
 
     for (point_slot = 0; point_slot < ARRAY_SIZE(g_ptebp_slots); point_slot++)
     {
         struct ptebp_slot *slot = &g_ptebp_slots[point_slot];
 
-        if (!slot->hook_addr || slot->hook_addr != pc)
-            continue;
+        if (!slot->hook_addr || slot->hook_addr != pc) continue;
 
         hit_point = &g_ptebp_info->points[point_slot];
         emulate_insn_word = slot->orig_insn;
@@ -297,14 +266,11 @@ static int ptebp_handle_brk(struct pt_regs *hook_regs)
 out_unlock:
     spin_unlock_irqrestore(&g_ptebp_lock, flags);
 
-    if (!hit_point)
-        return 0;
+    if (!hit_point) return 0;
 
-    if (hit_point->on_hit)
-        hit_point->on_hit((void *)regs, (void *)hit_point);
+    if (hit_point->on_hit) hit_point->on_hit((void *)regs, (void *)hit_point);
 
-    if (!emulate_insn(regs, &emulate_insn_word))
-        ptebp_drop_all_monitors(false);
+    if (!emulate_insn(regs, &emulate_insn_word)) ptebp_drop_all_monitors(false);
     hook_regs->regs[0] = 0;
     return 1;
 }
@@ -326,8 +292,7 @@ static int ptebp_handle_fault(struct pt_regs *hook_regs)
         .ctx = &mem_ctx,
     };
 
-    if (!hook_regs)
-        return 0;
+    if (!hook_regs) return 0;
 
     // do_mem_abort(far, esr, regs)：far 是数据访问地址，regs->pc 是触发访问的指令地址。
     far = hook_regs->regs[0];
@@ -337,20 +302,16 @@ static int ptebp_handle_fault(struct pt_regs *hook_regs)
     fsc = esr & PTEBP_ESR_FSC_MASK;
     fault_page = untagged_addr(far) & PAGE_MASK;
 
-    if (ec != PTEBP_ESR_EC_DABT_LOW)
-        return 0;
+    if (ec != PTEBP_ESR_EC_DABT_LOW) return 0;
 
-    if (!regs || !current->mm || !user_mode(regs) || (current->flags & PF_EXITING))
-        return 0;
+    if (!regs || !current->mm || !user_mode(regs) || (current->flags & PF_EXITING)) return 0;
 
     // PTEBP 只接管本模块 execute-only PTE 产生的 L3 权限异常。
-    if (fsc != PTEBP_ESR_FSC_PERM_L3)
-        return 0;
+    if (fsc != PTEBP_ESR_FSC_PERM_L3) return 0;
 
     // 根据当前 mm 和 FAR 页地址定位对应 slot，避免接管其他进程或其他页面的权限异常。
     spin_lock_irqsave(&g_ptebp_lock, flags);
-    if (!g_ptebp_info || g_ptebp_mm != current->mm)
-        goto out_unlock;
+    if (!g_ptebp_info || g_ptebp_mm != current->mm) goto out_unlock;
 
     mem_ctx = (struct ptebp_emu_mem_ctx){
         .page_vaddr = fault_page,
@@ -360,19 +321,15 @@ static int ptebp_handle_fault(struct pt_regs *hook_regs)
         struct ptebp_slot *slot = &g_ptebp_slots[point_slot];
         struct ptebp_emu_patch *patch;
 
-        if (!slot->hook_addr ||
-            (slot->hook_addr & PAGE_MASK) != fault_page)
-            continue;
+        if (!slot->hook_addr || (slot->hook_addr & PAGE_MASK) != fault_page) continue;
 
-        if (!owner)
-            owner = slot;
+        if (!owner) owner = slot;
 
         patch = &mem_ctx.patches[point_slot];
         patch->hook_addr = slot->hook_addr;
         patch->orig_insn = slot->orig_insn;
     }
-    if (!owner)
-        goto out_unlock;
+    if (!owner) goto out_unlock;
     if (!ptebp_validate_slot(owner, current->mm))
     {
         spin_unlock_irqrestore(&g_ptebp_lock, flags);
@@ -384,11 +341,9 @@ static int ptebp_handle_fault(struct pt_regs *hook_regs)
 
 out_unlock:
     spin_unlock_irqrestore(&g_ptebp_lock, flags);
-    if (!owner)
-        return 0;
+    if (!owner) return 0;
 
-    if (!emulate_insn_with_mem(regs, NULL, &mem_access))
-        ptebp_drop_all_monitors(false);
+    if (!emulate_insn_with_mem(regs, NULL, &mem_access)) ptebp_drop_all_monitors(false);
     hook_regs->regs[0] = 0;
     return 1;
 }
@@ -404,8 +359,7 @@ static inline void stop_ptebp_monitor(void)
     synchronize_rcu();
 }
 
-static int ptebp_install_slot(struct break_point *info, size_t point_slot,
-                              struct mm_struct *mm)
+static int ptebp_install_slot(struct break_point *info, size_t point_slot, struct mm_struct *mm)
 {
     struct bp_point *point;
     struct ptebp_slot *slot;
@@ -418,54 +372,42 @@ static int ptebp_install_slot(struct break_point *info, size_t point_slot,
     size_t scan_slot;
     int status = 0;
 
-    if (point_slot >= ARRAY_SIZE(g_ptebp_slots))
-        return -EINVAL;
+    if (point_slot >= ARRAY_SIZE(g_ptebp_slots)) return -EINVAL;
 
     point = &info->points[point_slot];
     slot = &g_ptebp_slots[point_slot];
     hook_addr = untagged_addr(point->hit_addr) & ~0x3ULL;
-    if (!hook_addr || hook_addr >= READ_ONCE(mm->task_size) ||
-        sizeof(slot->orig_insn) > READ_ONCE(mm->task_size) - hook_addr)
-        return -EFAULT;
+    if (!hook_addr || hook_addr >= READ_ONCE(mm->task_size) || sizeof(slot->orig_insn) > READ_ONCE(mm->task_size) - hook_addr) return -EFAULT;
     page_vaddr = hook_addr & PAGE_MASK;
 
     ptep = get_user_pte(mm, page_vaddr);
-    if (!ptep)
-        return -EFAULT;
+    if (!ptep) return -EFAULT;
 
     orig_pte = READ_ONCE(*ptep);
-    if (!pte_present(orig_pte))
-        return -EFAULT;
+    if (!pte_present(orig_pte)) return -EFAULT;
 
     page_owner = NULL;
     for (scan_slot = 0; scan_slot < ARRAY_SIZE(g_ptebp_slots); scan_slot++)
     {
         struct ptebp_slot *candidate = &g_ptebp_slots[scan_slot];
 
-        if (!candidate->hook_addr)
-            continue;
-        if (candidate->hook_addr == hook_addr)
-            return -EEXIST;
-        if ((candidate->hook_addr & PAGE_MASK) == page_vaddr)
-            page_owner = candidate;
+        if (!candidate->hook_addr) continue;
+        if (candidate->hook_addr == hook_addr) return -EEXIST;
+        if ((candidate->hook_addr & PAGE_MASK) == page_vaddr) page_owner = candidate;
     }
 
-    if (page_owner && !ptebp_validate_slot(page_owner, mm))
-        return -EFAULT;
+    if (page_owner && !ptebp_validate_slot(page_owner, mm)) return -EFAULT;
 
-    if (!page_owner && (pte_val(orig_pte) & PTEBP_UXN))
-        return -EACCES;
+    if (!page_owner && (pte_val(orig_pte) & PTEBP_UXN)) return -EACCES;
 
-    if (page_owner)
-        orig_pte = page_owner->orig_pte;
+    if (page_owner) orig_pte = page_owner->orig_pte;
 
     *slot = (struct ptebp_slot){
         .orig_pte = orig_pte,
         .hook_addr = hook_addr,
     };
     status = ptebp_access_insn(slot, &slot->orig_insn, false);
-    if (status)
-        goto clear_slot;
+    if (status) goto clear_slot;
     if (slot->orig_insn == PTEBP_BRK_INSN)
     {
         status = -ESTALE;
@@ -473,15 +415,11 @@ static int ptebp_install_slot(struct break_point *info, size_t point_slot,
     }
 
     status = ptebp_access_insn(slot, &brk_insn, true);
-    if (!status && !page_owner)
-        status = write_user_pte_value(mm, page_vaddr,
-                                      ptebp_make_execute_only_pte(pte_val(orig_pte)));
+    if (!status && !page_owner) status = write_user_pte_value(mm, page_vaddr, ptebp_make_execute_only_pte(pte_val(orig_pte)));
 
-    if (!status)
-        return 0;
+    if (!status) return 0;
 
-    if (status)
-        (void)ptebp_access_insn(slot, &slot->orig_insn, true);
+    if (status) (void)ptebp_access_insn(slot, &slot->orig_insn, true);
 clear_slot:
     memset(slot, 0, sizeof(*slot));
     return status;
@@ -494,52 +432,40 @@ static inline int start_ptebp_monitor(struct break_point *info)
     struct mm_struct *mm;
     unsigned long flags;
 
-    BUILD_BUG_ON(ARRAY_SIZE(g_ptebp_slots) !=
-                 ARRAY_SIZE(((struct break_point *)0)->points));
-    BUILD_BUG_ON(ARRAY_SIZE(g_ptebp_slots) !=
-                 ARRAY_SIZE(((struct ptebp_emu_mem_ctx *)0)->patches));
+    BUILD_BUG_ON(ARRAY_SIZE(g_ptebp_slots) != ARRAY_SIZE(((struct break_point *)0)->points));
+    BUILD_BUG_ON(ARRAY_SIZE(g_ptebp_slots) != ARRAY_SIZE(((struct ptebp_emu_mem_ctx *)0)->patches));
 
-    if (!info || info->pid <= 0)
-        return -EINVAL;
+    if (!info || info->pid <= 0) return -EINVAL;
 
     for (point_slot = 0; point_slot < ARRAY_SIZE(info->points); point_slot++)
-        if (ptebp_point_is_active(&info->points[point_slot]))
-            break;
-    if (point_slot == ARRAY_SIZE(info->points))
-        return -EINVAL;
+        if (ptebp_point_is_active(&info->points[point_slot])) break;
+    if (point_slot == ARRAY_SIZE(info->points)) return -EINVAL;
 
     stop_ptebp_monitor();
 
     mm = get_mm_by_pid(info->pid);
-    if (!mm)
-        return -EINVAL;
+    if (!mm) return -EINVAL;
 
     status = hook_entry_install(&g_ptebp_fault_hook);
-    if (status)
-        goto err_put_mm;
+    if (status) goto err_put_mm;
 
     status = hook_entry_install(&g_ptebp_brk_hook);
-    if (status)
-        goto err_remove_fault_hook;
+    if (status) goto err_remove_fault_hook;
 
     mmap_read_lock(mm);
     spin_lock_irqsave(&g_ptebp_lock, flags);
     g_ptebp_mm = mm;
     for (point_slot = 0; point_slot < ARRAY_SIZE(info->points); point_slot++)
     {
-        if (!ptebp_point_is_active(&info->points[point_slot]))
-            continue;
+        if (!ptebp_point_is_active(&info->points[point_slot])) continue;
         status = ptebp_install_slot(info, point_slot, mm);
-        if (status)
-            break;
+        if (status) break;
     }
-    if (!status)
-        g_ptebp_info = info;
+    if (!status) g_ptebp_info = info;
     spin_unlock_irqrestore(&g_ptebp_lock, flags);
     mmap_read_unlock(mm);
 
-    if (!status)
-        return 0;
+    if (!status) return 0;
 
     stop_ptebp_monitor();
     return status;

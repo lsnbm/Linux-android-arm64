@@ -37,14 +37,14 @@
         BitTube 底层使用 socketpair(AF_UNIX, SOCK_SEQPACKET) 创建一对 Unix Domain Socket，并通过 send()/recv() 传递事件数据。
         UDS 不经过网卡，也不走 TCP/IP 网络协议栈；数据通过内核 socket 缓冲区在本地进程之间传递，适合高频、小数据量事件分发。
 */
-#define VGYRO_SENSOR_TYPE_GYROSCOPE 4
+#define VGYRO_SENSOR_TYPE_GYROSCOPE              4
 #define VGYRO_SENSOR_TYPE_GYROSCOPE_UNCALIBRATED 16
-#define VGYRO_ASENSOR_EVENT_SIZE 104
-#define VGYRO_ASENSOR_VERSION_OFFSET 0
-#define VGYRO_ASENSOR_TYPE_OFFSET 8
-#define VGYRO_ASENSOR_DATA_OFFSET 24
-#define VGYRO_SCALE_MILLI 1000
-#define VGYRO_MAX_SCAN_BYTES (2 * 1024 * 1024)
+#define VGYRO_ASENSOR_EVENT_SIZE                 104
+#define VGYRO_ASENSOR_VERSION_OFFSET             0
+#define VGYRO_ASENSOR_TYPE_OFFSET                8
+#define VGYRO_ASENSOR_DATA_OFFSET                24
+#define VGYRO_SCALE_MILLI                        1000
+#define VGYRO_MAX_SCAN_BYTES                     (2 * 1024 * 1024)
 
 enum vgyro_sendto_arg_mode
 {
@@ -77,8 +77,7 @@ static u32 vgyro_milli_to_float_bits(int value)
     int exp;
     u32 mant;
 
-    if (!value)
-        return 0;
+    if (!value) return 0;
 
     if (value < 0)
     {
@@ -91,15 +90,12 @@ static u32 vgyro_milli_to_float_bits(int value)
     }
 
     q = (mag << 24) / VGYRO_SCALE_MILLI;
-    if (!q)
-        return sign;
+    if (!q) return sign;
 
     top = fls64(q) - 1;
     exp = top - 24 + 127;
-    if (exp <= 0)
-        return sign;
-    if (exp >= 255)
-        return sign | 0x7f800000U;
+    if (exp <= 0) return sign;
+    if (exp >= 255) return sign | 0x7f800000U;
 
     if (top > 23)
     {
@@ -108,14 +104,12 @@ static u32 vgyro_milli_to_float_bits(int value)
         u64 mask = (1ULL << shift) - 1;
         u64 rounded = q >> shift;
 
-        if ((q & mask) >= half)
-            rounded++;
+        if ((q & mask) >= half) rounded++;
         if (rounded >= (1ULL << 24))
         {
             rounded >>= 1;
             exp++;
-            if (exp >= 255)
-                return sign | 0x7f800000U;
+            if (exp >= 255) return sign | 0x7f800000U;
         }
         mant = (u32)rounded;
     }
@@ -137,14 +131,10 @@ static u32 vgyro_float_bits_add(u32 a, u32 b)
     u64 mant_a, mant_b, mant_r;
     int diff;
 
-    if (!abs_a)
-        return b;
-    if (!abs_b)
-        return a;
-    if ((abs_a & 0x7f800000U) == 0x7f800000U)
-        return a;
-    if ((abs_b & 0x7f800000U) == 0x7f800000U)
-        return b;
+    if (!abs_a) return b;
+    if (!abs_b) return a;
+    if ((abs_a & 0x7f800000U) == 0x7f800000U) return a;
+    if ((abs_b & 0x7f800000U) == 0x7f800000U) return b;
 
     sign_a = a >> 31;
     sign_b = b >> 31;
@@ -153,14 +143,10 @@ static u32 vgyro_float_bits_add(u32 a, u32 b)
     mant_a = a & 0x7fffffU;
     mant_b = b & 0x7fffffU;
 
-    if (exp_a)
-        mant_a |= 0x800000U;
-    else
-        exp_a = 1;
-    if (exp_b)
-        mant_b |= 0x800000U;
-    else
-        exp_b = 1;
+    if (exp_a) mant_a |= 0x800000U;
+    else exp_a = 1;
+    if (exp_b) mant_b |= 0x800000U;
+    else exp_b = 1;
 
     mant_a <<= 8;
     mant_b <<= 8;
@@ -180,10 +166,8 @@ static u32 vgyro_float_bits_add(u32 a, u32 b)
     }
 
     diff = exp_a - exp_b;
-    if (diff >= 56)
-        mant_b = 0;
-    else
-        mant_b >>= diff;
+    if (diff >= 56) mant_b = 0;
+    else mant_b >>= diff;
 
     exp_r = exp_a;
     if (sign_a == sign_b)
@@ -209,15 +193,13 @@ static u32 vgyro_float_bits_add(u32 a, u32 b)
             mant_r = mant_b - mant_a;
         }
 
-        if (!mant_r)
-            return 0;
+        if (!mant_r) return 0;
 
         if (mant_r < (0x800000ULL << 8))
         {
             int shift = 31 - (fls64(mant_r) - 1);
 
-            if (shift >= exp_r)
-                shift = exp_r - 1;
+            if (shift >= exp_r) shift = exp_r - 1;
             mant_r <<= shift;
             exp_r -= shift;
         }
@@ -233,32 +215,25 @@ static u32 vgyro_float_bits_add(u32 a, u32 b)
         }
     }
 
-    if (exp_r >= 255)
-        return (sign_r << 31) | 0x7f800000U;
-    if (exp_r <= 0)
-        return sign_r << 31;
+    if (exp_r >= 255) return (sign_r << 31) | 0x7f800000U;
+    if (exp_r <= 0) return sign_r << 31;
 
-    return (sign_r << 31) | ((u32)exp_r << 23) |
-           (((u32)(mant_r >> 8)) & 0x7fffffU);
+    return (sign_r << 31) | ((u32)exp_r << 23) | (((u32)(mant_r >> 8)) & 0x7fffffU);
 }
 
 // 判断 sendto 缓冲区长度是否可能是一组 ASensorEvent。
 static bool vgyro_buffer_maybe_events(size_t len)
 {
-    if (len < VGYRO_ASENSOR_EVENT_SIZE)
-        return false;
-    if (len > VGYRO_MAX_SCAN_BYTES)
-        return false;
-    if (len % VGYRO_ASENSOR_EVENT_SIZE)
-        return false;
+    if (len < VGYRO_ASENSOR_EVENT_SIZE) return false;
+    if (len > VGYRO_MAX_SCAN_BYTES) return false;
+    if (len % VGYRO_ASENSOR_EVENT_SIZE) return false;
     return true;
 }
 
 // 判断传感器事件类型是否为陀螺仪或未校准陀螺仪。
 static bool vgyro_is_gyro_event_type(int type)
 {
-    return type == VGYRO_SENSOR_TYPE_GYROSCOPE ||
-           type == VGYRO_SENSOR_TYPE_GYROSCOPE_UNCALIBRATED;
+    return type == VGYRO_SENSOR_TYPE_GYROSCOPE || type == VGYRO_SENSOR_TYPE_GYROSCOPE_UNCALIBRATED;
 }
 
 // 扫描内核临时缓冲区并给陀螺仪事件叠加虚拟三轴值。
@@ -270,8 +245,7 @@ static int vgyro_patch_kernel_events(char *buf, size_t len)
     u32 fy = vgyro_milli_to_float_bits(READ_ONCE(vg.gyro_y_mrad_s));
     u32 fz = vgyro_milli_to_float_bits(READ_ONCE(vg.gyro_z_mrad_s));
 
-    if (!buf || !vgyro_buffer_maybe_events(len))
-        return 0;
+    if (!buf || !vgyro_buffer_maybe_events(len)) return 0;
 
     for (off = 0; off + VGYRO_ASENSOR_EVENT_SIZE <= len; off += VGYRO_ASENSOR_EVENT_SIZE)
     {
@@ -279,10 +253,8 @@ static int vgyro_patch_kernel_events(char *buf, size_t len)
         int type = *(int *)(buf + off + VGYRO_ASENSOR_TYPE_OFFSET);
         u32 *data = (u32 *)(buf + off + VGYRO_ASENSOR_DATA_OFFSET);
 
-        if (version != VGYRO_ASENSOR_EVENT_SIZE)
-            continue;
-        if (!vgyro_is_gyro_event_type(type))
-            continue;
+        if (version != VGYRO_ASENSOR_EVENT_SIZE) continue;
+        if (!vgyro_is_gyro_event_type(type)) continue;
 
         data[0] = vgyro_float_bits_add(data[0], fx);
         data[1] = vgyro_float_bits_add(data[1], fy);
@@ -302,16 +274,13 @@ static int vgyro_handle_sendto(struct pt_regs *regs, enum vgyro_sendto_arg_mode 
     char *kbuf;
     int patched;
 
-    if (!READ_ONCE(vg.active))
-        return 0;
-    if (!regs)
-        return 0;
+    if (!READ_ONCE(vg.active)) return 0;
+    if (!regs) return 0;
 
     if (mode == VGYRO_SENDTO_ARGS_ARM64_SYSCALL)
     {
         sys_regs = (struct pt_regs *)regs->regs[0];
-        if (!sys_regs)
-            return 0;
+        if (!sys_regs) return 0;
 
         ubuf = (char __user *)sys_regs->regs[1];
         len = (size_t)sys_regs->regs[2];
@@ -322,28 +291,20 @@ static int vgyro_handle_sendto(struct pt_regs *regs, enum vgyro_sendto_arg_mode 
         len = (size_t)regs->regs[2];
     }
 
-    if (!ubuf || !vgyro_buffer_maybe_events(len))
-        return 0;
+    if (!ubuf || !vgyro_buffer_maybe_events(len)) return 0;
 
     kbuf = vmalloc(len);
-    if (!kbuf)
-        return 0;
+    if (!kbuf) return 0;
 
-    if (copy_from_user(kbuf, ubuf, len))
-        goto out;
+    if (copy_from_user(kbuf, ubuf, len)) goto out;
 
     patched = vgyro_patch_kernel_events(kbuf, len);
     if (patched > 0)
     {
         unsigned long missing = copy_to_user(ubuf, kbuf, len);
 
-        if (missing)
-            ls_log_tag("vgyro", "sendto copy back missing=%lu len=%zu\n",
-                       missing, len);
-        else
-            ls_log_tag("vgyro", "sendto patched %d gyro event(s) len=%zu mode=%d mrad=%d/%d/%d\n",
-                       patched, len, mode, READ_ONCE(vg.gyro_x_mrad_s),
-                       READ_ONCE(vg.gyro_y_mrad_s), READ_ONCE(vg.gyro_z_mrad_s));
+        if (missing) ls_log_tag("vgyro", "sendto copy back missing=%lu len=%zu\n", missing, len);
+        else ls_log_tag("vgyro", "sendto patched %d gyro event(s) len=%zu mode=%d mrad=%d/%d/%d\n", patched, len, mode, READ_ONCE(vg.gyro_x_mrad_s), READ_ONCE(vg.gyro_y_mrad_s), READ_ONCE(vg.gyro_z_mrad_s));
     }
 
 out:
@@ -375,8 +336,7 @@ static bool vgyro_sendto_hook_installed(void)
 
     for (i = 0; i < ARRAY_SIZE(vgyro_sendto_hook_targets); i++)
     {
-        if (vgyro_sendto_hook_targets[i][0].installed)
-            return true;
+        if (vgyro_sendto_hook_targets[i][0].installed) return true;
     }
 
     return false;
@@ -393,13 +353,11 @@ static int vgyro_install_hook_locked(void)
         ret = inline_hook_install(vgyro_sendto_hook_targets[i]);
         if (!ret)
         {
-            ls_log_tag("vgyro", "inline hook on %s registered\n",
-                       vgyro_sendto_hook_targets[i][0].target_sym);
+            ls_log_tag("vgyro", "inline hook on %s registered\n", vgyro_sendto_hook_targets[i][0].target_sym);
             return 0;
         }
 
-        ls_log_tag("vgyro", "inline hook on %s failed: %d\n",
-                   vgyro_sendto_hook_targets[i][0].target_sym, ret);
+        ls_log_tag("vgyro", "inline hook on %s failed: %d\n", vgyro_sendto_hook_targets[i][0].target_sym, ret);
     }
 
     return ret;
@@ -432,8 +390,7 @@ static inline int v_gyro_report(int gyro_x_mrad_s, int gyro_y_mrad_s, int gyro_z
     WRITE_ONCE(vg.gyro_z_mrad_s, gyro_z_mrad_s);
     WRITE_ONCE(vg.active, true);
 
-    ls_log_tag("vgyro", "report mrad=%d/%d/%d hook=%d\n",
-               gyro_x_mrad_s, gyro_y_mrad_s, gyro_z_mrad_s, vgyro_sendto_hook_installed());
+    ls_log_tag("vgyro", "report mrad=%d/%d/%d hook=%d\n", gyro_x_mrad_s, gyro_y_mrad_s, gyro_z_mrad_s, vgyro_sendto_hook_installed());
     return 0;
 }
 
@@ -449,8 +406,7 @@ static inline void v_gyro_destroy(void)
     WRITE_ONCE(vg.gyro_y_mrad_s, 0);
     WRITE_ONCE(vg.gyro_z_mrad_s, 0);
 
-    for (i = 0; i < ARRAY_SIZE(vgyro_sendto_hook_targets); i++)
-        inline_hook_remove(vgyro_sendto_hook_targets[i]);
+    for (i = 0; i < ARRAY_SIZE(vgyro_sendto_hook_targets); i++) inline_hook_remove(vgyro_sendto_hook_targets[i]);
 
     ls_log_tag("vgyro", "inline hook unregistered\n");
 

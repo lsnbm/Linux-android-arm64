@@ -49,8 +49,7 @@ static inline int vt_active_count(void)
 {
     int i, count = 0;
     for (i = 0; i < virtual_slots; i++)
-        if (vt.tracking_ids[i] != -1)
-            count++;
+        if (vt.tracking_ids[i] != -1) count++;
     return count;
 }
 
@@ -59,20 +58,17 @@ static inline int init_virtual_input_params(int requested_virtual_slots)
 {
     int i;
 
-    if (requested_virtual_slots <= 0 || requested_virtual_slots > MAX_VIRTUAL_SLOTS)
-        return -EINVAL;
+    if (requested_virtual_slots <= 0 || requested_virtual_slots > MAX_VIRTUAL_SLOTS) return -EINVAL;
 
     virtual_slots = requested_virtual_slots;
     original_slots = 10; // 固定以 10 个 slot 作为总池
     physical_slots = original_slots - virtual_slots;
-    if (physical_slots <= 0)
-        return -EINVAL;
+    if (physical_slots <= 0) return -EINVAL;
 
     virtual_slot_base = physical_slots;
     vtouch_tracking_id_base = 40000;
 
-    for (i = 0; i < MAX_VIRTUAL_SLOTS; i++)
-        vt.tracking_ids[i] = -1;
+    for (i = 0; i < MAX_VIRTUAL_SLOTS; i++) vt.tracking_ids[i] = -1;
 
     return 0;
 }
@@ -82,8 +78,7 @@ static inline int hijack_init_slots(struct input_dev *dev)
 {
     struct input_mt *mt = dev->mt;
 
-    if (!mt)
-        return -EINVAL;
+    if (!mt) return -EINVAL;
 
     /*
  这里把内核中触摸屏设备支持的slot截断到0~(physical_slots-1)
@@ -151,8 +146,7 @@ static inline void update_global_keys(void)
     // tracking_id != -1 表示该 Slot 处于按下状态
     for (i = 0; i < physical_slots; i++)
     {
-        if (input_mt_get_value(&mt->slots[i], ABS_MT_TRACKING_ID) != -1)
-            count++;
+        if (input_mt_get_value(&mt->slots[i], ABS_MT_TRACKING_ID) != -1) count++;
     }
 
     // 统计所有手指：物理+虚拟
@@ -163,16 +157,14 @@ static inline void update_global_keys(void)
     input_event 会检查 keybit，所以这里临时恢复能力，
     发完我们自己的 BTN_TOUCH/BTN_TOOL_* 后再清回去，只拦物理驱动，不拦虚拟注入。
     */
-    if (relock_keys)
-        set_global_key_bits(dev, true);
+    if (relock_keys) set_global_key_bits(dev, true);
 
     // 注意：这里绝对不能调用 input_report_key，必须直接使用 input_event
     input_event(dev, EV_KEY, BTN_TOUCH, count > 0);
     input_event(dev, EV_KEY, BTN_TOOL_FINGER, count == 1);
     input_event(dev, EV_KEY, BTN_TOOL_DOUBLETAP, count >= 2);
 
-    if (relock_keys)
-        set_global_key_bits(dev, false);
+    if (relock_keys) set_global_key_bits(dev, false);
 }
 
 // 调用者传 0 ~ virtual_slots-1，内部映射到硬件 slot
@@ -184,14 +176,11 @@ static inline int send_report(int vslot, int x, int y, bool touching)
     int tracking_id;
     int old_slot;
 
-    if (!dev || !mt)
-        return -ENODEV;
+    if (!dev || !mt) return -ENODEV;
 
-    if ((unsigned)vslot >= virtual_slots)
-        return -EINVAL;
+    if ((unsigned)vslot >= virtual_slots) return -EINVAL;
 
-    if (touching && vt.tracking_ids[vslot] == -1)
-        return -EINVAL;
+    if (touching && vt.tracking_ids[vslot] == -1) return -EINVAL;
 
     tracking_id = touching ? vt.tracking_ids[vslot] : -1;
 
@@ -214,12 +203,9 @@ static inline int send_report(int vslot, int x, int y, bool touching)
         input_event(dev, EV_ABS, ABS_MT_POSITION_Y, y);
 
         // 上报伪造面积和压力
-        if (vt.has_touch_major)
-            input_event(dev, EV_ABS, ABS_MT_TOUCH_MAJOR, 10);
-        if (vt.has_width_major)
-            input_event(dev, EV_ABS, ABS_MT_WIDTH_MAJOR, 10);
-        if (vt.has_pressure)
-            input_event(dev, EV_ABS, ABS_MT_PRESSURE, 60);
+        if (vt.has_touch_major) input_event(dev, EV_ABS, ABS_MT_TOUCH_MAJOR, 10);
+        if (vt.has_width_major) input_event(dev, EV_ABS, ABS_MT_WIDTH_MAJOR, 10);
+        if (vt.has_pressure) input_event(dev, EV_ABS, ABS_MT_PRESSURE, 60);
     }
 
     // 删除 input_mt_sync_frame(dev);
@@ -247,10 +233,7 @@ static int match_touchscreen(struct device *dev, void *data)
     struct input_dev *input = to_input_dev(dev);
     struct input_dev **result = data;
 
-    if (test_bit(EV_ABS, input->evbit) &&
-        test_bit(ABS_MT_SLOT, input->absbit) &&
-        test_bit(BTN_TOUCH, input->keybit) &&
-        input->mt)
+    if (test_bit(EV_ABS, input->evbit) && test_bit(ABS_MT_SLOT, input->absbit) && test_bit(BTN_TOUCH, input->keybit) && input->mt)
     {
         *result = input;
         return 1;
@@ -264,8 +247,7 @@ static inline int v_touch_init(int request_virtual_slots, int *max_x, int *max_y
     struct class *input_class;
     int ret;
 
-    if (!max_x || !max_y)
-        return -EINVAL;
+    if (!max_x || !max_y) return -EINVAL;
 
     if (vt.initialized)
     {
@@ -283,8 +265,7 @@ static inline int v_touch_init(int request_virtual_slots, int *max_x, int *max_y
     }
 
     ret = init_virtual_input_params(request_virtual_slots);
-    if (ret)
-        return ret;
+    if (ret) return ret;
 
     input_class = (struct class *)generic_kallsyms_lookup_name("input_class");
     if (!input_class)
@@ -329,8 +310,7 @@ static inline void v_touch_destroy(void)
     int i;
 
     // 防止重复调用
-    if (!vt.initialized)
-        return;
+    if (!vt.initialized) return;
 
     // 发送所有仍按下的虚拟 slot 的抬起信号
     for (i = 0; i < virtual_slots; i++)
@@ -366,8 +346,7 @@ static inline void v_touch_destroy(void)
 
     vt.initialized = false;
 
-    for (i = 0; i < virtual_slots; i++)
-        vt.tracking_ids[i] = -1;
+    for (i = 0; i < virtual_slots; i++) vt.tracking_ids[i] = -1;
 }
 
 static inline void v_touch_event(enum request_op op, int slot, int x, int y)
@@ -378,28 +357,23 @@ static inline void v_touch_event(enum request_op op, int slot, int x, int y)
     int max_x;
     int max_y;
 
-    if (!vt.initialized)
-        return;
+    if (!vt.initialized) return;
 
     // 越界保护,slot定义的是int,不是short,与内核字节对齐吧
-    if ((unsigned)slot >= virtual_slots)
-        return;
+    if ((unsigned)slot >= virtual_slots) return;
 
     // 坐标安全检查：只检查按下/移动，抬起事件不依赖 x/y。
     // ABS 最大值本身也拒绝，避免 TouchUp(1,1,1,1) 这类脏坐标变成 raw 最大点后参与下一次 DOWN。和防止其他异常状态坐标上报
     if (op == request_op_touch_down || op == request_op_touch_move)
     {
-        if (!vt.dev || !vt.dev->absinfo)
-            return;
+        if (!vt.dev || !vt.dev->absinfo) return;
 
         max_x = vt.dev->absinfo[ABS_MT_POSITION_X].maximum;
         max_y = vt.dev->absinfo[ABS_MT_POSITION_Y].maximum;
 
-        if (max_x <= 0 || max_y <= 0)
-            return;
+        if (max_x <= 0 || max_y <= 0) return;
 
-        if (x < 0 || y < 0 || x >= max_x || y >= max_y)
-            return;
+        if (x < 0 || y < 0 || x >= max_x || y >= max_y) return;
     }
 
     if (op == request_op_touch_move)
@@ -434,8 +408,7 @@ static inline void v_touch_event(enum request_op op, int slot, int x, int y)
             {
                 // 已有虚拟手指按住（已锁），直接注入
                 ret = send_report(slot, x, y, true);
-                if (ret)
-                    vt.tracking_ids[slot] = -1;
+                if (ret) vt.tracking_ids[slot] = -1;
             }
         }
     }

@@ -182,6 +182,8 @@ class TcpTestWindow(QWidget):
         self.ptebp_active = False
         self.stepbp_active = False
         self.bp_active_mode = ""
+        self.syscall_active = False
+        self.syscall_refresh_inflight = False
         self.hwbp_selected_index: int | None = None
         self.hwbp_point_rows: list[dict[str, object]] = []
         self.live_refresh_timer = QTimer(self)
@@ -371,6 +373,7 @@ class TcpTestWindow(QWidget):
         self.browser_page = QWidget()
         self.pointer_page = QWidget()
         self.breakpoint_page = QWidget()
+        self.syscall_page = QWidget()
         self.signature_page = QWidget()
         self.save_page = QWidget()
         self.log_page = QWidget()
@@ -382,6 +385,7 @@ class TcpTestWindow(QWidget):
         self.tabs.addTab(self.browser_page, "内存浏览页")
         self.tabs.addTab(self.pointer_page, "指针页")
         self.tabs.addTab(self.breakpoint_page, "断点页")
+        self.tabs.addTab(self.syscall_page, "系统调用页")
         self.tabs.addTab(self.signature_page, "特征码页")
         self.tabs.addTab(self.log_page, "日志页")
         self.tabs.addTab(self.settings_page, "设置页")
@@ -392,6 +396,7 @@ class TcpTestWindow(QWidget):
         self._build_browser_page()
         self._build_pointer_page()
         self._build_breakpoint_page()
+        self._build_syscall_page()
         self._build_signature_page()
         self._build_save_page()
         self._build_log_page()
@@ -406,12 +411,17 @@ class TcpTestWindow(QWidget):
     def _is_breakpoint_tab_active(self) -> bool:
         return self.tabs.currentWidget() is self.breakpoint_page
 
+    def _is_syscall_tab_active(self) -> bool:
+        return self.tabs.currentWidget() is self.syscall_page
+
     def on_tab_changed(self, _index: int) -> None:
         # 仅在切到指针页时主动刷新一次状态，避免后台持续轮询。
         if self._is_pointer_tab_active() and self._is_connected():
             self.on_pointer_status()
         if self._is_breakpoint_tab_active() and self._is_connected():
             self.on_hwbp_refresh(silent=True)
+        if self._is_syscall_tab_active() and self._is_connected():
+            self.on_syscall_log_refresh(silent=True)
 
     def _build_memory_page(self) -> None:
         layout = self._create_page_layout(
@@ -1005,6 +1015,31 @@ class TcpTestWindow(QWidget):
         clear_row.addStretch(1)
         card_layout.addLayout(clear_row)
 
+    def _build_syscall_page(self) -> None:
+        layout = self._create_page_layout(self.syscall_page, "系统调用监控", "")
+        card, card_layout = self._create_section_card(parent=self.syscall_page)
+        layout.addWidget(card, 1)
+
+        row = QHBoxLayout()
+        self.syscall_status_label = QLabel("未监听")
+        self.syscall_start_button = QPushButton("开始监听")
+        self.syscall_stop_button = QPushButton("停止监听")
+        refresh_button = QPushButton("刷新日志")
+        clear_button = QPushButton("清空显示")
+        self.syscall_log_view = QTextEdit()
+        self.syscall_log_view.setReadOnly(True)
+        self.syscall_log_view.setPlaceholderText("Android 端包含 lsdriver 标签的内核日志将在这里实时显示。")
+        self.syscall_start_button.clicked.connect(self.on_syscall_start)
+        self.syscall_stop_button.clicked.connect(self.on_syscall_stop)
+        refresh_button.clicked.connect(self.on_syscall_log_refresh)
+        clear_button.clicked.connect(self.syscall_log_view.clear)
+        for widget in (self.syscall_status_label, self.syscall_start_button, self.syscall_stop_button, refresh_button, clear_button):
+            row.addWidget(widget)
+        row.addStretch(1)
+        card_layout.addLayout(row)
+        card_layout.addWidget(self.syscall_log_view, 1)
+        self._apply_syscall_state()
+
     def _log(self, text: str) -> None:
         time_text = datetime.now().strftime("%H:%M:%S")
         self.log_view.append(f"[{time_text}] {text}")
@@ -1120,6 +1155,7 @@ class TcpTestWindow(QWidget):
         self.pointer_scan_running = False
         self.pointer_status_request_inflight = False
         self.hwbp_refresh_inflight = False
+        self.syscall_refresh_inflight = False
         if reason:
             self._set_status(reason)
 
@@ -2647,31 +2683,24 @@ class TcpTestWindow(QWidget):
             self._set_status(f"扫描结果已刷新：start={self.scan_page_start}, total={total}")
         return True
 
-    def on_scan_first(self) -> None:
-        request = self._build_scan_request(is_first=True)
+    def _run_scan(self, is_first: bool) -> None:
+        request = self._build_scan_request(is_first=is_first)
         if request is None:
             return
         operation, params = request
-        response = self._request_ok(operation, params, error_title="扫描失败", status_on_error="首次扫描失败")
-        if response is None:
+        label = "首次" if is_first else "再次"
+        if self._request_ok(operation, params, error_title="扫描失败", status_on_error=f"{label}扫描失败") is None:
             return
-        self._set_status("首次扫描已执行")
+        self._set_status(f"{label}扫描已执行")
         self.on_scan_status()
         self.scan_page_start = 0
         self._fetch_scan_page(self.scan_page_start)
 
+    def on_scan_first(self) -> None:
+        self._run_scan(True)
+
     def on_scan_next(self) -> None:
-        request = self._build_scan_request(is_first=False)
-        if request is None:
-            return
-        operation, params = request
-        response = self._request_ok(operation, params, error_title="扫描失败", status_on_error="再次扫描失败")
-        if response is None:
-            return
-        self._set_status("再次扫描已执行")
-        self.on_scan_status()
-        self.scan_page_start = 0
-        self._fetch_scan_page(self.scan_page_start)
+        self._run_scan(False)
 
     def on_scan_clear(self) -> None:
         response = self._request_ok("scan.clear", error_title="清空失败")
@@ -3041,33 +3070,21 @@ class TcpTestWindow(QWidget):
             self.browser_addr_input.setText(f"0x{base_addr:X}")
             self.browser_view.setPlainText("缓存长度不足以显示当前视图。")
 
-    def on_browser_read(self) -> None:
-        mode_data = self.browser_view_combo.currentData()
-        view_mode = str(mode_data).strip() if mode_data is not None else self._browser_mode_to_token(self.browser_view_combo.currentText().strip())
-        if view_mode == "disasm":
-            addr = self._parse_browser_addr()
-            if addr is None:
-                return
-            self.browser_current_addr = addr
-            self._refresh_disasm_view(addr)
-            return
-
+    def _read_browser(self, force: bool) -> None:
         addr = self._parse_browser_addr()
         if addr is None:
             return
         self.browser_current_addr = addr
-        self._refresh_browser_view(addr)
+        if self._current_browser_view_mode() == "disasm":
+            self._refresh_disasm_view(addr)
+        else:
+            self._refresh_browser_view(addr, force=force)
+
+    def on_browser_read(self) -> None:
+        self._read_browser(False)
 
     def on_browser_refresh_cache(self) -> None:
-        addr = self._parse_browser_addr()
-        if addr is None:
-            return
-        self.browser_current_addr = addr
-        view_mode = self._current_browser_view_mode()
-        if view_mode == "disasm":
-            self._refresh_disasm_view(addr)
-            return
-        self._refresh_browser_view(addr, force=True)
+        self._read_browser(True)
 
     def _build_pointer_scan_request(self) -> tuple[str, dict] | None:
         target_text = self.pointer_target_input.text().strip()
@@ -3230,6 +3247,47 @@ class TcpTestWindow(QWidget):
         self._refresh_saved_items_live()
         self._refresh_pointer_status_live()
         self._refresh_bp_info_live()
+        if self._is_syscall_tab_active():
+            self.on_syscall_log_refresh(silent=True)
+
+    def _apply_syscall_state(self) -> None:
+        self.syscall_status_label.setText("已监听" if self.syscall_active else "未监听")
+        self.syscall_start_button.setEnabled(not self.syscall_active)
+        self.syscall_stop_button.setEnabled(self.syscall_active)
+
+    def on_syscall_start(self) -> None:
+        data = self._request_data_dict("syscall.start", error_title="监听失败", error_prefix="启动监听失败: ")
+        if data is None:
+            return
+        self.syscall_active = True
+        self._apply_syscall_state()
+        self._set_status(f"已监听 PID {self._safe_int(data.get('pid'), 0)} 的系统调用")
+        self.on_syscall_log_refresh(silent=True)
+
+    def on_syscall_stop(self) -> None:
+        data = self._request_data_dict("syscall.stop", error_title="停止失败", error_prefix="停止监听失败: ")
+        if data is None:
+            return
+        self.syscall_active = False
+        self._apply_syscall_state()
+        self._set_status("系统调用监听已停止")
+
+    def on_syscall_log_refresh(self, silent: bool = False) -> None:
+        if self.syscall_refresh_inflight:
+            return
+        self.syscall_refresh_inflight = True
+        try:
+            data = self._request_data_dict(
+                "syscall.log", {"max_lines": 500}, error_title="日志刷新失败",
+                log_enabled=not silent, warn=not silent,
+            )
+            if data is None:
+                return
+            self._set_text_preserve_interaction(self.syscall_log_view, str(data.get("log", "")))
+            if not silent:
+                self._set_status(f"系统调用日志已刷新，共 {self._safe_int(data.get('line_count'), 0)} 行")
+        finally:
+            self.syscall_refresh_inflight = False
 
     def on_sync_pid(self) -> None:
         input_text = self.pid_input.text().strip()
@@ -3371,134 +3429,55 @@ class TcpTestWindow(QWidget):
         if not silent:
             self._set_status("断点信息已刷新")
 
-    def on_hwbp_set(self) -> None:
+    def _set_breakpoint_mode(self, operation: str, mode: str, label: str) -> None:
         if self.hwbp_active:
             QMessageBox.information(self, "提示", "断点已激活，请先移除当前断点。")
             return
-
         try:
             points = self._collect_hwbp_points()
         except ValueError as exc:
             QMessageBox.warning(self, "输入提示", str(exc))
             return
-        response = self._request_ok(
-            "breakpoint.set",
-            {"points": points},
-            error_title="设置失败",
-            status_on_error="设置硬件断点失败",
-        )
-        if response is None:
+        if self._request_ok(operation, {"points": points}, error_title="设置失败", status_on_error=f"设置 {label} 失败") is None:
             return
         self.hwbp_active = True
-        self.ptebp_active = False
-        self.stepbp_active = False
-        self.bp_active_mode = "hwbp"
+        self.ptebp_active = mode == "ptebp"
+        self.stepbp_active = mode == "stepbp"
+        self.bp_active_mode = mode
         self._apply_hwbp_active_state()
-        self._set_status(f"设置硬件断点成功: {len(points)} 个 points")
+        self._set_status(f"设置 {label} 成功: {len(points)} 个 points")
         self.on_hwbp_refresh(silent=True)
+
+    def _remove_breakpoint_mode(self, operation: str, mode: str, label: str) -> None:
+        active = self.hwbp_active and (self.bp_active_mode or "hwbp") == mode
+        if not active:
+            self._set_status(f"{label} 未激活，无需移除")
+            return
+        if self._request_ok(operation, error_title="移除失败") is None:
+            return
+        self.hwbp_active = self.ptebp_active = self.stepbp_active = False
+        self.bp_active_mode = ""
+        self._apply_hwbp_active_state()
+        self._set_status(f"已移除进程 {label}")
+        self.on_hwbp_refresh(silent=True)
+
+    def on_hwbp_set(self) -> None:
+        self._set_breakpoint_mode("breakpoint.set", "hwbp", "HWBP")
 
     def on_hwbp_remove_all(self) -> None:
-        if not self.hwbp_active:
-            self._set_status("断点未激活，无需移除")
-            return
-        if self.ptebp_active or self.stepbp_active:
-            QMessageBox.information(self, "提示", "当前激活的不是 HWBP，请使用对应的移除按钮。")
-            return
-
-        response = self._request_ok("breakpoint.clear", error_title="移除失败")
-        if response is None:
-            return
-        self.hwbp_active = False
-        self.ptebp_active = False
-        self.stepbp_active = False
-        self.bp_active_mode = ""
-        self._apply_hwbp_active_state()
-        self._set_status("已移除进程硬件断点")
-        self.on_hwbp_refresh(silent=True)
+        self._remove_breakpoint_mode("breakpoint.clear", "hwbp", "HWBP")
 
     def on_ptebp_set(self) -> None:
-        if self.hwbp_active:
-            QMessageBox.information(self, "提示", "断点已激活，请先移除当前断点。")
-            return
-
-        try:
-            points = self._collect_hwbp_points()
-        except ValueError as exc:
-            QMessageBox.warning(self, "输入提示", str(exc))
-            return
-        response = self._request_ok(
-            "ptebp.set",
-            {"points": points},
-            error_title="设置失败",
-            status_on_error="设置 PTEBP 失败",
-        )
-        if response is None:
-            return
-        self.hwbp_active = True
-        self.ptebp_active = True
-        self.stepbp_active = False
-        self.bp_active_mode = "ptebp"
-        self._apply_hwbp_active_state()
-        self._set_status(f"设置 PTEBP 成功: {len(points)} 个 points")
-        self.on_hwbp_refresh(silent=True)
+        self._set_breakpoint_mode("ptebp.set", "ptebp", "PTEBP")
 
     def on_ptebp_remove_all(self) -> None:
-        if not self.ptebp_active:
-            self._set_status("PTEBP 未激活，无需移除")
-            return
-
-        response = self._request_ok("ptebp.clear", error_title="移除失败")
-        if response is None:
-            return
-        self.hwbp_active = False
-        self.ptebp_active = False
-        self.stepbp_active = False
-        self.bp_active_mode = ""
-        self._apply_hwbp_active_state()
-        self._set_status("已移除进程 PTEBP")
-        self.on_hwbp_refresh(silent=True)
+        self._remove_breakpoint_mode("ptebp.clear", "ptebp", "PTEBP")
 
     def on_stepbp_set(self) -> None:
-        if self.hwbp_active:
-            QMessageBox.information(self, "提示", "断点已激活，请先移除当前断点。")
-            return
-
-        try:
-            points = self._collect_hwbp_points()
-        except ValueError as exc:
-            QMessageBox.warning(self, "输入提示", str(exc))
-            return
-        response = self._request_ok(
-            "stepbp.set",
-            {"points": points},
-            error_title="设置失败",
-            status_on_error="设置 STEPBP 失败",
-        )
-        if response is None:
-            return
-        self.hwbp_active = True
-        self.ptebp_active = False
-        self.stepbp_active = True
-        self.bp_active_mode = "stepbp"
-        self._apply_hwbp_active_state()
-        self._set_status(f"设置 STEPBP 成功: {len(points)} 个 points")
-        self.on_hwbp_refresh(silent=True)
+        self._set_breakpoint_mode("stepbp.set", "stepbp", "STEPBP")
 
     def on_stepbp_remove_all(self) -> None:
-        if not self.stepbp_active:
-            self._set_status("STEPBP 未激活，无需移除")
-            return
-
-        response = self._request_ok("stepbp.clear", error_title="移除失败")
-        if response is None:
-            return
-        self.hwbp_active = False
-        self.ptebp_active = False
-        self.stepbp_active = False
-        self.bp_active_mode = ""
-        self._apply_hwbp_active_state()
-        self._set_status("已移除进程 STEPBP")
-        self.on_hwbp_refresh(silent=True)
+        self._remove_breakpoint_mode("stepbp.clear", "stepbp", "STEPBP")
 
     def on_hwbp_tree_current_item_changed(self, current: QTreeWidgetItem | None, _previous: QTreeWidgetItem | None) -> None:
         if current is None:

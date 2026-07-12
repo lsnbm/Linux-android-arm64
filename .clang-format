@@ -1,0 +1,56 @@
+# 以 LLVM 预设风格为基础；未在本文件中明确指定的选项沿用 LLVM 默认值。
+BasedOnStyle: LLVM
+
+# 使用 C++ 语法解析文件；该模式也能格式化项目中的 C 和头文件。
+Language: Cpp
+
+# 每一级代码块使用 4 个空格缩进。
+IndentWidth: 4
+
+# 源码中已有 Tab 时，将一个 Tab 按 4 列宽度计算。
+TabWidth: 4
+
+# 格式化器始终使用空格缩进，不主动生成 Tab 字符。
+UseTab: Never
+
+# 一行超过 1024 列时才因列宽考虑换行，基本保留较长的函数调用和表达式。
+ColumnLimit: 1024
+
+# 使用 Allman 大括号风格：函数、类和控制语句的左大括号独占下一行。
+BreakBeforeBraces: Allman
+
+# 不允许短代码块保持在单行，带大括号的代码块统一展开为多行。
+AllowShortBlocksOnASingleLine: Never
+
+# 不允许短函数保持在单行，函数体即使很短也展开为多行。
+AllowShortFunctionsOnASingleLine: None
+
+# 允许短 if、else if 和 else 语句放在同一行。
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse
+
+# 允许短 for、while 和 do 循环保持在单行。
+AllowShortLoopsOnASingleLine: true
+
+# 不自动给无大括号的 if、for、while 等控制语句补充大括号。
+InsertBraces: false
+
+# 指针星号靠近变量名，格式为 int *pointer，而不是 int* pointer。
+PointerAlignment: Right
+
+# 普通、嵌套和匿名命名空间中的内容全部增加一级缩进。
+NamespaceIndentation: All
+
+# 对齐相邻代码行末尾的注释；不会重新排版注释正文。
+AlignTrailingComments: true
+
+# 对齐连续的宏定义名称和值，例如让多个 #define 的值纵向对齐。
+AlignConsecutiveMacros: true
+
+# 多行宏的续行反斜杠靠左对齐，避免为右对齐填充过多空格。
+AlignEscapedNewlines: Left
+
+# 保留 #include 的原始顺序，避免格式化器改变头文件依赖顺序。
+SortIncludes: Never
+
+# 不自动合并、拆分或重排普通注释和文档注释的文本内容。
+ReflowComments: false

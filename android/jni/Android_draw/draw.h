@@ -23,7 +23,7 @@
 #include "ImGui/font/Font.h"
 #include "ImGui/imgui_internal.h"
 #include "ImGui/backends/imgui_impl_android.h"
-#include "Android_touch/TouchHelperA.h"
+#include "Android_touch/ImGuiTouchInput.h"
 
 namespace Utils
 {
@@ -55,7 +55,7 @@ namespace Utils
         drawList->AddText(ImVec2(pos.x + 1.0f, pos.y + 1.0f), colorShadow, fpsText);
         drawList->AddText(pos, colorText, fpsText);
     }
-}
+} // namespace Utils
 
 //  OpenGL ES 后端实现
 #include <EGL/egl.h>
@@ -95,15 +95,10 @@ namespace RenderGL
         ANativeWindow_acquire(native_window);
 
         display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-        if (eglInitialize(display, 0, 0) != EGL_TRUE)
-            return false;
+        if (eglInitialize(display, 0, 0) != EGL_TRUE) return false;
 
         EGLint num_config = 0;
-        const EGLint attribList[] = {
-            EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
-            EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
-            EGL_BLUE_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_RED_SIZE, 8, EGL_ALPHA_SIZE, 8,
-            EGL_DEPTH_SIZE, 16, EGL_STENCIL_SIZE, 8, EGL_NONE};
+        const EGLint attribList[] = {EGL_SURFACE_TYPE, EGL_WINDOW_BIT, EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT, EGL_BLUE_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_RED_SIZE, 8, EGL_ALPHA_SIZE, 8, EGL_DEPTH_SIZE, 16, EGL_STENCIL_SIZE, 8, EGL_NONE};
 
         eglChooseConfig(display, attribList, &config, 1, &num_config);
 
@@ -115,8 +110,7 @@ namespace RenderGL
         context = eglCreateContext(display, config, EGL_NO_CONTEXT, attrib_list);
         surface = eglCreateWindowSurface(display, config, native_window, nullptr);
 
-        if (!eglMakeCurrent(display, surface, surface, context))
-            return false;
+        if (!eglMakeCurrent(display, surface, surface, context)) return false;
 
         // 初始化 ImGui
         IMGUI_CHECKVERSION();
@@ -166,8 +160,7 @@ namespace RenderGL
         glClear(GL_COLOR_BUFFER_BIT);
         glFlush();
 
-        if (display == EGL_NO_DISPLAY)
-            return;
+        if (display == EGL_NO_DISPLAY) return;
 
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
@@ -183,10 +176,8 @@ namespace RenderGL
         if (display != EGL_NO_DISPLAY)
         {
             eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-            if (context != EGL_NO_CONTEXT)
-                eglDestroyContext(display, context);
-            if (surface != EGL_NO_SURFACE)
-                eglDestroySurface(display, surface);
+            if (context != EGL_NO_CONTEXT) eglDestroyContext(display, context);
+            if (surface != EGL_NO_SURFACE) eglDestroySurface(display, surface);
             eglTerminate(display);
         }
         display = EGL_NO_DISPLAY;
@@ -195,7 +186,7 @@ namespace RenderGL
         ANativeWindow_release(native_window);
     }
 
-}
+} // namespace RenderGL
 
 //  Vulkan 后端实现
 #include <vulkan/vulkan.h>
@@ -277,31 +268,21 @@ namespace RenderVK
     static int s_recordDisplayMisses = 0;
     static std::chrono::steady_clock::time_point s_lastRecordDisplayScan{};
 
-    inline bool SameRecordDisplay(const android::ANativeWindowCreator::RecordDisplayInfo &lhs,
-                                  const android::ANativeWindowCreator::RecordDisplayInfo &rhs)
+    inline bool SameRecordDisplay(const android::ANativeWindowCreator::RecordDisplayInfo &lhs, const android::ANativeWindowCreator::RecordDisplayInfo &rhs)
     {
-        return lhs.layerStack == rhs.layerStack &&
-               lhs.orientation == rhs.orientation &&
-               lhs.layerStackRect == rhs.layerStackRect &&
-               lhs.displayRect == rhs.displayRect;
+        return lhs.layerStack == rhs.layerStack && lhs.orientation == rhs.orientation && lhs.layerStackRect == rhs.layerStackRect && lhs.displayRect == rhs.displayRect;
     }
 
-    inline RecordTransform BuildRecordTransform(const android::ANativeWindowCreator::RecordDisplayInfo &target,
-                                                const VkExtent2D bufferExtent,
-                                                int32_t sourceWidth,
-                                                int32_t sourceHeight)
+    inline RecordTransform BuildRecordTransform(const android::ANativeWindowCreator::RecordDisplayInfo &target, const VkExtent2D bufferExtent, int32_t sourceWidth, int32_t sourceHeight)
     {
         RecordTransform transform{};
-        if (bufferExtent.width == 0 || bufferExtent.height == 0 ||
-            sourceWidth <= 0 || sourceHeight <= 0)
-            return transform;
+        if (bufferExtent.width == 0 || bufferExtent.height == 0 || sourceWidth <= 0 || sourceHeight <= 0) return transform;
 
         const float left = static_cast<float>(std::min(target.layerStackRect.left, target.layerStackRect.right));
         const float top = static_cast<float>(std::min(target.layerStackRect.top, target.layerStackRect.bottom));
         const float targetWidth = static_cast<float>(target.layerStackRect.Width());
         const float targetHeight = static_cast<float>(target.layerStackRect.Height());
-        if (targetWidth <= 0.0f || targetHeight <= 0.0f)
-            return transform;
+        if (targetWidth <= 0.0f || targetHeight <= 0.0f) return transform;
 
         const float bufferWidth = static_cast<float>(bufferExtent.width);
         const float bufferHeight = static_cast<float>(bufferExtent.height);
@@ -310,8 +291,7 @@ namespace RenderVK
         const int32_t orientation = ((target.orientation % 4) + 4) % 4;
         // AOSP 通常把 layerStackRect 输出为旋转后的逻辑坐标，此时无需再次旋转。
         // 仅当录屏 ROM 输出的 layerStackRect 轴向与源坐标相反时，应用方向的逆变换。
-        const bool needsAxisSwap = (orientation == 1 || orientation == 3) &&
-                                   sourceLandscape != targetLandscape;
+        const bool needsAxisSwap = (orientation == 1 || orientation == 3) && sourceLandscape != targetLandscape;
 
         switch (needsAxisSwap ? orientation : 0)
         {
@@ -361,12 +341,10 @@ namespace RenderVK
 
     inline void CleanupSwapchain(bool destroySwapchain = true)
     {
-        for (auto fb : g_Framebuffers)
-            vkDestroyFramebuffer(g_Device, fb, nullptr);
+        for (auto fb : g_Framebuffers) vkDestroyFramebuffer(g_Device, fb, nullptr);
         g_Framebuffers.clear();
 
-        for (auto iv : g_SwapchainImageViews)
-            vkDestroyImageView(g_Device, iv, nullptr);
+        for (auto iv : g_SwapchainImageViews) vkDestroyImageView(g_Device, iv, nullptr);
         g_SwapchainImageViews.clear();
 
         // 仅在允许销毁时释放，防止底层断开连接
@@ -398,14 +376,11 @@ namespace RenderVK
         }
         g_SwapchainFormat = surfaceFormat.format;
 
-        if (capabilities.currentExtent.width != 0xFFFFFFFF)
-            g_SwapchainExtent = capabilities.currentExtent;
-        else
-            g_SwapchainExtent = {(uint32_t)displayInfo.width, (uint32_t)displayInfo.height};
+        if (capabilities.currentExtent.width != 0xFFFFFFFF) g_SwapchainExtent = capabilities.currentExtent;
+        else g_SwapchainExtent = {(uint32_t)displayInfo.width, (uint32_t)displayInfo.height};
 
         uint32_t imageCount = capabilities.minImageCount + 1;
-        if (capabilities.maxImageCount > 0 && imageCount > capabilities.maxImageCount)
-            imageCount = capabilities.maxImageCount;
+        if (capabilities.maxImageCount > 0 && imageCount > capabilities.maxImageCount) imageCount = capabilities.maxImageCount;
 
         VkSwapchainCreateInfoKHR createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
@@ -419,10 +394,8 @@ namespace RenderVK
         createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
         // 强制 Identity Transform，防止 Android 对正方形缓冲进行额外的错误拉伸
-        if (capabilities.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR)
-            createInfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
-        else
-            createInfo.preTransform = capabilities.currentTransform;
+        if (capabilities.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) createInfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+        else createInfo.preTransform = capabilities.currentTransform;
 
         createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
         createInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR; // Vsync
@@ -494,35 +467,27 @@ namespace RenderVK
 
     inline void CleanupRecordSurface()
     {
-        if (g_Device != VK_NULL_HANDLE)
-            vkDeviceWaitIdle(g_Device);
+        if (g_Device != VK_NULL_HANDLE) vkDeviceWaitIdle(g_Device);
 
-        for (auto fence : s_recordSurface.inFlightFences)
-            vkDestroyFence(g_Device, fence, nullptr);
+        for (auto fence : s_recordSurface.inFlightFences) vkDestroyFence(g_Device, fence, nullptr);
         s_recordSurface.inFlightFences.clear();
 
-        for (auto semaphore : s_recordSurface.renderFinishedSemaphores)
-            vkDestroySemaphore(g_Device, semaphore, nullptr);
+        for (auto semaphore : s_recordSurface.renderFinishedSemaphores) vkDestroySemaphore(g_Device, semaphore, nullptr);
         s_recordSurface.renderFinishedSemaphores.clear();
 
-        for (auto semaphore : s_recordSurface.imageAvailableSemaphores)
-            vkDestroySemaphore(g_Device, semaphore, nullptr);
+        for (auto semaphore : s_recordSurface.imageAvailableSemaphores) vkDestroySemaphore(g_Device, semaphore, nullptr);
         s_recordSurface.imageAvailableSemaphores.clear();
 
-        for (auto framebuffer : s_recordSurface.framebuffers)
-            vkDestroyFramebuffer(g_Device, framebuffer, nullptr);
+        for (auto framebuffer : s_recordSurface.framebuffers) vkDestroyFramebuffer(g_Device, framebuffer, nullptr);
         s_recordSurface.framebuffers.clear();
 
         if (!s_recordSurface.commandBuffers.empty() && g_CommandPool != VK_NULL_HANDLE)
         {
-            vkFreeCommandBuffers(g_Device, g_CommandPool,
-                                 static_cast<uint32_t>(s_recordSurface.commandBuffers.size()),
-                                 s_recordSurface.commandBuffers.data());
+            vkFreeCommandBuffers(g_Device, g_CommandPool, static_cast<uint32_t>(s_recordSurface.commandBuffers.size()), s_recordSurface.commandBuffers.data());
             s_recordSurface.commandBuffers.clear();
         }
 
-        for (auto imageView : s_recordSurface.imageViews)
-            vkDestroyImageView(g_Device, imageView, nullptr);
+        for (auto imageView : s_recordSurface.imageViews) vkDestroyImageView(g_Device, imageView, nullptr);
         s_recordSurface.imageViews.clear();
 
         if (s_recordSurface.swapchain != VK_NULL_HANDLE)
@@ -550,12 +515,10 @@ namespace RenderVK
     inline bool CreateRecordSwapchain()
     {
         VkSurfaceCapabilitiesKHR capabilities{};
-        if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_PhysicalDevice, s_recordSurface.surface, &capabilities) != VK_SUCCESS)
-            return false;
+        if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_PhysicalDevice, s_recordSurface.surface, &capabilities) != VK_SUCCESS) return false;
 
         uint32_t formatCount = 0;
-        if (vkGetPhysicalDeviceSurfaceFormatsKHR(g_PhysicalDevice, s_recordSurface.surface, &formatCount, nullptr) != VK_SUCCESS || formatCount == 0)
-            return false;
+        if (vkGetPhysicalDeviceSurfaceFormatsKHR(g_PhysicalDevice, s_recordSurface.surface, &formatCount, nullptr) != VK_SUCCESS || formatCount == 0) return false;
 
         std::vector<VkSurfaceFormatKHR> formats(formatCount);
         vkGetPhysicalDeviceSurfaceFormatsKHR(g_PhysicalDevice, s_recordSurface.surface, &formatCount, formats.data());
@@ -571,17 +534,13 @@ namespace RenderVK
                 break;
             }
         }
-        if (!foundFormat)
-            return false;
+        if (!foundFormat) return false;
 
-        if (capabilities.currentExtent.width != 0xFFFFFFFF)
-            s_recordSurface.extent = capabilities.currentExtent;
-        else
-            s_recordSurface.extent = {static_cast<uint32_t>(s_recordSurface.width), static_cast<uint32_t>(s_recordSurface.height)};
+        if (capabilities.currentExtent.width != 0xFFFFFFFF) s_recordSurface.extent = capabilities.currentExtent;
+        else s_recordSurface.extent = {static_cast<uint32_t>(s_recordSurface.width), static_cast<uint32_t>(s_recordSurface.height)};
 
         uint32_t imageCount = capabilities.minImageCount + 1;
-        if (capabilities.maxImageCount > 0 && imageCount > capabilities.maxImageCount)
-            imageCount = capabilities.maxImageCount;
+        if (capabilities.maxImageCount > 0 && imageCount > capabilities.maxImageCount) imageCount = capabilities.maxImageCount;
 
         VkSwapchainCreateInfoKHR createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
@@ -593,15 +552,12 @@ namespace RenderVK
         createInfo.imageArrayLayers = 1;
         createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
         createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        createInfo.preTransform = (capabilities.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR)
-                                      ? VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
-                                      : capabilities.currentTransform;
+        createInfo.preTransform = (capabilities.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) ? VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR : capabilities.currentTransform;
         createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
         createInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;
         createInfo.clipped = VK_TRUE;
 
-        if (vkCreateSwapchainKHR(g_Device, &createInfo, nullptr, &s_recordSurface.swapchain) != VK_SUCCESS)
-            return false;
+        if (vkCreateSwapchainKHR(g_Device, &createInfo, nullptr, &s_recordSurface.swapchain) != VK_SUCCESS) return false;
 
         vkGetSwapchainImagesKHR(g_Device, s_recordSurface.swapchain, &imageCount, nullptr);
         s_recordSurface.images.resize(imageCount);
@@ -624,8 +580,7 @@ namespace RenderVK
             viewInfo.subresourceRange.levelCount = 1;
             viewInfo.subresourceRange.baseArrayLayer = 0;
             viewInfo.subresourceRange.layerCount = 1;
-            if (vkCreateImageView(g_Device, &viewInfo, nullptr, &s_recordSurface.imageViews[i]) != VK_SUCCESS)
-                return false;
+            if (vkCreateImageView(g_Device, &viewInfo, nullptr, &s_recordSurface.imageViews[i]) != VK_SUCCESS) return false;
         }
 
         s_recordSurface.framebuffers.resize(s_recordSurface.imageViews.size());
@@ -640,8 +595,7 @@ namespace RenderVK
             framebufferInfo.width = s_recordSurface.extent.width;
             framebufferInfo.height = s_recordSurface.extent.height;
             framebufferInfo.layers = 1;
-            if (vkCreateFramebuffer(g_Device, &framebufferInfo, nullptr, &s_recordSurface.framebuffers[i]) != VK_SUCCESS)
-                return false;
+            if (vkCreateFramebuffer(g_Device, &framebufferInfo, nullptr, &s_recordSurface.framebuffers[i]) != VK_SUCCESS) return false;
         }
 
         s_recordSurface.commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
@@ -650,8 +604,7 @@ namespace RenderVK
         allocInfo.commandPool = g_CommandPool;
         allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         allocInfo.commandBufferCount = static_cast<uint32_t>(s_recordSurface.commandBuffers.size());
-        if (vkAllocateCommandBuffers(g_Device, &allocInfo, s_recordSurface.commandBuffers.data()) != VK_SUCCESS)
-            return false;
+        if (vkAllocateCommandBuffers(g_Device, &allocInfo, s_recordSurface.commandBuffers.data()) != VK_SUCCESS) return false;
 
         s_recordSurface.imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
         s_recordSurface.renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
@@ -665,10 +618,7 @@ namespace RenderVK
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
-            if (vkCreateSemaphore(g_Device, &semaphoreInfo, nullptr, &s_recordSurface.imageAvailableSemaphores[i]) != VK_SUCCESS ||
-                vkCreateSemaphore(g_Device, &semaphoreInfo, nullptr, &s_recordSurface.renderFinishedSemaphores[i]) != VK_SUCCESS ||
-                vkCreateFence(g_Device, &fenceInfo, nullptr, &s_recordSurface.inFlightFences[i]) != VK_SUCCESS)
-                return false;
+            if (vkCreateSemaphore(g_Device, &semaphoreInfo, nullptr, &s_recordSurface.imageAvailableSemaphores[i]) != VK_SUCCESS || vkCreateSemaphore(g_Device, &semaphoreInfo, nullptr, &s_recordSurface.renderFinishedSemaphores[i]) != VK_SUCCESS || vkCreateFence(g_Device, &fenceInfo, nullptr, &s_recordSurface.inFlightFences[i]) != VK_SUCCESS) return false;
         }
 
         return true;
@@ -678,8 +628,7 @@ namespace RenderVK
     {
         if (s_preventCapture)
         {
-            if (s_recordSurface.window)
-                CleanupRecordSurface();
+            if (s_recordSurface.window) CleanupRecordSurface();
             s_hasCachedRecordDisplay = false;
             s_hasPendingRecordDisplay = false;
             s_pendingRecordDisplayHits = 0;
@@ -690,8 +639,7 @@ namespace RenderVK
         // 旧 ProcessMirrorDisplay 依赖私有 mirrorSurface，Android 15/16 和部分厂商机型容易出现
         // 悬浮窗消失/崩溃。这里改为检测录屏 layerStack，并创建一个非可信副本 Surface。
         auto now = std::chrono::steady_clock::now();
-        bool shouldScan = s_lastRecordDisplayScan == std::chrono::steady_clock::time_point{} ||
-                          (now - s_lastRecordDisplayScan) >= std::chrono::seconds(2);
+        bool shouldScan = s_lastRecordDisplayScan == std::chrono::steady_clock::time_point{} || (now - s_lastRecordDisplayScan) >= std::chrono::seconds(2);
         if (shouldScan)
         {
             s_lastRecordDisplayScan = now;
@@ -701,8 +649,7 @@ namespace RenderVK
             {
                 s_hasPendingRecordDisplay = false;
                 s_pendingRecordDisplayHits = 0;
-                if (++s_recordDisplayMisses >= 2)
-                    s_hasCachedRecordDisplay = false;
+                if (++s_recordDisplayMisses >= 2) s_hasCachedRecordDisplay = false;
             }
             else
             {
@@ -739,22 +686,16 @@ namespace RenderVK
 
         if (!s_hasCachedRecordDisplay)
         {
-            if (s_recordSurface.window)
-                CleanupRecordSurface();
+            if (s_recordSurface.window) CleanupRecordSurface();
             return false;
         }
 
         const auto &target = s_cachedRecordDisplay;
         const int32_t sourceWidth = std::max(displayInfo.width, displayInfo.height);
         const int32_t sourceHeight = std::min(displayInfo.width, displayInfo.height);
-        if (sourceWidth <= 0 || sourceHeight <= 0)
-            return false;
+        if (sourceWidth <= 0 || sourceHeight <= 0) return false;
 
-        if (s_recordSurface.window &&
-            SameRecordDisplay(s_recordSurface.display, target) &&
-            s_recordSurface.sourceWidth == sourceWidth &&
-            s_recordSurface.sourceHeight == sourceHeight)
-            return true;
+        if (s_recordSurface.window && SameRecordDisplay(s_recordSurface.display, target) && s_recordSurface.sourceWidth == sourceWidth && s_recordSurface.sourceHeight == sourceHeight) return true;
 
         CleanupRecordSurface();
 
@@ -795,70 +736,33 @@ namespace RenderVK
             return false;
         }
 
-        s_recordSurface.transform = BuildRecordTransform(
-            target,
-            s_recordSurface.extent,
-            s_recordSurface.sourceWidth,
-            s_recordSurface.sourceHeight);
-        if (!s_recordSurface.transform.valid ||
-            !android::ANativeWindowCreator::ConfigureOnLayerStack(
-                s_recordSurface.window,
-                target.layerStack,
-                s_recordSurface.transform.dsdx,
-                s_recordSurface.transform.dtdx,
-                s_recordSurface.transform.dtdy,
-                s_recordSurface.transform.dsdy,
-                s_recordSurface.transform.positionX,
-                s_recordSurface.transform.positionY))
+        s_recordSurface.transform = BuildRecordTransform(target, s_recordSurface.extent, s_recordSurface.sourceWidth, s_recordSurface.sourceHeight);
+        if (!s_recordSurface.transform.valid || !android::ANativeWindowCreator::ConfigureOnLayerStack(s_recordSurface.window, target.layerStack, s_recordSurface.transform.dsdx, s_recordSurface.transform.dtdx, s_recordSurface.transform.dtdy, s_recordSurface.transform.dsdy, s_recordSurface.transform.positionX, s_recordSurface.transform.positionY))
         {
             CleanupRecordSurface();
             return false;
         }
 
-        std::println(stderr,
-                     "[RenderVK] Record overlay ready layerStack={} source={}x{} stackRect=({},{}-{},{}), displayRect=({},{}-{},{}), orientation={} extent={}x{} matrix=[{},{};{},{}] pos=({}, {})",
-                     target.layerStack,
-                     sourceWidth,
-                     sourceHeight,
-                     target.layerStackRect.left,
-                     target.layerStackRect.top,
-                     target.layerStackRect.right,
-                     target.layerStackRect.bottom,
-                     target.displayRect.left,
-                     target.displayRect.top,
-                     target.displayRect.right,
-                     target.displayRect.bottom,
-                     target.orientation,
-                     s_recordSurface.extent.width,
-                     s_recordSurface.extent.height,
-                     s_recordSurface.transform.dsdx,
-                     s_recordSurface.transform.dtdx,
-                     s_recordSurface.transform.dtdy,
-                     s_recordSurface.transform.dsdy,
-                     s_recordSurface.transform.positionX,
-                     s_recordSurface.transform.positionY);
+        std::println(stderr, "[RenderVK] Record overlay ready layerStack={} source={}x{} stackRect=({},{}-{},{}), displayRect=({},{}-{},{}), orientation={} extent={}x{} matrix=[{},{};{},{}] pos=({}, {})", target.layerStack, sourceWidth, sourceHeight, target.layerStackRect.left, target.layerStackRect.top, target.layerStackRect.right, target.layerStackRect.bottom, target.displayRect.left, target.displayRect.top, target.displayRect.right, target.displayRect.bottom, target.orientation, s_recordSurface.extent.width, s_recordSurface.extent.height, s_recordSurface.transform.dsdx, s_recordSurface.transform.dtdx, s_recordSurface.transform.dtdy, s_recordSurface.transform.dsdy, s_recordSurface.transform.positionX, s_recordSurface.transform.positionY);
         return true;
     }
 
     inline void RenderRecordSurface(ImDrawData *drawData)
     {
         // 双 Surface 方案：主 Surface 保持触摸和显示，录屏副本只负责把同一帧画面送进录屏。
-        if (!drawData || drawData->TotalVtxCount <= 0 || !EnsureRecordSurface() || s_recordSurface.swapchain == VK_NULL_HANDLE)
-            return;
+        if (!drawData || drawData->TotalVtxCount <= 0 || !EnsureRecordSurface() || s_recordSurface.swapchain == VK_NULL_HANDLE) return;
 
         uint32_t frameIndex = g_CurrentFrame;
         VK_CHECK(vkWaitForFences(g_Device, 1, &s_recordSurface.inFlightFences[frameIndex], VK_TRUE, UINT64_MAX));
 
         uint32_t imageIndex = 0;
-        VkResult result = vkAcquireNextImageKHR(g_Device, s_recordSurface.swapchain, UINT64_MAX,
-                                                s_recordSurface.imageAvailableSemaphores[frameIndex], VK_NULL_HANDLE, &imageIndex);
+        VkResult result = vkAcquireNextImageKHR(g_Device, s_recordSurface.swapchain, UINT64_MAX, s_recordSurface.imageAvailableSemaphores[frameIndex], VK_NULL_HANDLE, &imageIndex);
         if (result == VK_ERROR_OUT_OF_DATE_KHR)
         {
             CleanupRecordSurface();
             return;
         }
-        if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
-            return;
+        if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) return;
 
         VK_CHECK(vkResetFences(g_Device, 1, &s_recordSurface.inFlightFences[frameIndex]));
 
@@ -883,12 +787,8 @@ namespace RenderVK
         vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
         ImDrawData recordDrawData = *drawData;
         recordDrawData.DisplayPos = ImVec2(0.0f, 0.0f);
-        recordDrawData.DisplaySize = ImVec2(
-            static_cast<float>(s_recordSurface.sourceWidth),
-            static_cast<float>(s_recordSurface.sourceHeight));
-        recordDrawData.FramebufferScale = ImVec2(
-            static_cast<float>(s_recordSurface.extent.width) / static_cast<float>(s_recordSurface.sourceWidth),
-            static_cast<float>(s_recordSurface.extent.height) / static_cast<float>(s_recordSurface.sourceHeight));
+        recordDrawData.DisplaySize = ImVec2(static_cast<float>(s_recordSurface.sourceWidth), static_cast<float>(s_recordSurface.sourceHeight));
+        recordDrawData.FramebufferScale = ImVec2(static_cast<float>(s_recordSurface.extent.width) / static_cast<float>(s_recordSurface.sourceWidth), static_cast<float>(s_recordSurface.extent.height) / static_cast<float>(s_recordSurface.sourceHeight));
         ImGui_ImplVulkan_RenderDrawData(&recordDrawData, cmd);
         vkCmdEndRenderPass(cmd);
         VK_CHECK(vkEndCommandBuffer(cmd));
@@ -917,8 +817,7 @@ namespace RenderVK
         presentInfo.pImageIndices = &imageIndex;
 
         result = vkQueuePresentKHR(g_Queue, &presentInfo);
-        if (result == VK_ERROR_OUT_OF_DATE_KHR)
-            CleanupRecordSurface();
+        if (result == VK_ERROR_OUT_OF_DATE_KHR) CleanupRecordSurface();
     }
 
     inline bool init(bool preventCapture = true)
@@ -939,8 +838,7 @@ namespace RenderVK
 
         // Android 13+ 双 Surface 模式：主层始终跳过镜像，录屏/投屏只接收 LarkRecord，
         // 避免主层与副层在录屏中重复合成。旧系统仍沿用单 Surface 行为。
-        const bool useDualSurfaceCapture =
-            !preventCapture && android::ANativeWindowCreator::SupportsRecordLayerStack();
+        const bool useDualSurfaceCapture = !preventCapture && android::ANativeWindowCreator::SupportsRecordLayerStack();
         const bool skipMainCapture = preventCapture || useDualSurfaceCapture;
         native_window = android::ANativeWindowCreator::Create("Lark", max_side, max_side, skipMainCapture);
         if (native_window == nullptr)
@@ -948,11 +846,7 @@ namespace RenderVK
             std::println(stderr, "[RenderVK Error] Failed to create ANativeWindow!");
             return false;
         }
-        std::println(stderr,
-                     "[RenderVK] Capture policy preventCapture={} dualSurface={} skipMainCapture={}",
-                     preventCapture,
-                     useDualSurfaceCapture,
-                     skipMainCapture);
+        std::println(stderr, "[RenderVK] Capture policy preventCapture={} dualSurface={} skipMainCapture={}", preventCapture, useDualSurfaceCapture, skipMainCapture);
         ANativeWindow_acquire(native_window);
 
         const char *instance_extensions[] = {"VK_KHR_surface", "VK_KHR_android_surface"};
@@ -969,8 +863,7 @@ namespace RenderVK
 
         uint32_t gpu_count = 0;
         VK_CHECK(vkEnumeratePhysicalDevices(g_Instance, &gpu_count, nullptr));
-        if (gpu_count == 0)
-            return false;
+        if (gpu_count == 0) return false;
         std::vector<VkPhysicalDevice> gpus(gpu_count);
         VK_CHECK(vkEnumeratePhysicalDevices(g_Instance, &gpu_count, gpus.data()));
         g_PhysicalDevice = gpus[0];
@@ -1082,18 +975,7 @@ namespace RenderVK
             VK_CHECK(vkCreateFence(g_Device, &fenceInfo, nullptr, &g_InFlightFences[i]));
         }
 
-        VkDescriptorPoolSize pool_sizes[] = {
-            {VK_DESCRIPTOR_TYPE_SAMPLER, 1000},
-            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000},
-            {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000},
-            {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000},
-            {VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000},
-            {VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000},
-            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000},
-            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000},
-            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000},
-            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000},
-            {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000}};
+        VkDescriptorPoolSize pool_sizes[] = {{VK_DESCRIPTOR_TYPE_SAMPLER, 1000}, {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000}, {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000}, {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000}, {VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000}, {VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000}, {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000}, {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000}, {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000}, {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000}, {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000}};
         VkDescriptorPoolCreateInfo descPoolInfo{};
         descPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         descPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
@@ -1126,7 +1008,9 @@ namespace RenderVK
         init_info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
 
         init_info.CheckVkResultFn = [](VkResult err)
-        { if(err) std::println(stderr, "[ImGui Vulkan Error] {}", (int)err); };
+        {
+            if (err) std::println(stderr, "[ImGui Vulkan Error] {}", (int)err);
+        };
 
         ImGui_ImplVulkan_Init(&init_info);
 
@@ -1171,8 +1055,7 @@ namespace RenderVK
 
         // 旋转或启动时，强制将菜单拉回左上角安全位置
         static bool s_reposition = true;
-        if (rotated)
-            s_reposition = true;
+        if (rotated) s_reposition = true;
 
         if (s_reposition)
         {
@@ -1268,8 +1151,7 @@ namespace RenderVK
     {
         Touch_Shutdown();
 
-        if (g_Device != VK_NULL_HANDLE)
-            vkDeviceWaitIdle(g_Device);
+        if (g_Device != VK_NULL_HANDLE) vkDeviceWaitIdle(g_Device);
 
         CleanupRecordSurface();
 
@@ -1304,4 +1186,4 @@ namespace RenderVK
             native_window = nullptr;
         }
     }
-}
+} // namespace RenderVK

@@ -13,7 +13,7 @@ class MappedFile
     void *ptr_ = nullptr;
     size_t size_ = 0;
 
-public:
+  public:
     MappedFile() = default;
     ~MappedFile() { release(); }
     MappedFile(const MappedFile &) = delete;
@@ -47,8 +47,7 @@ public:
         release();
         char tpl[] = "/data/local/tmp/memscan_XXXXXX";
         fd_ = mkstemp(tpl);
-        if (fd_ < 0)
-            return false;
+        if (fd_ < 0) return false;
         unlink(tpl);
         if (ftruncate(fd_, static_cast<off_t>(sz)) != 0)
         {
@@ -84,11 +83,9 @@ public:
         size_ = 0;
     }
 
-    template <typename T = void>
-    T *as() noexcept { return static_cast<T *>(ptr_); }
+    template <typename T = void> T *as() noexcept { return static_cast<T *>(ptr_); }
 
-    template <typename T = void>
-    const T *as() const noexcept { return static_cast<const T *>(ptr_); }
+    template <typename T = void> const T *as() const noexcept { return static_cast<const T *>(ptr_); }
 
     // 返回当前映射区域的字节大小。
     size_t size() const noexcept { return size_; }
@@ -98,7 +95,6 @@ public:
     // 向内核提示映射区域的访问模式。
     void advise(int advice)
     {
-        if (ptr_)
-            madvise(ptr_, size_, advice);
+        if (ptr_) madvise(ptr_, size_, advice);
     }
 };

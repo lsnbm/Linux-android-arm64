@@ -27,22 +27,20 @@
 // 屏蔽 CFI 检查，统一利用 kprobe 获取 kallsyms_lookup_name 地址
 __attribute__((no_sanitize("cfi"))) static unsigned long generic_kallsyms_lookup_name(const char *name)
 {
-        unsigned long (*fn_kallsyms_lookup_name)(const char *name) = NULL;
-        struct kprobe kp = {0};
+    unsigned long (*fn_kallsyms_lookup_name)(const char *name) = NULL;
+    struct kprobe kp = {0};
 
-        if (!fn_kallsyms_lookup_name)
-        {
-                kp.symbol_name = "kallsyms_lookup_name";
-                if (register_kprobe(&kp) < 0)
-                        return 0;
-                fn_kallsyms_lookup_name = (void *)kp.addr;
-                unregister_kprobe(&kp);
-        }
+    if (!fn_kallsyms_lookup_name)
+    {
+        kp.symbol_name = "kallsyms_lookup_name";
+        if (register_kprobe(&kp) < 0) return 0;
+        fn_kallsyms_lookup_name = (void *)kp.addr;
+        unregister_kprobe(&kp);
+    }
 
-        if (!fn_kallsyms_lookup_name)
-                return 0;
+    if (!fn_kallsyms_lookup_name) return 0;
 
-        return fn_kallsyms_lookup_name(name);
+    return fn_kallsyms_lookup_name(name);
 }
 int (*fn_aarch64_insn_patch_text)(void *addrs[], uint32_t insns[], int cnt);
 
@@ -63,19 +61,18 @@ int (*fn_aarch64_insn_patch_text)(void *addrs[], uint32_t insns[], int cnt);
 
 __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
 {
-        // AArch64 RET 指令机器码
+    // AArch64 RET 指令机器码
 #define AARCH64_RET_INSTR 0xD65F03C0
-        // 内部状态，记录是否已经热更新成功
-        static bool is_cfi_bypassed = false;
-        uint64_t cfi_addr = 0;
-        void *patch_addrs[1];
-        uint32_t patch_insns[1] = {AARCH64_RET_INSTR};
+    // 内部状态，记录是否已经热更新成功
+    static bool is_cfi_bypassed = false;
+    uint64_t cfi_addr = 0;
+    void *patch_addrs[1];
+    uint32_t patch_insns[1] = {AARCH64_RET_INSTR};
 
-        if (is_cfi_bypassed)
-                return true;
+    if (is_cfi_bypassed) return true;
 
-        // 获取同步 patch 函数：内部使用 stop_machine，避免其他 CPU 执行到半补丁状态。
-        /*
+    // 获取同步 patch 函数：内部使用 stop_machine，避免其他 CPU 执行到半补丁状态。
+    /*
         注意：aarch64_insn_patch_text_nosync不同步多cpu
         在patch目标地址多行指令时很可能导致其他cpu执行到半补丁状态，
         为了防止这个情况使用aarch64_insn_patch_text，
@@ -84,29 +81,23 @@ __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
         aarch64_insn_patch_text内部也是stop_machine 停止其他cpu，
         在循环调用aarch64_insn_patch_text_nosync来patch指令
         */
-        fn_aarch64_insn_patch_text =
-            (void *)generic_kallsyms_lookup_name("aarch64_insn_patch_text");
+    fn_aarch64_insn_patch_text = (void *)generic_kallsyms_lookup_name("aarch64_insn_patch_text");
 
-        if (!fn_aarch64_insn_patch_text)
-                return false;
+    if (!fn_aarch64_insn_patch_text) return false;
 
-        //  依次查找各个版本的 CFI slowpath 函数
-        cfi_addr = generic_kallsyms_lookup_name("__cfi_slowpath"); // 5.10
-        if (!cfi_addr)
-                cfi_addr = generic_kallsyms_lookup_name("__cfi_slowpath_diag"); // 5.15
-        if (!cfi_addr)
-                cfi_addr = generic_kallsyms_lookup_name("_cfi_slowpath"); // 5.4
+    //  依次查找各个版本的 CFI slowpath 函数
+    cfi_addr = generic_kallsyms_lookup_name("__cfi_slowpath");                     // 5.10
+    if (!cfi_addr) cfi_addr = generic_kallsyms_lookup_name("__cfi_slowpath_diag"); // 5.15
+    if (!cfi_addr) cfi_addr = generic_kallsyms_lookup_name("_cfi_slowpath");       // 5.4
 
-        if (!cfi_addr)
-                return false;
+    if (!cfi_addr) return false;
 
-        // 强行 Patch 成 RET 指令 (直接返回，使得所有 CFI 校验默认通过)
-        patch_addrs[0] = (void *)cfi_addr;
-        if (fn_aarch64_insn_patch_text(patch_addrs, patch_insns, 1) != 0)
-                return false;
+    // 强行 Patch 成 RET 指令 (直接返回，使得所有 CFI 校验默认通过)
+    patch_addrs[0] = (void *)cfi_addr;
+    if (fn_aarch64_insn_patch_text(patch_addrs, patch_insns, 1) != 0) return false;
 
-        is_cfi_bypassed = true;
-        return true;
+    is_cfi_bypassed = true;
+    return true;
 }
 
 //------------------下面是通用，但未导出，未定义函数-----------------
@@ -115,250 +106,221 @@ __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
 
 static inline uint64_t make_tlbi_addr(uint64_t addr)
 {
-        return (addr >> 12) & TLBI_VADDR_MASK;
+    return (addr >> 12) & TLBI_VADDR_MASK;
 }
 
 // 用 ARM64 TLBI 指令刷新全部cpu一个用户 VA 对应的所有 ASID TLB 项
 static inline void flush_user_tlb_addr_all_asid(uint64_t addr)
 {
-        uint64_t tlbi_addr = make_tlbi_addr(addr);
+    uint64_t tlbi_addr = make_tlbi_addr(addr);
 
-        asm volatile(
-            "dsb ishst\n\t"
-            "tlbi vaale1is, %[tlbi_addr]\n\t" // 需要所有cpu，因为写的是目标用户态的页，随时都能被其他cpu执行
-            "dsb ish\n\t"
-            "isb\n\t"
-            :
-            : [tlbi_addr] "r"(tlbi_addr)
-            : "memory");
+    asm volatile("dsb ishst\n\t"
+                 "tlbi vaale1is, %[tlbi_addr]\n\t" // 需要所有cpu，因为写的是目标用户态的页，随时都能被其他cpu执行
+                 "dsb ish\n\t"
+                 "isb\n\t"
+                 :
+                 : [tlbi_addr] "r"(tlbi_addr)
+                 : "memory");
 }
 
 // 用 ARM64 TLBI 指令刷新当前 CPU 上一个用户 VA 对应的所有 ASID TLB 项
 static inline void flush_user_tlb_addr_all_asid_current_cpu(uint64_t addr)
 {
-        uint64_t tlbi_addr = make_tlbi_addr(addr);
+    uint64_t tlbi_addr = make_tlbi_addr(addr);
 
-        asm volatile(
-            "dsb nshst\n\t"
-            "tlbi vaale1, %[tlbi_addr]\n\t"
-            "dsb nsh\n\t"
-            "isb\n\t"
-            :
-            : [tlbi_addr] "r"(tlbi_addr)
-            : "memory");
+    asm volatile("dsb nshst\n\t"
+                 "tlbi vaale1, %[tlbi_addr]\n\t"
+                 "dsb nsh\n\t"
+                 "isb\n\t"
+                 :
+                 : [tlbi_addr] "r"(tlbi_addr)
+                 : "memory");
 }
 
 // 用 ARM64 TLBI 指令刷新全部cpu一个内核 VA 对应的所有 ASID TLB 项
 static inline void flush_kernel_tlb_addr_all_asid(uint64_t addr)
 {
-        uint64_t tlbi_addr = make_tlbi_addr(addr);
+    uint64_t tlbi_addr = make_tlbi_addr(addr);
 
-        asm volatile(
-            "dsb ishst\n\t"
-            "tlbi vaale1is, %[tlbi_addr]\n\t"
-            "dsb ish\n\t"
-            "isb\n\t"
-            :
-            : [tlbi_addr] "r"(tlbi_addr)
-            : "memory");
+    asm volatile("dsb ishst\n\t"
+                 "tlbi vaale1is, %[tlbi_addr]\n\t"
+                 "dsb ish\n\t"
+                 "isb\n\t"
+                 :
+                 : [tlbi_addr] "r"(tlbi_addr)
+                 : "memory");
 }
 
 // 用 ARM64 TLBI 指令刷新当前 CPU 上一个内核 VA 对应的所有 ASID TLB 项
 static inline void flush_kernel_tlb_addr_all_asid_current_cpu(uint64_t addr)
 {
-        uint64_t tlbi_addr = make_tlbi_addr(addr);
+    uint64_t tlbi_addr = make_tlbi_addr(addr);
 
-        asm volatile(
-            "dsb nshst\n\t"
-            "tlbi vaale1, %[tlbi_addr]\n\t"
-            "dsb nsh\n\t"
-            "isb\n\t"
-            :
-            : [tlbi_addr] "r"(tlbi_addr)
-            : "memory");
+    asm volatile("dsb nshst\n\t"
+                 "tlbi vaale1, %[tlbi_addr]\n\t"
+                 "dsb nsh\n\t"
+                 "isb\n\t"
+                 :
+                 : [tlbi_addr] "r"(tlbi_addr)
+                 : "memory");
 }
 
 // 返回 32 位位图中最低置位下标；没有置位时返回 32。
 static inline uint32_t lowest_set_bit32(uint32_t value)
 {
-        uint32_t bit;
+    uint32_t bit;
 
-        for (bit = 0; bit < 32; bit++)
-        {
-                if (value & (1U << bit))
-                        return bit;
-        }
+    for (bit = 0; bit < 32; bit++)
+    {
+        if (value & (1U << bit)) return bit;
+    }
 
-        return 32;
+    return 32;
 }
 
 // 返回 32 位位图中最高置位下标；没有置位时返回 32。
 static inline uint32_t highest_set_bit32(uint32_t value)
 {
-        int bit;
+    int bit;
 
-        for (bit = 31; bit >= 0; bit--)
-        {
-                if (value & (1U << bit))
-                        return (uint32_t)bit;
-        }
+    for (bit = 31; bit >= 0; bit--)
+    {
+        if (value & (1U << bit)) return (uint32_t)bit;
+    }
 
-        return 32;
+    return 32;
 }
 
 // 把已按指令单位计算好的有符号立即数写入 ARM64 指令字段。
 static inline int arm64_patch_signed_imm_field(uint32_t *insn, uint32_t enc_template, int64_t imm, int imm_bits, int imm_shift)
 {
-        int64_t limit;
-        uint32_t mask;
+    int64_t limit;
+    uint32_t mask;
 
-        if (!insn || imm_bits <= 0 || imm_bits > 31 || imm_shift < 0 || imm_bits + imm_shift > 32)
-                return -EINVAL;
+    if (!insn || imm_bits <= 0 || imm_bits > 31 || imm_shift < 0 || imm_bits + imm_shift > 32) return -EINVAL;
 
-        limit = 1LL << (imm_bits - 1);
-        if (imm < -limit || imm >= limit)
-                return -ERANGE;
+    limit = 1LL << (imm_bits - 1);
+    if (imm < -limit || imm >= limit) return -ERANGE;
 
-        mask = (uint32_t)((1ULL << imm_bits) - 1ULL);
-        *insn = enc_template | (((uint32_t)imm & mask) << imm_shift);
-        return 0;
+    mask = (uint32_t)((1ULL << imm_bits) - 1ULL);
+    *insn = enc_template | (((uint32_t)imm & mask) << imm_shift);
+    return 0;
 }
 
 // 获取内核态虚拟地址的pte
 static inline pte_t *get_kernel_pte(uint64_t vaddr)
 {
-        pgd_t *pgd;
-        p4d_t *p4d;
-        pud_t *pud;
-        pmd_t *pmd;
-        pte_t *ptep;
+    pgd_t *pgd;
+    p4d_t *p4d;
+    pud_t *pud;
+    pmd_t *pmd;
+    pte_t *ptep;
 
-        // PGD Level
-        pgd = get_kernel_pgd_base() + pgd_index(vaddr);
-        if (pgd_none(*pgd) || pgd_bad(*pgd))
-                return NULL;
+    // PGD Level
+    pgd = get_kernel_pgd_base() + pgd_index(vaddr);
+    if (pgd_none(*pgd) || pgd_bad(*pgd)) return NULL;
 
-        // P4D Level
-        p4d = p4d_offset(pgd, vaddr);
-        if (p4d_none(*p4d) || p4d_bad(*p4d))
-                return NULL;
+    // P4D Level
+    p4d = p4d_offset(pgd, vaddr);
+    if (p4d_none(*p4d) || p4d_bad(*p4d)) return NULL;
 
-        // PUD Level (可能遇到 1GB 大页)
-        pud = pud_offset(p4d, vaddr);
-        if (pud_none(*pud))
-                return NULL;
+    // PUD Level (可能遇到 1GB 大页)
+    pud = pud_offset(p4d, vaddr);
+    if (pud_none(*pud)) return NULL;
 
-        // 检查是否是 1G 大页
-        if (pud_leaf(*pud))
-                return NULL;
+    // 检查是否是 1G 大页
+    if (pud_leaf(*pud)) return NULL;
 
-        if (pud_bad(*pud))
-                return NULL;
+    if (pud_bad(*pud)) return NULL;
 
-        // PMD Level (可能遇到 2MB 大页)
-        pmd = pmd_offset(pud, vaddr);
-        if (pmd_none(*pmd))
-                return NULL;
+    // PMD Level (可能遇到 2MB 大页)
+    pmd = pmd_offset(pud, vaddr);
+    if (pmd_none(*pmd)) return NULL;
 
-        // 检查是否是 2M 大页
-        if (pmd_leaf(*pmd))
-                return NULL;
+    // 检查是否是 2M 大页
+    if (pmd_leaf(*pmd)) return NULL;
 
-        if (pmd_bad(*pmd))
-                return NULL;
+    if (pmd_bad(*pmd)) return NULL;
 
-        // PTE Level (普通的 4KB 页)
-        // 较新内核中 __pte_offset_map 不导出，对于 64位 系统直接使用 pte_offset_kernel 即可
-        ptep = pte_offset_kernel(pmd, vaddr);
-        if (!ptep)
-                return NULL;
+    // PTE Level (普通的 4KB 页)
+    // 较新内核中 __pte_offset_map 不导出，对于 64位 系统直接使用 pte_offset_kernel 即可
+    ptep = pte_offset_kernel(pmd, vaddr);
+    if (!ptep) return NULL;
 
-        return ptep;
+    return ptep;
 }
 
 // 获取用户态虚拟地址的pte
 static inline pte_t *get_user_pte(struct mm_struct *mm, uint64_t vaddr)
 {
-        pgd_t *pgd;
-        p4d_t *p4d;
-        pud_t *pud;
-        pmd_t *pmd;
-        pte_t *ptep;
+    pgd_t *pgd;
+    p4d_t *p4d;
+    pud_t *pud;
+    pmd_t *pmd;
+    pte_t *ptep;
 
-        if (!mm)
-                return NULL;
+    if (!mm) return NULL;
 
-        // PGD Level
-        pgd = pgd_offset(mm, vaddr);
-        if (pgd_none(*pgd) || pgd_bad(*pgd))
-                return NULL;
+    // PGD Level
+    pgd = pgd_offset(mm, vaddr);
+    if (pgd_none(*pgd) || pgd_bad(*pgd)) return NULL;
 
-        // P4D Level
-        p4d = p4d_offset(pgd, vaddr);
-        if (p4d_none(*p4d) || p4d_bad(*p4d))
-                return NULL;
+    // P4D Level
+    p4d = p4d_offset(pgd, vaddr);
+    if (p4d_none(*p4d) || p4d_bad(*p4d)) return NULL;
 
-        // PUD Level (可能遇到 1GB 大页)
-        pud = pud_offset(p4d, vaddr);
-        if (pud_none(*pud))
-                return NULL;
+    // PUD Level (可能遇到 1GB 大页)
+    pud = pud_offset(p4d, vaddr);
+    if (pud_none(*pud)) return NULL;
 
-        // 检查是否是 1G 大页
-        if (pud_leaf(*pud))
-                return NULL;
+    // 检查是否是 1G 大页
+    if (pud_leaf(*pud)) return NULL;
 
-        if (pud_bad(*pud))
-                return NULL;
+    if (pud_bad(*pud)) return NULL;
 
-        // PMD Level (可能遇到 2MB 大页)
-        pmd = pmd_offset(pud, vaddr);
-        if (pmd_none(*pmd))
-                return NULL;
+    // PMD Level (可能遇到 2MB 大页)
+    pmd = pmd_offset(pud, vaddr);
+    if (pmd_none(*pmd)) return NULL;
 
-        // 检查是否是 2M 大页
-        if (pmd_leaf(*pmd))
-                return NULL;
+    // 检查是否是 2M 大页
+    if (pmd_leaf(*pmd)) return NULL;
 
-        if (pmd_bad(*pmd))
-                return NULL;
+    if (pmd_bad(*pmd)) return NULL;
 
-        // PTE Level (普通的 4KB 页)
-        // 较新内核中 __pte_offset_map 不导出，对于 64位 系统直接使用 pte_offset_kernel 即可
-        ptep = pte_offset_kernel(pmd, vaddr);
-        if (!ptep)
-                return NULL;
+    // PTE Level (普通的 4KB 页)
+    // 较新内核中 __pte_offset_map 不导出，对于 64位 系统直接使用 pte_offset_kernel 即可
+    ptep = pte_offset_kernel(pmd, vaddr);
+    if (!ptep) return NULL;
 
-        return ptep;
+    return ptep;
 }
 
 // 根据 pid 获取 task_struct，调用方负责 put_task_struct。
 static inline struct task_struct *get_task_by_pid(pid_t pid)
 {
-        struct pid *pid_struct;
-        struct task_struct *task;
+    struct pid *pid_struct;
+    struct task_struct *task;
 
-        pid_struct = find_get_pid(pid);
-        if (!pid_struct)
-                return NULL;
+    pid_struct = find_get_pid(pid);
+    if (!pid_struct) return NULL;
 
-        task = get_pid_task(pid_struct, PIDTYPE_PID);
-        put_pid(pid_struct);
-        return task;
+    task = get_pid_task(pid_struct, PIDTYPE_PID);
+    put_pid(pid_struct);
+    return task;
 }
 
 // 根据 pid 获取 mm_struct，调用方负责 mmput。
 static inline struct mm_struct *get_mm_by_pid(pid_t pid)
 {
-        struct task_struct *task;
-        struct mm_struct *mm;
+    struct task_struct *task;
+    struct mm_struct *mm;
 
-        task = get_task_by_pid(pid);
-        if (!task)
-                return NULL;
+    task = get_task_by_pid(pid);
+    if (!task) return NULL;
 
-        mm = get_task_mm(task);
-        put_task_struct(task);
-        return mm;
+    mm = get_task_mm(task);
+    put_task_struct(task);
+    return mm;
 }
 
 /*
@@ -368,159 +330,139 @@ static inline struct mm_struct *get_mm_by_pid(pid_t pid)
 */
 static inline pte_t *get_or_alloc_user_pte(struct mm_struct *mm, uint64_t vaddr)
 {
-        pgd_t *pgd;
-        p4d_t *p4d;
-        pud_t *pud;
-        pmd_t *pmd;
-        pte_t *ptep;
+    pgd_t *pgd;
+    p4d_t *p4d;
+    pud_t *pud;
+    pmd_t *pmd;
+    pte_t *ptep;
 
-        if (!mm)
-                return NULL;
+    if (!mm) return NULL;
 
-        pgd = pgd_offset(mm, vaddr);
-        if (pgd_bad(*pgd))
-                return NULL;
-        if (pgd_none(*pgd))
-        {
-                p4d_t *new_p4d = p4d_alloc_one(mm, vaddr);
-                if (!new_p4d)
-                        return NULL;
-                pgd_populate(mm, pgd, new_p4d);
-        }
+    pgd = pgd_offset(mm, vaddr);
+    if (pgd_bad(*pgd)) return NULL;
+    if (pgd_none(*pgd))
+    {
+        p4d_t *new_p4d = p4d_alloc_one(mm, vaddr);
+        if (!new_p4d) return NULL;
+        pgd_populate(mm, pgd, new_p4d);
+    }
 
-        p4d = p4d_offset(pgd, vaddr);
-        if (p4d_bad(*p4d))
-                return NULL;
-        if (p4d_none(*p4d))
-        {
-                pud_t *new_pud = pud_alloc_one(mm, vaddr);
-                if (!new_pud)
-                        return NULL;
-                p4d_populate(mm, p4d, new_pud);
-        }
+    p4d = p4d_offset(pgd, vaddr);
+    if (p4d_bad(*p4d)) return NULL;
+    if (p4d_none(*p4d))
+    {
+        pud_t *new_pud = pud_alloc_one(mm, vaddr);
+        if (!new_pud) return NULL;
+        p4d_populate(mm, p4d, new_pud);
+    }
 
-        pud = pud_offset(p4d, vaddr);
-        if (pud_leaf(*pud) || pud_bad(*pud))
-                return NULL;
-        if (pud_none(*pud))
-        {
-                pmd_t *new_pmd = pmd_alloc_one(mm, vaddr);
-                if (!new_pmd)
-                        return NULL;
-                pud_populate(mm, pud, new_pmd);
-        }
+    pud = pud_offset(p4d, vaddr);
+    if (pud_leaf(*pud) || pud_bad(*pud)) return NULL;
+    if (pud_none(*pud))
+    {
+        pmd_t *new_pmd = pmd_alloc_one(mm, vaddr);
+        if (!new_pmd) return NULL;
+        pud_populate(mm, pud, new_pmd);
+    }
 
-        pmd = pmd_offset(pud, vaddr);
-        if (pmd_leaf(*pmd) || pmd_bad(*pmd))
-                return NULL;
-        if (pmd_none(*pmd))
-        {
-                pgtable_t new_pte = pte_alloc_one(mm);
-                if (!new_pte)
-                        return NULL;
-                pmd_populate(mm, pmd, new_pte);
-        }
+    pmd = pmd_offset(pud, vaddr);
+    if (pmd_leaf(*pmd) || pmd_bad(*pmd)) return NULL;
+    if (pmd_none(*pmd))
+    {
+        pgtable_t new_pte = pte_alloc_one(mm);
+        if (!new_pte) return NULL;
+        pmd_populate(mm, pmd, new_pte);
+    }
 
-        ptep = pte_offset_kernel(pmd, vaddr);
-        return ptep;
+    ptep = pte_offset_kernel(pmd, vaddr);
+    return ptep;
 }
 
 // 检查一段用户 VA 范围是否没有 present PTE，调用方负责持有合适的 mmap 锁。
 static inline bool user_pte_range_empty(struct mm_struct *mm, uint64_t addr, size_t size)
 {
-        uint64_t cur;
+    uint64_t cur;
 
-        if (!mm)
-                return false;
+    if (!mm) return false;
 
-        for (cur = addr; cur < addr + size; cur += PAGE_SIZE)
-        {
-                pte_t *ptep = get_user_pte(mm, cur);
-                if (ptep && pte_present(READ_ONCE(*ptep)))
-                        return false;
-        }
+    for (cur = addr; cur < addr + size; cur += PAGE_SIZE)
+    {
+        pte_t *ptep = get_user_pte(mm, cur);
+        if (ptep && pte_present(READ_ONCE(*ptep))) return false;
+    }
 
-        return true;
+    return true;
 }
 
 // 读取用户地址所在页的 PTE 值。
 static inline int read_user_pte_value(struct mm_struct *mm, uint64_t addr, pteval_t *out_pte)
 {
-        pte_t *ptep;
-        pte_t current_pte;
+    pte_t *ptep;
+    pte_t current_pte;
 
-        if (!mm || !out_pte)
-                return -EINVAL;
+    if (!mm || !out_pte) return -EINVAL;
 
-        ptep = get_user_pte(mm, addr);
-        if (!ptep)
-                return -EFAULT;
+    ptep = get_user_pte(mm, addr);
+    if (!ptep) return -EFAULT;
 
-        current_pte = READ_ONCE(*ptep);
-        if (!pte_present(current_pte))
-                return -EFAULT;
+    current_pte = READ_ONCE(*ptep);
+    if (!pte_present(current_pte)) return -EFAULT;
 
-        *out_pte = pte_val(current_pte);
-        return 0;
+    *out_pte = pte_val(current_pte);
+    return 0;
 }
 
 // 根据 pid 读取用户地址所在页的 PTE 值，内部完成 mm 获取和 mmap 读锁。
 static inline int read_user_pte_value_by_pid(pid_t pid, uint64_t addr, pteval_t *out_pte)
 {
-        int status;
-        struct mm_struct *mm;
+    int status;
+    struct mm_struct *mm;
 
-        if (!out_pte)
-                return -EINVAL;
+    if (!out_pte) return -EINVAL;
 
-        mm = get_mm_by_pid(pid);
-        if (!mm)
-                return -ESRCH;
+    mm = get_mm_by_pid(pid);
+    if (!mm) return -ESRCH;
 
-        mmap_read_lock(mm);
-        status = read_user_pte_value(mm, addr, out_pte);
-        mmap_read_unlock(mm);
-        mmput(mm);
-        return status;
+    mmap_read_lock(mm);
+    status = read_user_pte_value(mm, addr, out_pte);
+    mmap_read_unlock(mm);
+    mmput(mm);
+    return status;
 }
 
 // 写入用户地址所在页的 PTE，并用汇编刷新该用户页 TLB。
 static inline int write_user_pte_value(struct mm_struct *mm, uint64_t addr, pteval_t new_pte)
 {
-        pte_t *ptep;
-        struct vm_area_struct *vma;
+    pte_t *ptep;
+    struct vm_area_struct *vma;
 
-        if (!mm)
-                return -EINVAL;
+    if (!mm) return -EINVAL;
 
-        vma = find_vma(mm, addr);
-        if (!vma || addr < vma->vm_start)
-                return -EFAULT;
+    vma = find_vma(mm, addr);
+    if (!vma || addr < vma->vm_start) return -EFAULT;
 
-        ptep = get_user_pte(mm, addr);
-        if (!ptep)
-                return -EFAULT;
+    ptep = get_user_pte(mm, addr);
+    if (!ptep) return -EFAULT;
 
-        set_pte(ptep, __pte(new_pte));
-        flush_user_tlb_addr_all_asid(addr);
-        return 0;
+    set_pte(ptep, __pte(new_pte));
+    flush_user_tlb_addr_all_asid(addr);
+    return 0;
 }
 
 // 根据 pid 写入用户地址所在页的 PTE 值，要求目标地址属于现有 VMA。
 static inline int write_user_pte_value_by_pid(pid_t pid, uint64_t addr, pteval_t new_pte)
 {
-        int status;
-        struct mm_struct *mm;
+    int status;
+    struct mm_struct *mm;
 
-        mm = get_mm_by_pid(pid);
-        if (!mm)
-                return -ESRCH;
+    mm = get_mm_by_pid(pid);
+    if (!mm) return -ESRCH;
 
-        mmap_read_lock(mm);
-        status = write_user_pte_value(mm, addr, new_pte);
-        mmap_read_unlock(mm);
-        mmput(mm);
-        return status;
+    mmap_read_lock(mm);
+    status = write_user_pte_value(mm, addr, new_pte);
+    mmap_read_unlock(mm);
+    mmput(mm);
+    return status;
 }
 
 /*
@@ -585,22 +527,21 @@ br   x16
 */
 static int arm64_make_b(uint64_t from, uint64_t to, uint32_t *insn)
 {
-        int64_t offset = (int64_t)to - (int64_t)from;
+    int64_t offset = (int64_t)to - (int64_t)from;
 
-        if (offset < -(1LL << 27) || offset > ((1LL << 27) - 4))
-                return -ERANGE;
+    if (offset < -(1LL << 27) || offset > ((1LL << 27) - 4)) return -ERANGE;
 
-        *insn = 0x14000000 | ((offset >> 2) & 0x03FFFFFF);
-        return 0;
+    *insn = 0x14000000 | ((offset >> 2) & 0x03FFFFFF);
+    return 0;
 }
 
 // 编码长跳转
 static void arm64_make_ldr_ret(uint64_t target, uint32_t *insn)
 {
-        uint32_t ldr_x16_literal = 0x58000050; // ldr x16, [pc, #8]
-        uint32_t ret_x16 = 0xD65F0200;         // ret x16
+    uint32_t ldr_x16_literal = 0x58000050; // ldr x16, [pc, #8]
+    uint32_t ret_x16 = 0xD65F0200;         // ret x16
 
-        /*
+    /*
         实际编码结果：
            insn[0]: ldr x16, [pc, #8]
            insn[1]: ret x16
@@ -608,37 +549,35 @@ static void arm64_make_ldr_ret(uint64_t target, uint32_t *insn)
            insn[3]: target high32
         实际执行的汇编只有2条；后面的8字节是给ldr相对pc寻址到target地址数据。给ret跳
         */
-        __builtin_memcpy(&insn[0], &ldr_x16_literal, sizeof(uint32_t));
-        __builtin_memcpy(&insn[1], &ret_x16, sizeof(uint32_t));
-        __builtin_memcpy(&insn[2], &target, sizeof(target));
+    __builtin_memcpy(&insn[0], &ldr_x16_literal, sizeof(uint32_t));
+    __builtin_memcpy(&insn[1], &ret_x16, sizeof(uint32_t));
+    __builtin_memcpy(&insn[2], &target, sizeof(target));
 }
 
 // 释放一批通过GUP获取的page *;避免使用 put_page() 把 page_pinner 拉进来。
 static void release_gup_pages(struct page **pages, int nr)
 {
-        typedef void (*release_pages_t)(struct page **pages, int nr);
-        static release_pages_t fn_release_pages;
+    typedef void (*release_pages_t)(struct page **pages, int nr);
+    static release_pages_t fn_release_pages;
 
-        if (!pages || nr <= 0)
-                return;
+    if (!pages || nr <= 0) return;
 
-        if (!fn_release_pages)
-                fn_release_pages = (release_pages_t)generic_kallsyms_lookup_name("release_pages");
+    if (!fn_release_pages) fn_release_pages = (release_pages_t)generic_kallsyms_lookup_name("release_pages");
 
-        if (!fn_release_pages)
-        {
-                ls_log_tag("export", "严重错误！无法找到 release_pages，跳过 %d 个页引用回收\n", nr);
-                return;
-        }
+    if (!fn_release_pages)
+    {
+        ls_log_tag("export", "严重错误！无法找到 release_pages，跳过 %d 个页引用回收\n", nr);
+        return;
+    }
 
-        fn_release_pages(pages, nr);
+    fn_release_pages(pages, nr);
 }
 
 struct execmem_private_header
 {
-        uint64_t magic;    // 校验 execmem_free() 传入的指针是否来自 execmem_alloc()
-        void *base;        // vzalloc() 返回的原始页对齐地址，vfree() 必须释放这个地址
-        size_t alloc_size; // 实际分配并修改页权限的大小，释放时按这个范围恢复 NX
+    uint64_t magic;    // 校验 execmem_free() 传入的指针是否来自 execmem_alloc()
+    void *base;        // vzalloc() 返回的原始页对齐地址，vfree() 必须释放这个地址
+    size_t alloc_size; // 实际分配并修改页权限的大小，释放时按这个范围恢复 NX
 };
 
 #define EXECMEM_PRIVATE_MAGIC 0x455845434D454DULL
@@ -656,118 +595,110 @@ struct execmem_private_header
 // 分配可执行内存页
 static void *execmem_alloc(int type, size_t size)
 {
-        struct execmem_private_header *hdr; // 私有头，用于释放时找回 base
-        void *base;
-        void *code;
-        size_t header_size;
-        size_t alloc_size;
-        unsigned long start;
-        unsigned long addr;
-        unsigned long end;
+    struct execmem_private_header *hdr; // 私有头，用于释放时找回 base
+    void *base;
+    void *code;
+    size_t header_size;
+    size_t alloc_size;
+    unsigned long start;
+    unsigned long addr;
+    unsigned long end;
 
-        (void)type;
+    (void)type;
 
-        if (!size)
-                return NULL;
+    if (!size) return NULL;
 
-        header_size = ALIGN(sizeof(struct execmem_private_header),
-                            EXECMEM_PRIVATE_ALIGN);  // 对齐私有头
-        alloc_size = PAGE_ALIGN(header_size + size); // 私有头 + 代码区整体按页对齐
+    header_size = ALIGN(sizeof(struct execmem_private_header),
+                        EXECMEM_PRIVATE_ALIGN);  // 对齐私有头
+    alloc_size = PAGE_ALIGN(header_size + size); // 私有头 + 代码区整体按页对齐
 
-        base = vzalloc(alloc_size);
-        if (!base)
-                return NULL;
+    base = vzalloc(alloc_size);
+    if (!base) return NULL;
 
-        start = (unsigned long)base;
-        end = start + alloc_size;
+    start = (unsigned long)base;
+    end = start + alloc_size;
 
-        /*
+    /*
          * Inline copy of arm64 set_memory_x():
          * set PTE_MAYBE_GP, clear PTE_PXN, then flush kernel TLB.
          */
-        for (addr = start; addr < end; addr += PAGE_SIZE)
+    for (addr = start; addr < end; addr += PAGE_SIZE)
+    {
+        pte_t *ptep = get_kernel_pte(addr);
+        pteval_t pte;
+
+        if (!ptep)
         {
-                pte_t *ptep = get_kernel_pte(addr);
-                pteval_t pte;
-
-                if (!ptep)
-                {
-                        vfree(base);
-                        return NULL;
-                }
-
-                pte = READ_ONCE(pte_val(*ptep));
-                pte &= ~PTE_PXN;
-                pte |= EXECMEM_PTE_MAYBE_GP;
-                WRITE_ONCE(pte_val(*ptep), pte);
+            vfree(base);
+            return NULL;
         }
 
-        // 刷新tlb缓存，让映射生效
-        flush_tlb_kernel_range(start, end);
+        pte = READ_ONCE(pte_val(*ptep));
+        pte &= ~PTE_PXN;
+        pte |= EXECMEM_PTE_MAYBE_GP;
+        WRITE_ONCE(pte_val(*ptep), pte);
+    }
 
-        hdr = (struct execmem_private_header *)base;
-        hdr->magic = EXECMEM_PRIVATE_MAGIC;
-        hdr->base = base;
-        hdr->alloc_size = alloc_size;
+    // 刷新tlb缓存，让映射生效
+    flush_tlb_kernel_range(start, end);
 
-        code = (void *)(start + header_size);
+    hdr = (struct execmem_private_header *)base;
+    hdr->magic = EXECMEM_PRIVATE_MAGIC;
+    hdr->base = base;
+    hdr->alloc_size = alloc_size;
 
-        flush_icache_range(start, end);
+    code = (void *)(start + header_size);
 
-        return code;
+    flush_icache_range(start, end);
+
+    return code;
 }
 
 // 释放可执行内存页
 static void execmem_free(void *ptr)
 {
-        struct execmem_private_header *hdr; // 私有头地址
-        size_t header_size;
-        void *base;
-        size_t alloc_size;
-        unsigned long start;
-        unsigned long addr;
-        unsigned long end;
+    struct execmem_private_header *hdr; // 私有头地址
+    size_t header_size;
+    void *base;
+    size_t alloc_size;
+    unsigned long start;
+    unsigned long addr;
+    unsigned long end;
 
-        if (!ptr)
-                return;
+    if (!ptr) return;
 
-        header_size = ALIGN(sizeof(struct execmem_private_header),
-                            EXECMEM_PRIVATE_ALIGN);
+    header_size = ALIGN(sizeof(struct execmem_private_header), EXECMEM_PRIVATE_ALIGN);
 
-        hdr = (struct execmem_private_header *)((char *)ptr - header_size); // 由代码区地址反推私有头
+    hdr = (struct execmem_private_header *)((char *)ptr - header_size); // 由代码区地址反推私有头
 
-        if (hdr->magic != EXECMEM_PRIVATE_MAGIC ||
-            !hdr->base ||
-            !hdr->alloc_size)
-                return;
+    if (hdr->magic != EXECMEM_PRIVATE_MAGIC || !hdr->base || !hdr->alloc_size) return;
 
-        base = hdr->base;
-        alloc_size = hdr->alloc_size;
-        hdr->magic = 0;
+    base = hdr->base;
+    alloc_size = hdr->alloc_size;
+    hdr->magic = 0;
 
-        start = (unsigned long)base;
-        end = start + alloc_size;
+    start = (unsigned long)base;
+    end = start + alloc_size;
 
-        /*
+    /*
          * Inline copy of arm64 set_memory_nx():
          * set PTE_PXN, clear PTE_MAYBE_GP, then flush kernel TLB.
          */
-        for (addr = start; addr < end; addr += PAGE_SIZE)
-        {
-                pte_t *ptep = get_kernel_pte(addr);
-                pteval_t pte;
+    for (addr = start; addr < end; addr += PAGE_SIZE)
+    {
+        pte_t *ptep = get_kernel_pte(addr);
+        pteval_t pte;
 
-                if (!ptep)
-                        continue;
+        if (!ptep) continue;
 
-                pte = READ_ONCE(pte_val(*ptep));
-                pte |= PTE_PXN;
-                pte &= ~EXECMEM_PTE_MAYBE_GP;
-                WRITE_ONCE(pte_val(*ptep), pte);
-        }
+        pte = READ_ONCE(pte_val(*ptep));
+        pte |= PTE_PXN;
+        pte &= ~EXECMEM_PTE_MAYBE_GP;
+        WRITE_ONCE(pte_val(*ptep), pte);
+    }
 
-        flush_tlb_kernel_range(start, end);
-        vfree(base);
+    flush_tlb_kernel_range(start, end);
+    vfree(base);
 }
 
 #endif /* _EXPORT_FUN_H_ */
@@ -796,55 +727,57 @@ static void execmem_free(void *ptr)
  *      - cc        : 状态标志寄存器 (如 NZCV，被调用函数可能会修改条件标志)。
  *      - memory    : 编译器内存屏障，强制将寄存器缓存写回内存，并防止指令重排。
  */
-#define _KCALL_CLOBBERS                                                                     \
-        "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "lr", "cc", "memory", \
-            "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7",                                 \
-            "v16", "v17", "v18", "v19", "v20", "v21", "v22", "v23",                         \
-            "v24", "v25", "v26", "v27", "v28", "v29", "v30", "v31"
+#define _KCALL_CLOBBERS "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "lr", "cc", "memory", "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v16", "v17", "v18", "v19", "v20", "v21", "v22", "v23", "v24", "v25", "v26", "v27", "v28", "v29", "v30", "v31"
 
 // 调用 0 个参数的函数
-#define KCALL_0(fn_addr, ret_type) ({                                                                                                \
+#define KCALL_0(fn_addr, ret_type)                                                                                                   \
+    ({                                                                                                                               \
         register uint64_t _x0 asm("x0");                                                                                             \
         asm volatile("blr %1\n" : "=r"(_x0) : "r"((uint64_t)(fn_addr)) : "x1", "x2", "x3", "x4", "x5", "x6", "x7", _KCALL_CLOBBERS); \
         (ret_type) _x0;                                                                                                              \
-})
+    })
 
 // 调用 1 个参数的函数
-#define KCALL_1(fn_addr, ret_type, a1) ({                                                                                            \
+#define KCALL_1(fn_addr, ret_type, a1)                                                                                               \
+    ({                                                                                                                               \
         register uint64_t _x0 asm("x0") = (uint64_t)(a1);                                                                            \
         asm volatile("blr %1\n" : "+r"(_x0) : "r"((uint64_t)(fn_addr)) : "x1", "x2", "x3", "x4", "x5", "x6", "x7", _KCALL_CLOBBERS); \
         (ret_type) _x0;                                                                                                              \
-})
+    })
 
 // 调用 2 个参数的函数
-#define KCALL_2(fn_addr, ret_type, a1, a2) ({                                                                                             \
+#define KCALL_2(fn_addr, ret_type, a1, a2)                                                                                                \
+    ({                                                                                                                                    \
         register uint64_t _x0 asm("x0") = (uint64_t)(a1);                                                                                 \
         register uint64_t _x1 asm("x1") = (uint64_t)(a2);                                                                                 \
         asm volatile("blr %2\n" : "+r"(_x0), "+r"(_x1) : "r"((uint64_t)(fn_addr)) : "x2", "x3", "x4", "x5", "x6", "x7", _KCALL_CLOBBERS); \
         (ret_type) _x0;                                                                                                                   \
-})
+    })
 
 // 调用 3 个参数的函数
-#define KCALL_3(fn_addr, ret_type, a1, a2, a3) ({                                                                                              \
+#define KCALL_3(fn_addr, ret_type, a1, a2, a3)                                                                                                 \
+    ({                                                                                                                                         \
         register uint64_t _x0 asm("x0") = (uint64_t)(a1);                                                                                      \
         register uint64_t _x1 asm("x1") = (uint64_t)(a2);                                                                                      \
         register uint64_t _x2 asm("x2") = (uint64_t)(a3);                                                                                      \
         asm volatile("blr %3\n" : "+r"(_x0), "+r"(_x1), "+r"(_x2) : "r"((uint64_t)(fn_addr)) : "x3", "x4", "x5", "x6", "x7", _KCALL_CLOBBERS); \
         (ret_type) _x0;                                                                                                                        \
-})
+    })
 
 // 调用 4 个参数的函数
-#define KCALL_4(fn_addr, ret_type, a1, a2, a3, a4) ({                                                                                               \
+#define KCALL_4(fn_addr, ret_type, a1, a2, a3, a4)                                                                                                  \
+    ({                                                                                                                                              \
         register uint64_t _x0 asm("x0") = (uint64_t)(a1);                                                                                           \
         register uint64_t _x1 asm("x1") = (uint64_t)(a2);                                                                                           \
         register uint64_t _x2 asm("x2") = (uint64_t)(a3);                                                                                           \
         register uint64_t _x3 asm("x3") = (uint64_t)(a4);                                                                                           \
         asm volatile("blr %4\n" : "+r"(_x0), "+r"(_x1), "+r"(_x2), "+r"(_x3) : "r"((uint64_t)(fn_addr)) : "x4", "x5", "x6", "x7", _KCALL_CLOBBERS); \
         (ret_type) _x0;                                                                                                                             \
-})
+    })
 
 // 调用 5 个参数的函数
-#define KCALL_5(fn_addr, ret_type, a1, a2, a3, a4, a5) ({                                                                                                \
+#define KCALL_5(fn_addr, ret_type, a1, a2, a3, a4, a5)                                                                                                   \
+    ({                                                                                                                                                   \
         register uint64_t _x0 asm("x0") = (uint64_t)(a1);                                                                                                \
         register uint64_t _x1 asm("x1") = (uint64_t)(a2);                                                                                                \
         register uint64_t _x2 asm("x2") = (uint64_t)(a3);                                                                                                \
@@ -852,10 +785,11 @@ static void execmem_free(void *ptr)
         register uint64_t _x4 asm("x4") = (uint64_t)(a5);                                                                                                \
         asm volatile("blr %5\n" : "+r"(_x0), "+r"(_x1), "+r"(_x2), "+r"(_x3), "+r"(_x4) : "r"((uint64_t)(fn_addr)) : "x5", "x6", "x7", _KCALL_CLOBBERS); \
         (ret_type) _x0;                                                                                                                                  \
-})
+    })
 
 // 调用 6 个参数的函数
-#define KCALL_6(fn_addr, ret_type, a1, a2, a3, a4, a5, a6) ({                                                                                                 \
+#define KCALL_6(fn_addr, ret_type, a1, a2, a3, a4, a5, a6)                                                                                                    \
+    ({                                                                                                                                                        \
         register uint64_t _x0 asm("x0") = (uint64_t)(a1);                                                                                                     \
         register uint64_t _x1 asm("x1") = (uint64_t)(a2);                                                                                                     \
         register uint64_t _x2 asm("x2") = (uint64_t)(a3);                                                                                                     \
@@ -864,4 +798,4 @@ static void execmem_free(void *ptr)
         register uint64_t _x5 asm("x5") = (uint64_t)(a6);                                                                                                     \
         asm volatile("blr %6\n" : "+r"(_x0), "+r"(_x1), "+r"(_x2), "+r"(_x3), "+r"(_x4), "+r"(_x5) : "r"((uint64_t)(fn_addr)) : "x6", "x7", _KCALL_CLOBBERS); \
         (ret_type) _x0;                                                                                                                                       \
-})
+    })

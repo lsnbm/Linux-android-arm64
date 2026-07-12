@@ -68,8 +68,8 @@ Modifier's View :
 // 版本兼容
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
 // 内核 >= 6.1 使用 VMA 迭代器
-#define DECLARE_VMA_ITER() struct vma_iterator vmi
-#define INIT_VMA_ITER(mm) vma_iter_init(&vmi, mm, 0)
+#define DECLARE_VMA_ITER()        struct vma_iterator vmi
+#define INIT_VMA_ITER(mm)         vma_iter_init(&vmi, mm, 0)
 #define FOR_EACH_VMA_UNIFIED(vma) for_each_vma(vmi, vma)
 #else
 // 内核 < 6.1 使用传统链表
@@ -82,20 +82,17 @@ Modifier's View :
 #endif
 
 // VMA 权限检查宏
-#define VMA_PERM_MASK (VM_READ | VM_WRITE | VM_EXEC)
-#define VMA_IS_RX(vma) (((vma)->vm_flags & VMA_PERM_MASK) == (VM_READ | VM_EXEC))             // r-x
-#define VMA_IS_RO(vma) (((vma)->vm_flags & VMA_PERM_MASK) == VM_READ)                         // r--
-#define VMA_IS_RW(vma) (((vma)->vm_flags & VMA_PERM_MASK) == (VM_READ | VM_WRITE))            // rw-
+#define VMA_PERM_MASK   (VM_READ | VM_WRITE | VM_EXEC)
+#define VMA_IS_RX(vma)  (((vma)->vm_flags & VMA_PERM_MASK) == (VM_READ | VM_EXEC))            // r-x
+#define VMA_IS_RO(vma)  (((vma)->vm_flags & VMA_PERM_MASK) == VM_READ)                        // r--
+#define VMA_IS_RW(vma)  (((vma)->vm_flags & VMA_PERM_MASK) == (VM_READ | VM_WRITE))           // rw-
 #define VMA_IS_RWX(vma) (((vma)->vm_flags & VMA_PERM_MASK) == (VM_READ | VM_WRITE | VM_EXEC)) // rwx
 
 #define VMA_IS_RWP(vma) (VMA_IS_RW(vma) && !((vma)->vm_flags & VM_SHARED)) // rw-p (私有)
 
 static inline bool module_is_anon_rwx(const struct module_info *m)
 {
-    return __builtin_strncmp(m->name, "anon:", 5) == 0 ||
-           __builtin_strncmp(m->name, "rwx", 3) == 0 ||
-           __builtin_strncmp(m->name, "[anon:rwx", 9) == 0 ||
-           __builtin_strncmp(m->name, "[rwx", 4) == 0;
+    return __builtin_strncmp(m->name, "anon:", 5) == 0 || __builtin_strncmp(m->name, "rwx", 3) == 0 || __builtin_strncmp(m->name, "[anon:rwx", 9) == 0 || __builtin_strncmp(m->name, "[rwx", 4) == 0;
 }
 
 static inline const char *get_vma_anon_label(struct vm_area_struct *vma)
@@ -111,10 +108,8 @@ static inline int find_or_add_module(struct module_info *modules, int *module_co
 {
     int i;
     for (i = 0; i < *module_count; i++)
-        if (__builtin_strcmp((const char *)modules[i].name, (const char *)name) == 0)
-            return i;
-    if (*module_count >= MAX_MODULES)
-        return -1;
+        if (__builtin_strcmp((const char *)modules[i].name, (const char *)name) == 0) return i;
+    if (*module_count >= MAX_MODULES) return -1;
     i = (*module_count)++;
     strscpy(modules[i].name, name, MOD_NAME_LEN);
     modules[i].seg_count = 0;
@@ -123,8 +118,7 @@ static inline int find_or_add_module(struct module_info *modules, int *module_co
 
 static inline void add_seg(struct module_info *m, short type_tag, uint8_t prot, uint64_t start, uint64_t end)
 {
-    if (m->seg_count >= MAX_SEGS_PER_MODULE)
-        return;
+    if (m->seg_count >= MAX_SEGS_PER_MODULE) return;
     m->segs[m->seg_count].index = type_tag;
     m->segs[m->seg_count].prot = prot;
     m->segs[m->seg_count].start = start;
@@ -204,25 +198,19 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
 
     // 白名单(用于收集文件模块地址)，只搜集...开头虚拟地址区间。
     // 动态代码段不再依赖 /dev/zero 路径识别，而是按 RWX 权限单独收集为伪模块。
-    static const char *const mod_include_prefixes[] = {
-        "/data/", NULL};
+    static const char *const mod_include_prefixes[] = {"/data/", NULL};
 
     // 黑名单(用于收集可扫描内存地址)，排除...开头的虚拟地址区间
-    static const char *const excl_prefixes[] = {
-        "/dev/", "/system/", "/vendor/", "/apex/", NULL};
+    static const char *const excl_prefixes[] = {"/dev/", "/system/", "/vendor/", "/apex/", NULL};
     // 黑名单(用于收集可扫描内存地址)，排除指定关键字的虚拟地址区间
-    static const char *const excl_keywords[] = {
-        ".oat", ".art", ".odex", ".vdex", ".dex", ".ttf",
-        "dalvik", "gralloc", "ashmem", NULL};
+    static const char *const excl_keywords[] = {".oat", ".art", ".odex", ".vdex", ".dex", ".ttf", "dalvik", "gralloc", "ashmem", NULL};
 
     DECLARE_VMA_ITER();
 
-    if (!info)
-        return -EINVAL;
+    if (!info) return -EINVAL;
 
     path_buf = kmalloc(PATH_MAX, GFP_KERNEL);
-    if (!path_buf)
-        return -ENOMEM;
+    if (!path_buf) return -ENOMEM;
 
     mm = get_mm_by_pid(pid);
     if (!mm)
@@ -240,12 +228,9 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
     FOR_EACH_VMA_UNIFIED(vma)
     {
         uint8_t current_prot = 0;
-        if (vma->vm_flags & VM_READ)
-            current_prot |= 1;
-        if (vma->vm_flags & VM_WRITE)
-            current_prot |= 2;
-        if (vma->vm_flags & VM_EXEC)
-            current_prot |= 4;
+        if (vma->vm_flags & VM_READ) current_prot |= 1;
+        if (vma->vm_flags & VM_WRITE) current_prot |= 2;
+        if (vma->vm_flags & VM_EXEC) current_prot |= 4;
 
         /* ========== 模块收集 ========== */
 
@@ -309,16 +294,8 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
             if (vma->vm_file)
             {
                 path = d_path(&vma->vm_file->f_path, path_buf, PATH_MAX);
-                if (!IS_ERR(path))
-                    scnprintf(rwx_name, sizeof(rwx_name), "%s:%s:%llx-%llx",
-                              kind, path,
-                              (unsigned long long)vma->vm_start,
-                              (unsigned long long)vma->vm_end);
-                else
-                    scnprintf(rwx_name, sizeof(rwx_name), "anon:%s:%llx-%llx",
-                              kind,
-                              (unsigned long long)vma->vm_start,
-                              (unsigned long long)vma->vm_end);
+                if (!IS_ERR(path)) scnprintf(rwx_name, sizeof(rwx_name), "%s:%s:%llx-%llx", kind, path, (unsigned long long)vma->vm_start, (unsigned long long)vma->vm_end);
+                else scnprintf(rwx_name, sizeof(rwx_name), "anon:%s:%llx-%llx", kind, (unsigned long long)vma->vm_start, (unsigned long long)vma->vm_end);
             }
             else
             {
@@ -328,18 +305,12 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
                 没有做每个 VMA 都是独立的伪模块
                 */
                 const char *anon_label = get_vma_anon_label(vma);
-                if (anon_label && anon_label[0])
-                    scnprintf(rwx_name, sizeof(rwx_name), "anon:%s", anon_label);
-                else
-                    scnprintf(rwx_name, sizeof(rwx_name), "anon:%s:%llx-%llx",
-                              kind,
-                              (unsigned long long)vma->vm_start,
-                              (unsigned long long)vma->vm_end);
+                if (anon_label && anon_label[0]) scnprintf(rwx_name, sizeof(rwx_name), "anon:%s", anon_label);
+                else scnprintf(rwx_name, sizeof(rwx_name), "anon:%s:%llx-%llx", kind, (unsigned long long)vma->vm_start, (unsigned long long)vma->vm_end);
             }
 
             last_mod_idx = find_or_add_module(info->modules, &info->module_count, (const uint8_t *)rwx_name);
-            if (last_mod_idx >= 0)
-                add_seg(&info->modules[last_mod_idx], 0, current_prot, vma->vm_start, vma->vm_end);
+            if (last_mod_idx >= 0) add_seg(&info->modules[last_mod_idx], 0, current_prot, vma->vm_start, vma->vm_end);
 
             /*
              RWX 特殊模块单独暴露，不参与 BSS 续接。
@@ -365,8 +336,7 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
                 if (!IS_ERR(path))
                 {
                     for (i = 0; excl_prefixes[i]; i++)
-                        if (__builtin_strncmp(path, excl_prefixes[i],
-                                              __builtin_strlen(excl_prefixes[i])) == 0)
+                        if (__builtin_strncmp(path, excl_prefixes[i], __builtin_strlen(excl_prefixes[i])) == 0)
                         {
                             excluded = true;
                             break;
@@ -382,18 +352,12 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
             }
             else
             {
-                if (mm->start_stack >= vma->vm_start &&
-                    mm->start_stack < vma->vm_end)
-                    excluded = true;
+                if (mm->start_stack >= vma->vm_start && mm->start_stack < vma->vm_end) excluded = true;
 
                 if (!excluded && vma->vm_ops && vma->vm_ops->name)
                 {
                     const char *vma_name = vma->vm_ops->name(vma);
-                    if (vma_name &&
-                        (__builtin_strcmp(vma_name, "[vvar]") == 0 ||
-                         __builtin_strcmp(vma_name, "[vdso]") == 0 ||
-                         __builtin_strcmp(vma_name, "[vsyscall]") == 0))
-                        excluded = true;
+                    if (vma_name && (__builtin_strcmp(vma_name, "[vvar]") == 0 || __builtin_strcmp(vma_name, "[vdso]") == 0 || __builtin_strcmp(vma_name, "[vsyscall]") == 0)) excluded = true;
                 }
             }
 
@@ -521,8 +485,7 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
             匿名 RWX 伪模块不是 ELF 文件段，不参与下面的 so 段聚类、
             拓扑标记和 prot 规范化，否则 rwxp/rwxs 会被洗成 r-x。
             */
-            if (module_is_anon_rwx(m))
-                continue;
+            if (module_is_anon_rwx(m)) continue;
 
             /* 步骤 1：纯物理地址排序 */
             for (int x = 1; x < m->seg_count; x++)
@@ -548,8 +511,7 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
 
             for (j = 1; j < m->seg_count; j++)
             {
-                if (m->segs[j].start >= current_end &&
-                    (m->segs[j].start - current_end > 0x1000000))
+                if (m->segs[j].start >= current_end && (m->segs[j].start - current_end > 0x1000000))
                 {
                     if (current_volume > max_volume)
                     {
@@ -565,9 +527,7 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
                 {
                     if (m->segs[j].end > current_end)
                     {
-                        uint64_t increment_start = (m->segs[j].start > current_end)
-                                                       ? m->segs[j].start
-                                                       : current_end;
+                        uint64_t increment_start = (m->segs[j].start > current_end) ? m->segs[j].start : current_end;
                         current_volume += (m->segs[j].end - increment_start);
                         current_end = m->segs[j].end;
                     }
@@ -593,27 +553,22 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
                 {
                     m->segs[valid_count++] = m->segs[j];
                 }
-                else if (m->segs[j].index == -1 &&
-                         m->segs[j].start >= best_base &&
-                         m->segs[j].start <= best_end + 0x3000)
+                else if (m->segs[j].index == -1 && m->segs[j].start >= best_base && m->segs[j].start <= best_end + 0x3000)
                 {
                     m->segs[valid_count++] = m->segs[j];
-                    if (m->segs[j].end > best_end)
-                        best_end = m->segs[j].end;
+                    if (m->segs[j].end > best_end) best_end = m->segs[j].end;
                 }
             }
             m->seg_count = valid_count;
 
-            if (m->seg_count == 0)
-                continue;
+            if (m->seg_count == 0) continue;
 
             /* --- 步骤 4：严谨拓扑标记 --- */
             int first_data_idx = -1;
             cond_resched(); // 主动调度让出cpu,这几步的超大循环连续跑会单核长时间不进入 RCU 静止态
             for (j = 0; j < m->seg_count; j++)
             {
-                if (m->segs[j].index == -1)
-                    continue;
+                if (m->segs[j].index == -1) continue;
 
                 if ((m->segs[j].prot & 2) && !(m->segs[j].prot & 4))
                 {
@@ -624,17 +579,13 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
 
             for (j = 0; j < m->seg_count; j++)
             {
-                if (m->segs[j].index == -1)
-                    continue;
+                if (m->segs[j].index == -1) continue;
 
                 if (j == 0)
                 {
-                    if (!(m->segs[j].prot & 4) && !(m->segs[j].prot & 2))
-                        m->segs[j].index = 1;
-                    else if (m->segs[j].prot & 4)
-                        m->segs[j].index = 0;
-                    else
-                        m->segs[j].index = 2;
+                    if (!(m->segs[j].prot & 4) && !(m->segs[j].prot & 2)) m->segs[j].index = 1;
+                    else if (m->segs[j].prot & 4) m->segs[j].index = 0;
+                    else m->segs[j].index = 2;
                 }
                 else if (first_data_idx != -1 && j < first_data_idx)
                 {
@@ -642,12 +593,9 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
                 }
                 else
                 {
-                    if (m->segs[j].prot & 4)
-                        m->segs[j].index = 0;
-                    else if (m->segs[j].prot & 2)
-                        m->segs[j].index = 2;
-                    else
-                        m->segs[j].index = 1;
+                    if (m->segs[j].prot & 4) m->segs[j].index = 0;
+                    else if (m->segs[j].prot & 2) m->segs[j].index = 2;
+                    else m->segs[j].index = 1;
                 }
             }
 
@@ -683,8 +631,7 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
                 struct segment_info *prev_seg = &m->segs[out_idx];
                 struct segment_info *curr_seg = &m->segs[j];
 
-                if (prev_seg->end == curr_seg->start &&
-                    prev_seg->index == curr_seg->index)
+                if (prev_seg->end == curr_seg->start && prev_seg->index == curr_seg->index)
                 {
                     /* 首尾相连且拓扑标签一致，直接延伸尾部，prot 无需合并 */
                     prev_seg->end = curr_seg->end;
@@ -692,8 +639,7 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
                 else
                 {
                     out_idx++;
-                    if (out_idx != j)
-                        m->segs[out_idx] = *curr_seg;
+                    if (out_idx != j) m->segs[out_idx] = *curr_seg;
                 }
             }
             m->seg_count = out_idx + 1;
@@ -702,8 +648,7 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
             seq = 0;
             for (j = 0; j < m->seg_count; j++)
             {
-                if (m->segs[j].index != -1)
-                    m->segs[j].index = seq++;
+                if (m->segs[j].index != -1) m->segs[j].index = seq++;
             }
         }
     }

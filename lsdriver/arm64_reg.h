@@ -48,23 +48,22 @@ static inline void enable_hardware_debug_on_cpu(void *unused)
     (void)unused;
 
     // 解锁 OS Lock，允许访问调试寄存器
-    __asm__ volatile(
-        "msr oslar_el1, xzr\n\t"
-        "isb\n\t" ::: "memory");
+    __asm__ volatile("msr oslar_el1, xzr\n\t"
+                     "isb\n\t" ::
+                         : "memory");
 
     /*
     读取 MDSCR_EL1，置位后写回：
     bit 15 (MDE): Monitor Debug Enable，用户态调试使能(EL0)
     bit 13 (KDE): Kernel Debug Enable，内核态调试使能(EL1)
     */
-    __asm__ volatile(
-        "mrs %[val], mdscr_el1\n\t"
-        "orr %[val], %[val], %[mask]\n\t"
-        "msr mdscr_el1, %[val]\n\t"
-        "isb\n\t"
-        : [val] "=&r"(mdscr)
-        : [mask] "r"((uint64_t)((1 << 15) | (1 << 13)))
-        : "memory");
+    __asm__ volatile("mrs %[val], mdscr_el1\n\t"
+                     "orr %[val], %[val], %[mask]\n\t"
+                     "msr mdscr_el1, %[val]\n\t"
+                     "isb\n\t"
+                     : [val] "=&r"(mdscr)
+                     : [mask] "r"((uint64_t)((1 << 15) | (1 << 13)))
+                     : "memory");
 }
 
 // 关闭当前 CPU 上的自托管硬件调试；重新上 OS Lock
@@ -75,41 +74,39 @@ static inline void disable_hardware_debug_on_cpu(void *unused)
     (void)unused;
 
     // 清掉 MDSCR_EL1 的 MDE(bit15) 和 KDE(bit13)
-    __asm__ volatile(
-        "mrs    %[val], mdscr_el1\n\t"
-        "bic    %[val], %[val], %[mask]\n\t"
-        "msr    mdscr_el1, %[val]\n\t"
-        "isb\n\t"
-        : [val] "=&r"(mdscr)
-        : [mask] "r"((uint64_t)((1UL << 15) | (1UL << 13)))
-        : "memory");
+    __asm__ volatile("mrs    %[val], mdscr_el1\n\t"
+                     "bic    %[val], %[val], %[mask]\n\t"
+                     "msr    mdscr_el1, %[val]\n\t"
+                     "isb\n\t"
+                     : [val] "=&r"(mdscr)
+                     : [mask] "r"((uint64_t)((1UL << 15) | (1UL << 13)))
+                     : "memory");
 
     // 重新锁住 OS Lock
-    __asm__ volatile(
-        "mov    x0, #1\n\t"
-        "msr    oslar_el1, x0\n\t"
-        "isb\n\t"
-        :
-        :
-        : "x0", "memory");
+    __asm__ volatile("mov    x0, #1\n\t"
+                     "msr    oslar_el1, x0\n\t"
+                     "isb\n\t"
+                     :
+                     :
+                     : "x0", "memory");
 }
 
 // 读写系统寄存器的宏
 #ifndef read_sysreg
-#define read_sysreg(r) ({                                  \
-    uint64_t __val;                                        \
-    asm volatile("mrs %0, " __stringify(r) : "=r"(__val)); \
-    __val;                                                 \
-})
+#define read_sysreg(r)                                         \
+    ({                                                         \
+        uint64_t __val;                                        \
+        asm volatile("mrs %0, " __stringify(r) : "=r"(__val)); \
+        __val;                                                 \
+    })
 #endif
 
 #ifndef write_sysreg
-#define write_sysreg(v, r)                         \
-    do                                             \
-    {                                              \
-        uint64_t __val = (uint64_t)(v);            \
-        asm volatile("msr " __stringify(r) ", %x0" \
-                     : : "rZ"(__val));             \
+#define write_sysreg(v, r)                                           \
+    do                                                               \
+    {                                                                \
+        uint64_t __val = (uint64_t)(v);                              \
+        asm volatile("msr " __stringify(r) ", %x0" : : "rZ"(__val)); \
     } while (0)
 #endif
 
@@ -214,16 +211,18 @@ static void write_wb_reg(int reg, int n, uint64_t val)
 // Q寄存器名称拼接辅助宏：QREG(0) → q0, QREG(1) → q1, ...
 #define QREG(n) q##n
 
-#define READ_Q_REG_CASE(N, DST)                                                     \
-    case N:                                                                         \
-        asm volatile(".arch_extension fp\n.arch_extension simd\n"                   \
-                     "str " __stringify(QREG(N)) ", [%0]\n" ::"r"(DST) : "memory"); \
+#define READ_Q_REG_CASE(N, DST)                                        \
+    case N:                                                            \
+        asm volatile(".arch_extension fp\n.arch_extension simd\n"      \
+                     "str " __stringify(QREG(N)) ", [%0]\n" ::"r"(DST) \
+                     : "memory");                                      \
         break
 
-#define WRITE_Q_REG_CASE(N, SRC)                                                    \
-    case N:                                                                         \
-        asm volatile(".arch_extension fp\n.arch_extension simd\n"                   \
-                     "ldr " __stringify(QREG(N)) ", [%0]\n" ::"r"(SRC) : "memory"); \
+#define WRITE_Q_REG_CASE(N, SRC)                                       \
+    case N:                                                            \
+        asm volatile(".arch_extension fp\n.arch_extension simd\n"      \
+                     "ldr " __stringify(QREG(N)) ", [%0]\n" ::"r"(SRC) \
+                     : "memory");                                      \
         break
 
 #define GEN_READ_Q_REG_CASES(DST) \
@@ -360,13 +359,12 @@ static inline void write_fpsr(uint32_t val)
 static inline unsigned int read_current_el(void)
 {
     unsigned long val;
-    asm volatile(
-        "mrs %0, CurrentEL\n\t"
-        "lsr %0, %0, #2\n\t"
-        "and %0, %0, #0x3"
-        : "=r"(val)
-        :
-        : "cc");
+    asm volatile("mrs %0, CurrentEL\n\t"
+                 "lsr %0, %0, #2\n\t"
+                 "and %0, %0, #0x3"
+                 : "=r"(val)
+                 :
+                 : "cc");
     return (unsigned int)val;
 }
 
@@ -374,13 +372,12 @@ static inline unsigned int read_current_el(void)
 static inline unsigned int read_el2_implemented(void)
 {
     unsigned long val;
-    asm volatile(
-        "mrs %0, ID_AA64PFR0_EL1\n\t"
-        "lsr %0, %0, #8\n\t"
-        "and %0, %0, #0xF"
-        : "=r"(val)
-        :
-        : "cc");
+    asm volatile("mrs %0, ID_AA64PFR0_EL1\n\t"
+                 "lsr %0, %0, #8\n\t"
+                 "and %0, %0, #0xF"
+                 : "=r"(val)
+                 :
+                 : "cc");
     return (unsigned int)val;
 }
 
@@ -388,13 +385,12 @@ static inline unsigned int read_el2_implemented(void)
 static inline unsigned int read_vhe_support(void)
 {
     unsigned long val;
-    asm volatile(
-        "mrs %0, ID_AA64MMFR1_EL1\n\t"
-        "lsr %0, %0, #8\n\t"
-        "and %0, %0, #0xF"
-        : "=r"(val)
-        :
-        : "cc");
+    asm volatile("mrs %0, ID_AA64MMFR1_EL1\n\t"
+                 "lsr %0, %0, #8\n\t"
+                 "and %0, %0, #0xF"
+                 : "=r"(val)
+                 :
+                 : "cc");
     return (unsigned int)val;
 }
 
@@ -402,59 +398,42 @@ static inline unsigned int read_vhe_support(void)
 static inline unsigned long read_sctlr_el1(void)
 {
     unsigned long val;
-    asm volatile(
-        "mrs %0, SCTLR_EL1"
-        : "=r"(val)
-        :
-        : "cc");
+    asm volatile("mrs %0, SCTLR_EL1" : "=r"(val) : : "cc");
     return val;
 }
 
 // Vendor Hypervisor UID 查询接口，用于识别 EL2 侧厂商 hypervisor 服务。
 #ifndef ARM_SMCCC_VENDOR_HYP_CALL_UID_FUNC_ID
-#define ARM_SMCCC_VENDOR_HYP_CALL_UID_FUNC_ID \
-    ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL, ARM_SMCCC_SMC_32, ARM_SMCCC_OWNER_VENDOR_HYP, 0xff01)
+#define ARM_SMCCC_VENDOR_HYP_CALL_UID_FUNC_ID ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL, ARM_SMCCC_SMC_32, ARM_SMCCC_OWNER_VENDOR_HYP, 0xff01)
 #endif
 
 // ARM 标准 workaround 1 查询 ID，常用于判断 Spectre v2 缓解接口是否存在。
 #ifndef ARM_SMCCC_ARCH_WORKAROUND_1
-#define ARM_SMCCC_ARCH_WORKAROUND_1 \
-    ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL, ARM_SMCCC_SMC_32, ARM_SMCCC_OWNER_ARCH, 0x8000)
+#define ARM_SMCCC_ARCH_WORKAROUND_1 ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL, ARM_SMCCC_SMC_32, ARM_SMCCC_OWNER_ARCH, 0x8000)
 #endif
 
 // ARM 标准 workaround 2 查询 ID，常用于判断 SSBD/Spectre v4 缓解接口是否存在。
 #ifndef ARM_SMCCC_ARCH_WORKAROUND_2
-#define ARM_SMCCC_ARCH_WORKAROUND_2 \
-    ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL, ARM_SMCCC_SMC_32, ARM_SMCCC_OWNER_ARCH, 0x7fff)
+#define ARM_SMCCC_ARCH_WORKAROUND_2 ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL, ARM_SMCCC_SMC_32, ARM_SMCCC_OWNER_ARCH, 0x7fff)
 #endif
 
 // ARM 标准 workaround 3 查询 ID，常用于判断 Spectre-BHB 缓解接口是否存在。
 #ifndef ARM_SMCCC_ARCH_WORKAROUND_3
-#define ARM_SMCCC_ARCH_WORKAROUND_3 \
-    ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL, ARM_SMCCC_SMC_32, ARM_SMCCC_OWNER_ARCH, 0x3fff)
+#define ARM_SMCCC_ARCH_WORKAROUND_3 ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL, ARM_SMCCC_SMC_32, ARM_SMCCC_OWNER_ARCH, 0x3fff)
 #endif
 
-static void arm_smccc_call_conduit(enum arm_smccc_conduit conduit,
-                                   unsigned long arg0, unsigned long arg1,
-                                   unsigned long arg2, unsigned long arg3,
-                                   unsigned long arg4, unsigned long arg5,
-                                   unsigned long arg6, unsigned long arg7,
-                                   struct arm_smccc_res *res)
+static void arm_smccc_call_conduit(enum arm_smccc_conduit conduit, unsigned long arg0, unsigned long arg1, unsigned long arg2, unsigned long arg3, unsigned long arg4, unsigned long arg5, unsigned long arg6, unsigned long arg7, struct arm_smccc_res *res)
 {
-    if (conduit == SMCCC_CONDUIT_HVC)
-        arm_smccc_hvc(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, res);
-    else
-        arm_smccc_smc(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, res);
+    if (conduit == SMCCC_CONDUIT_HVC) arm_smccc_hvc(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, res);
+    else arm_smccc_smc(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, res);
 }
 
 // 查询一个标准 SMCCC function id 是否受支持；res.a0 是 SMCCC 返回码。
-static void print_smccc_arch_feature(enum arm_smccc_conduit conduit,
-                                     unsigned long func_id, const char *name)
+static void print_smccc_arch_feature(enum arm_smccc_conduit conduit, unsigned long func_id, const char *name)
 {
     struct arm_smccc_res res;
 
-    arm_smccc_call_conduit(conduit, ARM_SMCCC_ARCH_FEATURES_FUNC_ID,
-                           func_id, 0, 0, 0, 0, 0, 0, &res);
+    arm_smccc_call_conduit(conduit, ARM_SMCCC_ARCH_FEATURES_FUNC_ID, func_id, 0, 0, 0, 0, 0, 0, &res);
     ls_log("SMCCC feature %-22s: %ld (0x%lx)\n", name, res.a0, res.a0);
 }
 
@@ -484,10 +463,8 @@ static void print_smccc_probe(unsigned int current_el, unsigned int el2_implemen
         return;
     }
 
-    arm_smccc_call_conduit(conduit, ARM_SMCCC_VERSION_FUNC_ID,
-                           0, 0, 0, 0, 0, 0, 0, &res);
-    ls_log("SMCCC version      : 0x%lx (major=%lu minor=%lu)\n",
-           res.a0, (res.a0 >> 16) & 0xffff, res.a0 & 0xffff);
+    arm_smccc_call_conduit(conduit, ARM_SMCCC_VERSION_FUNC_ID, 0, 0, 0, 0, 0, 0, 0, &res);
+    ls_log("SMCCC version      : 0x%lx (major=%lu minor=%lu)\n", res.a0, (res.a0 >> 16) & 0xffff, res.a0 & 0xffff);
 
     print_smccc_arch_feature(conduit, ARM_SMCCC_VERSION_FUNC_ID, "SMCCC_VERSION");
     print_smccc_arch_feature(conduit, ARM_SMCCC_ARCH_FEATURES_FUNC_ID, "ARCH_FEATURES");
@@ -495,10 +472,8 @@ static void print_smccc_probe(unsigned int current_el, unsigned int el2_implemen
     print_smccc_arch_feature(conduit, ARM_SMCCC_ARCH_WORKAROUND_2, "ARCH_WORKAROUND_2");
     print_smccc_arch_feature(conduit, ARM_SMCCC_ARCH_WORKAROUND_3, "ARCH_WORKAROUND_3");
 
-    arm_smccc_call_conduit(conduit, ARM_SMCCC_VENDOR_HYP_CALL_UID_FUNC_ID,
-                           0, 0, 0, 0, 0, 0, 0, &res);
-    ls_log("Vendor hyp UID     : %08lx-%08lx-%08lx-%08lx\n",
-           res.a0, res.a1, res.a2, res.a3);
+    arm_smccc_call_conduit(conduit, ARM_SMCCC_VENDOR_HYP_CALL_UID_FUNC_ID, 0, 0, 0, 0, 0, 0, 0, &res);
+    ls_log("Vendor hyp UID     : %08lx-%08lx-%08lx-%08lx\n", res.a0, res.a1, res.a2, res.a3);
 }
 
 // 输出Hypervisor相关信息
@@ -552,25 +527,19 @@ static void print_el2_status(void)
     ls_log("CurrentEL          : EL%u\n", current_el);
 
     // 打印硬件是否实现 EL2。
-    ls_log("EL2 implemented    : %s (ID_AA64PFR0_EL1[11:8] = %u)\n",
-           el2_implemented ? "YES" : "NO",
-           el2_implemented);
+    ls_log("EL2 implemented    : %s (ID_AA64PFR0_EL1[11:8] = %u)\n", el2_implemented ? "YES" : "NO", el2_implemented);
 
     // 打印硬件是否支持 VHE。注意：硬件支持 VHE，不代表当前系统已经启用 VHE。
-    ls_log("VHE supported      : %s (ID_AA64MMFR1_EL1[11:8] = %u)\n",
-           vhe_supported ? "YES" : "NO",
-           vhe_supported);
+    ls_log("VHE supported      : %s (ID_AA64MMFR1_EL1[11:8] = %u)\n", vhe_supported ? "YES" : "NO", vhe_supported);
 
     // 打印 SCTLR_EL1 的当前值。该值主要用于辅助观察当前控制寄存器状态。
     ls_log("SCTLR_EL1          : 0x%016lx\n", sctlr_el1);
 
     // 判断 VHE 是否 active。
-    ls_log("VHE mode active    : %s\n",
-           current_el == 2 ? "YES" : "NO");
+    ls_log("VHE mode active    : %s\n", current_el == 2 ? "YES" : "NO");
 
     // 判断当前是否可以直接访问 EL2 寄存器。
-    ls_log("EL2 regs accessible: %s\n",
-           current_el == 2 ? "YES" : "NO (trap)");
+    ls_log("EL2 regs accessible: %s\n", current_el == 2 ? "YES" : "NO (trap)");
 
     // 运行在 EL2 时，读取 HCR_EL2。
     if (current_el == 2)
@@ -578,16 +547,10 @@ static void print_el2_status(void)
         unsigned long hcr_el2;
 
         // 读取 HCR_EL2。
-        asm volatile(
-            "mrs %0, HCR_EL2"
-            : "=r"(hcr_el2)
-            :
-            :);
+        asm volatile("mrs %0, HCR_EL2" : "=r"(hcr_el2) : :);
 
         ls_log("HCR_EL2            : 0x%016lx\n", hcr_el2);
-        ls_log("  E2H bit[34]      : %lu (VHE=%s)\n",
-               (hcr_el2 >> 34) & 1,
-               ((hcr_el2 >> 34) & 1) ? "enabled" : "disabled");
+        ls_log("  E2H bit[34]      : %lu (VHE=%s)\n", (hcr_el2 >> 34) & 1, ((hcr_el2 >> 34) & 1) ? "enabled" : "disabled");
     }
     else
     {
@@ -623,10 +586,7 @@ static void print_el2_status(void)
         {
             ls_log("  compatible       : %s\n", str);
 
-            if (strnstr(str, "gunyah", strlen(str)) ||
-                strnstr(str, "haven", strlen(str)) ||
-                strnstr(str, "qhee", strlen(str)) ||
-                strnstr(str, "qtee", strlen(str)))
+            if (strnstr(str, "gunyah", strlen(str)) || strnstr(str, "haven", strlen(str)) || strnstr(str, "qhee", strlen(str)) || strnstr(str, "qtee", strlen(str)))
             {
                 hyp_hint = true;
             }
@@ -639,8 +599,7 @@ static void print_el2_status(void)
         ls_log("DT /hypervisor     : no hyp node\n");
     }
     np = of_find_node_by_path("/psci");
-    if (!np)
-        np = of_find_node_by_path("/firmware/psci");
+    if (!np) np = of_find_node_by_path("/firmware/psci");
     if (np)
     {
         ls_log("DT PSCI            : present\n");
@@ -649,8 +608,7 @@ static void print_el2_status(void)
         {
             ls_log("  compatible       : %s\n", str);
 
-            if (strnstr(str, "psci", strlen(str)) ||
-                strnstr(str, "arm,psci", strlen(str)))
+            if (strnstr(str, "psci", strlen(str)) || strnstr(str, "arm,psci", strlen(str)))
             {
                 tz_hint = true;
             }
@@ -667,22 +625,16 @@ static void print_el2_status(void)
     np = of_find_node_by_path("/");
     if (np)
     {
-        if (!of_property_read_string(np, "model", &model))
-            ls_log("DT model           : %s\n", model);
-        else
-            ls_log("DT model           : unavailable\n");
+        if (!of_property_read_string(np, "model", &model)) ls_log("DT model           : %s\n", model);
+        else ls_log("DT model           : unavailable\n");
 
         of_property_for_each_string(np, "compatible", prop, str)
         {
             ls_log("DT compatible      : %s\n", str);
 
-            if (strnstr(str, "qcom", strlen(str)))
-                ls_log("  platform hint    : Qualcomm SoC / board\n");
+            if (strnstr(str, "qcom", strlen(str))) ls_log("  platform hint    : Qualcomm SoC / board\n");
 
-            if (strnstr(str, "gunyah", strlen(str)) ||
-                strnstr(str, "haven", strlen(str)) ||
-                strnstr(str, "qhee", strlen(str)) ||
-                strnstr(str, "qtee", strlen(str)))
+            if (strnstr(str, "gunyah", strlen(str)) || strnstr(str, "haven", strlen(str)) || strnstr(str, "qhee", strlen(str)) || strnstr(str, "qtee", strlen(str)))
             {
                 hyp_hint = true;
             }
