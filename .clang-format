@@ -54,3 +54,5 @@ SortIncludes: Never
 
 # 不自动合并、拆分或重排普通注释和文档注释的文本内容。
 ReflowComments: false
+
+AccessModifierOffset: -4

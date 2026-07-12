@@ -30,8 +30,11 @@ paciasp指令包含bti功能
 
 */
 
-#define HOOK_STUB_WORDS 4
-#define HOOK_STUB_BYTES (HOOK_STUB_WORDS * 4)
+#define HOOK_STUB_WORDS     4
+#define HOOK_STUB_BYTES     (HOOK_STUB_WORDS * 4)
+#define HOOK_METADATA_BYTES 32
+#define HOOK_REGS_BYTES     272
+#define HOOK_FRAME_BYTES    (HOOK_METADATA_BYTES + HOOK_REGS_BYTES)
 
 #define TRAMP_WORDS             120
 #define TRAMP_BYTES             (TRAMP_WORDS * 4)
@@ -123,48 +126,53 @@ struct hook_entry
     int slot_index;                       // 分配到的槽位，-1 表示未分配
 };
 
+static inline void *hook_frame_metadata(struct pt_regs *regs)
+{
+    return regs ? (void *)((char *)regs - HOOK_METADATA_BYTES) : NULL;
+}
+
 // 生成模板跳板汇编代码
 static void trampoline_build(uint32_t *buf, const uint32_t orig_insn[HOOK_STUB_WORDS], uint64_t work_fn, uint64_t return_addr)
 {
     static const uint32_t tramp_template[TRAMP_WORDS] = {
-        // 开辟272字节栈空间，这块空间按 struct pt_regs 前缀布局：
-        // regs[0..30] = 0..240，sp = 248，pc = 256，pstate = 264
-        0xD10443FF, // [0] sub sp, sp, #272
+        // 开辟304字节栈空间：前32字节供返回 hook 保存元数据，后272字节按 struct pt_regs 前缀布局。
+        // synthetic pt_regs = sp + 32；regs[0..30] = 0..240，sp = 248，pc = 256，pstate = 264
+        0xD104C3FF, // [0] sub sp, sp, #304
 
         // 所有通用寄存器入栈保存到 pt_regs.regs[0..30]
-        0xA90007E0, // [1] stp x0, x1, [sp]
-        0xA9010FE2, // [2] stp x2, x3, [sp, #16]
-        0xA90217E4, // [3] stp x4, x5, [sp, #32]
-        0xA9031FE6, // [4] stp x6, x7, [sp, #48]
-        0xA90427E8, // [5] stp x8, x9, [sp, #64]
-        0xA9052FEA, // [6] stp x10, x11, [sp, #80]
-        0xA90637EC, // [7] stp x12, x13, [sp, #96]
-        0xA9073FEE, // [8] stp x14, x15, [sp, #112]
-        0xA90847F0, // [9] stp x16, x17, [sp, #128]
-        0xA9094FF2, // [10] stp x18, x19, [sp, #144]
-        0xA90A57F4, // [11] stp x20, x21, [sp, #160]
-        0xA90B5FF6, // [12] stp x22, x23, [sp, #176]
-        0xA90C67F8, // [13] stp x24, x25, [sp, #192]
-        0xA90D6FFA, // [14] stp x26, x27, [sp, #208]
-        0xA90E77FC, // [15] stp x28, x29, [sp, #224]
-        0xF9007BFE, // [16] str x30, [sp, #240]
+        0xA90207E0, // [1] stp x0, x1, [sp, #32]
+        0xA9030FE2, // [2] stp x2, x3, [sp, #48]
+        0xA90417E4, // [3] stp x4, x5, [sp, #64]
+        0xA9051FE6, // [4] stp x6, x7, [sp, #80]
+        0xA90627E8, // [5] stp x8, x9, [sp, #96]
+        0xA9072FEA, // [6] stp x10, x11, [sp, #112]
+        0xA90837EC, // [7] stp x12, x13, [sp, #128]
+        0xA9093FEE, // [8] stp x14, x15, [sp, #144]
+        0xA90A47F0, // [9] stp x16, x17, [sp, #160]
+        0xA90B4FF2, // [10] stp x18, x19, [sp, #176]
+        0xA90C57F4, // [11] stp x20, x21, [sp, #192]
+        0xA90D5FF6, // [12] stp x22, x23, [sp, #208]
+        0xA90E67F8, // [13] stp x24, x25, [sp, #224]
+        0xA90F6FFA, // [14] stp x26, x27, [sp, #240]
+        0xA91077FC, // [15] stp x28, x29, [sp, #256]
+        0xF9008BFE, // [16] str x30, [sp, #272]
 
-        // 保存进入跳板前的真实SP。当前SP已经减了272，所以 sp + 272 才是原始SP
-        0x910443E9, // [17] add x9, sp, #272
-        0xF9007FE9, // [18] str x9, [sp, #248]     < pt_regs.sp
+        // 保存进入跳板前的真实SP。当前SP已经减了304，synthetic pt_regs.sp 位于 sp + 280。
+        0x9104C3E9, // [17] add x9, sp, #304
+        0xF9008FE9, // [18] str x9, [sp, #280]     < pt_regs.sp
 
         // 保存原始PC。RET_SLOT里存 target_addr + 16，减16得到被hook覆盖的入口地址
         0x58000C29, // [19] ldr x9, [pc, #0x184]  < RET_SLOT
         0xD1004129, // [20] sub x9, x9, #16        < pt_regs.pc = target_addr
-        0xF90083E9, // [21] str x9, [sp, #256]     < pt_regs.pc
+        0xF90093E9, // [21] str x9, [sp, #288]     < pt_regs.pc
 
         // 保存NZCV条件标志到 pt_regs.pstate。这里不是完整PSTATE，只保留本跳板能恢复的NZCV位
         0xD53B4209, // [22] mrs x9, nzcv
-        0xF90087E9, // [23] str x9, [sp, #264]     < pt_regs.pstate，仅使用NZCV位
+        0xF90097E9, // [23] str x9, [sp, #296]     < pt_regs.pstate，仅使用NZCV位
 
         // 给工作函数建议临时栈帧，把 struct pt_regs * 放到参数0，然后通过x9调用work_fn
         0x910003FD, // [24] mov x29, sp
-        0x910003E0, // [25] mov x0, sp             < 参数0: struct pt_regs *
+        0x910083E0, // [25] add x0, sp, #32        < 参数0: struct pt_regs *
         0x58000B89, // [26] ldr x9, [pc, #0x170]  < 相对寻址到WORK_SLOT
         0xD63F0120, // [27] blr x9
 
@@ -175,13 +183,13 @@ static void trampoline_build(uint32_t *buf, const uint32_t orig_insn[HOOK_STUB_W
         // 返回0时，如果 work_fn 改了 pt_regs.pc，不执行原指令，直接走动态PC路径
         0x58000AC9, // [30] ldr x9, [pc, #0x158]  < RET_SLOT
         0xD1004129, // [31] sub x9, x9, #16
-        0xF94083EA, // [32] ldr x10, [sp, #256]    < work_fn 修改后的 pt_regs.pc
+        0xF94093EA, // [32] ldr x10, [sp, #288]    < work_fn 修改后的 pt_regs.pc
         0xEB09015F, // [33] cmp x10, x9
         0x54000721, // [34] b.ne [91]              < pc 被修改，走动态pc路径
 
         // 返回0且PC没改：恢复 regs->sp / regs->pstate / regs[0..30]，执行被覆盖的4条原始指令，再ret跳回原函数
         // x16暂存pt_regs基址，x17暂存最终SP；切回SP后再恢复原x16/x17，避免破坏原始指令现场
-        0x910003F0, // [35] mov x16, sp            < 栈帧基指针
+        0x910083F0, // [35] add x16, sp, #32       < synthetic pt_regs 基指针
         0xF9407E11, // [36] ldr x17, [x16, #248]   < 恢复目标sp
         0xF9408609, // [37] ldr x9, [x16, #264]
         0xD51B4209, // [38] msr nzcv, x9
@@ -213,12 +221,12 @@ static void trampoline_build(uint32_t *buf, const uint32_t orig_insn[HOOK_STUB_W
         // 返回1时，不继续执行原函数；但仍先检查PC是否被改，改了就按新的regs->pc跳走
         0x580006A9, // [63] ldr x9, [pc, #0xD4]   < RET_SLOT
         0xD1004129, // [64] sub x9, x9, #16
-        0xF94083EA, // [65] ldr x10, [sp, #256]    < work_fn 修改后的 pt_regs.pc
+        0xF94093EA, // [65] ldr x10, [sp, #288]    < work_fn 修改后的 pt_regs.pc
         0xEB09015F, // [66] cmp x10, x9
         0x54000301, // [67] b.ne [91]              < pc 被修改，走动态pc路径
 
         // 返回1且PC没改：恢复 regs->sp / regs->pstate / regs[0..30] 后 ret x30
-        0x910003F0, // [68] mov x16, sp
+        0x910083F0, // [68] add x16, sp, #32
         0xF9407E11, // [69] ldr x17, [x16, #248]
         0xF9408609, // [70] ldr x9, [x16, #264]
         0xD51B4209, // [71] msr nzcv, x9
@@ -244,7 +252,7 @@ static void trampoline_build(uint32_t *buf, const uint32_t orig_insn[HOOK_STUB_W
 
         // 动态PC路径：work_fn修改了 regs->pc，恢复现场后跳到新的PC
         // x17暂存pt_regs基址，x16承载最终跳转目标，x15暂存最终SP；最后使用 ret x16 兼容BTI场景
-        0x910003F1, // [91] mov x17, sp            < pc栈帧基址
+        0x910083F1, // [91] add x17, sp, #32       < synthetic pt_regs 基指针
         0xF9408230, // [92] ldr x16, [x17, #256]   < 动态pc 目标地址
         0xF9407E2F, // [93] ldr x15, [x17, #248]   < 恢复目标sp
         0xF9408629, // [94] ldr x9, [x17, #264]
@@ -285,6 +293,7 @@ static void trampoline_build(uint32_t *buf, const uint32_t orig_insn[HOOK_STUB_W
     BUILD_BUG_ON(offsetof(struct pt_regs, sp) != 248);
     BUILD_BUG_ON(offsetof(struct pt_regs, pc) != 256);
     BUILD_BUG_ON(offsetof(struct pt_regs, pstate) != 264);
+    BUILD_BUG_ON(offsetof(struct pt_regs, orig_x0) != HOOK_REGS_BYTES);
     // 被覆盖的4个word回放完后，必须紧跟跳回原函数后续地址的ldr/ret序列。
     BUILD_BUG_ON(TRAMP_RET_TO_ORIG_INDEX != TRAMP_ORIG_INSN_INDEX + HOOK_STUB_WORDS);
 

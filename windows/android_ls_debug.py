@@ -11,7 +11,14 @@ CURRENT_DIR = Path(__file__).resolve().parent
 if str(CURRENT_DIR) not in sys.path:
     sys.path.insert(0, str(CURRENT_DIR))
 
-from tcp_server import AndroidBridgeSession, BridgeConnectionError, BridgeError, discover_lan_devices
+from tcp_server import (
+    AndroidBridgeSession,
+    BridgeConnectionError,
+    BridgeError,
+    DEFAULT_ANDROID_PORT,
+    DEFAULT_ANDROID_TIMEOUT_SECONDS,
+    discover_lan_devices,
+)
 
 from PySide6.QtCore import QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QMouseEvent, QTextCursor, QWheelEvent
@@ -36,9 +43,6 @@ from PySide6.QtWidgets import (
     QMenu,
 )
 
-DEFAULT_PORT = 9494
-NETWORK_TIMEOUT_SECONDS = 6
-MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 BROWSER_WINDOW_BYTES = 100
 BROWSER_DISASM_CACHE_LINES = BROWSER_WINDOW_BYTES // 4
 VALUE_TYPE_OPTIONS = (
@@ -49,7 +53,6 @@ VALUE_TYPE_OPTIONS = (
     ("Float", "Float"),
     ("Double", "Double"),
 )
-HWBP_BASE_FIELDS = ("pc", "hit_count", "lr", "sp", "pstate", "orig_x0", "syscallno", "fpsr", "fpcr")
 HWBP_OP_LABELS = {
     "none": "未设置",
     "read": "读取",
@@ -161,31 +164,28 @@ class BrowserTextEdit(QTextEdit):
 
 class TcpTestWindow(QWidget):
     scan_lan_finished = Signal(object, str, object)
+    live_refresh_finished = Signal(object)
 
     def __init__(self) -> None:
         super().__init__()
-        self.bridge_session = AndroidBridgeSession(timeout_seconds=NETWORK_TIMEOUT_SECONDS)
+        self.bridge_session = AndroidBridgeSession(timeout_seconds=DEFAULT_ANDROID_TIMEOUT_SECONDS)
         self.is_scanning = False
         self.memory_info_data: dict | None = None
         self.scan_page_start = 0
         self.scan_total_count = 0
         self.scan_live_refresh_enabled = False
         self.pointer_scan_running = False
-        self.pointer_status_request_inflight = False
-        self.hwbp_refresh_inflight = False
         self.saved_items: list[dict[str, str]] = []
-        self.browser_cache_base = 0
-        self.browser_cache_data = b""
         self.browser_current_addr = 0
         self.bp_info_data: dict | None = None
-        self.hwbp_active = False
-        self.ptebp_active = False
-        self.stepbp_active = False
-        self.bp_active_mode = ""
+        self.breakpoint_mode = ""
         self.syscall_active = False
-        self.syscall_refresh_inflight = False
         self.hwbp_selected_index: int | None = None
         self.hwbp_point_rows: list[dict[str, object]] = []
+        self.live_refresh_inflight = False
+        self.live_refresh_closing = False
+        self.saved_refresh_cursor = 0
+        self.target_generation = 0
         self.live_refresh_timer = QTimer(self)
         self.live_refresh_timer.setInterval(1000)
         self.live_refresh_timer.timeout.connect(self.on_live_refresh_tick)
@@ -193,29 +193,24 @@ class TcpTestWindow(QWidget):
         self.resize(1140, 760)
         self.setMinimumSize(980, 680)
         self.scan_lan_finished.connect(self._on_scan_lan_finished)
+        self.live_refresh_finished.connect(self._apply_live_refresh_result)
         self._setup_ui()
         self.live_refresh_timer.start()
-
-    def _apply_window_style(self) -> None:
-        return
 
     def _create_card(self, object_name: str) -> QFrame:
         card = QFrame(self)
         card.setObjectName(object_name)
         return card
 
-    def _create_page_layout(self, page: QWidget, title_text: str, hint_text: str) -> QVBoxLayout:
+    def _create_page_layout(self, page: QWidget) -> QVBoxLayout:
         layout = QVBoxLayout(page)
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(10)
-
-        _ = (title_text, hint_text)
         return layout
 
     def _create_section_card(
         self,
         title_text: str | None = None,
-        hint_text: str | None = None,
         *,
         parent: QWidget | None = None,
     ) -> tuple[QFrame, QVBoxLayout]:
@@ -229,9 +224,6 @@ class TcpTestWindow(QWidget):
             title = QLabel(title_text)
             title.setObjectName("sectionTitle")
             layout.addWidget(title)
-
-        # 工具型界面默认隐藏区块说明文案，避免占用纵向空间。
-        _ = hint_text
 
         return card, layout
 
@@ -289,34 +281,6 @@ class TcpTestWindow(QWidget):
         self.sync_pid_button.clicked.connect(self.on_sync_pid)
         status_row.addWidget(self.sync_pid_button)
 
-        tls_row = QHBoxLayout()
-        tls_row.setContentsMargins(0, 0, 0, 0)
-        tls_row.setSpacing(8)
-
-        tls_thread_prefix = QLabel("线程名")
-        tls_thread_prefix.setObjectName("metricTitle")
-        tls_row.addWidget(tls_thread_prefix)
-
-        self.tls_thread_input = QLineEdit()
-        self.tls_thread_input.setPlaceholderText("task->comm，最多 15 字符")
-        self.tls_thread_input.setMaxLength(15)
-        self.tls_thread_input.setMinimumWidth(180)
-        self.tls_thread_input.returnPressed.connect(self.on_get_tls_tpidr_el0)
-        tls_row.addWidget(self.tls_thread_input)
-
-        self.get_tls_button = QPushButton("获取 TPIDR_EL0")
-        self.get_tls_button.clicked.connect(self.on_get_tls_tpidr_el0)
-        tls_row.addWidget(self.get_tls_button)
-
-        tls_result_prefix = QLabel("TLS")
-        tls_result_prefix.setObjectName("metricTitle")
-        tls_row.addWidget(tls_result_prefix)
-
-        self.tls_result_label = QLabel("--")
-        self.tls_result_label.setObjectName("metricValue")
-        self.tls_result_label.setMinimumWidth(180)
-        tls_row.addWidget(self.tls_result_label, 1)
-
         connection_row = QHBoxLayout()
         connection_row.setContentsMargins(0, 0, 0, 0)
         connection_row.setSpacing(8)
@@ -340,7 +304,7 @@ class TcpTestWindow(QWidget):
         port_label.setObjectName("metricTitle")
         connection_row.addWidget(port_label)
 
-        self.port_input = QLineEdit(str(DEFAULT_PORT))
+        self.port_input = QLineEdit(str(DEFAULT_ANDROID_PORT))
         self.port_input.setPlaceholderText("端口")
         self.port_input.setFixedWidth(78)
         connection_row.addWidget(self.port_input)
@@ -350,12 +314,10 @@ class TcpTestWindow(QWidget):
         connection_row.addWidget(self.test_button)
         hero_layout.addLayout(connection_row)
         hero_layout.addLayout(status_row)
-        hero_layout.addLayout(tls_row)
 
         root.addWidget(hero_card)
 
     def _setup_ui(self) -> None:
-        self._apply_window_style()
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 10, 12, 10)
         root.setSpacing(8)
@@ -374,6 +336,7 @@ class TcpTestWindow(QWidget):
         self.pointer_page = QWidget()
         self.breakpoint_page = QWidget()
         self.syscall_page = QWidget()
+        self.environment_page = QWidget()
         self.signature_page = QWidget()
         self.save_page = QWidget()
         self.log_page = QWidget()
@@ -386,6 +349,7 @@ class TcpTestWindow(QWidget):
         self.tabs.addTab(self.pointer_page, "指针页")
         self.tabs.addTab(self.breakpoint_page, "断点页")
         self.tabs.addTab(self.syscall_page, "系统调用页")
+        self.tabs.addTab(self.environment_page, "环境参数页")
         self.tabs.addTab(self.signature_page, "特征码页")
         self.tabs.addTab(self.log_page, "日志页")
         self.tabs.addTab(self.settings_page, "设置页")
@@ -397,6 +361,7 @@ class TcpTestWindow(QWidget):
         self._build_pointer_page()
         self._build_breakpoint_page()
         self._build_syscall_page()
+        self._build_environment_page()
         self._build_signature_page()
         self._build_save_page()
         self._build_log_page()
@@ -408,6 +373,12 @@ class TcpTestWindow(QWidget):
     def _is_pointer_tab_active(self) -> bool:
         return self.tabs.currentWidget() is self.pointer_page
 
+    def _is_scan_tab_active(self) -> bool:
+        return self.tabs.currentWidget() is self.search_page
+
+    def _is_save_tab_active(self) -> bool:
+        return self.tabs.currentWidget() is self.save_page
+
     def _is_breakpoint_tab_active(self) -> bool:
         return self.tabs.currentWidget() is self.breakpoint_page
 
@@ -415,20 +386,11 @@ class TcpTestWindow(QWidget):
         return self.tabs.currentWidget() is self.syscall_page
 
     def on_tab_changed(self, _index: int) -> None:
-        # 仅在切到指针页时主动刷新一次状态，避免后台持续轮询。
-        if self._is_pointer_tab_active() and self._is_connected():
-            self.on_pointer_status()
-        if self._is_breakpoint_tab_active() and self._is_connected():
-            self.on_hwbp_refresh(silent=True)
-        if self._is_syscall_tab_active() and self._is_connected():
-            self.on_syscall_log_refresh(silent=True)
+        if self._is_connected():
+            self.on_live_refresh_tick()
 
     def _build_memory_page(self) -> None:
-        layout = self._create_page_layout(
-            self.memory_page,
-            "内存信息",
-            "查看完整 memory_info，并按模块名、地址或权限快速筛选当前结果。",
-        )
+        layout = self._create_page_layout(self.memory_page)
 
         card, card_layout = self._create_section_card(parent=self.memory_page)
         layout.addWidget(card, 1)
@@ -452,17 +414,50 @@ class TcpTestWindow(QWidget):
         row.addStretch(1)
         card_layout.addLayout(row)
 
+        dump_row = QHBoxLayout()
+        dump_row.setSpacing(10)
+        dump_row.addWidget(QLabel("模块名/地址范围"))
+        self.memory_dump_input = QLineEdit()
+        self.memory_dump_input.setPlaceholderText("例如 unity 或 0x5000-0x6000")
+        self.memory_dump_input.returnPressed.connect(self.on_dump_memory)
+        dump_row.addWidget(self.memory_dump_input, 1)
+        self.dump_memory_button = QPushButton("Dump")
+        self.dump_memory_button.clicked.connect(self.on_dump_memory)
+        dump_row.addWidget(self.dump_memory_button)
+        dump_row.addStretch(1)
+        card_layout.addLayout(dump_row)
+
         self.memory_view = QTextEdit()
         self.memory_view.setReadOnly(True)
         self.memory_view.setPlaceholderText("点击“刷新内存信息”后显示可读的 memory_info 结构数据。")
         card_layout.addWidget(self.memory_view, 1)
 
+    def _build_environment_page(self) -> None:
+        layout = self._create_page_layout(self.environment_page)
+        card, card_layout = self._create_section_card(parent=self.environment_page)
+        layout.addWidget(card, 1)
+
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        row.addWidget(QLabel("线程名"))
+        self.env_thread_input = QLineEdit()
+        self.env_thread_input.setPlaceholderText("可选，task->comm，最多 15 字符")
+        self.env_thread_input.setMaxLength(15)
+        self.env_thread_input.returnPressed.connect(self.on_get_environment_params)
+        row.addWidget(self.env_thread_input, 1)
+        self.get_env_button = QPushButton("获取环境参数")
+        self.get_env_button.clicked.connect(self.on_get_environment_params)
+        row.addWidget(self.get_env_button)
+        row.addStretch(1)
+        card_layout.addLayout(row)
+
+        self.environment_view = QTextEdit()
+        self.environment_view.setReadOnly(True)
+        self.environment_view.setPlaceholderText("留空线程名可获取 PACGA；填写线程名时同时获取 TPIDR_EL0。")
+        card_layout.addWidget(self.environment_view, 1)
+
     def _build_scan_page(self) -> None:
-        layout = self._create_page_layout(
-            self.search_page,
-            "内存扫描",
-            "左侧专注查看结果，右侧集中调整类型、模式、分页和扫描动作。",
-        )
+        layout = self._create_page_layout(self.search_page)
 
         splitter = QSplitter(Qt.Horizontal)
         layout.addWidget(splitter, 1)
@@ -477,7 +472,7 @@ class TcpTestWindow(QWidget):
         self.scan_view.customContextMenuRequested.connect(self.on_scan_view_context_menu)
         left_layout.addWidget(self.scan_view, 1)
 
-        right_panel, right_layout = self._create_section_card("扫描参数", "调整扫描条件后再执行首次扫描或再次扫描。", parent=self.search_page)
+        right_panel, right_layout = self._create_section_card("扫描参数", parent=self.search_page)
         splitter.addWidget(right_panel)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 2)
@@ -566,11 +561,7 @@ class TcpTestWindow(QWidget):
         right_layout.addStretch(1)
 
     def _build_browser_page(self) -> None:
-        layout = self._create_page_layout(
-            self.browser_page,
-            "内存浏览",
-            "输入地址后按不同视图浏览缓存内容，适合快速定位十六进制、数值和反汇编结果。",
-        )
+        layout = self._create_page_layout(self.browser_page)
 
         toolbar_card, toolbar_layout = self._create_section_card(parent=self.browser_page)
         layout.addWidget(toolbar_card)
@@ -583,8 +574,8 @@ class TcpTestWindow(QWidget):
         self.browser_addr_input.returnPressed.connect(self.on_browser_read)
         row1.addWidget(self.browser_addr_input, 1)
 
-        row1.addWidget(QLabel("缓存"))
-        self.browser_size_label = QLabel(f"{BROWSER_WINDOW_BYTES} 字节缓存")
+        row1.addWidget(QLabel("快照"))
+        self.browser_size_label = QLabel(f"{BROWSER_WINDOW_BYTES} 字节")
         self.browser_size_label.setMinimumWidth(120)
         row1.addWidget(self.browser_size_label)
 
@@ -603,7 +594,7 @@ class TcpTestWindow(QWidget):
         self.browser_read_button = QPushButton("读取")
         self.browser_read_button.clicked.connect(self.on_browser_read)
         row1.addWidget(self.browser_read_button)
-        self.browser_refresh_button = QPushButton("刷新缓存")
+        self.browser_refresh_button = QPushButton("刷新")
         self.browser_refresh_button.clicked.connect(self.on_browser_refresh_cache)
         row1.addWidget(self.browser_refresh_button)
         row1.addStretch(1)
@@ -616,14 +607,11 @@ class TcpTestWindow(QWidget):
         self.browser_view.setReadOnly(True)
         self.browser_view.setPlaceholderText("内存浏览结果将显示在这里。")
         self.browser_view.wheel_navigate_handler = self.on_browser_wheel_navigate
+        self.browser_view_combo.currentIndexChanged.connect(self.on_browser_format_changed)
         viewer_layout.addWidget(self.browser_view, 1)
 
     def _build_pointer_page(self) -> None:
-        layout = self._create_page_layout(
-            self.pointer_page,
-            "指针扫描",
-            "把扫描条件和结果输出拆开，方便连续调整参数并观察状态变化。",
-        )
+        layout = self._create_page_layout(self.pointer_page)
 
         config_card, config_layout = self._create_section_card("扫描配置", parent=self.pointer_page)
         layout.addWidget(config_card)
@@ -712,11 +700,7 @@ class TcpTestWindow(QWidget):
         result_layout.addWidget(self.pointer_view, 1)
 
     def _build_breakpoint_page(self) -> None:
-        layout = self._create_page_layout(
-            self.breakpoint_page,
-            "断点",
-            "上方负责配置 HWBP/PTEBP，下方按 hit_addr / records 查看断点记录。",
-        )
+        layout = self._create_page_layout(self.breakpoint_page)
 
         config_card, config_layout = self._create_section_card("断点配置", parent=self.breakpoint_page)
         layout.addWidget(config_card)
@@ -879,11 +863,7 @@ class TcpTestWindow(QWidget):
                 label.setText(f"P{i}")
 
     def _build_signature_page(self) -> None:
-        layout = self._create_page_layout(
-            self.signature_page,
-            "特征码",
-            "把保存、过滤和按模式扫描集中到一页，方便连续验证 Signature 文件和模式匹配结果。",
-        )
+        layout = self._create_page_layout(self.signature_page)
 
         action_card, action_layout = self._create_section_card("扫描与过滤", parent=self.signature_page)
         layout.addWidget(action_card)
@@ -944,11 +924,7 @@ class TcpTestWindow(QWidget):
         result_layout.addWidget(self.sig_view, 1)
 
     def _build_save_page(self) -> None:
-        layout = self._create_page_layout(
-            self.save_page,
-            "保存列表",
-            "管理从扫描结果保存的地址，也可以手动追加地址并实时观察值变化。",
-        )
+        layout = self._create_page_layout(self.save_page)
 
         card, card_layout = self._create_section_card(parent=self.save_page)
         layout.addWidget(card, 1)
@@ -982,11 +958,7 @@ class TcpTestWindow(QWidget):
         card_layout.addWidget(self.saved_view, 1)
 
     def _build_settings_page(self) -> None:
-        layout = self._create_page_layout(
-            self.settings_page,
-            "设置",
-            "这里目前保留为引导页，未连接设备时会自动停留在这个页面。",
-        )
+        layout = self._create_page_layout(self.settings_page)
         card, card_layout = self._create_section_card(parent=self.settings_page)
         layout.addWidget(card, 1)
         tip = QLabel("设置页已留空。设备扫描和连接在顶部控制栏完成。")
@@ -995,11 +967,7 @@ class TcpTestWindow(QWidget):
         card_layout.addStretch(1)
 
     def _build_log_page(self) -> None:
-        layout = self._create_page_layout(
-            self.log_page,
-            "运行日志",
-            "集中查看当前客户端操作、状态变化和网络通信过程中记录的关键信息。",
-        )
+        layout = self._create_page_layout(self.log_page)
 
         card, card_layout = self._create_section_card(parent=self.log_page)
         layout.addWidget(card, 1)
@@ -1016,7 +984,7 @@ class TcpTestWindow(QWidget):
         card_layout.addLayout(clear_row)
 
     def _build_syscall_page(self) -> None:
-        layout = self._create_page_layout(self.syscall_page, "系统调用监控", "")
+        layout = self._create_page_layout(self.syscall_page)
         card, card_layout = self._create_section_card(parent=self.syscall_page)
         layout.addWidget(card, 1)
 
@@ -1057,8 +1025,10 @@ class TcpTestWindow(QWidget):
             self.tabs.setTabEnabled(i, True)
         self.pid_input.setEnabled(connected)
         self.sync_pid_button.setEnabled(connected)
-        self.tls_thread_input.setEnabled(connected)
-        self.get_tls_button.setEnabled(connected)
+        self.env_thread_input.setEnabled(connected)
+        self.get_env_button.setEnabled(connected)
+        self.memory_dump_input.setEnabled(connected)
+        self.dump_memory_button.setEnabled(connected)
 
     def _discover_lan_devices(self) -> list[tuple[str, str]]:
         return [(device.host, device.mac) for device in discover_lan_devices()]
@@ -1151,13 +1121,42 @@ class TcpTestWindow(QWidget):
     def _disconnect_device(self, reason: str | None = None) -> None:
         self.bridge_session.disconnect()
         self._set_connection_ui(False)
-        self.scan_live_refresh_enabled = False
-        self.pointer_scan_running = False
-        self.pointer_status_request_inflight = False
-        self.hwbp_refresh_inflight = False
-        self.syscall_refresh_inflight = False
+        self._invalidate_target_ui_state()
+        self.live_refresh_inflight = False
         if reason:
             self._set_status(reason)
+
+    def _invalidate_target_ui_state(self) -> None:
+        self.target_generation += 1
+        self.memory_info_data = None
+        self.memory_view.clear()
+        self.global_pid_label.setText("--")
+        self.scan_view.clear()
+        self.scan_page_start = 0
+        self.scan_total_count = 0
+        self.scan_live_refresh_enabled = False
+        self.scan_total_label.setText("总结果数: 0")
+        self.saved_items.clear()
+        self.saved_refresh_cursor = 0
+        self._refresh_saved_view()
+        self.browser_current_addr = 0
+        self.browser_addr_input.setText("0x0")
+        self.browser_view.clear()
+        self.pointer_scan_running = False
+        self.pointer_status_label.setText("扫描状态: 未开始")
+        self.pointer_view.clear()
+        self.bp_info_data = None
+        self.breakpoint_mode = ""
+        self.hwbp_selected_index = None
+        self.hwbp_num_brps_label.setText("bp_info.num_brps: 0")
+        self.hwbp_num_wrps_label.setText("bp_info.num_wrps: 0")
+        self.hwbp_points_label.setText("bp_info.points: []")
+        self.hwbp_tree.clear()
+        self._apply_hwbp_active_state()
+        self.syscall_active = False
+        self._apply_syscall_state()
+        self.syscall_log_view.clear()
+        self.environment_view.clear()
 
     def _connect_device(self) -> None:
         endpoint = self._parse_endpoint()
@@ -1669,7 +1668,7 @@ class TcpTestWindow(QWidget):
         failed_indices: list[int] = []
         for idx in valid_indices:
             response = self._request_ok(
-                "breakpoint.record.remove",
+                "breakpoint_record.remove",
                 {"index": idx},
                 error_title="删除失败",
                 warn=False,
@@ -1720,22 +1719,6 @@ class TcpTestWindow(QWidget):
         if lower_field in {"fpsr", "fpcr"}:
             return f"0x{value & 0xFFFFFFFF:X}"
         return f"0x{value & ((1 << 64) - 1):X}"
-
-    def _refresh_hwbp_tree_from_cache(self) -> None:
-        bp_info = self._bp_info_struct()
-        if bp_info is None:
-            return
-        self._render_hwbp_tree(bp_info)
-
-    def _get_selected_hwbp_index(self) -> int | None:
-        current_item = self.hwbp_tree.currentItem()
-        index = self._extract_hwbp_index_from_tree_item(current_item)
-        if index is not None:
-            self.hwbp_selected_index = index
-            return index
-        if self.hwbp_selected_index is not None and self._hwbp_record_index_exists(self.hwbp_selected_index):
-            return self.hwbp_selected_index
-        return None
 
     @staticmethod
     def _hwbp_xregs(record: dict) -> list[object]:
@@ -2051,11 +2034,7 @@ class TcpTestWindow(QWidget):
         bp_info = info.get("bp_info")
         if not isinstance(bp_info, dict):
             bp_info = {}
-        self.hwbp_active = bool(info.get("active", self.hwbp_active))
-        mode_text = str(info.get("active_mode") or ("hwbp" if self.hwbp_active else "")).strip().lower()
-        self.bp_active_mode = mode_text
-        self.ptebp_active = self.hwbp_active and mode_text == "ptebp"
-        self.stepbp_active = self.hwbp_active and mode_text == "stepbp"
+        self.breakpoint_mode = str(info.get("mode") or "").strip().lower()
         num_brps = self._safe_int(bp_info.get("num_brps"), 0)
         num_wrps = self._safe_int(bp_info.get("num_wrps"), 0)
         self.hwbp_num_brps_label.setText(f"bp_info.num_brps: {num_brps}")
@@ -2077,42 +2056,42 @@ class TcpTestWindow(QWidget):
                 f"[{point_index}] 0x{hit_addr:X} {point_type}/{point_scope}/{point_len}/records{point_records}"
             )
         points_text = "; ".join(point_parts) if point_parts else "[]"
-        if self.hwbp_active:
-            active_mode = "STEPBP" if self.stepbp_active else ("PTEBP" if self.ptebp_active else "HWBP")
-            self.hwbp_points_label.setText(f"bp_info.points: {points_text}  active: true  mode: {active_mode}")
+        if self.breakpoint_mode:
+            mode_label = self.breakpoint_mode.upper()
+            self.hwbp_points_label.setText(f"bp_info.points: {points_text}  mode: {mode_label}")
         else:
-            self.hwbp_points_label.setText(f"bp_info.points: {points_text}  active: false")
+            self.hwbp_points_label.setText(f"bp_info.points: {points_text}  mode: none")
         self._apply_hwbp_active_state()
         if self.hwbp_selected_index is not None and not self._hwbp_record_index_exists(self.hwbp_selected_index):
             self.hwbp_selected_index = None
         self._render_hwbp_tree(bp_info)
 
     def _apply_hwbp_active_state(self) -> None:
-        hwbp_mode_active = self.hwbp_active and not self.ptebp_active and not self.stepbp_active
+        active = bool(self.breakpoint_mode)
         if hasattr(self, "hwbp_set_button"):
-            self.hwbp_set_button.setEnabled(not self.hwbp_active)
+            self.hwbp_set_button.setEnabled(not active)
         if hasattr(self, "hwbp_remove_button"):
-            self.hwbp_remove_button.setEnabled(hwbp_mode_active)
+            self.hwbp_remove_button.setEnabled(self.breakpoint_mode == "hwbp")
         if hasattr(self, "ptebp_set_button"):
-            self.ptebp_set_button.setEnabled(not self.hwbp_active)
+            self.ptebp_set_button.setEnabled(not active)
         if hasattr(self, "ptebp_remove_button"):
-            self.ptebp_remove_button.setEnabled(self.ptebp_active)
+            self.ptebp_remove_button.setEnabled(self.breakpoint_mode == "ptebp")
         if hasattr(self, "stepbp_set_button"):
-            self.stepbp_set_button.setEnabled(not self.hwbp_active)
+            self.stepbp_set_button.setEnabled(not active)
         if hasattr(self, "stepbp_remove_button"):
-            self.stepbp_remove_button.setEnabled(self.stepbp_active)
+            self.stepbp_remove_button.setEnabled(self.breakpoint_mode == "stepbp")
         if hasattr(self, "hwbp_add_point_button"):
-            self.hwbp_add_point_button.setEnabled((not self.hwbp_active) and len(self.hwbp_point_rows) < 16)
+            self.hwbp_add_point_button.setEnabled((not active) and len(self.hwbp_point_rows) < 16)
         if hasattr(self, "hwbp_remove_point_button"):
-            self.hwbp_remove_point_button.setEnabled((not self.hwbp_active) and len(self.hwbp_point_rows) > 1)
+            self.hwbp_remove_point_button.setEnabled((not active) and len(self.hwbp_point_rows) > 1)
         for row in getattr(self, "hwbp_point_rows", []):
             for key in ("addr", "type", "scope", "length"):
                 widget = row.get(key)
                 if isinstance(widget, QWidget):
-                    widget.setEnabled(not self.hwbp_active)
+                    widget.setEnabled(not active)
             remove_button = row.get("remove")
             if isinstance(remove_button, QPushButton):
-                remove_button.setEnabled((not self.hwbp_active) and len(self.hwbp_point_rows) > 1)
+                remove_button.setEnabled((not active) and len(self.hwbp_point_rows) > 1)
 
     @staticmethod
     def _format_sig_result(data: dict) -> str:
@@ -2184,25 +2163,32 @@ class TcpTestWindow(QWidget):
     @staticmethod
     def _build_read_operation_for_type(type_token: str, addr: str) -> tuple[str, dict] | None:
         mapping = {
-            "I8": "u8",
-            "I16": "u16",
-            "I32": "u32",
-            "I64": "u64",
-            "Float": "f32",
-            "Double": "f64",
+            "I8": 1,
+            "I16": 2,
+            "I32": 4,
+            "I64": 8,
+            "Float": 4,
+            "Double": 8,
         }
-        value_type = mapping.get(type_token)
-        if value_type is None:
+        size = mapping.get(type_token)
+        if size is None:
             return None
-        return "memory.read_value", {"address": addr, "value_type": value_type}
+        return "memory.read", {"address": addr, "size": size}
 
     @staticmethod
-    def _extract_value_field(response: dict | None) -> str | None:
+    def _extract_value_field(response: dict | None, type_token: str) -> str | None:
         data = TcpTestWindow._response_data_dict(response)
-        if data:
-            value = data.get("value")
-            if value is not None:
-                return str(value)
+        data_hex = str(data.get("data_hex") or "")
+        try:
+            raw = bytes.fromhex(data_hex)
+            if type_token in {"I8", "I16", "I32", "I64"}:
+                return str(int.from_bytes(raw, "little", signed=True))
+            if type_token == "Float" and len(raw) == 4:
+                return str(struct.unpack("<f", raw)[0])
+            if type_token == "Double" and len(raw) == 8:
+                return str(struct.unpack("<d", raw)[0])
+        except (ValueError, struct.error):
+            pass
         return None
 
     @staticmethod
@@ -2267,7 +2253,7 @@ class TcpTestWindow(QWidget):
             return ""
         operation, params = request
         response = self._send_operation(operation, params, log_enabled=False)
-        value = self._extract_value_field(response)
+        value = self._extract_value_field(response, type_token)
         return value if value is not None else ""
 
     def _ensure_saved_item_value(self, item: dict[str, str]) -> bool:
@@ -2289,7 +2275,7 @@ class TcpTestWindow(QWidget):
             return False
         if not locked:
             response = self._request_ok(
-                "lock.unset",
+                "lock.remove",
                 {"address": addr},
                 error_title="锁定失败",
                 error_prefix="取消锁定失败: ",
@@ -2346,7 +2332,7 @@ class TcpTestWindow(QWidget):
             return False
 
         response = self._request_ok(
-            "memory.write_block",
+            "memory.write",
             {"address": addr, "data_hex": packed_value.hex().upper()},
             error_title="写入失败",
             error_prefix="写入失败: ",
@@ -2661,7 +2647,7 @@ class TcpTestWindow(QWidget):
         type_token = str(type_data).strip() if type_data is not None else self.scan_type_combo.currentText().strip()
 
         data = self._request_data_dict(
-            "scan.page",
+            "scan.results",
             {"start": start, "count": page_count, "value_type": type_token},
             error_title="获取失败",
             parse_title="解析失败",
@@ -2677,7 +2663,7 @@ class TcpTestWindow(QWidget):
         self.scan_page_start = self._safe_int(data.get("start"), start)
         self.scan_total_count = self._safe_int(data.get("total_count"), 0)
         self.scan_total_label.setText(f"总结果数: {self.scan_total_count}")
-        self.scan_live_refresh_enabled = True
+        self.scan_live_refresh_enabled = False
         if not silent:
             total = self.scan_total_count
             self._set_status(f"扫描结果已刷新：start={self.scan_page_start}, total={total}")
@@ -2691,10 +2677,12 @@ class TcpTestWindow(QWidget):
         label = "首次" if is_first else "再次"
         if self._request_ok(operation, params, error_title="扫描失败", status_on_error=f"{label}扫描失败") is None:
             return
-        self._set_status(f"{label}扫描已执行")
-        self.on_scan_status()
         self.scan_page_start = 0
-        self._fetch_scan_page(self.scan_page_start)
+        self.scan_total_count = 0
+        self.scan_total_label.setText("总结果数: 0")
+        self.scan_live_refresh_enabled = True
+        self._set_status(f"{label}扫描已启动")
+        self.on_live_refresh_tick()
 
     def on_scan_first(self) -> None:
         self._run_scan(True)
@@ -2714,7 +2702,7 @@ class TcpTestWindow(QWidget):
         self._set_status("扫描结果已清空")
 
     def on_scan_status(self) -> None:
-        data = self._request_data_dict("scan.status", error_title="状态失败")
+        data = self._request_data_dict("scan.get", error_title="状态失败")
         if data is None:
             return
         scanning = bool(data.get("scanning", False))
@@ -2722,11 +2710,6 @@ class TcpTestWindow(QWidget):
         count = data.get("count", 0)
         self.scan_total_label.setText(f"总结果数: {count}")
         self._set_status(f"扫描状态: scanning={1 if scanning else 0}, progress={progress}, count={count}")
-
-    def on_scan_fetch_page(self) -> None:
-        if self.scan_page_start < 0:
-            self.scan_page_start = 0
-        self._fetch_scan_page(self.scan_page_start)
 
     def on_scan_prev_page(self) -> None:
         page_count = self._get_scan_page_size()
@@ -2791,31 +2774,6 @@ class TcpTestWindow(QWidget):
             return None
         return total
 
-    def _browser_cache_contains(self, addr: int) -> bool:
-        if not self.browser_cache_data:
-            return False
-        cache_start = self.browser_cache_base
-        cache_end = cache_start + len(self.browser_cache_data)
-        return cache_start <= addr and addr + BROWSER_WINDOW_BYTES <= cache_end
-
-    def _render_browser_cached_view(self, addr: int, view_mode: str) -> bool:
-        if not self._browser_cache_contains(addr):
-            return False
-
-        offset = addr - self.browser_cache_base
-        data = self.browser_cache_data[offset : offset + BROWSER_WINDOW_BYTES]
-        if view_mode == "hex":
-            text = self._render_hex_dump(addr, data)
-        elif view_mode == "hex64":
-            text = self._render_hex64_dump(addr, data)
-        else:
-            text = self._render_typed_dump(addr, data, view_mode)
-
-        self.browser_current_addr = addr
-        self.browser_addr_input.setText(f"0x{addr:X}")
-        self.browser_view.setPlainText(text)
-        return True
-
     @staticmethod
     def _hex_to_bytes(hex_text: str) -> bytes | None:
         compact = re.sub(r"[^0-9A-Fa-f]", "", hex_text)
@@ -2826,26 +2784,9 @@ class TcpTestWindow(QWidget):
         except ValueError:
             return None
 
-    @staticmethod
-    def _browser_mode_to_token(mode_text: str) -> str:
-        mapping = {
-            "Hex": "hex",
-            "Hex64": "hex64",
-            "I8": "i8",
-            "I16": "i16",
-            "I32": "i32",
-            "I64": "i64",
-            "Float": "f32",
-            "Double": "f64",
-            "Disasm": "disasm",
-        }
-        return mapping.get(mode_text, "hex")
-
     def _current_browser_view_mode(self) -> str:
         mode_data = self.browser_view_combo.currentData()
-        if mode_data is not None:
-            return str(mode_data).strip()
-        return self._browser_mode_to_token(self.browser_view_combo.currentText().strip())
+        return str(mode_data).strip() if mode_data is not None else "hex"
 
     @staticmethod
     def _browser_scroll_unit(view_mode: str) -> int:
@@ -2858,29 +2799,13 @@ class TcpTestWindow(QWidget):
             "i64": 8,
             "f32": 4,
             "f64": 8,
+            "disasm": 4,
         }
         return mapping.get(view_mode, 16)
 
     def on_browser_wheel_navigate(self, delta_y: int) -> bool:
-        view_mode = self._current_browser_view_mode()
         step_count = max(1, abs(delta_y) // 120) if abs(delta_y) >= 120 else 1
-
-        if view_mode == "disasm":
-            line_delta = -step_count if delta_y > 0 else step_count
-            self._move_disasm_view(line_delta)
-            return True
-
-        current = self.browser_current_addr
-        if current <= 0 and self.browser_addr_input.text().strip():
-            parsed_addr = self._parse_browser_addr()
-            if parsed_addr is None:
-                return False
-            current = parsed_addr
-        byte_delta = self._browser_scroll_unit(view_mode) * step_count
-        next_addr = max(0, current - byte_delta) if delta_y > 0 else current + byte_delta
-        if self._render_browser_cached_view(next_addr, view_mode):
-            return True
-        self._refresh_browser_view(next_addr)
+        self._move_browser_view(-step_count if delta_y > 0 else step_count)
         return True
 
     @staticmethod
@@ -2978,28 +2903,16 @@ class TcpTestWindow(QWidget):
 
         return "\n".join(lines) if lines else "没有可显示的反汇编结果。"
 
-    def _read_viewer_snapshot(self) -> dict | None:
-        return self._request_data_dict(
-            "viewer.snapshot",
-            error_title="读取失败",
-            error_prefix="内存浏览读取失败: ",
-            parse_title="解析失败",
-            parse_error_text="浏览器数据格式异常。",
-            log_enabled=False,
-        )
-
     def _open_viewer_snapshot(self, addr: int, mode_token: str) -> dict | None:
-        open_resp = self._request_ok(
+        snapshot = self._request_data_dict(
             "viewer.open",
             {"address": f"0x{addr:X}", "view_format": mode_token},
             error_title="读取失败",
             error_prefix="打开浏览器失败: ",
+            parse_title="解析失败",
+            parse_error_text="浏览器数据格式异常。",
             log_enabled=False,
         )
-        if open_resp is None:
-            return None
-
-        snapshot = self._read_viewer_snapshot()
         if snapshot is None:
             return None
         if not bool(snapshot.get("read_success", False)):
@@ -3007,84 +2920,80 @@ class TcpTestWindow(QWidget):
             return None
         return snapshot
 
-    def _refresh_disasm_view(self, addr: int) -> None:
-        mode_data = self.browser_view_combo.currentData()
-        mode_token = str(mode_data).strip() if mode_data is not None else self._browser_mode_to_token(self.browser_view_combo.currentText().strip())
-        snapshot = self._open_viewer_snapshot(addr, mode_token)
-        if not isinstance(snapshot, dict):
-            return
-
-        base_addr = self._safe_int(snapshot.get("base"), addr)
-        data = self._hex_to_bytes(str(snapshot.get("data_hex", "")))
-        if data is not None:
-            self.browser_cache_base = base_addr
-            self.browser_cache_data = data[:BROWSER_WINDOW_BYTES]
-        visible_addr = self._extract_disasm_window(snapshot)[1]
-        self.browser_current_addr = visible_addr
-        self.browser_addr_input.setText(f"0x{visible_addr:X}")
-        self.browser_view.setPlainText(self._render_disasm_dump(snapshot))
-
-    def _move_disasm_view(self, lines: int) -> None:
-        move_resp = self._request_ok(
-            "viewer.move",
-            {"lines": lines},
-            error_title="移动失败",
-            error_prefix="反汇编移动失败: ",
-            log_enabled=False,
-        )
-        if move_resp is None:
-            return
-
-        snapshot = self._read_viewer_snapshot()
-        if snapshot is None:
-            return
+    def _apply_viewer_snapshot(self, snapshot: dict) -> None:
         base_addr = self._safe_int(snapshot.get("base"), 0)
-        data = self._hex_to_bytes(str(snapshot.get("data_hex", "")))
-        if data is not None:
-            self.browser_cache_base = base_addr
-            self.browser_cache_data = data[:BROWSER_WINDOW_BYTES]
-        visible_addr = self._extract_disasm_window(snapshot)[1]
-        self.browser_current_addr = visible_addr
-        self.browser_addr_input.setText(f"0x{visible_addr:X}")
-        self.browser_view.setPlainText(self._render_disasm_dump(snapshot))
-
-    def _refresh_browser_view(self, addr: int, *, force: bool = False) -> None:
-        mode_data = self.browser_view_combo.currentData()
-        view_mode = str(mode_data).strip() if mode_data is not None else self._browser_mode_to_token(self.browser_view_combo.currentText().strip())
-        if not force and self._render_browser_cached_view(addr, view_mode):
-            return
-        request_base = max(0, addr)
-        snapshot = self._open_viewer_snapshot(request_base, view_mode)
-        if not isinstance(snapshot, dict):
-            return
         data = self._hex_to_bytes(str(snapshot.get("data_hex", "")))
         if data is None:
             QMessageBox.warning(self, "读取失败", "MemViewer HEX 数据解析失败。")
             return
-        base_addr = self._safe_int(snapshot.get("base"), addr)
-        data = data[:BROWSER_WINDOW_BYTES]
-        self.browser_cache_base = base_addr
-        self.browser_cache_data = data
-        if not self._render_browser_cached_view(addr, view_mode):
-            self.browser_current_addr = base_addr
-            self.browser_addr_input.setText(f"0x{base_addr:X}")
-            self.browser_view.setPlainText("缓存长度不足以显示当前视图。")
+        view_mode = self._current_browser_view_mode()
+        if view_mode == "disasm":
+            visible_addr = self._extract_disasm_window(snapshot)[1]
+            self.browser_current_addr = visible_addr
+            self.browser_addr_input.setText(f"0x{visible_addr:X}")
+            self.browser_view.setPlainText(self._render_disasm_dump(snapshot))
+            return
+        if view_mode == "hex":
+            text = self._render_hex_dump(base_addr, data)
+        elif view_mode == "hex64":
+            text = self._render_hex64_dump(base_addr, data)
+        else:
+            text = self._render_typed_dump(base_addr, data, view_mode)
+        self.browser_current_addr = base_addr
+        self.browser_addr_input.setText(f"0x{base_addr:X}")
+        self.browser_view.setPlainText(text)
 
-    def _read_browser(self, force: bool) -> None:
+    def _move_browser_view(self, lines: int) -> None:
+        byte_offset = lines * self._browser_scroll_unit(self._current_browser_view_mode())
+        snapshot = self._request_data_dict(
+            "viewer.seek",
+            {"offset": f"{byte_offset:+#x}"},
+            error_title="移动失败",
+            error_prefix="内存浏览移动失败: ",
+            parse_title="解析失败",
+            parse_error_text="浏览器数据格式异常。",
+            log_enabled=False,
+        )
+        if snapshot is not None:
+            self._apply_viewer_snapshot(snapshot)
+
+    def _read_browser(self) -> None:
         addr = self._parse_browser_addr()
         if addr is None:
             return
-        self.browser_current_addr = addr
-        if self._current_browser_view_mode() == "disasm":
-            self._refresh_disasm_view(addr)
-        else:
-            self._refresh_browser_view(addr, force=force)
+        snapshot = self._open_viewer_snapshot(addr, self._current_browser_view_mode())
+        if snapshot is not None:
+            self._apply_viewer_snapshot(snapshot)
 
     def on_browser_read(self) -> None:
-        self._read_browser(False)
+        self._read_browser()
 
     def on_browser_refresh_cache(self) -> None:
-        self._read_browser(True)
+        snapshot = self._request_data_dict(
+            "viewer.refresh",
+            error_title="刷新失败",
+            error_prefix="刷新快照失败: ",
+            parse_title="解析失败",
+            parse_error_text="浏览器数据格式异常。",
+            log_enabled=False,
+        )
+        if snapshot is not None:
+            self._apply_viewer_snapshot(snapshot)
+
+    def on_browser_format_changed(self) -> None:
+        if not self._is_connected() or self.browser_current_addr <= 0:
+            return
+        snapshot = self._request_data_dict(
+            "viewer.format",
+            {"view_format": self._current_browser_view_mode()},
+            error_title="格式切换失败",
+            error_prefix="格式切换失败: ",
+            parse_title="解析失败",
+            parse_error_text="浏览器数据格式异常。",
+            log_enabled=False,
+        )
+        if snapshot is not None:
+            self._apply_viewer_snapshot(snapshot)
 
     def _build_pointer_scan_request(self) -> tuple[str, dict] | None:
         target_text = self.pointer_target_input.text().strip()
@@ -3170,30 +3079,10 @@ class TcpTestWindow(QWidget):
             self._set_status("指针状态已刷新")
 
     def on_pointer_status(self) -> None:
-        data = self._request_data_dict("pointer.status", error_title="状态失败")
+        data = self._request_data_dict("pointer.get", error_title="状态失败")
         if data is None:
             return
         self._apply_pointer_status_data(data, silent=False)
-
-    def _refresh_pointer_status_live(self) -> None:
-        if not (self._is_pointer_tab_active() or self.pointer_scan_running):
-            return
-        if self.pointer_status_request_inflight:
-            return
-
-        self.pointer_status_request_inflight = True
-        try:
-            data = self._request_data_dict(
-                "pointer.status",
-                error_title="状态失败",
-                log_enabled=False,
-                warn=False,
-            )
-            if data is None:
-                return
-            self._apply_pointer_status_data(data, silent=True)
-        finally:
-            self.pointer_status_request_inflight = False
 
     def on_pointer_merge(self) -> None:
         response = self._request_ok("pointer.merge", error_title="合并失败")
@@ -3209,46 +3098,140 @@ class TcpTestWindow(QWidget):
         self.pointer_view.append("已触发指针链文本导出。")
         self._set_status("已触发导出任务")
 
-    def _refresh_saved_items_live(self) -> None:
-        if not self.saved_items:
-            return
-        if not self._is_connected():
-            return
-
-        changed = False
-        # 实时刷新时做上限保护，避免一次轮询过重。
-        refresh_count = min(len(self.saved_items), 300)
-        for i in range(refresh_count):
-            item = self.saved_items[i]
-            addr = item.get("addr", "")
-            type_token = item.get("type", "")
-            request = self._build_read_operation_for_type(type_token, addr)
-            if request is None:
-                continue
-            operation, params = request
-            response = self._send_operation(operation, params, log_enabled=False)
-            value = self._extract_value_field(response)
-            if value is None:
-                continue
-            if item.get("value", "") != value:
-                item["value"] = value
-                changed = True
-
-        if changed:
-            self._refresh_saved_view()
-
     def on_live_refresh_tick(self) -> None:
-        if not self._is_connected():
+        if not self._is_connected() or self.live_refresh_inflight or self.live_refresh_closing:
             return
 
-        if self.scan_live_refresh_enabled:
-            self._fetch_scan_page(self.scan_page_start, silent=True)
+        task: dict[str, object] | None = None
+        if self._is_scan_tab_active() and self.scan_live_refresh_enabled:
+            page_count = self._get_scan_page_size(silent=True)
+            if page_count is not None:
+                type_data = self.scan_type_combo.currentData()
+                type_token = str(type_data).strip() if type_data is not None else self.scan_type_combo.currentText().strip()
+                task = {"kind": "scan", "start": self.scan_page_start, "count": page_count, "value_type": type_token}
+        elif self._is_save_tab_active() and self.saved_items:
+            batch_size = min(20, len(self.saved_items))
+            entries: list[dict[str, object]] = []
+            for offset in range(batch_size):
+                index = (self.saved_refresh_cursor + offset) % len(self.saved_items)
+                item = self.saved_items[index]
+                request = self._build_read_operation_for_type(item.get("type", ""), item.get("addr", ""))
+                if request is not None:
+                    operation, params = request
+                    entries.append({"index": index, "addr": item.get("addr", ""), "type": item.get("type", ""), "operation": operation, "params": params})
+            self.saved_refresh_cursor = (self.saved_refresh_cursor + batch_size) % len(self.saved_items)
+            if entries:
+                task = {"kind": "saved", "entries": entries}
+        elif self._is_pointer_tab_active():
+            task = {"kind": "pointer"}
+        elif self._is_breakpoint_tab_active():
+            task = {"kind": "breakpoint"}
+        elif self._is_syscall_tab_active():
+            task = {"kind": "syscall"}
 
-        self._refresh_saved_items_live()
-        self._refresh_pointer_status_live()
-        self._refresh_bp_info_live()
-        if self._is_syscall_tab_active():
-            self.on_syscall_log_refresh(silent=True)
+        if task is None:
+            return
+        task["generation"] = self.target_generation
+        self.live_refresh_inflight = True
+        threading.Thread(target=self._run_live_refresh_task, args=(task,), daemon=True).start()
+
+    def _run_live_refresh_task(self, task: dict[str, object]) -> None:
+        result: dict[str, object] = {"kind": task.get("kind"), "generation": task.get("generation")}
+        try:
+            kind = task.get("kind")
+            if kind == "scan":
+                status = self.bridge_session.call_operation("scan.get").to_dict()
+                result["status"] = status
+                status_data = self._response_data_dict(status)
+                if self._response_ok(status) and not bool(status_data.get("scanning", False)):
+                    result["page"] = self.bridge_session.call_operation(
+                        "scan.results",
+                        {"start": task["start"], "count": task["count"], "value_type": task["value_type"]},
+                    ).to_dict()
+            elif kind == "saved":
+                values: list[dict[str, object]] = []
+                for entry in task.get("entries", []):
+                    if not isinstance(entry, dict):
+                        continue
+                    response = self.bridge_session.call_operation(str(entry["operation"]), entry["params"]).to_dict()
+                    values.append({**entry, "value": self._extract_value_field(response, str(entry["type"]))})
+                result["values"] = values
+            elif kind == "pointer":
+                result["response"] = self.bridge_session.call_operation("pointer.get").to_dict()
+            elif kind == "breakpoint":
+                result["response"] = self.bridge_session.call_operation("breakpoint.get").to_dict()
+            elif kind == "syscall":
+                result["response"] = self.bridge_session.call_operation("syscall.read").to_dict()
+        except BridgeConnectionError as exc:
+            result["connection_error"] = str(exc)
+        except BridgeError as exc:
+            result["error"] = str(exc)
+        if not self.live_refresh_closing:
+            self.live_refresh_finished.emit(result)
+
+    def _apply_live_refresh_result(self, result_obj: object) -> None:
+        if not isinstance(result_obj, dict) or self.live_refresh_closing:
+            return
+        if result_obj.get("generation") != self.target_generation:
+            return
+        self.live_refresh_inflight = False
+        connection_error = str(result_obj.get("connection_error") or "")
+        if connection_error:
+            self._disconnect_device(f"连接已断开：{connection_error}")
+            return
+
+        kind = result_obj.get("kind")
+        if kind == "scan":
+            status = result_obj.get("status")
+            if not isinstance(status, dict) or not self._response_ok(status):
+                return
+            status_data = self._response_data_dict(status)
+            scanning = bool(status_data.get("scanning", False))
+            count = self._safe_int(status_data.get("count"), 0)
+            self.scan_total_label.setText(f"总结果数: {count}")
+            if scanning:
+                return
+            page = result_obj.get("page")
+            if isinstance(page, dict) and self._response_ok(page):
+                data = self._response_data_dict(page)
+                self._render_scan_page(data)
+                self.scan_page_start = self._safe_int(data.get("start"), self.scan_page_start)
+                self.scan_total_count = self._safe_int(data.get("total_count"), count)
+                self.scan_total_label.setText(f"总结果数: {self.scan_total_count}")
+            self.scan_live_refresh_enabled = False
+            self._set_status(f"扫描完成：共 {count} 项")
+        elif kind == "saved":
+            changed = False
+            for entry in result_obj.get("values", []):
+                if not isinstance(entry, dict) or entry.get("value") is None:
+                    continue
+                index = self._safe_int(entry.get("index"), -1)
+                if index < 0 or index >= len(self.saved_items):
+                    continue
+                item = self.saved_items[index]
+                if item.get("addr") != entry.get("addr") or item.get("type") != entry.get("type"):
+                    continue
+                value = str(entry["value"])
+                if item.get("value") != value:
+                    item["value"] = value
+                    changed = True
+            if changed:
+                self._refresh_saved_view()
+        elif kind == "pointer":
+            response = result_obj.get("response")
+            if isinstance(response, dict) and self._response_ok(response):
+                self._apply_pointer_status_data(self._response_data_dict(response), silent=True)
+        elif kind == "breakpoint":
+            response = result_obj.get("response")
+            if isinstance(response, dict) and self._response_ok(response):
+                data = self._response_data_dict(response)
+                self.bp_info_data = data
+                self._render_bp_info(data)
+        elif kind == "syscall":
+            response = result_obj.get("response")
+            if isinstance(response, dict) and self._response_ok(response):
+                data = self._response_data_dict(response)
+                self._set_text_preserve_interaction(self.syscall_log_view, str(data.get("log", "")))
 
     def _apply_syscall_state(self) -> None:
         self.syscall_status_label.setText("已监听" if self.syscall_active else "未监听")
@@ -3273,21 +3256,15 @@ class TcpTestWindow(QWidget):
         self._set_status("系统调用监听已停止")
 
     def on_syscall_log_refresh(self, silent: bool = False) -> None:
-        if self.syscall_refresh_inflight:
+        data = self._request_data_dict(
+            "syscall.read", error_title="日志刷新失败",
+            log_enabled=not silent, warn=not silent,
+        )
+        if data is None:
             return
-        self.syscall_refresh_inflight = True
-        try:
-            data = self._request_data_dict(
-                "syscall.log", {"max_lines": 500}, error_title="日志刷新失败",
-                log_enabled=not silent, warn=not silent,
-            )
-            if data is None:
-                return
-            self._set_text_preserve_interaction(self.syscall_log_view, str(data.get("log", "")))
-            if not silent:
-                self._set_status(f"系统调用日志已刷新，共 {self._safe_int(data.get('line_count'), 0)} 行")
-        finally:
-            self.syscall_refresh_inflight = False
+        self._set_text_preserve_interaction(self.syscall_log_view, str(data.get("log", "")))
+        if not silent:
+            self._set_status(f"系统调用日志已刷新，共 {self._safe_int(data.get('line_count'), 0)} 行")
 
     def on_sync_pid(self) -> None:
         input_text = self.pid_input.text().strip()
@@ -3295,83 +3272,64 @@ class TcpTestWindow(QWidget):
             QMessageBox.warning(self, "输入提示", "请输入 PID 或包名。")
             return
 
-        pid_value: int | None = None
         if input_text.isdigit():
             pid_value = int(input_text, 10)
             if pid_value <= 0:
                 QMessageBox.warning(self, "输入提示", "PID 必须大于 0。")
                 return
+            data = self._request_data_dict(
+                "target.select",
+                {"pid": pid_value},
+                error_title="同步失败",
+                error_message="设置全局 PID 失败。",
+                status_on_error="同步失败：设置全局 PID 失败",
+            )
         else:
             data = self._request_data_dict(
-                "target.pid.get",
+                "target.attach",
                 {"package_name": input_text},
                 error_title="同步失败",
-                error_message="包名获取 PID 失败。",
+                error_message="包名附加目标失败。",
                 parse_title="同步失败",
-                parse_error_text="包名获取 PID 失败。",
-                status_on_error="同步失败：包名获取 PID 失败",
+                parse_error_text="包名附加目标响应异常。",
+                status_on_error="同步失败：包名附加目标失败",
             )
-            pid_value = self._safe_int(data.get("pid"), 0) if isinstance(data, dict) and "pid" in data else None
-            if pid_value is None:
-                return
-
-        set_response = self._request_ok(
-            "target.pid.set",
-            {"pid": pid_value},
-            error_title="同步失败",
-            error_message="设置全局 PID 失败。",
-            status_on_error="同步失败：设置全局 PID 失败",
-        )
-        if set_response is None:
+        current_pid = self._safe_int(data.get("pid"), 0) if isinstance(data, dict) else 0
+        if current_pid <= 0:
             return
 
-        current_data = self._request_data_dict(
-            "target.pid.current",
-            error_title="同步失败",
-            error_message="同步后读取全局 PID 失败。",
-            parse_title="同步失败",
-            parse_error_text="同步后读取全局 PID 失败。",
-            status_on_error="同步后读取全局 PID 失败",
-        )
-        current_pid: int | None = None
-        if isinstance(current_data, dict) and "pid" in current_data:
-            parsed_pid = self._safe_int(current_data.get("pid"), 0)
-            current_pid = parsed_pid if parsed_pid > 0 else None
-        if current_pid is None:
-            self.global_pid_label.setText("--")
-            return
-
+        self._invalidate_target_ui_state()
         self.global_pid_label.setText(str(current_pid))
         self._set_status(f"同步成功：全局PID={current_pid}")
 
-    def on_get_tls_tpidr_el0(self) -> None:
-        thread_name = self.tls_thread_input.text().strip()
-        if not thread_name:
-            QMessageBox.warning(self, "输入提示", "请输入线程名。")
-            return
-
+    def on_get_environment_params(self) -> None:
+        thread_name = self.env_thread_input.text().strip()
         data = self._request_data_dict(
-            "env.get_params",
+            "env.read",
             {"thread_name": thread_name},
-            error_title="TLS 获取失败",
-            error_prefix="获取 TPIDR_EL0 失败：",
-            parse_title="TLS 获取失败",
-            parse_error_text="TLS 响应格式异常。",
-            status_on_error="TLS 获取失败",
+            error_title="环境参数获取失败",
+            error_prefix="获取环境参数失败：",
+            parse_title="环境参数获取失败",
+            parse_error_text="环境参数响应格式异常。",
+            status_on_error="环境参数获取失败",
         )
         if data is None:
             return
 
-        tpidr_text = str(data.get("tpidr_el0_hex") or "").strip()
-        if not tpidr_text:
-            tpidr_value = self._safe_int(data.get("tpidr_el0"), 0)
-            tpidr_text = f"0x{tpidr_value:016X}" if tpidr_value else "0x0"
-
-        self.tls_result_label.setText(tpidr_text)
-        self._set_status(f"TLS 获取成功：{thread_name} TPIDR_EL0={tpidr_text}")
+        lines = [
+            f"PID: {self._safe_int(data.get('pid'), 0)}",
+            f"线程名: {str(data.get('thread_name') or '(未指定)')}",
+            f"TPIDR_EL0: {str(data.get('tpidr_el0_hex') or '0x0')}",
+            f"PACGA_LO: {str(data.get('pacga_lo_hex') or '0x0')}",
+            f"PACGA_HI: {str(data.get('pacga_hi_hex') or '0x0')}",
+            f"TLS 状态: {self._safe_int(data.get('tls_status'), 0)}",
+            f"PACGA 状态: {self._safe_int(data.get('pacga_status'), 0)}",
+        ]
+        self.environment_view.setPlainText("\n".join(lines))
+        self._set_status("环境参数获取成功")
 
     def on_refresh_memory_info(self) -> None:
-        response = self._send_operation("memory.info.full")
+        response = self._send_operation("memory.map")
         if response is None:
             return
 
@@ -3395,6 +3353,32 @@ class TcpTestWindow(QWidget):
         region_count = info.get("region_count", "未知")
         self._set_status(f"内存信息刷新成功：模块={module_count}，区域={region_count}")
 
+    def on_dump_memory(self) -> None:
+        target = self.memory_dump_input.text().strip()
+        if not target:
+            QMessageBox.warning(self, "输入提示", "请输入模块名或地址范围。")
+            return
+
+        self.dump_memory_button.setEnabled(False)
+        self._set_status(f"正在 Dump：{target}")
+        try:
+            data = self._request_data_dict(
+                "memory.dump",
+                {"target": target},
+                error_title="内存 Dump 失败",
+                error_prefix="内存 Dump 失败：",
+                parse_title="内存 Dump 失败",
+                parse_error_text="内存 Dump 响应格式异常。",
+                status_on_error="内存 Dump 失败",
+            )
+            if data is None:
+                return
+            path = str(data.get("path") or "").strip()
+            self._set_status(f"Dump 完成：{path or target}")
+            QMessageBox.information(self, "Dump 完成", f"设备端输出路径：\n{path or '(未返回路径)'}")
+        finally:
+            self.dump_memory_button.setEnabled(self._is_connected())
+
     def on_filter_memory_info(self) -> None:
         if self.memory_info_data is None:
             QMessageBox.warning(self, "提示", "暂无内存信息，请先点击“刷新内存信息”。")
@@ -3414,7 +3398,7 @@ class TcpTestWindow(QWidget):
 
     def on_hwbp_refresh(self, silent: bool = False) -> None:
         data = self._request_data_dict(
-            "breakpoint.info",
+            "breakpoint.get",
             error_title="刷新失败",
             parse_title="刷新失败",
             parse_error_text="断点信息响应异常。",
@@ -3429,8 +3413,8 @@ class TcpTestWindow(QWidget):
         if not silent:
             self._set_status("断点信息已刷新")
 
-    def _set_breakpoint_mode(self, operation: str, mode: str, label: str) -> None:
-        if self.hwbp_active:
+    def _set_breakpoint_mode(self, mode: str, label: str) -> None:
+        if self.breakpoint_mode:
             QMessageBox.information(self, "提示", "断点已激活，请先移除当前断点。")
             return
         try:
@@ -3438,46 +3422,41 @@ class TcpTestWindow(QWidget):
         except ValueError as exc:
             QMessageBox.warning(self, "输入提示", str(exc))
             return
-        if self._request_ok(operation, {"points": points}, error_title="设置失败", status_on_error=f"设置 {label} 失败") is None:
+        if self._request_ok("breakpoint.set", {"mode": mode, "points": points}, error_title="设置失败", status_on_error=f"设置 {label} 失败") is None:
             return
-        self.hwbp_active = True
-        self.ptebp_active = mode == "ptebp"
-        self.stepbp_active = mode == "stepbp"
-        self.bp_active_mode = mode
+        self.breakpoint_mode = mode
         self._apply_hwbp_active_state()
         self._set_status(f"设置 {label} 成功: {len(points)} 个 points")
         self.on_hwbp_refresh(silent=True)
 
-    def _remove_breakpoint_mode(self, operation: str, mode: str, label: str) -> None:
-        active = self.hwbp_active and (self.bp_active_mode or "hwbp") == mode
-        if not active:
+    def _remove_breakpoint_mode(self, mode: str, label: str) -> None:
+        if self.breakpoint_mode != mode:
             self._set_status(f"{label} 未激活，无需移除")
             return
-        if self._request_ok(operation, error_title="移除失败") is None:
+        if self._request_ok("breakpoint.clear", error_title="移除失败") is None:
             return
-        self.hwbp_active = self.ptebp_active = self.stepbp_active = False
-        self.bp_active_mode = ""
+        self.breakpoint_mode = ""
         self._apply_hwbp_active_state()
         self._set_status(f"已移除进程 {label}")
         self.on_hwbp_refresh(silent=True)
 
     def on_hwbp_set(self) -> None:
-        self._set_breakpoint_mode("breakpoint.set", "hwbp", "HWBP")
+        self._set_breakpoint_mode("hwbp", "HWBP")
 
     def on_hwbp_remove_all(self) -> None:
-        self._remove_breakpoint_mode("breakpoint.clear", "hwbp", "HWBP")
+        self._remove_breakpoint_mode("hwbp", "HWBP")
 
     def on_ptebp_set(self) -> None:
-        self._set_breakpoint_mode("ptebp.set", "ptebp", "PTEBP")
+        self._set_breakpoint_mode("ptebp", "PTEBP")
 
     def on_ptebp_remove_all(self) -> None:
-        self._remove_breakpoint_mode("ptebp.clear", "ptebp", "PTEBP")
+        self._remove_breakpoint_mode("ptebp", "PTEBP")
 
     def on_stepbp_set(self) -> None:
-        self._set_breakpoint_mode("stepbp.set", "stepbp", "STEPBP")
+        self._set_breakpoint_mode("stepbp", "STEPBP")
 
     def on_stepbp_remove_all(self) -> None:
-        self._remove_breakpoint_mode("stepbp.clear", "stepbp", "STEPBP")
+        self._remove_breakpoint_mode("stepbp", "STEPBP")
 
     def on_hwbp_tree_current_item_changed(self, current: QTreeWidgetItem | None, _previous: QTreeWidgetItem | None) -> None:
         if current is None:
@@ -3525,7 +3504,7 @@ class TcpTestWindow(QWidget):
 
         formatted_value = self._format_hwbp_edit_value(field_name, value)
         response = self._request_ok(
-            "breakpoint.record.update",
+            "breakpoint_record.update",
             {"index": index, "field": field_name, "value": formatted_value},
             error_title="写入失败",
         )
@@ -3594,17 +3573,6 @@ class TcpTestWindow(QWidget):
         if point_payload is not None:
             self._remove_hwbp_point(point_payload)
 
-    def _refresh_bp_info_live(self) -> None:
-        if not self._is_breakpoint_tab_active():
-            return
-        if self.hwbp_refresh_inflight:
-            return
-        self.hwbp_refresh_inflight = True
-        try:
-            self.on_hwbp_refresh(silent=True)
-        finally:
-            self.hwbp_refresh_inflight = False
-
     def _render_signature_data(self, data: dict, status_text: str) -> None:
         self.sig_status_label.setText(status_text)
         self._set_text_preserve_interaction(self.sig_view, self._format_sig_result(data))
@@ -3620,7 +3588,7 @@ class TcpTestWindow(QWidget):
             QMessageBox.warning(self, "输入提示", "目标地址或范围格式无效。")
             return
         response = self._request_ok(
-            "signature.scan_address",
+            "signature.create",
             {"address": f"0x{addr:X}", "range": scan_range, "file_name": file_name},
             error_title="执行失败",
         )
@@ -3632,7 +3600,7 @@ class TcpTestWindow(QWidget):
 
     def _scan_signature_file_data(self, file_name: str) -> dict | None:
         return self._request_data_dict(
-            "signature.scan_file",
+            "signature.scan",
             {"file_name": file_name},
             error_title="执行失败",
             parse_title="执行失败",
@@ -3683,7 +3651,7 @@ class TcpTestWindow(QWidget):
             QMessageBox.warning(self, "输入提示", "偏移必须是整数。")
             return
         data = self._request_data_dict(
-            "signature.scan_pattern",
+            "signature.match",
             {"range_offset": range_offset, "pattern": pattern},
             error_title="执行失败",
             parse_title="执行失败",
@@ -3695,6 +3663,7 @@ class TcpTestWindow(QWidget):
         self._set_status("按特征码扫描已完成")
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
+        self.live_refresh_closing = True
         self.live_refresh_timer.stop()
         self._disconnect_device()
         super().closeEvent(event)

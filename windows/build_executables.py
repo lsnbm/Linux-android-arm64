@@ -10,6 +10,7 @@ from pathlib import Path
 SCRIPT_PATH = Path(__file__).resolve()
 SCRIPT_DIR = SCRIPT_PATH.parent
 DEFAULT_OUTPUT_DIR = SCRIPT_DIR
+DEFAULT_EXCLUDED_FILES = {"tcp_server.py"}
 
 GUI_MARKERS = (
     "import PySide6",
@@ -58,12 +59,24 @@ def _needs_mcp_bundle(script_text: str) -> bool:
 
 
 def _discover_local_python_files() -> list[Path]:
-    files = []
-    for path in sorted(SCRIPT_DIR.glob("*.py")):
-        if path.resolve() == SCRIPT_PATH:
-            continue
-        files.append(path.resolve())
-    return files
+    return [
+        path.resolve()
+        for path in sorted(SCRIPT_DIR.glob("*.py"))
+        if path.resolve() != SCRIPT_PATH and path.name not in DEFAULT_EXCLUDED_FILES
+    ]
+
+
+def _validate_unique_output_names(targets: list[Path]) -> None:
+    names: dict[str, Path] = {}
+    for target in targets:
+        key = target.stem.casefold()
+        previous = names.get(key)
+        if previous is not None:
+            raise SystemExit(
+                f"Targets produce the same executable name '{target.stem}.exe': "
+                f"{previous} and {target}"
+            )
+        names[key] = target
 
 
 def _resolve_target(path_text: str) -> Path:
@@ -91,6 +104,7 @@ def _resolve_targets(raw_targets: list[str]) -> list[Path]:
         targets = _discover_local_python_files()
         if not targets:
             raise SystemExit(f"No .py files found in {SCRIPT_DIR}")
+        _validate_unique_output_names(targets)
         return targets
 
     resolved: list[Path] = []
@@ -106,6 +120,7 @@ def _resolve_targets(raw_targets: list[str]) -> list[Path]:
 
     if not resolved:
         raise SystemExit("No valid .py files to build.")
+    _validate_unique_output_names(resolved)
     return resolved
 
 
@@ -165,7 +180,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Build Windows executables with PyInstaller. "
-            "Without parameters, this script builds all .py files next to itself."
+            "Without parameters, this script builds the executable entry points next to itself."
         )
     )
     parser.add_argument(
@@ -173,7 +188,7 @@ def _parse_args() -> argparse.Namespace:
         nargs="*",
         help=(
             "Specific .py files to build. Supports relative or absolute paths. "
-            "If omitted, all .py files in the current script directory are built."
+            "If omitted, local executable entry points are built."
         ),
     )
     parser.add_argument(
@@ -222,7 +237,6 @@ def _pause_if_needed(should_pause: bool, exit_code: int) -> None:
 
 def main(args: argparse.Namespace) -> int:
     try:
-        _ensure_pyinstaller()
         targets = _resolve_targets(args.scripts)
 
         print("[INFO] Build targets:")
@@ -231,6 +245,8 @@ def main(args: argparse.Namespace) -> int:
 
         if args.list_only:
             return 0
+
+        _ensure_pyinstaller()
 
         dist_dir = Path(args.output_dir).resolve()
         build_root = dist_dir / ".pyinstaller"

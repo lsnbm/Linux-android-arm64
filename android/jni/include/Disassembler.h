@@ -163,7 +163,7 @@ namespace Disasm
 
     class Disassembler
     {
-      public:
+    public:
         static constexpr size_t DEFAULT_MAX_INSTRUCTIONS = 500;
 
         Disassembler() : m_handle(0), m_valid(false)
@@ -284,7 +284,7 @@ namespace Disasm
             return results;
         }
 
-      private:
+    private:
         csh m_handle;
         bool m_valid;
     };

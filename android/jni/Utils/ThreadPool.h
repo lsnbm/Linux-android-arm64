@@ -31,7 +31,7 @@ namespace Utils
         size_t active_{0};
         bool stopping_{false};
 
-      public:
+    public:
         explicit ThreadPool(size_t n = GetThreadCount())
         {
             if (n == 0) n = 4;
@@ -138,7 +138,7 @@ namespace Utils
 
     class GlobalThreadPools
     {
-      public:
+    public:
         ThreadPool &cpu()
         {
             static ThreadPool pool{GetThreadCount()};

@@ -83,23 +83,14 @@ namespace Config
 
 namespace SyscallLog
 {
-    inline std::string ReadDmesg(size_t maxLines = 300)
+    inline std::string ReadDmesg()
     {
-        std::deque<std::string> lines;
-        std::array<char, 1024> buf{};
-        FILE *pipe = popen("dmesg 2>/dev/null", "r");
-        if (!pipe) return {};
-        while (fgets(buf.data(), static_cast<int>(buf.size()), pipe))
-        {
-            std::string line(buf.data());
-            if (line.find("lsdriver") == std::string::npos) continue;
-            if (lines.size() == maxLines) lines.pop_front();
-            lines.push_back(std::move(line));
-        }
-        pclose(pipe);
-
         std::string out;
-        for (const auto &line : lines) out += line;
+        std::array<char, 4096> buf{};
+        FILE *pipe = popen("dmesg 2>/dev/null | grep lsdriver", "r");
+        if (!pipe) return {};
+        while (fgets(buf.data(), static_cast<int>(buf.size()), pipe)) out += buf.data();
+        pclose(pipe);
         return out;
     }
 } // namespace SyscallLog
@@ -281,50 +272,6 @@ namespace MemUtils
         return true;
     }
 
-    inline std::string HwbpRegName(int reg)
-    {
-        if (reg >= Driver::IDX_X0 && reg <= Driver::IDX_X29) return std::format("x{}", reg - Driver::IDX_X0);
-        if (reg >= Driver::IDX_Q0 && reg <= Driver::IDX_Q31) return std::format("q{}", reg - Driver::IDX_Q0);
-
-        switch (reg)
-        {
-        case Driver::IDX_PC:
-            return "pc";
-        case Driver::IDX_HIT_COUNT:
-            return "hit_count";
-        case Driver::IDX_LR:
-            return "lr";
-        case Driver::IDX_SP:
-            return "sp";
-        case Driver::IDX_ORIG_X0:
-            return "orig_x0";
-        case Driver::IDX_SYSCALLNO:
-            return "syscallno";
-        case Driver::IDX_PSTATE:
-            return "pstate";
-        case Driver::IDX_FPSR:
-            return "fpsr";
-        case Driver::IDX_FPCR:
-            return "fpcr";
-        default:
-            return std::format("idx{}", reg);
-        }
-    }
-
-    constexpr const char *HwbpOpName(std::uint8_t op) noexcept
-    {
-        switch (op)
-        {
-        case BP_OP_READ:
-            return "read";
-        case BP_OP_WRITE:
-            return "write";
-        case BP_OP_NONE:
-        default:
-            return "none";
-        }
-    }
-
     inline void HwbpRequestRead(Driver::bp_record &record, int reg)
     {
         if (reg >= 0 && reg < Driver::MAX_REG_COUNT && BP_GET_MASK(&record, reg) != BP_OP_WRITE) BP_SET_MASK(&record, reg, BP_OP_READ);
@@ -481,12 +428,13 @@ namespace MemUtils
         return *index;
     }
 
-    inline bool AssignHwbpRecordField(Driver::bp_record &record, std::string_view fieldToken, std::uint64_t value)
+    inline bool AssignHwbpRecordField(Driver::bp_record &record, std::string_view fieldToken, __uint128_t value)
     {
         const std::string token = HwbpLowerAscii(fieldToken);
         if (const auto maskIndex = HwbpMaskByteIndexFromToken(token); maskIndex.has_value())
         {
-            record.mask[*maskIndex] = static_cast<std::uint8_t>(value & 0xFF);
+            if (value > std::numeric_limits<std::uint8_t>::max()) return false;
+            record.mask[*maskIndex] = static_cast<std::uint8_t>(value);
             return true;
         }
 
@@ -499,7 +447,11 @@ namespace MemUtils
         }
 
         const auto regIndex = HwbpRegIndexFromToken(token);
-        return regIndex.has_value() && HwbpWriteRegisterValue(record, *regIndex, value);
+        if (!regIndex.has_value()) return false;
+        if (*regIndex >= Driver::IDX_Q0 && *regIndex <= Driver::IDX_Q31) return HwbpWriteRegisterValue(record, *regIndex, value);
+        if ((*regIndex == Driver::IDX_FPSR || *regIndex == Driver::IDX_FPCR) && value > std::numeric_limits<std::uint32_t>::max()) return false;
+        if (value > std::numeric_limits<std::uint64_t>::max()) return false;
+        return HwbpWriteRegisterValue(record, *regIndex, value);
     }
 
     // 统一的类型分发
@@ -622,7 +574,7 @@ namespace MemUtils
     }
 
     //  按扫描模式比较当前值与目标值。
-    template <typename T> bool Compare(T value, T target, FuzzyMode mode, double lastValue, double rangeMax = 0.0)
+    template <typename T> bool Compare(T value, T target, FuzzyMode mode, T lastValue, double rangeMax = 0.0)
     {
         // 浮点前置检查
         if constexpr (std::is_floating_point_v<T>)
@@ -653,8 +605,6 @@ namespace MemUtils
             else return a == b;
         };
 
-        T last = static_cast<T>(lastValue);
-
         switch (mode)
         {
         case FuzzyMode::Equal:
@@ -664,13 +614,13 @@ namespace MemUtils
         case FuzzyMode::Less:
             return value < target;
         case FuzzyMode::Increased:
-            return value > last;
+            return value > lastValue;
         case FuzzyMode::Decreased:
-            return value < last;
+            return value < lastValue;
         case FuzzyMode::Changed:
-            return !eq(value, last);
+            return !eq(value, lastValue);
         case FuzzyMode::Unchanged:
-            return eq(value, last);
+            return eq(value, lastValue);
         case FuzzyMode::Range:
         {
             if constexpr (isFloat)
@@ -732,10 +682,9 @@ namespace MemUtils
         // 跳过 0x/0X
         if (str.size() >= 2 && str[0] == '0' && (str[1] == 'x' || str[1] == 'X')) str.remove_prefix(2);
 
-        uintptr_t offset = 0;
-        std::string buf(str);
-        if (std::sscanf(buf.c_str(), "%lx", &offset) != 1) return std::nullopt;
-        return OffsetParseResult{offset, negative};
+        const auto offset = ParseUInt64(str, 16);
+        if (!offset.has_value()) return std::nullopt;
+        return OffsetParseResult{static_cast<uintptr_t>(*offset), negative};
     }
 
 } // namespace MemUtils
@@ -1108,7 +1057,7 @@ class Bitmap
     MappedFile storage_;
     size_t totalBits_ = 0;
 
-  public:
+public:
     // 按位数初始化位图存储。
     bool init(size_t bits, bool allSet)
     {
@@ -1207,10 +1156,10 @@ class Bitmap
 // ============================================================================
 class MemScanner
 {
-  public:
+public:
     using Results = std::vector<uintptr_t>;
 
-  private:
+private:
     // ── 区域描述 ──
     struct Region
     {
@@ -1242,6 +1191,31 @@ class MemScanner
             progress = 1.0f;
         }
     };
+
+    template <typename T> void runScan(pid_t pid, T target, Types::FuzzyMode mode, bool isFirst, double rangeMax)
+    {
+        ScanRunGuard guard{scanning_, progress_};
+        progress_ = 0.0f;
+        rangeMax_ = rangeMax;
+
+        if (isFirst)
+        {
+            if (mode == Types::FuzzyMode::Unknown) scanFirstUnknown<T>(pid);
+            else scanFirst<T>(pid, target, mode);
+        }
+        else
+        {
+            scanNext<T>(target, mode);
+        }
+    }
+
+    void runStringScan(const std::string &needle, bool isFirst)
+    {
+        ScanRunGuard guard{scanning_, progress_};
+        progress_ = 0.0f;
+        if (isFirst) scanFirstString(needle);
+        else scanNextString(needle);
+    }
 
     template <typename HitBuckets> static Results mergeUniqueAddresses(HitBuckets &threadHits)
     {
@@ -1303,7 +1277,7 @@ class MemScanner
 
         if (!bitmap_.init(totalBits, allSet)) return false;
 
-        size_t valBytes = totalBits * sizeof(double);
+        size_t valBytes = totalBits * sizeof(std::uint64_t);
         if (!values_.allocate(valBytes))
         {
             bitmap_.release();
@@ -1315,29 +1289,29 @@ class MemScanner
         return true;
     }
 
-    double *valuesMap() noexcept
+    std::uint64_t *valuesMap() noexcept
     {
-        return values_.as<double>();
+        return values_.as<std::uint64_t>();
     }
-    const double *valuesMap() const noexcept
+    const std::uint64_t *valuesMap() const noexcept
     {
-        return values_.as<const double>();
+        return values_.as<const std::uint64_t>();
     }
 
-    // 将模板数值统一转换为 double。
-    template <typename T> static double toDouble(T value, Types::FuzzyMode mode) noexcept
+    template <typename T> static std::uint64_t storeValue(T value) noexcept
     {
-        if constexpr (std::is_floating_point_v<T>)
-        {
-            double d = static_cast<double>(value);
-            return (std::isnan(d) || std::isinf(d)) ? 0.0 : d;
-        }
-        else if constexpr (std::is_integral_v<T>)
-        {
-            if (mode == Types::FuzzyMode::Pointer) return static_cast<double>(MemUtils::Normalize(static_cast<uintptr_t>(static_cast<std::make_unsigned_t<T>>(value))));
-            return static_cast<double>(value);
-        }
-        return static_cast<double>(value);
+        static_assert(sizeof(T) <= sizeof(std::uint64_t));
+        std::uint64_t stored = 0;
+        std::memcpy(&stored, &value, sizeof(T));
+        return stored;
+    }
+
+    template <typename T> static T loadValue(std::uint64_t stored) noexcept
+    {
+        static_assert(sizeof(T) <= sizeof(std::uint64_t));
+        T value{};
+        std::memcpy(&value, &stored, sizeof(T));
+        return value;
     }
 
     // 并行线程分配
@@ -1431,7 +1405,7 @@ class MemScanner
                             continue;
                         }
                     }
-                    valuesMap()[gb] = static_cast<double>(value);
+                    valuesMap()[gb] = storeValue(value);
                 }
 
                 // 不完整尾部：清除位
@@ -1466,7 +1440,7 @@ class MemScanner
         struct HitEntry
         {
             uintptr_t addr;
-            double val;
+            std::uint64_t val;
         };
         std::vector<std::deque<HitEntry>> threadHits(tc);
 
@@ -1503,9 +1477,9 @@ class MemScanner
                                     if (!MemUtils::IsValidFloat(value)) continue;
                                 }
 
-                                if (MemUtils::Compare(value, target, mode, 0.0, rmx))
+                                if (MemUtils::Compare(value, target, mode, T{}, rmx))
                                 {
-                                    myHits.push_back({addr + off, toDouble(value, mode)});
+                                    myHits.push_back({addr + off, storeValue(value)});
                                 }
                             }
                         }
@@ -1568,7 +1542,7 @@ class MemScanner
                             bitmap_.setOff(gb);
                             continue;
                         }
-                        double oldVal = valuesMap()[gb];
+                        const T oldVal = loadValue<T>(valuesMap()[gb]);
                         if (std::isnan(oldVal) || std::isinf(oldVal))
                         {
                             bitmap_.setOff(gb);
@@ -1576,10 +1550,10 @@ class MemScanner
                         }
                     }
 
-                    double oldVal = valuesMap()[gb];
+                    const T oldVal = loadValue<T>(valuesMap()[gb]);
                     if (MemUtils::Compare(value, target, mode, oldVal, rmx))
                     {
-                        valuesMap()[gb] = toDouble(value, mode);
+                        valuesMap()[gb] = storeValue(value);
                         survived.fetch_add(1, std::memory_order_relaxed);
                     }
                     else
@@ -1731,7 +1705,7 @@ class MemScanner
         setBits_ = 0;
     }
 
-  public:
+public:
     MemScanner() = default;
     ~MemScanner() = default; // RAII handles cleanup
     MemScanner(const MemScanner &) = delete;
@@ -1862,7 +1836,7 @@ class MemScanner
         // 位图
         if (!bitmap_.valid() || setBits_ == 0) return;
 
-        std::vector<std::pair<uintptr_t, double>> temp;
+        std::vector<std::pair<uintptr_t, std::uint64_t>> temp;
         temp.reserve(setBits_);
 
         for (const auto &reg : regions_)
@@ -1905,32 +1879,31 @@ class MemScanner
     void scan(pid_t pid, T target, Types::FuzzyMode mode, bool isFirst, double rangeMax = 0.0)
     {
         if (scanning_.exchange(true)) return;
+        runScan(pid, target, mode, isFirst, rangeMax);
+    }
 
-        ScanRunGuard guard{scanning_, progress_};
-
+    template <typename T> bool startAsync(pid_t pid, T target, Types::FuzzyMode mode, bool isFirst, double rangeMax = 0.0)
+    {
+        if (scanning_.exchange(true)) return false;
         progress_ = 0.0f;
-        rangeMax_ = rangeMax;
-
-        if (isFirst)
-        {
-            if (mode == Types::FuzzyMode::Unknown) scanFirstUnknown<T>(pid);
-            else scanFirst<T>(pid, target, mode);
-        }
-        else
-        {
-            scanNext<T>(target, mode);
-        }
+        if (Utils::GlobalPool.post_io([this, pid, target, mode, isFirst, rangeMax] { runScan(pid, target, mode, isFirst, rangeMax); })) return true;
+        scanning_ = false;
+        return false;
     }
 
     void scanString(pid_t /*pid*/, const std::string &needle, bool isFirst)
     {
         if (scanning_.exchange(true)) return;
+        runStringScan(needle, isFirst);
+    }
 
-        ScanRunGuard guard{scanning_, progress_};
-
+    bool startStringAsync(pid_t /*pid*/, std::string needle, bool isFirst)
+    {
+        if (scanning_.exchange(true)) return false;
         progress_ = 0.0f;
-        if (isFirst) scanFirstString(needle);
-        else scanNextString(needle);
+        if (Utils::GlobalPool.post_io([this, needle = std::move(needle), isFirst] { runStringScan(needle, isFirst); })) return true;
+        scanning_ = false;
+        return false;
     }
 };
 
@@ -1939,7 +1912,7 @@ class MemScanner
 // ============================================================================
 class LockManager
 {
-  private:
+private:
     struct LockItem
     {
         uintptr_t addr;
@@ -1962,15 +1935,17 @@ class LockManager
     {
         while (!writeStop_.load(std::memory_order_acquire) && Config::g_Running)
         {
+            std::vector<LockItem> snapshot;
             {
                 std::lock_guard lock(mutex_);
-                for (auto &item : locks_) MemUtils::WriteFromString(item.addr, item.type, item.value);
+                snapshot.assign(locks_.begin(), locks_.end());
             }
+            for (const auto &item : snapshot) MemUtils::WriteFromString(item.addr, item.type, item.value);
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
     }
 
-  public:
+public:
     LockManager()
     {
         writeTask_ = Utils::GlobalPool.push_io([this] { writeLoop(); });
@@ -2041,31 +2016,20 @@ class LockManager
 // ============================================================================
 class MemViewer
 {
-  private:
+private:
     uintptr_t base_ = 0;
     Types::ViewFormat format_ = Types::ViewFormat::Hex;
     std::vector<uint8_t> buffer_;
-    bool visible_ = false;
     bool readSuccess_ = false;
     std::vector<Disasm::DisasmLine> disasmCache_;
     std::future<std::vector<Disasm::DisasmLine>> disasmFuture_;
     bool disasmBusy_ = false;
 
-  public:
+public:
     MemViewer() : buffer_(Config::Constants::MEM_VIEW_DEFAULT_BYTES)
     {
     }
 
-    // 返回当前视图可见状态。
-    bool isVisible() const noexcept
-    {
-        return visible_;
-    }
-    // 设置当前视图可见状态。
-    void setVisible(bool v) noexcept
-    {
-        visible_ = v;
-    }
     // 返回当前内存浏览格式。
     Types::ViewFormat format() const noexcept
     {
@@ -2121,33 +2085,22 @@ class MemViewer
         refresh();
     }
 
-    // 打开指定地址并初始化浏览状态。
-    void open(uintptr_t addr)
+    void clear()
     {
+        waitDisasm();
+        base_ = 0;
+        readSuccess_ = false;
+        std::ranges::fill(buffer_, 0);
+        disasmCache_.clear();
+    }
+
+    // 打开指定地址并初始化浏览状态。
+    void open(uintptr_t addr, std::optional<Types::ViewFormat> format = std::nullopt)
+    {
+        if (format.has_value()) format_ = *format;
         if (format_ == Types::ViewFormat::Disasm) addr &= ~static_cast<uintptr_t>(3); // 强制 4 字节对齐
         base_ = addr;
         refresh();
-        visible_ = true;
-    }
-
-    // 按指定行数移动当前浏览窗口。
-    void move(int lines, size_t step)
-    {
-        if (format_ == Types::ViewFormat::Disasm)
-        {
-            if (!lines) return;
-            const int64_t delta = static_cast<int64_t>(lines) * 4;
-            base_ = delta < 0 && base_ < static_cast<uintptr_t>(-delta) ? 0 : base_ + delta;
-            base_ &= ~static_cast<uintptr_t>(3);
-            refresh();
-        }
-        else
-        {
-            int64_t delta = static_cast<int64_t>(lines) * static_cast<int64_t>(step);
-            if (delta < 0 && base_ < static_cast<uintptr_t>(-delta)) base_ = 0;
-            else base_ += delta;
-            refresh();
-        }
     }
 
     // 重新读取并刷新当前浏览缓存。
@@ -2201,12 +2154,28 @@ class MemViewer
         }
     }
 
-    // 按偏移字符串调整当前浏览基址。
+    // 按指定方向应用无符号字节偏移。
+    void applyOffset(uintptr_t offset, bool negative)
+    {
+        if (negative) base_ = base_ < offset ? 0 : base_ - offset;
+        else base_ += offset;
+        if (format_ == Types::ViewFormat::Disasm) base_ &= ~static_cast<uintptr_t>(3);
+        refresh();
+    }
+
+    // 按有符号字节偏移调整当前浏览基址。
+    void applyOffset(int64_t offset)
+    {
+        const auto magnitude = offset < 0 ? static_cast<uint64_t>(-(offset + 1)) + 1 : static_cast<uint64_t>(offset);
+        applyOffset(static_cast<uintptr_t>(magnitude), offset < 0);
+    }
+
+    // 解析偏移字符串后调整当前浏览基址。
     bool applyOffset(std::string_view offsetStr)
     {
         auto result = MemUtils::ParseHexOffset(offsetStr);
         if (!result) return false;
-        open(result->negative ? (base_ - result->offset) : (base_ + result->offset));
+        applyOffset(result->offset, result->negative);
         return true;
     }
 };
@@ -2216,7 +2185,7 @@ class MemViewer
 // ============================================================================
 class PointerManager
 {
-  public:
+public:
     struct PtrData
     {
         uintptr_t address, value;
@@ -2297,14 +2266,14 @@ class PointerManager
         Array
     };
 
-  private:
+private:
     std::mutex block_mtx_;
     std::condition_variable block_cv_;
     std::vector<PtrData> pointers_;
     std::vector<std::pair<uintptr_t, uintptr_t>> regions_;
     std::atomic<bool> scanning_{false};
     std::atomic<float> scanProgress_{0.0f};
-    size_t chainCount_ = 0;
+    std::atomic<size_t> chainCount_{0};
 
     // 生成可用的指针结果文件名。
     static FILE *CreateUniqueBinFile(std::string &path)
@@ -2748,7 +2717,7 @@ class PointerManager
         fflush(f);
     }
 
-  public:
+public:
     PointerManager() = default;
     ~PointerManager() = default;
 
@@ -2766,6 +2735,15 @@ class PointerManager
     size_t count() const noexcept
     {
         return chainCount_;
+    }
+
+    void clear()
+    {
+        if (scanning_) return;
+        pointers_.clear();
+        regions_.clear();
+        chainCount_ = 0;
+        scanProgress_ = 0.0f;
     }
 
     // 采集进程可用指针并建立初始集合。
@@ -2839,11 +2817,10 @@ class PointerManager
         return pointers_.size();
     }
 
+private:
     // 执行指针链扫描主流程。
-    void scan(pid_t /*pid*/, uintptr_t target, int depth, int maxOffset, bool useManual, uintptr_t manualBase, bool useArray, uintptr_t arrayBase, size_t arrayCount, const std::string &filterModule)
+    void runScan(pid_t /*pid*/, uintptr_t target, int depth, int maxOffset, bool useManual, uintptr_t manualBase, bool useArray, uintptr_t arrayBase, size_t arrayCount, const std::string &filterModule)
     {
-        if (scanning_.exchange(true)) return;
-
         struct ScanGuard
         {
             std::atomic<bool> &scanning;
@@ -3004,6 +2981,22 @@ class PointerManager
 
         fclose(outfile);
         chainCount_ = static_cast<size_t>(totalChains);
+    }
+
+public:
+    void scan(pid_t pid, uintptr_t target, int depth, int maxOffset, bool useManual, uintptr_t manualBase, bool useArray, uintptr_t arrayBase, size_t arrayCount, const std::string &filterModule)
+    {
+        if (scanning_.exchange(true)) return;
+        runScan(pid, target, depth, maxOffset, useManual, manualBase, useArray, arrayBase, arrayCount, filterModule);
+    }
+
+    bool startAsync(pid_t pid, uintptr_t target, int depth, int maxOffset, bool useManual, uintptr_t manualBase, bool useArray, uintptr_t arrayBase, size_t arrayCount, std::string filterModule)
+    {
+        if (scanning_.exchange(true)) return false;
+        scanProgress_ = 0.0f;
+        if (Utils::GlobalPool.post_io([this, pid, target, depth, maxOffset, useManual, manualBase, useArray, arrayBase, arrayCount, filterModule = std::move(filterModule)] { runScan(pid, target, depth, maxOffset, useManual, manualBase, useArray, arrayBase, arrayCount, filterModule); })) return true;
+        scanning_ = false;
+        return false;
     }
 
     struct MemoryGraph
@@ -3439,64 +3432,97 @@ class PointerManager
 // ============================================================================
 namespace MemoryTool
 {
-    struct HwbpState
-    {
-        bool active = false;
-        std::uint64_t address = 0;
-        std::string mode;
-        std::string type;
-        std::string scope;
-        int length = 0;
-
-        void clear()
-        {
-            active = false;
-            address = 0;
-            mode.clear();
-            type.clear();
-            scope.clear();
-            length = 0;
-        }
-    };
-
-    class Runtime
-    {
-      public:
-        MemScanner scanner;
-        MemViewer viewer;
-        PointerManager pointerManager;
-        LockManager locks;
-        HwbpState hwbp;
-    };
-
-    inline Runtime &GetRuntime()
-    {
-        static Runtime runtime;
-        return runtime;
-    }
-
     inline MemScanner &Scanner()
     {
-        return GetRuntime().scanner;
+        static MemScanner scanner;
+        return scanner;
     }
 
     inline MemViewer &Viewer()
     {
-        return GetRuntime().viewer;
+        static MemViewer viewer;
+        return viewer;
     }
 
     inline PointerManager &Pointer()
     {
-        return GetRuntime().pointerManager;
+        static PointerManager pointerManager;
+        return pointerManager;
     }
 
     inline LockManager &Locks()
     {
-        return GetRuntime().locks;
+        static LockManager locks;
+        return locks;
     }
 
-    inline HwbpState &Hwbp()
+    inline std::string &HwbpMode()
     {
-        return GetRuntime().hwbp;
+        static std::string hwbpMode;
+        return hwbpMode;
+    }
+
+    inline std::atomic_int &SyscallMonitorPid()
+    {
+        static std::atomic_int pid{0};
+        return pid;
+    }
+
+    inline std::mutex &SyscallMonitorMutex()
+    {
+        static std::mutex mutex;
+        return mutex;
+    }
+
+    inline int StartSyscallMonitor()
+    {
+        std::lock_guard lock(SyscallMonitorMutex());
+        const int pid = dr->GetGlobalPid();
+        if (pid <= 0) return EINVAL;
+
+        const int monitoredPid = SyscallMonitorPid().load(std::memory_order_acquire);
+        if (monitoredPid == pid) return 0;
+        if (monitoredPid > 0)
+        {
+            const int status = dr->StopSyscallMonitor(monitoredPid);
+            if (status != 0) return status;
+            SyscallMonitorPid().store(0, std::memory_order_release);
+        }
+
+        const int status = dr->StartSyscallMonitor(pid);
+        if (status == 0) SyscallMonitorPid().store(pid, std::memory_order_release);
+        return status;
+    }
+
+    inline int StopSyscallMonitor()
+    {
+        std::lock_guard lock(SyscallMonitorMutex());
+        const int pid = SyscallMonitorPid().load(std::memory_order_acquire);
+        if (pid <= 0) return 0;
+
+        const int status = dr->StopSyscallMonitor(pid);
+        if (status == 0) SyscallMonitorPid().store(0, std::memory_order_release);
+        return status;
+    }
+
+    inline bool SelectTarget(int pid)
+    {
+        if (pid <= 0) return false;
+        if (Scanner().isScanning() || Pointer().isScanning()) return false;
+        if (pid == dr->GetGlobalPid()) return true;
+        if (StopSyscallMonitor() != 0) return false;
+
+        auto &mode = HwbpMode();
+        if (mode == "hwbp") dr->RemoveProcessHwbpRef();
+        else if (mode == "ptebp") dr->RemoveProcessPtebpRef();
+        else if (mode == "stepbp") dr->RemoveProcessStepbpRef();
+
+        mode.clear();
+        Locks().clear();
+        Scanner().clear();
+        Viewer().clear();
+        Pointer().clear();
+        dr->SetGlobalPid(pid);
+        return true;
     }
 } // namespace MemoryTool

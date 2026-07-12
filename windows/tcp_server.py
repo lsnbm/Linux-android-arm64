@@ -17,12 +17,11 @@ from typing import Any
 DEFAULT_ANDROID_HOST = os.getenv("ANDROID_TCP_HOST", "auto").strip() or "auto"
 DEFAULT_ANDROID_PORT = int(os.getenv("ANDROID_TCP_PORT", "9494"))
 DEFAULT_ANDROID_TIMEOUT_SECONDS = float(os.getenv("ANDROID_TCP_TIMEOUT", "8"))
-MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 LAN_DISCOVERY_MAX_WORKERS = 24
 LAN_DISCOVERY_PING_TIMEOUT_MS = 150
+MAX_NDJSON_FRAME_BYTES = 16 * 1024 * 1024
 AUTO_HOST_TOKENS = {"", "auto", "*"}
 VIEWER_FORMAT_TOKENS = {"hex", "hex64", "i8", "i16", "i32", "i64", "f32", "f64", "disasm"}
-MEMORY_VALUE_TYPE_TOKENS = {"u8", "u16", "u32", "u64", "f32", "f64"}
 
 
 class BridgeError(RuntimeError):
@@ -31,6 +30,10 @@ class BridgeError(RuntimeError):
 
 class BridgeConnectionError(BridgeError):
     """Raised when the Android TCP bridge cannot be reached."""
+
+
+class BridgeRequestOutcomeUnknown(BridgeConnectionError):
+    """Raised when a sent request may have executed but no response was received."""
 
 
 class BridgeProtocolError(BridgeError):
@@ -53,6 +56,14 @@ class BridgeConfig:
     timeout_seconds: float = DEFAULT_ANDROID_TIMEOUT_SECONDS
     last_connected_host: str = ""
     last_discovered_devices: list[LanDevice] = field(default_factory=list)
+
+
+@dataclass
+class _BridgeConnection:
+    sock: socket.socket
+    host: str
+    port: int
+    rx_buffer: bytes = b""
 
 
 @dataclass
@@ -91,13 +102,6 @@ def normalize_view_format(view_format: str) -> str:
     token = str(view_format).strip().lower()
     if token not in VIEWER_FORMAT_TOKENS:
         raise ValueError("view_format must be one of: hex, hex64, i8, i16, i32, i64, f32, f64, disasm")
-    return token
-
-
-def normalize_memory_value_type(value_type: str) -> str:
-    token = str(value_type).strip().lower()
-    if token not in MEMORY_VALUE_TYPE_TOKENS:
-        raise ValueError("value_type must be one of: u8, u16, u32, u64, f32, f64")
     return token
 
 
@@ -260,18 +264,44 @@ class AndroidBridgeSession:
         self,
         *,
         timeout_seconds: float = DEFAULT_ANDROID_TIMEOUT_SECONDS,
-        max_response_bytes: int = MAX_RESPONSE_BYTES,
     ) -> None:
         self.timeout_seconds = float(timeout_seconds)
-        self.max_response_bytes = int(max_response_bytes)
         self._io_lock = threading.Lock()
-        self._sock: socket.socket | None = None
-        self._rx_buffer = b""
-        self.host = ""
-        self.port = DEFAULT_ANDROID_PORT
+        self._lifecycle_lock = threading.RLock()
+        self._state_lock = threading.Lock()
+        self._connection: _BridgeConnection | None = None
+
+    @property
+    def host(self) -> str:
+        connection = self._current_connection()
+        return connection.host if connection is not None else ""
+
+    @property
+    def port(self) -> int:
+        connection = self._current_connection()
+        return connection.port if connection is not None else DEFAULT_ANDROID_PORT
+
+    def _current_connection(self) -> _BridgeConnection | None:
+        with self._state_lock:
+            return self._connection
+
+    @staticmethod
+    def _close_connection(connection: _BridgeConnection | None) -> None:
+        if connection is None:
+            return
+        try:
+            connection.sock.close()
+        except OSError:
+            pass
+
+    def _drop_connection(self, connection: _BridgeConnection) -> None:
+        with self._state_lock:
+            if self._connection is connection:
+                self._connection = None
+        self._close_connection(connection)
 
     def is_connected(self) -> bool:
-        return self._sock is not None
+        return self._current_connection() is not None
 
     def connect(self, host: str, port: int) -> None:
         if not host.strip():
@@ -279,56 +309,53 @@ class AndroidBridgeSession:
         if port <= 0 or port > 65535:
             raise BridgeConnectionError("port must be in 1..65535")
 
-        self.disconnect()
-        try:
-            sock = socket.create_connection((host, port), timeout=self.timeout_seconds)
-            sock.settimeout(self.timeout_seconds)
-        except ConnectionRefusedError as exc:
-            raise BridgeConnectionError(f"failed to connect to {host}:{port} (connection refused)") from exc
-        except (socket.timeout, TimeoutError) as exc:
-            raise BridgeConnectionError(f"connect to {host}:{port} timed out") from exc
-        except OSError as exc:
-            if exc.errno is not None:
-                raise BridgeConnectionError(f"connect to {host}:{port} failed (errno {exc.errno})") from exc
-            raise BridgeConnectionError(f"connect to {host}:{port} failed") from exc
+        with self._lifecycle_lock:
+            self.disconnect()
+            try:
+                sock = socket.create_connection((host, port), timeout=self.timeout_seconds)
+                sock.settimeout(self.timeout_seconds)
+            except ConnectionRefusedError as exc:
+                raise BridgeConnectionError(f"failed to connect to {host}:{port} (connection refused)") from exc
+            except (socket.timeout, TimeoutError) as exc:
+                raise BridgeConnectionError(f"connect to {host}:{port} timed out") from exc
+            except OSError as exc:
+                if exc.errno is not None:
+                    raise BridgeConnectionError(f"connect to {host}:{port} failed (errno {exc.errno})") from exc
+                raise BridgeConnectionError(f"connect to {host}:{port} failed") from exc
 
-        self._sock = sock
-        self._rx_buffer = b""
-        self.host = host
-        self.port = port
+            with self._state_lock:
+                self._connection = _BridgeConnection(sock=sock, host=host, port=port)
 
     def disconnect(self) -> None:
-        if self._sock is not None:
-            try:
-                self._sock.close()
-            except OSError:
-                pass
-        self._sock = None
-        self._rx_buffer = b""
-        self.host = ""
+        with self._lifecycle_lock:
+            with self._state_lock:
+                connection = self._connection
+                self._connection = None
+            self._close_connection(connection)
 
     def request(self, request_obj: dict[str, Any]) -> BridgeResponse:
         with self._io_lock:
-            if self._sock is None:
+            connection = self._current_connection()
+            if connection is None:
                 raise BridgeConnectionError("bridge session is not connected")
 
             request_text = json.dumps(request_obj, ensure_ascii=False) + "\n"
             try:
-                self._sock.sendall(request_text.encode("utf-8"))
+                connection.sock.sendall(request_text.encode("utf-8"))
             except OSError as exc:
-                self.disconnect()
+                self._drop_connection(connection)
                 if exc.errno is not None:
-                    raise BridgeConnectionError(f"send failed (errno {exc.errno})") from exc
-                raise BridgeConnectionError("send failed") from exc
+                    raise BridgeRequestOutcomeUnknown(f"send failed; request outcome is unknown (errno {exc.errno})") from exc
+                raise BridgeRequestOutcomeUnknown("send failed; request outcome is unknown") from exc
 
-            response_obj = self._read_response_object()
+            response_obj = self._read_response_object(connection)
             return _coerce_bridge_response(
                 response_obj,
                 fallback_operation=str(request_obj.get("operation") or ""),
                 connection={
-                    "host": self.host,
-                    "resolved_host": self.host,
-                    "port": self.port,
+                    "host": connection.host,
+                    "resolved_host": connection.host,
+                    "port": connection.port,
                     "timeout_seconds": self.timeout_seconds,
                     "persistent": True,
                 },
@@ -337,15 +364,15 @@ class AndroidBridgeSession:
     def call_operation(self, operation: str, params: dict[str, Any] | None = None) -> BridgeResponse:
         return self.request({"operation": operation.strip(), "params": params or {}})
 
-    def _read_response_object(self) -> dict[str, Any]:
-        if self._sock is None:
-            raise BridgeConnectionError("bridge session is not connected")
-
+    def _read_response_object(self, connection: _BridgeConnection) -> dict[str, Any]:
         while True:
-            split_index = self._rx_buffer.find(b"\n")
+            split_index = connection.rx_buffer.find(b"\n")
             if split_index != -1:
-                payload = self._rx_buffer[:split_index].decode("utf-8", errors="replace").strip()
-                self._rx_buffer = self._rx_buffer[split_index + 1 :]
+                if split_index > MAX_NDJSON_FRAME_BYTES:
+                    self._drop_connection(connection)
+                    raise BridgeProtocolError("android tcp response exceeds the maximum frame size")
+                payload = connection.rx_buffer[:split_index].decode("utf-8", errors="replace").strip()
+                connection.rx_buffer = connection.rx_buffer[split_index + 1 :]
                 if not payload:
                     continue
                 try:
@@ -357,24 +384,24 @@ class AndroidBridgeSession:
                 return response_obj
 
             try:
-                chunk = self._sock.recv(4096)
+                chunk = connection.sock.recv(4096)
             except socket.timeout as exc:
-                self.disconnect()
-                raise BridgeConnectionError("wait for response timed out") from exc
+                self._drop_connection(connection)
+                raise BridgeRequestOutcomeUnknown("wait for response timed out; request outcome is unknown") from exc
             except OSError as exc:
-                self.disconnect()
+                self._drop_connection(connection)
                 if exc.errno is not None:
-                    raise BridgeConnectionError(f"receive failed (errno {exc.errno})") from exc
-                raise BridgeConnectionError("receive failed") from exc
+                    raise BridgeRequestOutcomeUnknown(f"receive failed; request outcome is unknown (errno {exc.errno})") from exc
+                raise BridgeRequestOutcomeUnknown("receive failed; request outcome is unknown") from exc
 
             if not chunk:
-                self.disconnect()
-                raise BridgeConnectionError("android tcp server closed the connection")
+                self._drop_connection(connection)
+                raise BridgeRequestOutcomeUnknown("android tcp server closed the connection; request outcome is unknown")
 
-            self._rx_buffer += chunk
-            if len(self._rx_buffer) > self.max_response_bytes:
-                self.disconnect()
-                raise BridgeProtocolError("android tcp response is too large")
+            connection.rx_buffer += chunk
+            if b"\n" not in connection.rx_buffer and len(connection.rx_buffer) > MAX_NDJSON_FRAME_BYTES:
+                self._drop_connection(connection)
+                raise BridgeProtocolError("android tcp response exceeds the maximum frame size")
 
 
 class AndroidBridgeClient:
@@ -386,23 +413,52 @@ class AndroidBridgeClient:
         host: str = DEFAULT_ANDROID_HOST,
         port: int = DEFAULT_ANDROID_PORT,
         timeout_seconds: float = DEFAULT_ANDROID_TIMEOUT_SECONDS,
-        max_response_bytes: int = MAX_RESPONSE_BYTES,
     ) -> None:
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._config = BridgeConfig(
             host=normalize_bridge_host(host),
             port=int(port),
             timeout_seconds=float(timeout_seconds),
         )
-        self._max_response_bytes = int(max_response_bytes)
         self._session: AndroidBridgeSession | None = None
         self._session_endpoint: tuple[str, int, float] | None = None
+        self._target_pid: int | None = None
+        self._target_host: str | None = None
 
     def _close_session_locked(self) -> None:
         if self._session is not None:
             self._session.disconnect()
         self._session = None
         self._session_endpoint = None
+
+    def disconnect(self, *, reset_target: bool = True) -> None:
+        with self._lock:
+            self._close_session_locked()
+            if reset_target:
+                self._target_pid = None
+                self._target_host = None
+
+    def connect(self) -> dict[str, Any]:
+        self.call_operation("bridge.ping").require_ok()
+        return self.connection_state()
+
+    def connection_state(self) -> dict[str, Any]:
+        with self._lock:
+            snapshot = self._config_snapshot_locked()
+            snapshot["session_connected"] = self._session is not None and self._session.is_connected()
+            snapshot["session_host"] = self._session.host if self._session is not None and self._session.host else None
+            snapshot["session_port"] = self._session.port if self._session is not None else self._config.port
+            snapshot["session_timeout_seconds"] = self._session.timeout_seconds if self._session is not None else self._config.timeout_seconds
+            snapshot["session_pid"] = self._target_pid
+            snapshot["session_pid_host"] = self._target_host
+            return snapshot
+
+    def _config_snapshot_locked(self) -> dict[str, Any]:
+        snapshot = asdict(self._config)
+        snapshot["last_discovered_devices"] = [device.to_dict() for device in self._config.last_discovered_devices]
+        snapshot["auto_discover"] = is_auto_bridge_host(self._config.host)
+        snapshot["resolved_host"] = self._config.last_connected_host or None
+        return snapshot
 
     def configure(
         self,
@@ -413,36 +469,38 @@ class AndroidBridgeClient:
     ) -> dict[str, Any]:
         with self._lock:
             should_reset_session = False
+            should_reset_target = False
             if host is not None:
-                self._config.host = normalize_bridge_host(host)
-                self._config.last_connected_host = ""
-                self._config.last_discovered_devices = []
-                should_reset_session = True
+                normalized_host = normalize_bridge_host(host)
+                if normalized_host != self._config.host:
+                    self._config.host = normalized_host
+                    self._config.last_connected_host = ""
+                    self._config.last_discovered_devices = []
+                    should_reset_session = True
+                    should_reset_target = True
             if port is not None:
                 if port <= 0 or port > 65535:
                     raise ValueError("port must be in 1..65535")
-                self._config.port = int(port)
-                should_reset_session = True
+                if int(port) != self._config.port:
+                    self._config.port = int(port)
+                    should_reset_session = True
+                    should_reset_target = True
             if timeout_seconds is not None:
                 if timeout_seconds <= 0:
                     raise ValueError("timeout_seconds must be > 0")
-                self._config.timeout_seconds = float(timeout_seconds)
-                should_reset_session = True
+                if float(timeout_seconds) != self._config.timeout_seconds:
+                    self._config.timeout_seconds = float(timeout_seconds)
+                    should_reset_session = True
             if should_reset_session:
                 self._close_session_locked()
-            snapshot = asdict(self._config)
-            snapshot["last_discovered_devices"] = [device.to_dict() for device in self._config.last_discovered_devices]
-            snapshot["auto_discover"] = is_auto_bridge_host(self._config.host)
-            snapshot["resolved_host"] = self._config.last_connected_host or None
-            return snapshot
+            if should_reset_target:
+                self._target_pid = None
+                self._target_host = None
+            return self._config_snapshot_locked()
 
     def current_config(self) -> dict[str, Any]:
         with self._lock:
-            snapshot = asdict(self._config)
-            snapshot["last_discovered_devices"] = [device.to_dict() for device in self._config.last_discovered_devices]
-            snapshot["auto_discover"] = is_auto_bridge_host(self._config.host)
-            snapshot["resolved_host"] = self._config.last_connected_host or None
-            return snapshot
+            return self._config_snapshot_locked()
 
     def discover(self) -> dict[str, Any]:
         with self._lock:
@@ -468,8 +526,9 @@ class AndroidBridgeClient:
         return snapshot
 
     def call_operation(self, operation: str, params: dict[str, Any] | None = None) -> BridgeResponse:
-        request = {"operation": operation.strip(), "params": params or {}}
-        return self._call_with_discovery(request, fallback_operation=operation.strip())
+        op = operation.strip()
+        request = {"operation": op, "params": params or {}}
+        return self._call_with_discovery(request, fallback_operation=op)
 
     def _call_with_discovery(self, request: dict[str, Any], *, fallback_operation: str) -> BridgeResponse:
         with self._lock:
@@ -544,7 +603,9 @@ class AndroidBridgeClient:
         for host in hosts:
             try:
                 return self._call_once(host, port, timeout_seconds, request, fallback_operation, configured_host)
-            except (OSError, BridgeError, json.JSONDecodeError) as exc:
+            except BridgeRequestOutcomeUnknown:
+                raise
+            except BridgeConnectionError as exc:
                 errors.append(f"{host}:{port} -> {exc}")
         return None
 
@@ -559,35 +620,63 @@ class AndroidBridgeClient:
     ) -> BridgeResponse:
         endpoint = (host, int(port), float(timeout_seconds))
         with self._lock:
+            operation = str(request.get("operation") or "")
+            if self._target_pid is not None and self._target_host not in {None, host}:
+                previous_host = self._target_host
+                self._target_pid = None
+                self._target_host = None
+                if operation not in {"bridge.ping", "target.find", "target.select", "target.attach", "target.get"}:
+                    raise BridgeError(
+                        f"resolved Android device changed from {previous_host} to {host}; "
+                        "please set or attach the target again"
+                    )
+
+            reconnected = False
             if self._session is None or self._session_endpoint != endpoint:
                 self._close_session_locked()
                 self._session = AndroidBridgeSession(
                     timeout_seconds=timeout_seconds,
-                    max_response_bytes=self._max_response_bytes,
                 )
                 self._session_endpoint = endpoint
             session = self._session
+            if session is None:
+                raise BridgeConnectionError("bridge session initialize failed")
 
-        if session is None:
-            raise BridgeConnectionError("bridge session initialize failed")
+            try:
+                if not session.is_connected():
+                    session.connect(host, port)
+                    reconnected = True
+                if reconnected and self._target_pid is not None and self._target_host == host and operation not in {"target.select", "target.attach"}:
+                    cached_pid = self._target_pid
+                    try:
+                        session.call_operation("target.select", {"pid": cached_pid}).require_ok()
+                    except BridgeError as exc:
+                        self._target_pid = None
+                        self._target_host = None
+                        raise BridgeError(
+                            f"cached pid {cached_pid} restore failed after reconnect; "
+                            "please set or attach the target again"
+                        ) from exc
 
-        try:
-            if not session.is_connected():
-                session.connect(host, port)
-            response = session.request(request)
-            response.connection = {
-                "host": configured_host,
-                "resolved_host": host,
-                "port": port,
-                "timeout_seconds": timeout_seconds,
-                "auto_discover": is_auto_bridge_host(configured_host),
-                "persistent": True,
-            }
-            if not response.operation:
-                response.operation = fallback_operation
-            return response
-        except (OSError, BridgeError, json.JSONDecodeError):
-            with self._lock:
+                response = session.request(request)
+                response.connection = {
+                    "host": configured_host,
+                    "resolved_host": host,
+                    "port": port,
+                    "timeout_seconds": timeout_seconds,
+                    "auto_discover": is_auto_bridge_host(configured_host),
+                    "persistent": True,
+                }
+                if not response.operation:
+                    response.operation = fallback_operation
+                if response.ok and operation in {"target.select", "target.attach", "target.get"} and isinstance(response.data, dict) and "pid" in response.data:
+                    try:
+                        self._target_pid = int(str(response.data["pid"]), 0)
+                        self._target_host = host
+                    except (TypeError, ValueError):
+                        pass
+                return response
+            except (OSError, BridgeError, json.JSONDecodeError):
                 if self._session is session:
                     self._close_session_locked()
-            raise
+                raise
