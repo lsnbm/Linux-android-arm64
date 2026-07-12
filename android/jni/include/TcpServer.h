@@ -788,7 +788,7 @@ namespace
 
         std::lock_guard<std::mutex> requestLock(gRequestMutex);
 
-        if (op == "bridge.ping") return ok();
+        if (op == "bridge.ping") return okData({{"protocol_version", 1}, {"target_operations", true}});
 
         if (op == "target.find")
         {
