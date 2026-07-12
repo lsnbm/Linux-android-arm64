@@ -22,6 +22,7 @@ obj/
 /libs/
 windows/__pycache__/
 *.pyc
+**/.pyinstaller/
 
 # Build dependency files
 *.o.d

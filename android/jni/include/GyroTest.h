@@ -22,8 +22,7 @@ inline void DoGyroSweep(const char *name, int start, int end, int step, int axis
 {
     GyroLog("开始%s", name);
 
-    if (step == 0)
-        return;
+    if (step == 0) return;
 
     const int dir = (end >= start) ? 1 : -1;
     step = std::abs(step) * dir;
@@ -34,12 +33,9 @@ inline void DoGyroSweep(const char *name, int start, int end, int step, int axis
         int y = 0;
         int z = 0;
 
-        if (axis == 0)
-            x = value;
-        else if (axis == 1)
-            y = value;
-        else
-            z = value;
+        if (axis == 0) x = value;
+        else if (axis == 1) y = value;
+        else z = value;
 
         dr->GyroReport(x, y, z);
         std::this_thread::sleep_for(std::chrono::milliseconds(30));

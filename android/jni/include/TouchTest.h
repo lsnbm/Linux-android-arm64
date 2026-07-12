@@ -24,8 +24,7 @@ inline void GetScreenLogicalSize(int &w, int &h)
         if (fgets(line, sizeof(line), pipe))
         {
             // 格式: Physical size: 1080x2340
-            if (sscanf(line, "Physical size: %dx%d", &wTmp, &hTmp) != 2)
-                sscanf(line, "Override size: %dx%d", &wTmp, &hTmp);
+            if (sscanf(line, "Physical size: %dx%d", &wTmp, &hTmp) != 2) sscanf(line, "Override size: %dx%d", &wTmp, &hTmp);
         }
         pclose(pipe);
     }

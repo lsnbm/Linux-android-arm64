@@ -24,11 +24,11 @@
 
   这一层只负责指令重写，不分配内存、不改页表、不处理异常入口。
 */
-#define ARM64_DBI_TARGET_SIZE 4096
-#define ARM64_DBI_TARGET_INSNS (ARM64_DBI_TARGET_SIZE / 4)
-#define ARM64_DBI_GHOST_MAX_INSNS (ARM64_DBI_TARGET_INSNS * 8)
-#define ARM64_DBI_GHOST_MAX_BYTES (ARM64_DBI_GHOST_MAX_INSNS * 4)
-#define ARM64_DBI_SCRATCH_REG 17
+#define ARM64_DBI_TARGET_SIZE          4096
+#define ARM64_DBI_TARGET_INSNS         (ARM64_DBI_TARGET_SIZE / 4)
+#define ARM64_DBI_GHOST_MAX_INSNS      (ARM64_DBI_TARGET_INSNS * 8)
+#define ARM64_DBI_GHOST_MAX_BYTES      (ARM64_DBI_GHOST_MAX_INSNS * 4)
+#define ARM64_DBI_SCRATCH_REG          17
 #define ARM64_DBI_MAX_PENDING_BRANCHES 512
 
 struct arm64_dbi_pending_branch
@@ -82,8 +82,7 @@ static inline u32 arm64_dbi_enc_nop(void)
 static inline int arm64_dbi_enc_b(s64 offset, u32 *out)
 {
     s64 imm26 = offset / 4;
-    if (imm26 < -(1LL << 25) || imm26 >= (1LL << 25))
-        return -ERANGE;
+    if (imm26 < -(1LL << 25) || imm26 >= (1LL << 25)) return -ERANGE;
     *out = 0x14000000U | ((u32)imm26 & 0x03FFFFFFU);
     return 0;
 }
@@ -91,8 +90,7 @@ static inline int arm64_dbi_enc_b(s64 offset, u32 *out)
 static inline int arm64_dbi_enc_bl(s64 offset, u32 *out)
 {
     s64 imm26 = offset / 4;
-    if (imm26 < -(1LL << 25) || imm26 >= (1LL << 25))
-        return -ERANGE;
+    if (imm26 < -(1LL << 25) || imm26 >= (1LL << 25)) return -ERANGE;
     *out = 0x94000000U | ((u32)imm26 & 0x03FFFFFFU);
     return 0;
 }
@@ -100,8 +98,7 @@ static inline int arm64_dbi_enc_bl(s64 offset, u32 *out)
 static inline int arm64_dbi_enc_b_cond(u32 cond, s64 offset, u32 *out)
 {
     s64 imm19 = offset / 4;
-    if (imm19 < -(1LL << 18) || imm19 >= (1LL << 18))
-        return -ERANGE;
+    if (imm19 < -(1LL << 18) || imm19 >= (1LL << 18)) return -ERANGE;
     *out = 0x54000000U | (((u32)imm19 & 0x7FFFFU) << 5) | (cond & 0xFU);
     return 0;
 }
@@ -110,8 +107,7 @@ static inline int arm64_dbi_enc_cbz(u32 sf, u32 rt, s64 offset, int is_nz, u32 *
 {
     s64 imm19 = offset / 4;
     u32 op = is_nz ? 0x35000000U : 0x34000000U;
-    if (imm19 < -(1LL << 18) || imm19 >= (1LL << 18))
-        return -ERANGE;
+    if (imm19 < -(1LL << 18) || imm19 >= (1LL << 18)) return -ERANGE;
     *out = op | ((sf & 1U) << 31) | (((u32)imm19 & 0x7FFFFU) << 5) | (rt & 0x1FU);
     return 0;
 }
@@ -122,8 +118,7 @@ static inline int arm64_dbi_enc_tbz(u32 rt, u32 bit, s64 offset, int is_nz, u32 
     u32 op = is_nz ? 0x37000000U : 0x36000000U;
     u32 b5 = (bit >> 5) & 1U;
     u32 b40 = bit & 0x1FU;
-    if (imm14 < -(1LL << 13) || imm14 >= (1LL << 13))
-        return -ERANGE;
+    if (imm14 < -(1LL << 13) || imm14 >= (1LL << 13)) return -ERANGE;
     *out = op | (b5 << 31) | (b40 << 19) | (((u32)imm14 & 0x3FFFU) << 5) | (rt & 0x1FU);
     return 0;
 }
@@ -159,8 +154,7 @@ static inline u32 arm64_dbi_enc_ldr_vec_imm_unsigned(u32 rt, u32 simd_opc)
         opc = 1;
     }
 
-    return (size_hi << 30) | 0x3D400000U | (opc << 22) |
-           ((ARM64_DBI_SCRATCH_REG & 0x1FU) << 5) | (rt & 0x1FU);
+    return (size_hi << 30) | 0x3D400000U | (opc << 22) | ((ARM64_DBI_SCRATCH_REG & 0x1FU) << 5) | (rt & 0x1FU);
 }
 
 static inline int arm64_dbi_emit_mov_imm64(u32 rd, u64 imm, u32 *out, int max_insns)
@@ -176,14 +170,11 @@ static inline int arm64_dbi_emit_mov_imm64(u32 rd, u64 imm, u32 *out, int max_in
 
         if (chunk == 0)
         {
-            if (!first)
-                continue;
-            if (imm != 0)
-                continue;
+            if (!first) continue;
+            if (imm != 0) continue;
         }
 
-        if (n >= max_insns)
-            return -ENOSPC;
+        if (n >= max_insns) return -ENOSPC;
 
         if (first)
         {
@@ -198,8 +189,7 @@ static inline int arm64_dbi_emit_mov_imm64(u32 rd, u64 imm, u32 *out, int max_in
 
     if (first)
     {
-        if (n >= max_insns)
-            return -ENOSPC;
+        if (n >= max_insns) return -ENOSPC;
         out[n++] = 0xD2800000U | (rd & 0x1FU);
     }
 
@@ -211,8 +201,7 @@ static inline int arm64_dbi_emit(struct arm64_dbi_ctx *ctx, u32 insn)
     // 所有重写指令都走统一出口，集中做 ghost 容量保护。
     if (ctx->ghost_count >= ctx->ghost_capacity)
     {
-        ls_log_tag("ptebp", "ghost instruction capacity exhausted target=0x%llx count=%d capacity=%d\n",
-                   ctx->target_page, ctx->ghost_count, ctx->ghost_capacity);
+        ls_log_tag("ptebp", "ghost instruction capacity exhausted target=0x%llx count=%d capacity=%d\n", ctx->target_page, ctx->ghost_count, ctx->ghost_capacity);
         return -ENOSPC;
     }
     ctx->ghost[ctx->ghost_count++] = insn;
@@ -231,13 +220,11 @@ static inline int arm64_dbi_emit_far_jump(struct arm64_dbi_ctx *ctx, u64 target)
     int n = arm64_dbi_emit_mov_imm64(ARM64_DBI_SCRATCH_REG, target, movs, 4);
     int i;
 
-    if (n < 0)
-        return n;
+    if (n < 0) return n;
     for (i = 0; i < n; i++)
     {
         int status = arm64_dbi_emit(ctx, movs[i]);
-        if (status)
-            return status;
+        if (status) return status;
     }
     return arm64_dbi_emit(ctx, arm64_dbi_enc_br(ARM64_DBI_SCRATCH_REG));
 }
@@ -248,11 +235,9 @@ static inline int arm64_dbi_emit_skip_far_jump(struct arm64_dbi_ctx *ctx, u64 ta
     int after_idx;
     int status;
 
-    if (arm64_dbi_emit(ctx, 0))
-        return -ENOSPC;
+    if (arm64_dbi_emit(ctx, 0)) return -ENOSPC;
     status = arm64_dbi_emit_far_jump(ctx, target);
-    if (status)
-        return status;
+    if (status) return status;
 
     after_idx = ctx->ghost_count;
     return arm64_patch_signed_imm_field(&ctx->ghost[branch_idx], enc_template, after_idx - branch_idx, imm_bits, 5);
@@ -264,13 +249,11 @@ static inline int arm64_dbi_emit_load_addr(struct arm64_dbi_ctx *ctx, u32 rd, u6
     int n = arm64_dbi_emit_mov_imm64(rd, addr, movs, 4);
     int i;
 
-    if (n < 0)
-        return n;
+    if (n < 0) return n;
     for (i = 0; i < n; i++)
     {
         int status = arm64_dbi_emit(ctx, movs[i]);
-        if (status)
-            return status;
+        if (status) return status;
     }
     return 0;
 }
@@ -292,8 +275,7 @@ static inline int arm64_dbi_queue_branch(struct arm64_dbi_ctx *ctx, int ghost_id
     // 前向同页分支目标尚未生成，先记录占位指令下标和原页目标下标。
     if (ctx->n_pending >= ARM64_DBI_MAX_PENDING_BRANCHES)
     {
-        ls_log_tag("ptebp", "pending branch capacity exhausted target=0x%llx pending=%d max=%d\n",
-                   ctx->target_page, ctx->n_pending, ARM64_DBI_MAX_PENDING_BRANCHES);
+        ls_log_tag("ptebp", "pending branch capacity exhausted target=0x%llx pending=%d max=%d\n", ctx->target_page, ctx->n_pending, ARM64_DBI_MAX_PENDING_BRANCHES);
         return -ENOSPC;
     }
     ctx->pending[ctx->n_pending].ghost_idx = ghost_idx;
@@ -308,8 +290,7 @@ static inline int arm64_dbi_emit_pending_branch(struct arm64_dbi_ctx *ctx, u32 e
 {
     int ghost_idx = ctx->ghost_count;
 
-    if (arm64_dbi_emit(ctx, enc_template))
-        return -ENOSPC;
+    if (arm64_dbi_emit(ctx, enc_template)) return -ENOSPC;
 
     ctx->intra_page_fixed++;
     return arm64_dbi_queue_branch(ctx, ghost_idx, enc_template, target_tidx, kind);
@@ -364,8 +345,7 @@ static inline int arm64_dbi_recomp_bl(struct arm64_dbi_ctx *ctx, u32 insn, u64 o
     }
 
     ctx->expanded++;
-    if (arm64_dbi_emit_load_addr(ctx, ARM64_DBI_SCRATCH_REG, target))
-        return -ENOSPC;
+    if (arm64_dbi_emit_load_addr(ctx, ARM64_DBI_SCRATCH_REG, target)) return -ENOSPC;
     return arm64_dbi_emit(ctx, 0xD63F0000U | ((u32)ARM64_DBI_SCRATCH_REG << 5));
 }
 
@@ -444,8 +424,7 @@ static inline int arm64_dbi_recomp_cbz(struct arm64_dbi_ctx *ctx, u32 insn, u64 
     }
 
     ctx->expanded++;
-    return arm64_dbi_emit_skip_far_jump(ctx, target,
-                                        (is_nz ? 0x34000000U : 0x35000000U) | ((sf & 1U) << 31) | (rt & 0x1FU), 19);
+    return arm64_dbi_emit_skip_far_jump(ctx, target, (is_nz ? 0x34000000U : 0x35000000U) | ((sf & 1U) << 31) | (rt & 0x1FU), 19);
 }
 
 static inline int arm64_dbi_recomp_tbz(struct arm64_dbi_ctx *ctx, u32 insn, u64 orig_pc)
@@ -485,10 +464,7 @@ static inline int arm64_dbi_recomp_tbz(struct arm64_dbi_ctx *ctx, u32 insn, u64 
     }
 
     ctx->expanded++;
-    return arm64_dbi_emit_skip_far_jump(ctx, target,
-                                        (is_nz ? 0x36000000U : 0x37000000U) |
-                                            (((bit >> 5) & 1U) << 31) | ((bit & 0x1FU) << 19) | (rt & 0x1FU),
-                                        14);
+    return arm64_dbi_emit_skip_far_jump(ctx, target, (is_nz ? 0x36000000U : 0x37000000U) | (((bit >> 5) & 1U) << 31) | ((bit & 0x1FU) << 19) | (rt & 0x1FU), 14);
 }
 
 static inline int arm64_dbi_recomp_adrp(struct arm64_dbi_ctx *ctx, u32 insn, u64 orig_pc)
@@ -523,14 +499,10 @@ static inline int arm64_dbi_recomp_ldr_lit(struct arm64_dbi_ctx *ctx, u32 insn, 
     u32 ldr;
 
     ctx->expanded++;
-    if (arm64_dbi_emit_load_addr(ctx, ARM64_DBI_SCRATCH_REG, data_addr))
-        return -ENOSPC;
-    if (variant == 2)
-        ldr = arm64_dbi_enc_ldrsw_imm_unsigned(rt, ARM64_DBI_SCRATCH_REG);
-    else if (variant == 0)
-        ldr = arm64_dbi_enc_ldr_imm_unsigned(rt, ARM64_DBI_SCRATCH_REG, 2);
-    else
-        ldr = arm64_dbi_enc_ldr_imm_unsigned(rt, ARM64_DBI_SCRATCH_REG, 3);
+    if (arm64_dbi_emit_load_addr(ctx, ARM64_DBI_SCRATCH_REG, data_addr)) return -ENOSPC;
+    if (variant == 2) ldr = arm64_dbi_enc_ldrsw_imm_unsigned(rt, ARM64_DBI_SCRATCH_REG);
+    else if (variant == 0) ldr = arm64_dbi_enc_ldr_imm_unsigned(rt, ARM64_DBI_SCRATCH_REG, 2);
+    else ldr = arm64_dbi_enc_ldr_imm_unsigned(rt, ARM64_DBI_SCRATCH_REG, 3);
     return arm64_dbi_emit(ctx, ldr);
 }
 
@@ -541,11 +513,9 @@ static inline int arm64_dbi_recomp_ldr_vec_lit(struct arm64_dbi_ctx *ctx, u32 in
     s64 imm19 = arm64_dbi_sign_extend((insn >> 5) & 0x7FFFFU, 19);
     u64 data_addr = orig_pc + ((u64)imm19 << 2);
 
-    if (opc == 3)
-        return -EINVAL;
+    if (opc == 3) return -EINVAL;
     ctx->expanded++;
-    if (arm64_dbi_emit_load_addr(ctx, ARM64_DBI_SCRATCH_REG, data_addr))
-        return -ENOSPC;
+    if (arm64_dbi_emit_load_addr(ctx, ARM64_DBI_SCRATCH_REG, data_addr)) return -ENOSPC;
     return arm64_dbi_emit(ctx, arm64_dbi_enc_ldr_vec_imm_unsigned(rt, opc));
 }
 
@@ -554,8 +524,7 @@ static inline int arm64_dbi_recompile_page(struct arm64_dbi_ctx *ctx)
     // 单次线性扫描生成 ghost 页；前向同页分支在扫描结束后统一回填。
     int i;
 
-    if (!ctx || !ctx->orig || !ctx->ghost || ctx->ghost_capacity < ARM64_DBI_TARGET_INSNS)
-        return -EINVAL;
+    if (!ctx || !ctx->orig || !ctx->ghost || ctx->ghost_capacity < ARM64_DBI_TARGET_INSNS) return -EINVAL;
 
     ctx->ghost_count = 0;
     ctx->fixed = 0;
@@ -579,33 +548,22 @@ static inline int arm64_dbi_recompile_page(struct arm64_dbi_ctx *ctx)
             ctx->passthrough++;
             status = arm64_dbi_emit(ctx, insn);
         }
-        else if ((insn & 0xFC000000U) == 0x14000000U)
-            status = arm64_dbi_recomp_b(ctx, insn, orig_pc);
-        else if ((insn & 0xFC000000U) == 0x94000000U)
-            status = arm64_dbi_recomp_bl(ctx, insn, orig_pc);
-        else if ((insn & 0xFF000010U) == 0x54000000U)
-            status = arm64_dbi_recomp_bcond(ctx, insn, orig_pc);
-        else if ((insn & 0x7E000000U) == 0x34000000U)
-            status = arm64_dbi_recomp_cbz(ctx, insn, orig_pc);
-        else if ((insn & 0x7E000000U) == 0x36000000U)
-            status = arm64_dbi_recomp_tbz(ctx, insn, orig_pc);
-        else if ((insn & 0x9F000000U) == 0x90000000U)
-            status = arm64_dbi_recomp_adrp(ctx, insn, orig_pc);
-        else if ((insn & 0x9F000000U) == 0x10000000U)
-            status = arm64_dbi_recomp_adr(ctx, insn, orig_pc);
-        else if ((insn & 0xFF000000U) == 0x18000000U)
-            status = arm64_dbi_recomp_ldr_lit(ctx, insn, orig_pc, 0);
-        else if ((insn & 0xFF000000U) == 0x58000000U)
-            status = arm64_dbi_recomp_ldr_lit(ctx, insn, orig_pc, 1);
-        else if ((insn & 0xFF000000U) == 0x98000000U)
-            status = arm64_dbi_recomp_ldr_lit(ctx, insn, orig_pc, 2);
+        else if ((insn & 0xFC000000U) == 0x14000000U) status = arm64_dbi_recomp_b(ctx, insn, orig_pc);
+        else if ((insn & 0xFC000000U) == 0x94000000U) status = arm64_dbi_recomp_bl(ctx, insn, orig_pc);
+        else if ((insn & 0xFF000010U) == 0x54000000U) status = arm64_dbi_recomp_bcond(ctx, insn, orig_pc);
+        else if ((insn & 0x7E000000U) == 0x34000000U) status = arm64_dbi_recomp_cbz(ctx, insn, orig_pc);
+        else if ((insn & 0x7E000000U) == 0x36000000U) status = arm64_dbi_recomp_tbz(ctx, insn, orig_pc);
+        else if ((insn & 0x9F000000U) == 0x90000000U) status = arm64_dbi_recomp_adrp(ctx, insn, orig_pc);
+        else if ((insn & 0x9F000000U) == 0x10000000U) status = arm64_dbi_recomp_adr(ctx, insn, orig_pc);
+        else if ((insn & 0xFF000000U) == 0x18000000U) status = arm64_dbi_recomp_ldr_lit(ctx, insn, orig_pc, 0);
+        else if ((insn & 0xFF000000U) == 0x58000000U) status = arm64_dbi_recomp_ldr_lit(ctx, insn, orig_pc, 1);
+        else if ((insn & 0xFF000000U) == 0x98000000U) status = arm64_dbi_recomp_ldr_lit(ctx, insn, orig_pc, 2);
         else if ((insn & 0xFF000000U) == 0xD8000000U)
         {
             ctx->expanded++;
             status = arm64_dbi_emit(ctx, arm64_dbi_enc_nop());
         }
-        else if ((insn & 0x3F000000U) == 0x1C000000U)
-            status = arm64_dbi_recomp_ldr_vec_lit(ctx, insn, orig_pc);
+        else if ((insn & 0x3F000000U) == 0x1C000000U) status = arm64_dbi_recomp_ldr_vec_lit(ctx, insn, orig_pc);
         else
         {
             ctx->passthrough++;
@@ -616,8 +574,7 @@ static inline int arm64_dbi_recompile_page(struct arm64_dbi_ctx *ctx)
         {
             ctx->failed++;
             ctx->ghost_count = prev_ghost_idx;
-            if (arm64_dbi_emit(ctx, arm64_dbi_enc_nop()))
-                return -ENOSPC;
+            if (arm64_dbi_emit(ctx, arm64_dbi_enc_nop())) return -ENOSPC;
         }
     }
 
@@ -661,17 +618,14 @@ static inline u64 arm64_dbi_target_to_ghost_pc(const struct arm64_dbi_ctx *ctx, 
     u32 idx;
     u32 ghost_idx;
 
-    if (!ctx || !ctx->ghost_page || target_pc < ctx->target_page)
-        return 0;
+    if (!ctx || !ctx->ghost_page || target_pc < ctx->target_page) return 0;
 
     off = (target_pc & ~0x3ULL) - ctx->target_page;
-    if (off >= ARM64_DBI_TARGET_SIZE)
-        return 0;
+    if (off >= ARM64_DBI_TARGET_SIZE) return 0;
 
     idx = (u32)(off >> 2);
     ghost_idx = ctx->offset_map[idx];
-    if (ghost_idx >= (u32)ctx->ghost_count)
-        return 0;
+    if (ghost_idx >= (u32)ctx->ghost_count) return 0;
 
     return ctx->ghost_page + (u64)ghost_idx * 4;
 }
@@ -691,7 +645,7 @@ static inline u64 arm64_dbi_target_to_ghost_pc(const struct arm64_dbi_ctx *ctx, 
 #endif
 
 // ghost 用户 PTE 权限：用户态可执行、只读、PXN，映射普通内存属性。
-#define ARM64_DBI_GHOST_PTE_FLAGS (PTE_TYPE_PAGE | PTE_VALID | PTE_AF | PTE_SHARED | PTE_USER | PTE_RDONLY | PTE_PXN | PTE_ATTRINDX(MT_NORMAL))
+#define ARM64_DBI_GHOST_PTE_FLAGS  (PTE_TYPE_PAGE | PTE_VALID | PTE_AF | PTE_SHARED | PTE_USER | PTE_RDONLY | PTE_PXN | PTE_ATTRINDX(MT_NORMAL))
 #define ARM64_DBI_GHOST_SLOT_COUNT 16
 
 struct arm64_dbi_ghost
@@ -751,12 +705,10 @@ static inline int arm64_dbi_ghost_restore_target_pte(pid_t pid, const struct arm
 {
     int status;
 
-    if (!ghost || !ghost->target_page)
-        return -EINVAL;
+    if (!ghost || !ghost->target_page) return -EINVAL;
 
     status = write_user_pte_value_by_pid(pid, ghost->target_page, ghost->saved_pte);
-    if (!status)
-        flush_tlb_all();
+    if (!status) flush_tlb_all();
     return status;
 }
 
@@ -764,22 +716,16 @@ static inline int arm64_dbi_ghost_restore_target_pte(pid_t pid, const struct arm
 static inline u64 arm64_dbi_ghost_find_hole_locked(struct mm_struct *mm, u64 near, size_t size)
 {
     static const u64 ranges[] = {
-        16ULL * 1024 * 1024,
-        128ULL * 1024 * 1024,
-        1024ULL * 1024 * 1024,
-        16ULL * 1024 * 1024 * 1024,
-        ~0ULL,
+        16ULL * 1024 * 1024, 128ULL * 1024 * 1024, 1024ULL * 1024 * 1024, 16ULL * 1024 * 1024 * 1024, ~0ULL,
     };
     u64 near_page = near & PAGE_MASK;
     u64 user_hi;
     int range_index;
 
-    if (!mm || !size)
-        return 0;
+    if (!mm || !size) return 0;
 
     user_hi = (u64)mm->task_size & PAGE_MASK;
-    if (user_hi <= PAGE_SIZE || size > user_hi - PAGE_SIZE)
-        return 0;
+    if (user_hi <= PAGE_SIZE || size > user_hi - PAGE_SIZE) return 0;
 
     /*
      * Prefer a nearby ghost VA, but do not fail just because the target SO text
@@ -803,20 +749,15 @@ static inline u64 arm64_dbi_ghost_find_hole_locked(struct mm_struct *mm, u64 nea
         else
         {
             lo = near_page > range ? near_page - range : PAGE_SIZE;
-            if (near_page > ~0ULL - range)
-                hi = user_hi;
-            else
-                hi = PAGE_ALIGN(near_page + range);
-            if (hi > user_hi || hi < lo)
-                hi = user_hi;
+            if (near_page > ~0ULL - range) hi = user_hi;
+            else hi = PAGE_ALIGN(near_page + range);
+            if (hi > user_hi || hi < lo) hi = user_hi;
         }
 
         lo &= PAGE_MASK;
-        if (lo < PAGE_SIZE)
-            lo = PAGE_SIZE;
+        if (lo < PAGE_SIZE) lo = PAGE_SIZE;
         hi &= PAGE_MASK;
-        if (hi <= lo || hi - lo < size)
-            continue;
+        if (hi <= lo || hi - lo < size) continue;
 
         addr = lo;
         while (addr < hi)
@@ -847,12 +788,9 @@ static inline u64 arm64_dbi_ghost_find_hole_locked(struct mm_struct *mm, u64 nea
             gap_end &= PAGE_MASK;
             if (gap_end >= gap_start + size)
             {
-                if (near_page >= gap_start && near_page + size <= gap_end)
-                    candidate = near_page;
-                else if (near_page < gap_start)
-                    candidate = gap_start;
-                else
-                    candidate = gap_end - size;
+                if (near_page >= gap_start && near_page + size <= gap_end) candidate = near_page;
+                else if (near_page < gap_start) candidate = gap_start;
+                else candidate = gap_end - size;
 
                 dist = candidate > near_page ? candidate - near_page : near_page - candidate;
                 if (dist < best_dist && user_pte_range_empty(mm, candidate, size))
@@ -862,13 +800,11 @@ static inline u64 arm64_dbi_ghost_find_hole_locked(struct mm_struct *mm, u64 nea
                 }
             }
 
-            if (!vma || vma->vm_start >= hi)
-                break;
+            if (!vma || vma->vm_start >= hi) break;
             addr = PAGE_ALIGN(vma->vm_end);
         }
 
-        if (best)
-            return best;
+        if (best) return best;
     }
 
     return 0;
@@ -882,17 +818,15 @@ static inline void arm64_dbi_ghost_sync_icache(void *addr, size_t size)
     unsigned long end = start + size;
     unsigned long line;
 
-    for (line = start & ~63UL; line < end; line += 64)
-        asm volatile("dc cvau, %0" : : "r"(line) : "memory");
+    for (line = start & ~63UL; line < end; line += 64) asm volatile("dc cvau, %0" : : "r"(line) : "memory");
 
-    asm volatile(
-        "dsb ish\n\t"
-        "ic ialluis\n\t"
-        "dsb ish\n\t"
-        "isb\n\t"
-        :
-        :
-        : "memory");
+    asm volatile("dsb ish\n\t"
+                 "ic ialluis\n\t"
+                 "dsb ish\n\t"
+                 "isb\n\t"
+                 :
+                 :
+                 : "memory");
 }
 
 // 从目标进程 target_page 对应物理页读取 4KB 原始指令快照。
@@ -903,19 +837,16 @@ static inline int arm64_dbi_ghost_read_target_page(pid_t pid, u64 target_page, v
     phys_addr_t pa = 0;
     int status;
 
-    if (!buffer)
-        return -EINVAL;
+    if (!buffer) return -EINVAL;
 
     mm = get_mm_by_pid(pid);
-    if (!mm)
-        return -ESRCH;
+    if (!mm) return -ESRCH;
 
     mmap_read_lock(mm);
     status = mmu_translate_va_to_pa(mm, target_page, &pa);
     mmap_read_unlock(mm);
     mmput(mm);
-    if (status)
-        return status;
+    if (status) return status;
 
     return pte_read_physical(pa, buffer, PAGE_SIZE);
 }
@@ -929,8 +860,7 @@ static inline int arm64_dbi_ghost_install_ptes(struct mm_struct *mm, struct arm6
     int page_count = arm64_dbi_ghost_page_count();
     int status = 0;
 
-    if (!mm || !ghost || !ghost->ghost_page || !ghost->ghost_pa)
-        return -EINVAL;
+    if (!mm || !ghost || !ghost->ghost_page || !ghost->ghost_pa) return -EINVAL;
 
     for (index = 0; index < page_count; index++)
     {
@@ -965,8 +895,7 @@ err_clear:
         u64 ghost_addr = ghost->ghost_page + (u64)(installed - 1) * PAGE_SIZE;
         pte_t *ptep = get_user_pte(mm, ghost_addr);
 
-        if (ptep)
-            set_pte(ptep, __pte(0));
+        if (ptep) set_pte(ptep, __pte(0));
         installed--;
     }
     flush_tlb_all();
@@ -980,15 +909,13 @@ static inline void arm64_dbi_ghost_clear_ptes(struct mm_struct *mm, u64 ghost_pa
     int index;
     int page_count = arm64_dbi_ghost_page_count();
 
-    if (!mm || !ghost_page)
-        return;
+    if (!mm || !ghost_page) return;
 
     mmap_write_lock(mm);
     for (index = 0; index < page_count; index++)
     {
         pte_t *ptep = get_user_pte(mm, ghost_page + (u64)index * PAGE_SIZE);
-        if (ptep)
-            set_pte(ptep, __pte(0));
+        if (ptep) set_pte(ptep, __pte(0));
     }
     mmap_write_unlock(mm);
     flush_tlb_all();
@@ -999,11 +926,9 @@ static inline void arm64_dbi_ghost_release(pid_t pid, struct arm64_dbi_ghost *gh
 {
     struct mm_struct *mm;
 
-    if (!ghost)
-        return;
+    if (!ghost) return;
 
-    if (pid > 0 && ghost->armed)
-        arm64_dbi_ghost_restore_target_pte(pid, ghost);
+    if (pid > 0 && ghost->armed) arm64_dbi_ghost_restore_target_pte(pid, ghost);
 
     if (pid > 0 && ghost->ghost_page)
     {
@@ -1015,10 +940,8 @@ static inline void arm64_dbi_ghost_release(pid_t pid, struct arm64_dbi_ghost *gh
         }
     }
 
-    if (ghost->ghost_copy)
-        free_pages((unsigned long)ghost->ghost_copy, arm64_dbi_ghost_order());
-    if (ghost->target_copy)
-        vfree(ghost->target_copy);
+    if (ghost->ghost_copy) free_pages((unsigned long)ghost->ghost_copy, arm64_dbi_ghost_order());
+    if (ghost->target_copy) vfree(ghost->target_copy);
     __builtin_memset(ghost, 0, sizeof(*ghost));
 }
 
@@ -1033,8 +956,7 @@ static inline int arm64_dbi_ghost_prepare_resource(pid_t pid, u64 target_page, c
     int status;
     size_t ghost_size = arm64_dbi_ghost_size();
 
-    if (!ghost || (target_page & ~PAGE_MASK))
-        return -EINVAL;
+    if (!ghost || (target_page & ~PAGE_MASK)) return -EINVAL;
 
     __builtin_memset(ghost, 0, sizeof(*ghost));
     ghost->target_page = target_page;
@@ -1057,14 +979,12 @@ static inline int arm64_dbi_ghost_prepare_resource(pid_t pid, u64 target_page, c
     else
     {
         status = arm64_dbi_ghost_read_target_page(pid, target_page, ghost->target_copy);
-        if (status < 0)
-            goto err_out;
+        if (status < 0) goto err_out;
     }
 
     // 记录原始 PTE，后续启用 UXN 和 release 恢复都依赖它。
     status = read_user_pte_value_by_pid(pid, target_page, &ghost->saved_pte);
-    if (status)
-        goto err_out;
+    if (status) goto err_out;
 
     mm = get_mm_by_pid(pid);
     if (!mm)
@@ -1079,8 +999,7 @@ static inline int arm64_dbi_ghost_prepare_resource(pid_t pid, u64 target_page, c
     mmap_write_unlock(mm);
     if (!ghost->ghost_page)
     {
-        ls_log_tag("ptebp", "no ghost VA hole pid=%d target=0x%llx size=0x%zx task_size=0x%llx\n",
-                   pid, target_page, ghost_size, (u64)mm->task_size);
+        ls_log_tag("ptebp", "no ghost VA hole pid=%d target=0x%llx size=0x%zx task_size=0x%llx\n", pid, target_page, ghost_size, (u64)mm->task_size);
         mmput(mm);
         status = -ENOSPC;
         goto err_out;
@@ -1094,12 +1013,8 @@ static inline int arm64_dbi_ghost_prepare_resource(pid_t pid, u64 target_page, c
     ghost->dbi.ghost = ghost->ghost_copy;
     ghost->dbi.ghost_capacity = ARM64_DBI_GHOST_MAX_INSNS;
     status = arm64_dbi_recompile_page(&ghost->dbi);
-    if (status)
-        ls_log_tag("ptebp", "DBI recompile failed pid=%d target=0x%llx ghost=0x%llx status=%d count=%d pending=%d failed=%d\n",
-                   pid, target_page, ghost->ghost_page, status, ghost->dbi.ghost_count,
-                   ghost->dbi.n_pending, ghost->dbi.failed);
-    if (status)
-        goto err_out;
+    if (status) ls_log_tag("ptebp", "DBI recompile failed pid=%d target=0x%llx ghost=0x%llx status=%d count=%d pending=%d failed=%d\n", pid, target_page, ghost->ghost_page, status, ghost->dbi.ghost_count, ghost->dbi.n_pending, ghost->dbi.failed);
+    if (status) goto err_out;
 
     mm = get_mm_by_pid(pid);
     if (!mm)
@@ -1112,8 +1027,7 @@ static inline int arm64_dbi_ghost_prepare_resource(pid_t pid, u64 target_page, c
     status = arm64_dbi_ghost_install_ptes(mm, ghost);
     mmap_write_unlock(mm);
     mmput(mm);
-    if (status)
-        goto err_out;
+    if (status) goto err_out;
 
     arm64_dbi_ghost_sync_icache(ghost->ghost_copy, ghost_size);
     return 0;
@@ -1132,8 +1046,7 @@ static inline struct arm64_dbi_ghost_slot *arm64_dbi_ghost_find_slot_locked(pid_
     {
         struct arm64_dbi_ghost_slot *slot = &g_arm64_dbi_ghost_slots[slot_index];
 
-        if (slot->used && slot->pid == pid && slot->ghost.target_page == target_page)
-            return slot;
+        if (slot->used && slot->pid == pid && slot->ghost.target_page == target_page) return slot;
     }
 
     return NULL;
@@ -1145,8 +1058,7 @@ static inline struct arm64_dbi_ghost_slot *arm64_dbi_ghost_alloc_slot_locked(voi
 
     for (slot_index = 0; slot_index < ARM64_DBI_GHOST_SLOT_COUNT; slot_index++)
     {
-        if (!g_arm64_dbi_ghost_slots[slot_index].used)
-            return &g_arm64_dbi_ghost_slots[slot_index];
+        if (!g_arm64_dbi_ghost_slots[slot_index].used) return &g_arm64_dbi_ghost_slots[slot_index];
     }
 
     return NULL;
@@ -1154,8 +1066,7 @@ static inline struct arm64_dbi_ghost_slot *arm64_dbi_ghost_alloc_slot_locked(voi
 
 static inline void arm64_dbi_ghost_release_slot_copy(pid_t pid, struct arm64_dbi_ghost_slot *slot)
 {
-    if (!slot || !slot->used)
-        return;
+    if (!slot || !slot->used) return;
 
     arm64_dbi_ghost_release(pid, &slot->ghost);
     __builtin_memset(slot, 0, sizeof(*slot));
@@ -1171,12 +1082,10 @@ static inline int arm64_dbi_ghost_install(pid_t pid, u64 target_page, const void
     pteval_t armed_pte;
     int status = 0;
 
-    if (pid <= 0 || (target_page & ~PAGE_MASK))
-        return -EINVAL;
+    if (pid <= 0 || (target_page & ~PAGE_MASK)) return -EINVAL;
 
     prepared = kzalloc(sizeof(*prepared), GFP_KERNEL);
-    if (!prepared)
-        return -ENOMEM;
+    if (!prepared) return -ENOMEM;
 
     mutex_lock(&g_arm64_dbi_ghost_mutex);
 
@@ -1191,8 +1100,7 @@ static inline int arm64_dbi_ghost_install(pid_t pid, u64 target_page, const void
     spin_unlock_irqrestore(&g_arm64_dbi_ghost_lock, flags);
 
     status = arm64_dbi_ghost_prepare_resource(pid, target_page, machine_code_4k, prepared);
-    if (status)
-        goto out_unlock;
+    if (status) goto out_unlock;
 
     spin_lock_irqsave(&g_arm64_dbi_ghost_lock, flags);
     slot = arm64_dbi_ghost_alloc_slot_locked();
@@ -1200,8 +1108,7 @@ static inline int arm64_dbi_ghost_install(pid_t pid, u64 target_page, const void
     {
         spin_unlock_irqrestore(&g_arm64_dbi_ghost_lock, flags);
         arm64_dbi_ghost_release(pid, prepared);
-        ls_log_tag("ptebp", "ghost slot exhausted pid=%d target=0x%llx slots=%d\n",
-               pid, target_page, ARM64_DBI_GHOST_SLOT_COUNT);
+        ls_log_tag("ptebp", "ghost slot exhausted pid=%d target=0x%llx slots=%d\n", pid, target_page, ARM64_DBI_GHOST_SLOT_COUNT);
         status = -ENOSPC;
         goto out_unlock;
     }
@@ -1222,8 +1129,7 @@ static inline int arm64_dbi_ghost_install(pid_t pid, u64 target_page, const void
     if (armed_pte != slot->ghost.saved_pte)
     {
         status = write_user_pte_value_by_pid(pid, slot->ghost.target_page, armed_pte);
-        if (!status)
-            flush_tlb_all();
+        if (!status) flush_tlb_all();
     }
     if (status)
     {
@@ -1237,8 +1143,7 @@ static inline int arm64_dbi_ghost_install(pid_t pid, u64 target_page, const void
     }
 
 out_success:
-    if (out_ghost_page)
-        *out_ghost_page = ghost_page;
+    if (out_ghost_page) *out_ghost_page = ghost_page;
 
 out_unlock:
     mutex_unlock(&g_arm64_dbi_ghost_mutex);
@@ -1254,10 +1159,8 @@ static inline bool arm64_dbi_ghost_lookup_pc(pid_t pid, u64 target_page, u64 tar
     u64 ghost_pc = 0;
     bool found = false;
 
-    if (out_ghost_pc)
-        *out_ghost_pc = 0;
-    if (pid <= 0 || (target_page & ~PAGE_MASK))
-        return false;
+    if (out_ghost_pc) *out_ghost_pc = 0;
+    if (pid <= 0 || (target_page & ~PAGE_MASK)) return false;
 
     spin_lock_irqsave(&g_arm64_dbi_ghost_lock, flags);
     slot = arm64_dbi_ghost_find_slot_locked(pid, target_page);
@@ -1268,8 +1171,7 @@ static inline bool arm64_dbi_ghost_lookup_pc(pid_t pid, u64 target_page, u64 tar
     }
     spin_unlock_irqrestore(&g_arm64_dbi_ghost_lock, flags);
 
-    if (out_ghost_pc)
-        *out_ghost_pc = ghost_pc;
+    if (out_ghost_pc) *out_ghost_pc = ghost_pc;
     return found;
 }
 
@@ -1280,8 +1182,7 @@ static inline void arm64_dbi_ghost_remove_all(pid_t pid)
     int slot_index;
     int release_count = 0;
 
-    if (pid <= 0)
-        return;
+    if (pid <= 0) return;
 
     mutex_lock(&g_arm64_dbi_ghost_mutex);
     __builtin_memset(g_arm64_dbi_ghost_release_slots, 0, sizeof(g_arm64_dbi_ghost_release_slots));
@@ -1291,16 +1192,14 @@ static inline void arm64_dbi_ghost_remove_all(pid_t pid)
     {
         struct arm64_dbi_ghost_slot *slot = &g_arm64_dbi_ghost_slots[slot_index];
 
-        if (!slot->used || slot->pid != pid)
-            continue;
+        if (!slot->used || slot->pid != pid) continue;
 
         g_arm64_dbi_ghost_release_slots[release_count++] = *slot;
         __builtin_memset(slot, 0, sizeof(*slot));
     }
     spin_unlock_irqrestore(&g_arm64_dbi_ghost_lock, flags);
 
-    for (slot_index = 0; slot_index < release_count; slot_index++)
-        arm64_dbi_ghost_release_slot_copy(pid, &g_arm64_dbi_ghost_release_slots[slot_index]);
+    for (slot_index = 0; slot_index < release_count; slot_index++) arm64_dbi_ghost_release_slot_copy(pid, &g_arm64_dbi_ghost_release_slots[slot_index]);
 
     mutex_unlock(&g_arm64_dbi_ghost_mutex);
 }

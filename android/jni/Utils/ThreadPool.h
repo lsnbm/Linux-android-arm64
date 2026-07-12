@@ -17,8 +17,7 @@ namespace Utils
 {
     inline unsigned GetThreadCount() noexcept
     {
-        if (auto n = std::thread::hardware_concurrency(); n > 0)
-            return n;
+        if (auto n = std::thread::hardware_concurrency(); n > 0) return n;
         return 4;
     }
 
@@ -32,38 +31,42 @@ namespace Utils
         size_t active_{0};
         bool stopping_{false};
 
-    public:
+      public:
         explicit ThreadPool(size_t n = GetThreadCount())
         {
-            if (n == 0)
-                n = 4;
+            if (n == 0) n = 4;
             for (size_t i = 0; i < n; ++i)
             {
-                workers_.emplace_back([this](std::stop_token st)
-                                      {
-                    while (true) {
-                        std::function<void()> task;
+                workers_.emplace_back(
+                    [this](std::stop_token st)
+                    {
+                        while (true)
                         {
-                            std::unique_lock lk(mtx_);
-                            cv_.wait(lk, st, [&]{ return stopping_ || !tasks_.empty(); });
-                            if ((st.stop_requested() || stopping_) && tasks_.empty()) return;
-                            if (tasks_.empty()) continue;
-                            task = std::move(tasks_.front());
-                            tasks_.pop();
-                            ++active_;
+                            std::function<void()> task;
+                            {
+                                std::unique_lock lk(mtx_);
+                                cv_.wait(lk, st, [&] { return stopping_ || !tasks_.empty(); });
+                                if ((st.stop_requested() || stopping_) && tasks_.empty()) return;
+                                if (tasks_.empty()) continue;
+                                task = std::move(tasks_.front());
+                                tasks_.pop();
+                                ++active_;
+                            }
+                            try
+                            {
+                                task();
+                            }
+                            catch (...)
+                            {
+                                // 防止任务异常导致工作线程退出。
+                            }
+                            {
+                                std::lock_guard lk(mtx_);
+                                --active_;
+                                if (tasks_.empty() && active_ == 0) done_cv_.notify_all();
+                            }
                         }
-                        try {
-                            task();
-                        } catch (...) {
-                            // 防止任务异常导致工作线程退出。
-                        }
-                        {
-                            std::lock_guard lk(mtx_);
-                            --active_;
-                            if (tasks_.empty() && active_ == 0)
-                                done_cv_.notify_all();
-                        }
-                    } });
+                    });
             }
         }
 
@@ -75,38 +78,27 @@ namespace Utils
         ThreadPool(const ThreadPool &) = delete;
         ThreadPool &operator=(const ThreadPool &) = delete;
 
-        template <class F, class... Args>
-        auto push(F &&f, Args &&...args) -> std::future<std::invoke_result_t<F, Args...>>
+        template <class F, class... Args> auto push(F &&f, Args &&...args) -> std::future<std::invoke_result_t<F, Args...>>
         {
             using R = std::invoke_result_t<F, Args...>;
-            auto task = std::make_shared<std::packaged_task<R()>>(
-                std::bind(std::forward<F>(f), std::forward<Args>(args)...));
+            auto task = std::make_shared<std::packaged_task<R()>>(std::bind(std::forward<F>(f), std::forward<Args>(args)...));
             auto fut = task->get_future();
             {
                 std::lock_guard lk(mtx_);
-                if (stopping_)
-                    throw std::runtime_error("ThreadPool is stopping");
-                tasks_.emplace([task]
-                               { (*task)(); });
+                if (stopping_) throw std::runtime_error("ThreadPool is stopping");
+                tasks_.emplace([task] { (*task)(); });
             }
             cv_.notify_one();
             return fut;
         }
 
-        template <class F, class... Args>
-        bool post(F &&f, Args &&...args)
+        template <class F, class... Args> bool post(F &&f, Args &&...args)
         {
-            auto thunk = std::make_shared<std::tuple<std::decay_t<F>, std::decay_t<Args>...>>(
-                std::forward<F>(f), std::forward<Args>(args)...);
+            auto thunk = std::make_shared<std::tuple<std::decay_t<F>, std::decay_t<Args>...>>(std::forward<F>(f), std::forward<Args>(args)...);
             {
                 std::lock_guard lk(mtx_);
-                if (stopping_)
-                    return false;
-                tasks_.emplace([thunk]() mutable
-                               {
-                                   std::apply([](auto &fn, auto &...xs)
-                                              { std::invoke(fn, xs...); }, *thunk);
-                               });
+                if (stopping_) return false;
+                tasks_.emplace([thunk]() mutable { std::apply([](auto &fn, auto &...xs) { std::invoke(fn, xs...); }, *thunk); });
             }
             cv_.notify_one();
             return true;
@@ -115,27 +107,23 @@ namespace Utils
         void wait_all()
         {
             std::unique_lock lk(mtx_);
-            done_cv_.wait(lk, [&]
-                          { return tasks_.empty() && active_ == 0; });
+            done_cv_.wait(lk, [&] { return tasks_.empty() && active_ == 0; });
         }
 
         void shutdown(bool drop_pending)
         {
             {
                 std::lock_guard lk(mtx_);
-                if (stopping_)
-                    return;
+                if (stopping_) return;
                 stopping_ = true;
                 if (drop_pending)
                 {
-                    while (!tasks_.empty())
-                        tasks_.pop();
+                    while (!tasks_.empty()) tasks_.pop();
                 }
             }
             if (drop_pending)
             {
-                for (auto &w : workers_)
-                    w.request_stop();
+                for (auto &w : workers_) w.request_stop();
             }
             cv_.notify_all();
             done_cv_.notify_all();
@@ -150,7 +138,7 @@ namespace Utils
 
     class GlobalThreadPools
     {
-    public:
+      public:
         ThreadPool &cpu()
         {
             static ThreadPool pool{GetThreadCount()};
@@ -163,26 +151,22 @@ namespace Utils
             return pool;
         }
 
-        template <class F, class... Args>
-        auto push(F &&f, Args &&...args) -> std::future<std::invoke_result_t<F, Args...>>
+        template <class F, class... Args> auto push(F &&f, Args &&...args) -> std::future<std::invoke_result_t<F, Args...>>
         {
             return cpu().push(std::forward<F>(f), std::forward<Args>(args)...);
         }
 
-        template <class F, class... Args>
-        bool post(F &&f, Args &&...args)
+        template <class F, class... Args> bool post(F &&f, Args &&...args)
         {
             return cpu().post(std::forward<F>(f), std::forward<Args>(args)...);
         }
 
-        template <class F, class... Args>
-        auto push_io(F &&f, Args &&...args) -> std::future<std::invoke_result_t<F, Args...>>
+        template <class F, class... Args> auto push_io(F &&f, Args &&...args) -> std::future<std::invoke_result_t<F, Args...>>
         {
             return io().push(std::forward<F>(f), std::forward<Args>(args)...);
         }
 
-        template <class F, class... Args>
-        bool post_io(F &&f, Args &&...args)
+        template <class F, class... Args> bool post_io(F &&f, Args &&...args)
         {
             return io().post(std::forward<F>(f), std::forward<Args>(args)...);
         }
@@ -201,4 +185,4 @@ namespace Utils
     };
 
     inline GlobalThreadPools GlobalPool{};
-}
+} // namespace Utils

@@ -28,8 +28,7 @@ namespace Disasm
     */
     static inline void NormalizeAsmText(const char *in, char *out, size_t outSize)
     {
-        if (!out || outSize == 0)
-            return;
+        if (!out || outSize == 0) return;
 
         size_t n = 0;
         if (in)
@@ -37,8 +36,7 @@ namespace Disasm
             for (const char *p = in; *p && n + 1 < outSize; ++p)
             {
                 unsigned char ch = static_cast<unsigned char>(*p);
-                if (std::isspace(ch))
-                    continue;
+                if (std::isspace(ch)) continue;
                 out[n++] = static_cast<char>(std::toupper(ch));
             }
         }
@@ -51,13 +49,11 @@ namespace Disasm
     */
     static inline bool ParseNumberAt(const char *p, uint64_t *outValue)
     {
-        if (!p || !outValue)
-            return false;
+        if (!p || !outValue) return false;
 
         char *end = nullptr;
         uint64_t value = std::strtoull(p, &end, 0);
-        if (end == p)
-            return false;
+        if (end == p) return false;
 
         *outValue = value;
         return true;
@@ -69,14 +65,12 @@ namespace Disasm
     */
     static inline bool ParseFirstHex(const char *text, uint64_t *outValue)
     {
-        if (!text || !outValue)
-            return false;
+        if (!text || !outValue) return false;
 
         char norm[192]{};
         NormalizeAsmText(text, norm, sizeof(norm));
         const char *p = std::strstr(norm, "0X");
-        if (!p)
-            return false;
+        if (!p) return false;
 
         return ParseNumberAt(p, outValue);
     }
@@ -88,8 +82,7 @@ namespace Disasm
     */
     static inline bool ParseHashImmAfter(const char *text, const char *needle, uint64_t *outValue)
     {
-        if (!text || !needle || !outValue)
-            return false;
+        if (!text || !needle || !outValue) return false;
 
         char norm[192]{};
         char key[64]{};
@@ -97,12 +90,10 @@ namespace Disasm
         NormalizeAsmText(needle, key, sizeof(key));
 
         const char *p = std::strstr(norm, key);
-        if (!p)
-            return false;
+        if (!p) return false;
 
         p += std::strlen(key);
-        if (*p == '#')
-            ++p;
+        if (*p == '#') ++p;
 
         return ParseNumberAt(p, outValue);
     }
@@ -114,8 +105,7 @@ namespace Disasm
     */
     static inline bool ParseMemOffsetForBase(const char *op, const char *baseReg, uint64_t *outOffset)
     {
-        if (!op || !baseReg || !outOffset)
-            return false;
+        if (!op || !baseReg || !outOffset) return false;
 
         char norm[192]{};
         char base[16]{};
@@ -126,12 +116,10 @@ namespace Disasm
         std::snprintf(pattern, sizeof(pattern), "[%s", base);
 
         const char *p = std::strstr(norm, pattern);
-        if (!p)
-            return false;
+        if (!p) return false;
 
         const char *end = std::strchr(p, ']');
-        if (!end)
-            return false;
+        if (!end) return false;
 
         const char *imm = std::strstr(p, "#0X");
         if (!imm || imm > end)
@@ -149,8 +137,7 @@ namespace Disasm
     */
     static inline bool OpStartsWith(const char *op, const char *prefix)
     {
-        if (!op || !prefix)
-            return false;
+        if (!op || !prefix) return false;
 
         char norm[192]{};
         char key[64]{};
@@ -165,8 +152,7 @@ namespace Disasm
     */
     static inline bool OpContains(const char *op, const char *needle)
     {
-        if (!op || !needle)
-            return false;
+        if (!op || !needle) return false;
 
         char norm[192]{};
         char key[64]{};
@@ -177,7 +163,7 @@ namespace Disasm
 
     class Disassembler
     {
-    public:
+      public:
         static constexpr size_t DEFAULT_MAX_INSTRUCTIONS = 500;
 
         Disassembler() : m_handle(0), m_valid(false)
@@ -216,18 +202,18 @@ namespace Disasm
         Disassembler(const Disassembler &) = delete;
         Disassembler &operator=(const Disassembler &) = delete;
 
-        bool IsValid() const { return m_valid; }
+        bool IsValid() const
+        {
+            return m_valid;
+        }
 
         const char *GetLastError() const
         {
-            if (!m_valid)
-                return "反汇编器未初始化";
+            if (!m_valid) return "反汇编器未初始化";
             return cs_strerror(cs_errno(m_handle));
         }
 
-        std::vector<DisasmLine> Disassemble(uint64_t address, const uint8_t *buffer,
-                                            size_t size, size_t maxCount = DEFAULT_MAX_INSTRUCTIONS,
-                                            bool logInstructions = false)
+        std::vector<DisasmLine> Disassemble(uint64_t address, const uint8_t *buffer, size_t size, size_t maxCount = DEFAULT_MAX_INSTRUCTIONS, bool logInstructions = false)
         {
             std::vector<DisasmLine> results;
 
@@ -253,32 +239,24 @@ namespace Disasm
             }
 
             // 输出反汇编结果
-            if (logInstructions)
-                printf("[*] 反汇编 %zu 条指令:\n", count);
+            if (logInstructions) printf("[*] 反汇编 %zu 条指令:\n", count);
             for (size_t i = 0; i < count; i++)
             {
-                if (!logInstructions)
-                    continue;
+                if (!logInstructions) continue;
                 // 原始字节
                 char bytesStr[48] = {0};
                 int pos = 0;
-                for (size_t j = 0; j < insn[i].size; j++)
-                    pos += snprintf(bytesStr + pos, sizeof(bytesStr) - pos, "%02X ", insn[i].bytes[j]);
-                if (pos > 0)
-                    bytesStr[pos - 1] = '\0';
+                for (size_t j = 0; j < insn[i].size; j++) pos += snprintf(bytesStr + pos, sizeof(bytesStr) - pos, "%02X ", insn[i].bytes[j]);
+                if (pos > 0) bytesStr[pos - 1] = '\0';
 
                 // 大写化
                 char mn[32] = {0}, op[160] = {0};
                 strncpy(mn, insn[i].mnemonic, sizeof(mn) - 1);
                 strncpy(op, insn[i].op_str, sizeof(op) - 1);
-                for (char *p = mn; *p; ++p)
-                    *p = std::toupper(static_cast<unsigned char>(*p));
-                for (char *p = op; *p; ++p)
-                    *p = std::toupper(static_cast<unsigned char>(*p));
+                for (char *p = mn; *p; ++p) *p = std::toupper(static_cast<unsigned char>(*p));
+                for (char *p = op; *p; ++p) *p = std::toupper(static_cast<unsigned char>(*p));
 
-                printf("  0x%llX:  %-12s  %-7s %s\n",
-                       (unsigned long long)insn[i].address,
-                       bytesStr, mn, op);
+                printf("  0x%llX:  %-12s  %-7s %s\n", (unsigned long long)insn[i].address, bytesStr, mn, op);
             }
 
             // 填充结果
@@ -296,10 +274,8 @@ namespace Disasm
                 strncpy(line.mnemonic, insn[i].mnemonic, sizeof(line.mnemonic) - 1);
                 strncpy(line.op_str, insn[i].op_str, sizeof(line.op_str) - 1);
 
-                for (char *p = line.mnemonic; *p; ++p)
-                    *p = std::toupper(static_cast<unsigned char>(*p));
-                for (char *p = line.op_str; *p; ++p)
-                    *p = std::toupper(static_cast<unsigned char>(*p));
+                for (char *p = line.mnemonic; *p; ++p) *p = std::toupper(static_cast<unsigned char>(*p));
+                for (char *p = line.op_str; *p; ++p) *p = std::toupper(static_cast<unsigned char>(*p));
 
                 results.push_back(line);
             }
@@ -308,7 +284,7 @@ namespace Disasm
             return results;
         }
 
-    private:
+      private:
         csh m_handle;
         bool m_valid;
     };

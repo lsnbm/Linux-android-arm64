@@ -9,7 +9,7 @@ from pathlib import Path
 
 SCRIPT_PATH = Path(__file__).resolve()
 SCRIPT_DIR = SCRIPT_PATH.parent
-DEFAULT_OUTPUT_DIR = SCRIPT_DIR / "build"
+DEFAULT_OUTPUT_DIR = SCRIPT_DIR
 
 GUI_MARKERS = (
     "import PySide6",
@@ -179,7 +179,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-dir",
         default=str(DEFAULT_OUTPUT_DIR),
-        help="Directory for final .exe files. Default: <script directory>/build.",
+        help="Directory for final .exe files. Default: the script directory.",
     )
     parser.add_argument(
         "--no-clean",

@@ -136,8 +136,7 @@ static bool hide_kgsl_has_pid(void)
     int i;
 
     for (i = 0; i < HIDE_KGSL_MAX_PIDS; i++)
-        if (READ_ONCE(g_hide_kgsl_pids[i]))
-            return true;
+        if (READ_ONCE(g_hide_kgsl_pids[i])) return true;
     return false;
 }
 
@@ -150,8 +149,7 @@ static bool should_hide(void)
     {
         pid_t hide_pid = READ_ONCE(g_hide_kgsl_pids[i]);
 
-        if (hide_pid && current->tgid == hide_pid)
-            return true;
+        if (hide_pid && current->tgid == hide_pid) return true;
     }
     return false;
 }
@@ -163,8 +161,7 @@ static bool kobj_under_kgsl(struct kobject *kobj)
 
     for (p = kobj->parent; p && depth < 8; p = p->parent, depth++)
     {
-        if (p->name && strstr(p->name, "kgsl"))
-            return true;
+        if (p->name && strstr(p->name, "kgsl")) return true;
     }
     return false;
 }
@@ -191,11 +188,9 @@ static int sysfs_create_group_hook_work(struct pt_regs *regs)
 {
     struct kobject *kobj = (struct kobject *)regs->regs[0];
 
-    if (!kobj || !kobj->name)
-        return 0;
+    if (!kobj || !kobj->name) return 0;
 
-    if (!kobj_under_kgsl(kobj))
-        return 0;
+    if (!kobj_under_kgsl(kobj)) return 0;
 
     if (should_hide())
     {
@@ -219,8 +214,7 @@ int hide_kgsl_install(pid_t pid)
     int ret = 0;
     int i, empty = -1;
 
-    if (pid <= 0)
-        return -EINVAL;
+    if (pid <= 0) return -EINVAL;
 
     mutex_lock(&g_hide_kgsl_lock);
 
@@ -237,10 +231,8 @@ int hide_kgsl_install(pid_t pid)
     {
         pid_t hidden_pid = READ_ONCE(g_hide_kgsl_pids[i]);
 
-        if (hidden_pid == pid)
-            goto out_unlock;
-        if (!hidden_pid && empty < 0)
-            empty = i;
+        if (hidden_pid == pid) goto out_unlock;
+        if (!hidden_pid && empty < 0) empty = i;
     }
 
     if (empty < 0)
@@ -262,18 +254,15 @@ void hide_kgsl_remove(pid_t pid)
 {
     int i;
 
-    if (pid <= 0)
-        return;
+    if (pid <= 0) return;
 
     mutex_lock(&g_hide_kgsl_lock);
     for (i = 0; i < HIDE_KGSL_MAX_PIDS; i++)
     {
-        if (READ_ONCE(g_hide_kgsl_pids[i]) == pid)
-            WRITE_ONCE(g_hide_kgsl_pids[i], 0);
+        if (READ_ONCE(g_hide_kgsl_pids[i]) == pid) WRITE_ONCE(g_hide_kgsl_pids[i], 0);
     }
 
-    if (!hide_kgsl_has_pid())
-        inline_hook_remove(g_kgsl_hooks);
+    if (!hide_kgsl_has_pid()) inline_hook_remove(g_kgsl_hooks);
     mutex_unlock(&g_hide_kgsl_lock);
 }
 

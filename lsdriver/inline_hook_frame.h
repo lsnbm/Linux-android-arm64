@@ -33,22 +33,21 @@ paciasp指令包含bti功能
 #define HOOK_STUB_WORDS 4
 #define HOOK_STUB_BYTES (HOOK_STUB_WORDS * 4)
 
-#define TRAMP_WORDS 120
-#define TRAMP_BYTES (TRAMP_WORDS * 4)
-#define TRAMP_SLOT_COUNT 16
-#define TRAMP_ORIG_INSN_INDEX 57
+#define TRAMP_WORDS             120
+#define TRAMP_BYTES             (TRAMP_WORDS * 4)
+#define TRAMP_SLOT_COUNT        32
+#define TRAMP_ORIG_INSN_INDEX   57
 #define TRAMP_RET_TO_ORIG_INDEX 61
-#define TRAMP_RET_SLOT_INDEX 116
-#define TRAMP_WORK_SLOT_INDEX 118
+#define TRAMP_RET_SLOT_INDEX    116
+#define TRAMP_WORK_SLOT_INDEX   118
 
 #define HOOK_STR_1(x) #x
-#define HOOK_STR(x) HOOK_STR_1(x)
+#define HOOK_STR(x)   HOOK_STR_1(x)
 
 // 用符号链接下面汇编代码段，安装hook时patch为跳板代码
 extern uint32_t inline_hook_trampoline_slots[];
 
-asm(
-    ".pushsection .text\n\t"
+asm(".pushsection .text\n\t"
     ".balign 8\n\t"
     ".globl inline_hook_trampoline_slots\n\t"
     "inline_hook_trampoline_slots:\n\t"
@@ -64,8 +63,7 @@ static DECLARE_BITMAP(g_slot_used, TRAMP_SLOT_COUNT);
 static int slot_alloc(uint32_t **trampoline_out)
 {
     int bit = find_first_zero_bit(g_slot_used, TRAMP_SLOT_COUNT);
-    if (bit >= TRAMP_SLOT_COUNT)
-        return -ENOSPC;
+    if (bit >= TRAMP_SLOT_COUNT) return -ENOSPC;
     set_bit(bit, g_slot_used);
     *trampoline_out = inline_hook_trampoline_slots + bit * TRAMP_WORDS;
     return bit;
@@ -82,11 +80,9 @@ static int trampoline_patch(uint32_t *dst, const uint32_t *src)
     int i;
     void *addrs[TRAMP_WORDS];
 
-    if (!fn_aarch64_insn_patch_text)
-        return -ENOENT;
+    if (!fn_aarch64_insn_patch_text) return -ENOENT;
 
-    for (i = 0; i < TRAMP_WORDS; i++)
-        addrs[i] = (void *)&dst[i];
+    for (i = 0; i < TRAMP_WORDS; i++) addrs[i] = (void *)&dst[i];
 
     return fn_aarch64_insn_patch_text(addrs, (uint32_t *)src, TRAMP_WORDS);
 }
@@ -95,8 +91,7 @@ static void hook_save_orig_insns(uint64_t addr, uint32_t *insns, int count)
 {
     int i;
     // AArch64指令天然4字节对齐，这里逐条READ_ONCE保存入口被覆盖的指令word。
-    for (i = 0; i < count; i++)
-        insns[i] = READ_ONCE(*(uint32_t *)(uintptr_t)(addr + i * 4));
+    for (i = 0; i < count; i++) insns[i] = READ_ONCE(*(uint32_t *)(uintptr_t)(addr + i * 4));
 }
 
 // 批量 patch 一段 AArch64 指令；aarch64_insn_patch_text 内部负责 stop_machine 同步。
@@ -105,14 +100,11 @@ static int hook_patch_words(uint64_t addr, const uint32_t *insns, int count)
     int i;
     void *addrs[HOOK_STUB_WORDS];
 
-    if (!fn_aarch64_insn_patch_text)
-        return -ENOENT;
+    if (!fn_aarch64_insn_patch_text) return -ENOENT;
 
-    if (count <= 0 || count > HOOK_STUB_WORDS)
-        return -EINVAL;
+    if (count <= 0 || count > HOOK_STUB_WORDS) return -EINVAL;
 
-    for (i = 0; i < count; i++)
-        addrs[i] = (void *)(uintptr_t)(addr + i * 4);
+    for (i = 0; i < count; i++) addrs[i] = (void *)(uintptr_t)(addr + i * 4);
 
     return fn_aarch64_insn_patch_text(addrs, (uint32_t *)insns, count);
 }
@@ -315,8 +307,7 @@ static int hook_entry_install(struct hook_entry *e)
     int ret, slot;
     uint64_t return_addr;
 
-    if (e->installed)
-        return 0;
+    if (e->installed) return 0;
 
     // 查符号地址
     if (!e->target_addr && e->target_sym)
@@ -328,20 +319,16 @@ static int hook_entry_install(struct hook_entry *e)
             return -ENOENT;
         }
     }
-    if (!e->target_addr || !e->work_fn)
-        return -EINVAL;
+    if (!e->target_addr || !e->work_fn) return -EINVAL;
 
     // 分配并获取一个槽位
     slot = slot_alloc(&e->trampoline);
-    if (slot < 0)
-        return -ENOSPC;
+    if (slot < 0) return -ENOSPC;
     e->slot_index = slot;
 
     // 保存原始指令，入口会被4条指令的ret跳板覆盖
     hook_save_orig_insns(e->target_addr, e->saved_insn, HOOK_STUB_WORDS);
-    ls_log_tag("hook", "original %s: 0x%llx: %08x %08x %08x %08x\n",
-               e->target_sym ? e->target_sym : "<addr>", e->target_addr,
-               e->saved_insn[0], e->saved_insn[1], e->saved_insn[2], e->saved_insn[3]);
+    ls_log_tag("hook", "original %s: 0x%llx: %08x %08x %08x %08x\n", e->target_sym ? e->target_sym : "<addr>", e->target_addr, e->saved_insn[0], e->saved_insn[1], e->saved_insn[2], e->saved_insn[3]);
 
     // return_addr = handler + 16(跳过被我们覆盖的4条指令)
     return_addr = e->target_addr + HOOK_STUB_BYTES;
@@ -374,18 +361,14 @@ static int hook_entry_install(struct hook_entry *e)
     }
 
     e->installed = true;
-    ls_log_tag("hook", "installed %s: target=0x%llx trampoline=0x%llx slot=%d work=0x%llx return=0x%llx hook=%08x %08x %08x %08x\n",
-               e->target_sym ? e->target_sym : "<addr>", e->target_addr, (uint64_t)e->trampoline,
-               e->slot_index, (uint64_t)e->work_fn, return_addr,
-               hook_code[0], hook_code[1], hook_code[2], hook_code[3]);
+    ls_log_tag("hook", "installed %s: target=0x%llx trampoline=0x%llx slot=%d work=0x%llx return=0x%llx hook=%08x %08x %08x %08x\n", e->target_sym ? e->target_sym : "<addr>", e->target_addr, (uint64_t)e->trampoline, e->slot_index, (uint64_t)e->work_fn, return_addr, hook_code[0], hook_code[1], hook_code[2], hook_code[3]);
     return 0;
 }
 
 // 卸载单条 hook
 static void hook_entry_remove(struct hook_entry *e)
 {
-    if (!e->installed)
-        return;
+    if (!e->installed) return;
     // 恢复原指令
     hook_patch_words(e->target_addr, e->saved_insn, HOOK_STUB_WORDS);
     slot_free(e->slot_index);
@@ -399,8 +382,7 @@ static void hook_entry_remove(struct hook_entry *e)
 int inline_hook_install_count(struct hook_entry *entries, int count)
 {
     int i, ret;
-    if (count > TRAMP_SLOT_COUNT)
-        return -ENOSPC;
+    if (count > TRAMP_SLOT_COUNT) return -ENOSPC;
 
     for (i = 0; i < count; i++)
     {
@@ -408,8 +390,7 @@ int inline_hook_install_count(struct hook_entry *entries, int count)
         // 失败回退
         if (ret)
         {
-            while (--i >= 0)
-                hook_entry_remove(&entries[i]);
+            while (--i >= 0) hook_entry_remove(&entries[i]);
             return ret;
         }
     }
@@ -419,8 +400,7 @@ int inline_hook_install_count(struct hook_entry *entries, int count)
 void inline_hook_remove_count(struct hook_entry *entries, int count)
 {
     // 逆序卸载
-    for (int i = count - 1; i >= 0; i--)
-        hook_entry_remove(&entries[i]);
+    for (int i = count - 1; i >= 0; i--) hook_entry_remove(&entries[i]);
 }
 
 // 用于驱动/用户态退出的强行卸载所有hook
@@ -432,8 +412,7 @@ void inline_hook_remove_all(void)
 
     for (i = 0; i < TRAMP_SLOT_COUNT; i++)
     {
-        if (!test_bit(i, g_slot_used))
-            continue;
+        if (!test_bit(i, g_slot_used)) continue;
 
         // trampoline[TRAMP_ORIG_INSN_INDEX..] 是被覆盖的原始指令，直接还原
         trampoline = inline_hook_trampoline_slots + i * TRAMP_WORDS;
@@ -459,6 +438,6 @@ void inline_hook_remove_all(void)
 // 外部调用宏，宏函数计算数组数量，不要直接在函数内部使用sizeof,参数会退化为指针
 
 #define inline_hook_install(entries) inline_hook_install_count((entries), sizeof(entries) / sizeof((entries)[0]))
-#define inline_hook_remove(entries) inline_hook_remove_count((entries), sizeof(entries) / sizeof((entries)[0]))
+#define inline_hook_remove(entries)  inline_hook_remove_count((entries), sizeof(entries) / sizeof((entries)[0]))
 
 #endif // INLINE_HOOK_FRAME_H

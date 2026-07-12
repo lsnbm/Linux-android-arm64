@@ -45,13 +45,11 @@ static bool hwbp_info_has_active_point(struct break_point *info)
 {
     int point_slot;
 
-    if (!info || info->pid <= 0)
-        return false;
+    if (!info || info->pid <= 0) return false;
 
     for (point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
     {
-        if (hwbp_point_is_active(&info->points[point_slot]))
-            return true;
+        if (hwbp_point_is_active(&info->points[point_slot])) return true;
     }
 
     return false;
@@ -60,8 +58,7 @@ static bool hwbp_info_has_active_point(struct break_point *info)
 // 判断一个 break_point 配置中是否包含指定线程组 pid 的有效点位。
 static bool hwbp_info_has_pid(struct break_point *info, pid_t pid)
 {
-    if (!info || pid <= 0 || info->pid != pid)
-        return false;
+    if (!info || pid <= 0 || info->pid != pid) return false;
 
     return hwbp_info_has_active_point(info);
 }
@@ -75,8 +72,7 @@ static int hw_breakpoint_parse(struct bp_point *point, bool is_compat, struct ar
 {
     uint64_t alignment_mask, offset;
 
-    if (!point || !hw)
-        return -EINVAL;
+    if (!point || !hw) return -EINVAL;
 
     memset(hw, 0, sizeof(*hw));
 
@@ -135,15 +131,12 @@ static int hw_breakpoint_parse(struct bp_point *point, bool is_compat, struct ar
     {
         if (is_compat)
         {
-            if (hw->ctrl.len != ARM_BREAKPOINT_LEN_2 &&
-                hw->ctrl.len != ARM_BREAKPOINT_LEN_4)
-                return -EINVAL;
+            if (hw->ctrl.len != ARM_BREAKPOINT_LEN_2 && hw->ctrl.len != ARM_BREAKPOINT_LEN_4) return -EINVAL;
         }
         else
         {
             // AArch64 执行断点只允许 4 字节。源码里这里不是直接报错，而是修正成 4。
-            if (hw->ctrl.len != ARM_BREAKPOINT_LEN_4)
-                hw->ctrl.len = ARM_BREAKPOINT_LEN_4;
+            if (hw->ctrl.len != ARM_BREAKPOINT_LEN_4) hw->ctrl.len = ARM_BREAKPOINT_LEN_4;
         }
     }
 
@@ -158,10 +151,8 @@ static int hw_breakpoint_parse(struct bp_point *point, bool is_compat, struct ar
     if (is_compat)
     {
 
-        if (hw->ctrl.len == ARM_BREAKPOINT_LEN_8)
-            alignment_mask = 0x7;
-        else
-            alignment_mask = 0x3;
+        if (hw->ctrl.len == ARM_BREAKPOINT_LEN_8) alignment_mask = 0x7;
+        else alignment_mask = 0x3;
 
         offset = hw->address & alignment_mask;
 
@@ -171,12 +162,10 @@ static int hw_breakpoint_parse(struct bp_point *point, bool is_compat, struct ar
             break;
         case 1:
         case 2:
-            if (hw->ctrl.len == ARM_BREAKPOINT_LEN_2)
-                break;
+            if (hw->ctrl.len == ARM_BREAKPOINT_LEN_2) break;
             fallthrough;
         case 3:
-            if (hw->ctrl.len == ARM_BREAKPOINT_LEN_1)
-                break;
+            if (hw->ctrl.len == ARM_BREAKPOINT_LEN_1) break;
             fallthrough;
         default:
             return -EINVAL;
@@ -184,10 +173,8 @@ static int hw_breakpoint_parse(struct bp_point *point, bool is_compat, struct ar
     }
     else
     {
-        if (hw->ctrl.type == ARM_BREAKPOINT_EXECUTE)
-            alignment_mask = 0x3;
-        else
-            alignment_mask = 0x7;
+        if (hw->ctrl.type == ARM_BREAKPOINT_EXECUTE) alignment_mask = 0x3;
+        else alignment_mask = 0x7;
 
         offset = hw->address & alignment_mask;
     }
@@ -207,22 +194,18 @@ static uint64_t get_distance_from_watchpoint(uint64_t fault_addr, uint64_t watch
     uint32_t lens;
     uint32_t lene;
 
-    if (!ctrl || !ctrl->len)
-        return ~0ULL;
+    if (!ctrl || !ctrl->len) return ~0ULL;
 
     fault_addr = untagged_addr(fault_addr);
     lens = lowest_set_bit32(ctrl->len);
     lene = highest_set_bit32(ctrl->len);
-    if (lens >= 32 || lene >= 32)
-        return ~0ULL;
+    if (lens >= 32 || lene >= 32) return ~0ULL;
 
     wp_low = watch_addr + lens;
     wp_high = watch_addr + lene;
 
-    if (fault_addr < wp_low)
-        return wp_low - fault_addr;
-    if (fault_addr > wp_high)
-        return fault_addr - wp_high;
+    if (fault_addr < wp_low) return wp_low - fault_addr;
+    if (fault_addr > wp_high) return fault_addr - wp_high;
     return 0;
 }
 
@@ -231,12 +214,10 @@ static bool watchpoint_access_matches(struct arch_hw_breakpoint *info, uint64_t 
 {
     bool is_write;
 
-    if (!info || info->ctrl.type == ARM_BREAKPOINT_EXECUTE)
-        return false;
+    if (!info || info->ctrl.type == ARM_BREAKPOINT_EXECUTE) return false;
 
     is_write = !!(esr & ARM64_HWBKPT_ESR_ACCESS_MASK);
-    if (is_write)
-        return !!(info->ctrl.type & ARM_BREAKPOINT_STORE);
+    if (is_write) return !!(info->ctrl.type & ARM_BREAKPOINT_STORE);
 
     return !!(info->ctrl.type & ARM_BREAKPOINT_LOAD);
 }
@@ -254,8 +235,7 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
     struct perf_event **slots;
     struct perf_event *bp;
 
-    if (!bp_info)
-        return 0;
+    if (!bp_info) return 0;
 
     /*
    这里说明一下为何可以这么做进行步过
@@ -310,11 +290,7 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
             struct bp_point *point = &bp_info->points[j];
 
             // 地址不相等跳过
-            if (!hwbp_point_is_active(point) ||
-                bp_info->pid != current->tgid ||
-                hw_breakpoint_parse(point, 0, &info) ||
-                info.address != addr)
-                continue;
+            if (!hwbp_point_is_active(point) || bp_info->pid != current->tgid || hw_breakpoint_parse(point, 0, &info) || info.address != addr) continue;
 
             /*
                 上案例
@@ -346,13 +322,10 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
                 所以真实命中 slot2，但 point0 先被派发了，
                 导致 point0.records 里写入了 record.pc = 0x71B5655590。
                 */
-            if (info.address != (regs->pc & ~0x3ULL))
-                continue;
+            if (info.address != (regs->pc & ~0x3ULL)) continue;
 
             // 地址相等、控制码相等且当前槽位启用才派发
-            if ((ctrl & 0x1) &&
-                ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) == (ctrl & ~0x1ULL)) &&
-                bp_info->pid == current->tgid)
+            if ((ctrl & 0x1) && ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) == (ctrl & ~0x1ULL)) && bp_info->pid == current->tgid)
             {
 
                 point->on_hit((void *)regs, (void *)point);
@@ -404,8 +377,7 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
     struct perf_event **slots;
     struct perf_event *bp;
 
-    if (!bp_info)
-        return 0;
+    if (!bp_info) return 0;
 
     /*
     watchpoint_handler 原型是 (addr, esr, regs)。这里用 addr 判断真实命中的访问地址，
@@ -416,29 +388,20 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
         addr = read_wb_reg(AARCH64_DBG_REG_WVR, slot);
         ctrl = read_wb_reg(AARCH64_DBG_REG_WCR, slot);
 
-        if (!(ctrl & 0x1))
-            continue;
+        if (!(ctrl & 0x1)) continue;
 
         for (j = 0; j < BP_CONFIG_MAX; j++)
         {
             struct bp_point *point = &bp_info->points[j];
 
-            if (!hwbp_point_is_active(point) ||
-                bp_info->pid != current->tgid ||
-                hw_breakpoint_parse(point, 0, &info) ||
-                info.ctrl.type == ARM_BREAKPOINT_EXECUTE ||
-                info.address != addr ||
-                ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) != (ctrl & ~0x1ULL)) ||
-                !watchpoint_access_matches(&info, esr))
-                continue;
+            if (!hwbp_point_is_active(point) || bp_info->pid != current->tgid || hw_breakpoint_parse(point, 0, &info) || info.ctrl.type == ARM_BREAKPOINT_EXECUTE || info.address != addr || ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) != (ctrl & ~0x1ULL)) || !watchpoint_access_matches(&info, esr)) continue;
 
             /*
             内核 perf 可以在没有精确命中时选择最近 watchpoint 兜底；
             这里做自定义断点计数，非精确命中会把相邻访问归到第一个点位，必须跳过。
             */
             dist = get_distance_from_watchpoint(fault_addr, addr, &info.ctrl);
-            if (dist != 0)
-                continue;
+            if (dist != 0) continue;
 
             hit_point = point;
             hit_slot = slot;
@@ -449,8 +412,7 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
         }
     }
 
-    if (!hit_point)
-        return 0;
+    if (!hit_point) return 0;
 
     hit_point->on_hit((void *)regs, (void *)hit_point);
 
@@ -485,12 +447,11 @@ static struct hook_entry g_debug_exception_hooks[] = {
 static unsigned long __attribute__((used, __noinline__)) ret_work_finish_task_switch(void);
 __attribute__((naked, used)) void ret_trampoline_finish_task_switch(void)
 {
-    asm volatile(
-        "str x0, [sp, #-16]!\n"
-        "bl ret_work_finish_task_switch\n"
-        "mov x16, x0\n"
-        "ldr x0, [sp], #16\n"
-        "ret x16\n");
+    asm volatile("str x0, [sp, #-16]!\n"
+                 "bl ret_work_finish_task_switch\n"
+                 "mov x16, x0\n"
+                 "ldr x0, [sp], #16\n"
+                 "ret x16\n");
 }
 
 // 在当前 CPU 上安装硬件断点/观察点寄存器。
@@ -500,8 +461,7 @@ static void install_hwbp_regs_on_cpu(struct break_point *bp_info)
     int wrp_slot = 0;
     int j;
 
-    if (!bp_info)
-        return;
+    if (!bp_info) return;
 
     for (j = 0; j < BP_CONFIG_MAX; j++)
     {
@@ -509,16 +469,13 @@ static void install_hwbp_regs_on_cpu(struct break_point *bp_info)
         struct arch_hw_breakpoint info;
         int reg_slot;
 
-        if (!hwbp_point_is_active(point))
-            continue;
+        if (!hwbp_point_is_active(point)) continue;
 
-        if (hw_breakpoint_parse(point, 0, &info))
-            continue;
+        if (hw_breakpoint_parse(point, 0, &info)) continue;
 
         if (info.ctrl.type == ARM_BREAKPOINT_EXECUTE)
         {
-            if (brp_slot >= num_brps)
-                continue;
+            if (brp_slot >= num_brps) continue;
 
             reg_slot = brp_slot++;
             write_wb_reg(AARCH64_DBG_REG_BVR, reg_slot, info.address);
@@ -526,8 +483,7 @@ static void install_hwbp_regs_on_cpu(struct break_point *bp_info)
         }
         else
         {
-            if (wrp_slot >= num_wrps)
-                continue;
+            if (wrp_slot >= num_wrps) continue;
 
             reg_slot = wrp_slot++;
             write_wb_reg(AARCH64_DBG_REG_WVR, reg_slot, info.address);
@@ -550,28 +506,23 @@ static void clear_hwbp_regs_on_cpu(void *data)
 
     (void)data;
 
-    if (!bp_info)
-        return;
+    if (!bp_info) return;
 
     for (point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
     {
         struct bp_point *point = &bp_info->points[point_slot];
 
-        if (!hwbp_point_is_active(point) || hw_breakpoint_parse(point, 0, &info))
-            continue;
+        if (!hwbp_point_is_active(point) || hw_breakpoint_parse(point, 0, &info)) continue;
 
         expected_ctrl = encode_ctrl_reg(info.ctrl);
         if (info.ctrl.type == ARM_BREAKPOINT_EXECUTE)
         {
-            if (brp_slot >= num_brps)
-                continue;
+            if (brp_slot >= num_brps) continue;
 
             addr = read_wb_reg(AARCH64_DBG_REG_BVR, brp_slot);
             ctrl = read_wb_reg(AARCH64_DBG_REG_BCR, brp_slot);
 
-            if ((ctrl & 0x1) &&
-                info.address == addr &&
-                ((expected_ctrl & ~0x1) == (ctrl & ~0x1)))
+            if ((ctrl & 0x1) && info.address == addr && ((expected_ctrl & ~0x1) == (ctrl & ~0x1)))
             {
                 write_wb_reg(AARCH64_DBG_REG_BCR, brp_slot, ctrl & ~0x1);
             }
@@ -580,15 +531,12 @@ static void clear_hwbp_regs_on_cpu(void *data)
         }
         else
         {
-            if (wrp_slot >= num_wrps)
-                continue;
+            if (wrp_slot >= num_wrps) continue;
 
             addr = read_wb_reg(AARCH64_DBG_REG_WVR, wrp_slot);
             ctrl = read_wb_reg(AARCH64_DBG_REG_WCR, wrp_slot);
 
-            if ((ctrl & 0x1) &&
-                info.address == addr &&
-                ((expected_ctrl & ~0x1) == (ctrl & ~0x1)))
+            if ((ctrl & 0x1) && info.address == addr && ((expected_ctrl & ~0x1) == (ctrl & ~0x1)))
             {
                 write_wb_reg(AARCH64_DBG_REG_WCR, wrp_slot, ctrl & ~0x1);
             }
@@ -633,11 +581,9 @@ static unsigned long __attribute__((used, __noinline__)) ret_work_finish_task_sw
 // finish_task_switch(prev) 入口 hook：函数返回后再覆盖 perf 写入的硬件断点寄存器。
 static int work_trampoline_finish_task_switch(struct pt_regs *hook_regs)
 {
-    if (!g_bp_info)
-        return 0;
+    if (!g_bp_info) return 0;
 
-    if (this_cpu_read(g_finish_task_switch_orig_lr))
-        return 0;
+    if (this_cpu_read(g_finish_task_switch_orig_lr)) return 0;
 
     this_cpu_write(g_finish_task_switch_orig_lr, hook_regs->regs[30]);
     hook_regs->regs[30] = (unsigned long)ret_trampoline_finish_task_switch;
@@ -800,12 +746,10 @@ static void stop_task_run_monitor(void)
 {
     int cpu;
 
-    if (!g_bp_info)
-        return;
+    if (!g_bp_info) return;
 
     // 遍历所有在线 CPU，清理寄存器
-    for_each_online_cpu(cpu)
-        smp_call_function_single(cpu, clear_hwbp_regs_on_cpu, NULL, 1);
+    for_each_online_cpu(cpu) smp_call_function_single(cpu, clear_hwbp_regs_on_cpu, NULL, 1);
 
     g_bp_info = NULL;
     ls_log_tag("hwbp", "monitor config removed\n");

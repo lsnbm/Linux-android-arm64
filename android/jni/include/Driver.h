@@ -42,13 +42,13 @@
 #define PAGE_SIZE 4096
 class Driver
 {
-public: // 共有结构体和锁
-        // 轻量高性能自旋锁
+  public: // 共有结构体和锁
+    // 轻量高性能自旋锁
     class SpinLock
     {
         unsigned char locked = 0;
 
-    public:
+      public:
         void lock() noexcept
         {
             while (__atomic_exchange_n(&locked, 1, __ATOMIC_ACQUIRE))
@@ -66,6 +66,7 @@ public: // 共有结构体和锁
         }
     };
     SpinLock m_mutex;
+
 #define TLS_THREAD_NAME_LEN 16
 
     struct env_params
@@ -79,9 +80,9 @@ public: // 共有结构体和锁
     };
 
 // 寄存器操作类型定义
-#define BP_OP_NONE 0x0  // 00: 不操作
-#define BP_OP_READ 0x1  // 01: 读
-#define BP_OP_WRITE 0x2 // 10: 写
+#define BP_OP_NONE    0x0 // 00: 不操作
+#define BP_OP_READ    0x1 // 01: 读
+#define BP_OP_WRITE   0x2 // 10: 写
 #define BP_CONFIG_MAX 16
 
 // 设置掩码位的宏，参数1:结构体指针，参数2:寄存器索引，参数3:操作类型
@@ -95,8 +96,7 @@ public: // 共有结构体和锁
     } while (0)
 
 // 获取掩码位的宏，参数1:结构体指针，参数2:寄存器索引
-#define BP_GET_MASK(record, reg) \
-    (((record)->mask[(reg) >> 2] >> (((reg) & 0x3) << 1)) & 0x3)
+#define BP_GET_MASK(record, reg) (((record)->mask[(reg) >> 2] >> (((reg) & 0x3) << 1)) & 0x3)
 
     // 断点类型
     enum bp_type
@@ -210,9 +210,9 @@ public: // 共有结构体和锁
     struct bp_record
     {
         /*
-        一个掩码位，控制所有寄存器的读写行为
-        为了方便掩码位控制对应寄存器，不使用数组存储寄存器了， 方便了：阅读，理解，写代码时不再做 regs[i] / vregs[i] 的索引换算
-        */
+    一个掩码位，控制所有寄存器的读写行为
+    为了方便掩码位控制对应寄存器，不使用数组存储寄存器了， 方便了：阅读，理解，写代码时不再做 regs[i] / vregs[i] 的索引换算
+    */
         uint8_t mask[18];
 
         // 通用寄存器
@@ -279,10 +279,10 @@ public: // 共有结构体和锁
         int x, y;                   // 触摸坐标
     };
 
-#define MAX_MODULES 1024
+#define MAX_MODULES      1024
 #define MAX_SCAN_REGIONS 16534
 
-#define MOD_NAME_LEN 256
+#define MOD_NAME_LEN        256
 #define MAX_SEGS_PER_MODULE 512
 
     struct segment_info
@@ -349,6 +349,9 @@ public: // 共有结构体和锁
         request_op_stepbp_set,    // 设置单步 PC breakpoint
         request_op_stepbp_remove, // 删除单步 PC breakpoint
 
+        request_op_syscall_monitor_set,    // 监控指定进程的系统调用
+        request_op_syscall_monitor_remove, // 取消指定进程的系统调用监控
+
         request_op_env_get_params, // 获取指定进程环境参数
 
         request_op_kernel_exit // 内核线程退出
@@ -381,7 +384,7 @@ public: // 共有结构体和锁
         struct env_params env_info;
     };
 
-public: // 外部初始化
+  public: // 外部初始化
     Driver(int Vslot, bool initGyro, bool initGnss)
     {
         InitCommunication();
@@ -394,7 +397,7 @@ public: // 外部初始化
     {
     }
 
-public:
+  public:
     void NullIo()
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
@@ -412,8 +415,7 @@ public:
     int GetPid(std::string_view packageName)
     {
         DIR *dir = opendir("/proc");
-        if (!dir)
-            return -1;
+        if (!dir) return -1;
         struct dirent *entry;
 
         char pathBuffer[64];
@@ -457,9 +459,8 @@ public:
         global_pid = pid;
     }
 
-public: // 外部读写接口
-    template <typename T>
-    T Read(uint64_t address)
+  public: // 外部读写接口
+    template <typename T> T Read(uint64_t address)
     {
         T value = {};
         HandleVirtualMemoryRWEvent(request_op_vmem_read, address, &value, sizeof(T));
@@ -473,8 +474,7 @@ public: // 外部读写接口
 
     std::string ReadString(uint64_t address, size_t max_length = 128)
     {
-        if (!address)
-            return "";
+        if (!address) return "";
         std::vector<char> buffer(max_length + 1, 0);
         if (Read(address, buffer.data(), max_length) > 0)
         {
@@ -484,8 +484,7 @@ public: // 外部读写接口
         return "";
     }
 
-    template <typename T>
-    int Write(uint64_t address, const T &value)
+    template <typename T> int Write(uint64_t address, const T &value)
     {
         return HandleVirtualMemoryRWEvent(request_op_vmem_write, address, const_cast<T *>(&value), sizeof(T));
     }
@@ -495,7 +494,7 @@ public: // 外部读写接口
         return HandleVirtualMemoryRWEvent(request_op_vmem_write, address, buffer, size);
     }
 
-public: // 外部输入接口
+  public: // 外部输入接口
     void TouchDown(int slot, int x, int y, int screenW, int screenH)
     {
         HandleTouchEvent(request_op_touch_down, slot, x, y, screenW, screenH);
@@ -506,7 +505,10 @@ public: // 外部输入接口
         HandleTouchEvent(request_op_touch_move, slot, x, y, screenW, screenH);
     }
 
-    void TouchUp(int slot) { HandleTouchEvent(request_op_touch_up, slot, 1, 1, 1, 1); }
+    void TouchUp(int slot)
+    {
+        HandleTouchEvent(request_op_touch_up, slot, 1, 1, 1, 1);
+    }
 
     void GyroReport(int gyro_x_mrad_s, int gyro_y_mrad_s, int gyro_z_mrad_s)
     {
@@ -518,7 +520,7 @@ public: // 外部输入接口
         HandleGnssReport(latitude_e7, longitude_e7);
     }
 
-public: // 外部获取内存信息
+  public: // 外部获取内存信息
     // 获取内部结构体实例 内部成员调用不需要显示使用this指针，隐式this
     const virtual_memory &GetMemoryInfoRef()
     {
@@ -555,14 +557,11 @@ public: // 外部获取内存信息
 
             std::string_view fullPath(mod.name);
 
-            if (fullPath.length() < moduleName.length())
-                continue;
+            if (fullPath.length() < moduleName.length()) continue;
 
             size_t pos = fullPath.length() - moduleName.length();
-            if (pos > 0 && fullPath[pos - 1] != '/')
-                continue;
-            if (fullPath.substr(pos) != moduleName)
-                continue;
+            if (pos > 0 && fullPath[pos - 1] != '/') continue;
+            if (fullPath.substr(pos) != moduleName) continue;
 
             std::fprintf(stderr, "========== 模块信息 ==========\n");
             std::fprintf(stderr, "  模块索引  : %d\n", i);
@@ -587,8 +586,7 @@ public: // 外部获取内存信息
             for (int j = 0; j < mod.seg_count; ++j)
             {
                 const auto &seg = mod.segs[j];
-                if (seg.index != segmentIndex)
-                    continue;
+                if (seg.index != segmentIndex) continue;
 
                 *outAddress = isStart ? seg.start : seg.end;
                 return true;
@@ -621,8 +619,7 @@ public: // 外部获取内存信息
         for (int i = 0; i < info.region_count; ++i)
         {
             const auto &r = info.regions[i];
-            if (r.end > r.start)
-                regions.emplace_back(r.start, r.end);
+            if (r.end > r.start) regions.emplace_back(r.start, r.end);
         }
 
         // 压入所有模块的静态基址区域
@@ -638,8 +635,7 @@ public: // 外部获取内存信息
 
         if (!regions.empty())
         {
-            std::sort(regions.begin(), regions.end(), [](const auto &a, const auto &b)
-                      { return a.first < b.first; });
+            std::sort(regions.begin(), regions.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
         }
 
         return regions;
@@ -672,15 +668,13 @@ public: // 外部获取内存信息
             const auto &mod = info.modules[i];
             std::string_view fullPath(mod.name);
 
-            if (fullPath.find(moduleName) == std::string_view::npos)
-                continue;
+            if (fullPath.find(moduleName) == std::string_view::npos) continue;
 
             matchedModuleCount++;
             for (int j = 0; j < mod.seg_count; ++j)
             {
                 const auto &seg = mod.segs[j];
-                if (seg.start >= seg.end)
-                    continue;
+                if (seg.start >= seg.end) continue;
                 dumpSegs.push_back({seg.index, seg.start, seg.end});
             }
         }
@@ -694,13 +688,13 @@ public: // 外部获取内存信息
         // 只保证收集到的区段按内存地址从低到高排列。
         // Dump 时按 [baseAddr, maxEnd) 整段展开。
         // 无论是否命中模块区段，都尝试按页读取；只有读取失败时才补 0。
-        std::sort(dumpSegs.begin(), dumpSegs.end(), [](const DumpSegment &a, const DumpSegment &b)
+        std::sort(dumpSegs.begin(), dumpSegs.end(),
+                  [](const DumpSegment &a, const DumpSegment &b)
                   {
-                      if (a.start != b.start)
-                          return a.start < b.start;
-                      if (a.end != b.end)
-                          return a.end < b.end;
-                      return a.index < b.index; });
+                      if (a.start != b.start) return a.start < b.start;
+                      if (a.end != b.end) return a.end < b.end;
+                      return a.index < b.index;
+                  });
 
         // 确定模块的内存跨度
         uint64_t baseAddr = dumpSegs.front().start;
@@ -708,10 +702,8 @@ public: // 外部获取内存信息
 
         for (const auto &seg : dumpSegs)
         {
-            if (seg.start < baseAddr)
-                baseAddr = seg.start;
-            if (seg.end > maxEnd)
-                maxEnd = seg.end;
+            if (seg.start < baseAddr) baseAddr = seg.start;
+            if (seg.end > maxEnd) maxEnd = seg.end;
         }
 
         uint64_t spanSize = maxEnd - baseAddr;
@@ -764,8 +756,7 @@ public: // 外部获取内存信息
                 failedPages++;
             }
 
-            if (!read_ok)
-                std::fill(page.begin(), page.begin() + toRead, 0);
+            if (!read_ok) std::fill(page.begin(), page.begin() + toRead, 0);
 
             if (fwrite(page.data(), 1, toRead, fp) != toRead)
             {
@@ -787,7 +778,7 @@ public: // 外部获取内存信息
         return true;
     }
 
-public: // 外部硬件断点接口
+  public: // 外部硬件断点接口
     // 获取断点结构体信息
     const break_point &GetHwbpInfoRef()
     {
@@ -823,8 +814,7 @@ public: // 外部硬件断点接口
     // 删除指定索引内容
     void RemoveHwbpRecord(int index)
     {
-        if (index < 0)
-            return;
+        if (index < 0) return;
 
         int flat_index = 0;
         for (auto &point : req->bp_info.points)
@@ -833,8 +823,7 @@ public: // 外部硬件断点接口
             {
                 const int local_index = index - flat_index;
                 const int tail_count = point.record_count - local_index - 1;
-                if (tail_count > 0)
-                    __builtin_memmove(&point.records[local_index], &point.records[local_index + 1], static_cast<size_t>(tail_count) * sizeof(bp_record));
+                if (tail_count > 0) __builtin_memmove(&point.records[local_index], &point.records[local_index + 1], static_cast<size_t>(tail_count) * sizeof(bp_record));
                 point.record_count--;
                 __builtin_memset(&point.records[point.record_count], 0, sizeof(bp_record));
                 return;
@@ -844,7 +833,18 @@ public: // 外部硬件断点接口
         }
     }
 
-public:
+  public: // 外部系统调用监控接口
+    int StartSyscallMonitor(int pid)
+    {
+        return HandleSyscallMonitorEvent(request_op_syscall_monitor_set, pid);
+    }
+
+    int StopSyscallMonitor(int pid)
+    {
+        return HandleSyscallMonitorEvent(request_op_syscall_monitor_remove, pid);
+    }
+
+  public:
     // 查询指定线程的 TLS 和目标进程的 PACGA 环境参数
     bool GetEnvParams(std::string_view threadName)
     {
@@ -857,7 +857,7 @@ public:
         return req->env_info;
     }
 
-private: // 私有实现，外部无需关系
+  private: // 私有实现，外部无需关系
     struct request_obj *req = nullptr;
     int global_pid = 0;
 
@@ -906,8 +906,7 @@ private: // 私有实现，外部无需关系
     // 传 0 表示不启用虚拟触摸，内核也不会初始化触摸功能
     void InitTouch(int requested_slots)
     {
-        if (requested_slots <= 0)
-            return;
+        if (requested_slots <= 0) return;
         req->op = request_op_touch_init;
         req->vinput_info.request_virtual_slots = requested_slots;
         IoCommitAndWait();
@@ -916,8 +915,7 @@ private: // 私有实现，外部无需关系
     // 初始化陀螺仪
     void InitGyro(bool enable)
     {
-        if (!enable)
-            return;
+        if (!enable) return;
 
         std::scoped_lock<SpinLock> lock(m_mutex);
         req->op = request_op_gyro_init;
@@ -927,8 +925,7 @@ private: // 私有实现，外部无需关系
     // 初始化虚拟定位
     void InitGnss(bool enable)
     {
-        if (!enable)
-            return;
+        if (!enable) return;
 
         std::scoped_lock<SpinLock> lock(m_mutex);
         req->op = request_op_gnss_init;
@@ -973,17 +970,14 @@ private: // 私有实现，外部无需关系
             req->vmemrw_info.size = chunk;
 
             asm volatile("" ::: "memory");
-            if (!is_read)
-                copy_virtual_memory_chunk(req->vmemrw_info.user_buffer, static_cast<uint8_t *>(buffer) + processed, chunk);
+            if (!is_read) copy_virtual_memory_chunk(req->vmemrw_info.user_buffer, static_cast<uint8_t *>(buffer) + processed, chunk);
             IoCommitAndWait();
 
             asm volatile("" ::: "memory");
-            if (req->status <= 0)
-                return req->status;
+            if (req->status <= 0) return req->status;
 
             asm volatile("" ::: "memory");
-            if (is_read)
-                copy_virtual_memory_chunk(static_cast<uint8_t *>(buffer) + processed, req->vmemrw_info.user_buffer, chunk);
+            if (is_read) copy_virtual_memory_chunk(static_cast<uint8_t *>(buffer) + processed, req->vmemrw_info.user_buffer, chunk);
 
             processed += chunk;
         }
@@ -1007,11 +1001,9 @@ private: // 私有实现，外部无需关系
         std::scoped_lock<SpinLock> lock(m_mutex);
 
         // 下面代码绝对不要使用整数除法
-        if (screenW <= 0 || screenH <= 0 || req->vinput_info.POSITION_X <= 0 || req->vinput_info.POSITION_Y <= 0)
-            return;
+        if (screenW <= 0 || screenH <= 0 || req->vinput_info.POSITION_X <= 0 || req->vinput_info.POSITION_Y <= 0) return;
 
-        if (x < 0 || y < 0 || x > screenW || y > screenH)
-            return;
+        if (x < 0 || y < 0 || x > screenW || y > screenH) return;
 
         req->op = op;
         req->vinput_info.slot = slot;
@@ -1065,8 +1057,7 @@ private: // 私有实现，外部无需关系
     int HandleHwbpEvent(request_op op, std::span<const bp_point> points = {})
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
-        if (op != request_op_hwbp_set && op != request_op_hwbp_remove)
-            return -1;
+        if (op != request_op_hwbp_set && op != request_op_hwbp_remove) return -1;
 
         req->op = op;
         req->status = 0;
@@ -1092,8 +1083,7 @@ private: // 私有实现，外部无需关系
     int HandlePtebpEvent(request_op op, std::span<const bp_point> points = {})
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
-        if (op != request_op_ptebp_set && op != request_op_ptebp_remove)
-            return -1;
+        if (op != request_op_ptebp_set && op != request_op_ptebp_remove) return -1;
 
         req->op = op;
         req->status = 0;
@@ -1119,8 +1109,7 @@ private: // 私有实现，外部无需关系
     int HandleStepbpEvent(request_op op, std::span<const bp_point> points = {})
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
-        if (op != request_op_stepbp_set && op != request_op_stepbp_remove)
-            return -1;
+        if (op != request_op_stepbp_set && op != request_op_stepbp_remove) return -1;
 
         req->op = op;
         req->status = 0;
@@ -1142,20 +1131,34 @@ private: // 私有实现，外部无需关系
         return req->status;
     }
 
+    // 系统调用监控事件；取消时仍使用启动监控时保存的 PID。
+    // 此接口只负责启停监控，系统调用日志由驱动写入内核 printk 环形缓冲区，不通过 req 返回。
+    // Android shell 查看已有输出：su -c "dmesg | grep -E 'lsdriver'"
+    // Android shell 实时查看输出：su -c "dmesg -w | grep -E 'lsdriver'"
+    int HandleSyscallMonitorEvent(request_op op, int pid)
+    {
+        std::scoped_lock<SpinLock> lock(m_mutex);
+        if ((op != request_op_syscall_monitor_set && op != request_op_syscall_monitor_remove) || pid <= 0) return -1;
+
+        req->op = op;
+        req->pid = pid;
+        req->status = 0;
+        IoCommitAndWait();
+        return req->status;
+    }
+
     // 获取指定进程的线程 TLS 或 PACGA 环境参数
     int HandleEnvGetParams(std::string_view threadName)
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
-        if (global_pid <= 0)
-            return -1;
+        if (global_pid <= 0) return -1;
 
         req->op = request_op_env_get_params;
         req->pid = global_pid;
         req->status = 0;
         __builtin_memset(&req->env_info, 0, sizeof(req->env_info));
         const size_t copyLen = std::min(threadName.size(), static_cast<size_t>(TLS_THREAD_NAME_LEN - 1));
-        if (copyLen > 0)
-            __builtin_memcpy(req->env_info.thread_name, threadName.data(), copyLen);
+        if (copyLen > 0) __builtin_memcpy(req->env_info.thread_name, threadName.data(), copyLen);
         IoCommitAndWait();
         return req->status;
     }

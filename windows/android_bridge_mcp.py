@@ -167,6 +167,37 @@ def _strip_scan_regions(response: dict[str, Any]) -> dict[str, Any]:
     slim_response = dict(response)
     slim_response["data"] = slim_data
     return slim_response
+
+
+def _scan_params(value_type: str, mode: str, value: str, range_max: str) -> dict[str, Any]:
+    params: dict[str, Any] = {"value_type": value_type.strip().lower(), "mode": mode.strip().lower()}
+    if params["mode"] != "unknown" and not str(value).strip():
+        raise ValueError("value is required unless mode is 'unknown'")
+    if str(value).strip():
+        params["value"] = value
+    if str(range_max).strip():
+        params["range_max"] = range_max
+    return params
+
+
+def _normalize_breakpoint_points(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for point in points:
+        if not isinstance(point, dict):
+            raise ValueError("points must contain objects with address, bp_type, bp_scope, length")
+        normalized.append(
+            {
+                "address": format_address(point["address"]),
+                "bp_type": point["bp_type"],
+                "bp_scope": point["bp_scope"],
+                "length": max(1, min(8, int(point["length"]))),
+            }
+        )
+    if not normalized:
+        raise ValueError("points must not be empty")
+    return normalized
+
+
 mcp = FastMCP(
     "NativeTcpBridge Android MCP",
     host=DEFAULT_MCP_BIND_HOST,
@@ -308,16 +339,7 @@ def android_memory_scan_start(
     range_max: str = "",
 ) -> dict[str, Any]:
     """Start a new memory scan. Example: value_type='i32', mode='eq', value='1234'."""
-    type_token = value_type.strip().lower()
-    mode_token = mode.strip().lower()
-    if mode_token != "unknown" and not str(value).strip():
-        raise ValueError("value is required unless mode is 'unknown'")
-    params: dict[str, Any] = {"value_type": type_token, "mode": mode_token}
-    if str(value).strip():
-        params["value"] = value
-    if str(range_max).strip():
-        params["range_max"] = range_max
-    return _call_bridge_operation("scan.start", params)
+    return _call_bridge_operation("scan.start", _scan_params(value_type, mode, value, range_max))
 
 
 @mcp.tool()
@@ -328,16 +350,7 @@ def android_memory_scan_refine(
     range_max: str = "",
 ) -> dict[str, Any]:
     """Refine the current memory scan result set."""
-    type_token = value_type.strip().lower()
-    mode_token = mode.strip().lower()
-    if mode_token != "unknown" and not str(value).strip():
-        raise ValueError("value is required unless mode is 'unknown'")
-    params: dict[str, Any] = {"value_type": type_token, "mode": mode_token}
-    if str(value).strip():
-        params["value"] = value
-    if str(range_max).strip():
-        params["range_max"] = range_max
-    return _call_bridge_operation("scan.refine", params)
+    return _call_bridge_operation("scan.refine", _scan_params(value_type, mode, value, range_max))
 
 
 @mcp.tool()
@@ -464,25 +477,9 @@ def android_breakpoint_set(points: list[dict[str, Any]]) -> dict[str, Any]:
     if isinstance(data, dict) and bool(data.get("active", False)):
         raise BridgeError("hardware breakpoint is already active; call android_breakpoint_clear_all first")
 
-    normalized_points: list[dict[str, Any]] = []
-    for point in points:
-        if not isinstance(point, dict):
-            raise ValueError("points must contain objects with address, bp_type, bp_scope, length")
-        clamped_length = max(1, min(8, int(point["length"])))
-        normalized_points.append(
-            {
-                "address": format_address(point["address"]),
-                "bp_type": point["bp_type"],
-                "bp_scope": point["bp_scope"],
-                "length": clamped_length,
-            }
-        )
-    if not normalized_points:
-        raise ValueError("points must not be empty")
-
     return _call_bridge_operation(
         "breakpoint.set",
-        {"points": normalized_points},
+        {"points": _normalize_breakpoint_points(points)},
     )
 
 
@@ -513,25 +510,9 @@ def android_ptebp_list() -> dict[str, Any]:
 @mcp.tool()
 def android_ptebp_set(points: list[dict[str, Any]]) -> dict[str, Any]:
     """Create one or more PTEBP points from bp_point-style configs."""
-    normalized_points: list[dict[str, Any]] = []
-    for point in points:
-        if not isinstance(point, dict):
-            raise ValueError("points must contain objects with address, bp_type, bp_scope, length")
-        clamped_length = max(1, min(8, int(point["length"])))
-        normalized_points.append(
-            {
-                "address": format_address(point["address"]),
-                "bp_type": point["bp_type"],
-                "bp_scope": point["bp_scope"],
-                "length": clamped_length,
-            }
-        )
-    if not normalized_points:
-        raise ValueError("points must not be empty")
-
     return _call_bridge_operation(
         "ptebp.set",
-        {"points": normalized_points},
+        {"points": _normalize_breakpoint_points(points)},
     )
 
 
@@ -550,25 +531,9 @@ def android_stepbp_list() -> dict[str, Any]:
 @mcp.tool()
 def android_stepbp_set(points: list[dict[str, Any]]) -> dict[str, Any]:
     """Create one or more STEPBP points from bp_point-style configs."""
-    normalized_points: list[dict[str, Any]] = []
-    for point in points:
-        if not isinstance(point, dict):
-            raise ValueError("points must contain objects with address, bp_type, bp_scope, length")
-        clamped_length = max(1, min(8, int(point["length"])))
-        normalized_points.append(
-            {
-                "address": format_address(point["address"]),
-                "bp_type": point["bp_type"],
-                "bp_scope": point["bp_scope"],
-                "length": clamped_length,
-            }
-        )
-    if not normalized_points:
-        raise ValueError("points must not be empty")
-
     return _call_bridge_operation(
         "stepbp.set",
-        {"points": normalized_points},
+        {"points": _normalize_breakpoint_points(points)},
     )
 
 

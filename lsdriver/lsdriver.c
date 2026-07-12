@@ -37,352 +37,357 @@ struct task_struct *volatile ls_process_task = 0;
 
 static int DispatchThreadFunction(void *data)
 {
-	// 自旋计数器：用来记录我们空转了多久
-	int spin_count = 0;
-	// 编译器屏障，这里读写任意内存，前后的内存访问不能跨过这个点重排，不能之前从内存读到的值在屏障之后假设仍然寄存器值有效
-	asm volatile("" ::: "memory");
-	while (dispatch_thread_task)
-	{
-		asm volatile("" ::: "memory");
-		if (ls_process_task)
-		{
-			asm volatile("" ::: "memory");
-			if (req->kernel) // 确实有任务
-			{
-				// 有活干，重置计数器
-				spin_count = 0;
+    // 自旋计数器：用来记录我们空转了多久
+    int spin_count = 0;
+    // 编译器屏障，这里读写任意内存，前后的内存访问不能跨过这个点重排，不能之前从内存读到的值在屏障之后假设仍然寄存器值有效
+    asm volatile("" ::: "memory");
+    while (dispatch_thread_task)
+    {
+        asm volatile("" ::: "memory");
+        if (ls_process_task)
+        {
+            asm volatile("" ::: "memory");
+            if (req->kernel) // 确实有任务
+            {
+                // 有活干，重置计数器
+                spin_count = 0;
 
-				asm volatile("" ::: "memory");
-				req->kernel = false; // 清除请求标志
+                asm volatile("" ::: "memory");
+                req->kernel = false; // 清除请求标志
 
-				asm volatile("" ::: "memory");
-				switch (req->op) // 派发
-				{
-				case request_op_none:
-					break;
-				case request_op_vmem_read:
-				case request_op_vmem_write:
-					req->status = virtual_memory_rw(req->op, req->pid, req->vmemrw_info.rw_addr, &req->vmemrw_info.user_buffer, req->vmemrw_info.size);
-					break;
-				case request_op_vmem_info:
-					req->status = virtual_memory_enum(req->pid, &req->vmem_info);
-					break;
-				case request_op_touch_init:
-					req->status = v_touch_init(req->vinput_info.request_virtual_slots, &req->vinput_info.POSITION_X, &req->vinput_info.POSITION_Y);
-					break;
-				case request_op_touch_down:
-				case request_op_touch_move:
-				case request_op_touch_up:
-					v_touch_event(req->op, req->vinput_info.slot, req->vinput_info.x, req->vinput_info.y);
-					break;
-				case request_op_gyro_init:
-					req->status = v_gyro_init();
-					break;
-				case request_op_gyro_report:
-					req->status = v_gyro_report(req->vgyro_info.gyro_x_mrad_s, req->vgyro_info.gyro_y_mrad_s, req->vgyro_info.gyro_z_mrad_s);
-					break;
-				case request_op_gnss_init:
-					req->status = v_gnss_init();
-					break;
-				case request_op_gnss_report:
-					req->status = v_gnss_report(req->vgnss_info.latitude_e7, req->vgnss_info.longitude_e7);
-					break;
-				case request_op_hwbp_set:
-					req->status = set_process_hwbp(&req->bp_info);
-					break;
-				case request_op_hwbp_remove:
-					remove_process_hwbp();
-					break;
-				case request_op_ptebp_set:
-					req->status = set_process_ptebp(&req->bp_info);
-					break;
-				case request_op_ptebp_remove:
-					remove_process_ptebp();
-					break;
-				case request_op_stepbp_set:
-					req->status = set_process_stepbp(&req->bp_info);
-					break;
-				case request_op_stepbp_remove:
-					remove_process_stepbp();
-					break;
-				case request_op_env_get_params:
-					req->status = get_env_params(req->pid, req->env_info.thread_name, &req->env_info.tpidr_el0, &req->env_info.pacga_lo, &req->env_info.pacga_hi, &req->env_info.tls_status, &req->env_info.pacga_status);
-					break;
-				case request_op_kernel_exit:
-					hide_task_remove(connect_thread_task->pid);
-					hide_task_remove(dispatch_thread_task->pid);
-					connect_thread_task = NULL;	 // 标记连接线程退出
-					dispatch_thread_task = NULL; // 标记调度线程退出
-					break;
-				default:
-					break;
-				}
-				asm volatile("" ::: "memory");
-				req->user = true; // 通知用户层完成rong'h
-			}
-			else
-			{
-				// 暂时没活干
+                asm volatile("" ::: "memory");
+                switch (req->op) // 派发
+                {
+                case request_op_none:
+                    break;
+                case request_op_vmem_read:
+                case request_op_vmem_write:
+                    req->status = virtual_memory_rw(req->op, req->pid, req->vmemrw_info.rw_addr, &req->vmemrw_info.user_buffer, req->vmemrw_info.size);
+                    break;
+                case request_op_vmem_info:
+                    req->status = virtual_memory_enum(req->pid, &req->vmem_info);
+                    break;
+                case request_op_touch_init:
+                    req->status = v_touch_init(req->vinput_info.request_virtual_slots, &req->vinput_info.POSITION_X, &req->vinput_info.POSITION_Y);
+                    break;
+                case request_op_touch_down:
+                case request_op_touch_move:
+                case request_op_touch_up:
+                    v_touch_event(req->op, req->vinput_info.slot, req->vinput_info.x, req->vinput_info.y);
+                    break;
+                case request_op_gyro_init:
+                    req->status = v_gyro_init();
+                    break;
+                case request_op_gyro_report:
+                    req->status = v_gyro_report(req->vgyro_info.gyro_x_mrad_s, req->vgyro_info.gyro_y_mrad_s, req->vgyro_info.gyro_z_mrad_s);
+                    break;
+                case request_op_gnss_init:
+                    req->status = v_gnss_init();
+                    break;
+                case request_op_gnss_report:
+                    req->status = v_gnss_report(req->vgnss_info.latitude_e7, req->vgnss_info.longitude_e7);
+                    break;
+                case request_op_hwbp_set:
+                    req->status = set_process_hwbp(&req->bp_info);
+                    break;
+                case request_op_hwbp_remove:
+                    remove_process_hwbp();
+                    break;
+                case request_op_ptebp_set:
+                    req->status = set_process_ptebp(&req->bp_info);
+                    break;
+                case request_op_ptebp_remove:
+                    remove_process_ptebp();
+                    break;
+                case request_op_stepbp_set:
+                    req->status = set_process_stepbp(&req->bp_info);
+                    break;
+                case request_op_stepbp_remove:
+                    remove_process_stepbp();
+                    break;
+                case request_op_syscall_monitor_set:
+                    req->status = syscall_monitor_install(req->pid);
+                    break;
+                case request_op_syscall_monitor_remove:
+                    syscall_monitor_remove(req->pid);
+                    req->status = 0;
+                    break;
+                case request_op_env_get_params:
+                    req->status = get_env_params(req->pid, req->env_info.thread_name, &req->env_info.tpidr_el0, &req->env_info.pacga_lo, &req->env_info.pacga_hi, &req->env_info.tls_status, &req->env_info.pacga_status);
+                    break;
+                case request_op_kernel_exit:
+                    hide_task_remove(connect_thread_task->pid);
+                    hide_task_remove(dispatch_thread_task->pid);
+                    connect_thread_task = NULL;  // 标记连接线程退出
+                    dispatch_thread_task = NULL; // 标记调度线程退出
+                    break;
+                default:
+                    break;
+                }
+                asm volatile("" ::: "memory");
+                req->user = true; // 通知用户层完成rong'h
+            }
+            else
+            {
+                // 暂时没活干
 
-				// 策略：前 5000 次循环死等（极速响应），超过后才睡觉
-				if (spin_count < 5000)
-				{
-					spin_count++;
-					cpu_relax(); // 告诉 CPU 我在忙等，降低功耗
-				}
-				else
-				{
-					// 既不占 CPU，也能快速醒来
-					usleep_range(50, 100);
+                // 策略：前 5000 次循环死等（极速响应），超过后才睡觉
+                if (spin_count < 5000)
+                {
+                    spin_count++;
+                    cpu_relax(); // 告诉 CPU 我在忙等，降低功耗
+                }
+                else
+                {
+                    // 既不占 CPU，也能快速醒来
+                    usleep_range(50, 100);
 
-					// 这里不要重置 spin_count，
-					// 保持睡眠状态直到下一个任务到来，做到了有任务超高性能响应，没任务超低消耗;
-				}
-			}
-		}
-		else
-		{
-			// 还没连接到进程，深睡眠
-			msleep(2000);
-		}
-	}
-	return 0;
+                    // 这里不要重置 spin_count，
+                    // 保持睡眠状态直到下一个任务到来，做到了有任务超高性能响应，没任务超低消耗;
+                }
+            }
+        }
+        else
+        {
+            // 还没连接到进程，深睡眠
+            msleep(2000);
+        }
+    }
+    return 0;
 }
 
 static int ConnectThreadFunction(void *data)
 {
-	struct task_struct *task;
-	struct mm_struct *mm = NULL;
-	struct page **pages = NULL;
-	int num_pages;
-	int ret;
+    struct task_struct *task;
+    struct mm_struct *mm = NULL;
+    struct page **pages = NULL;
+    int num_pages;
+    int ret;
 
-	// 和内核线程在运行
-	asm volatile("" ::: "memory");
-	while (connect_thread_task)
-	{
+    // 和内核线程在运行
+    asm volatile("" ::: "memory");
+    while (connect_thread_task)
+    {
 
-		// 遍历系统中所有进程,//这里不加RCU锁，不然会导致6.6以上超时
-		for_each_process(task)
-		{
-			if (__builtin_strcmp(task->comm, "LS") != 0)
-				continue;
+        // 遍历系统中所有进程,//这里不加RCU锁，不然会导致6.6以上超时
+        for_each_process(task)
+        {
+            if (__builtin_strcmp(task->comm, "LS") != 0) continue;
 
-			// 这次的task是旧task跳过
-			if (task == ls_process_task)
-				continue;
-			// 这次的task启动时间小于旧task跳过
-			if (ls_process_task && task->start_time <= ls_process_task->start_time)
-				continue;
+            // 这次的task是旧task跳过
+            if (task == ls_process_task) continue;
+            // 这次的task启动时间小于旧task跳过
+            if (ls_process_task && task->start_time <= ls_process_task->start_time) continue;
 
-			// 获取进程的内存描述符
-			mm = get_task_mm(task);
-			if (!mm)
-				continue;
+            // 获取进程的内存描述符
+            mm = get_task_mm(task);
+            if (!mm) continue;
 
-			// 计算页数
-			num_pages = (sizeof(struct request_obj) + PAGE_SIZE - 1) / PAGE_SIZE;
+            // 计算页数
+            num_pages = (sizeof(struct request_obj) + PAGE_SIZE - 1) / PAGE_SIZE;
 
-			// 分配页指针数组
-			pages = kmalloc_array(num_pages, sizeof(struct page *), GFP_KERNEL);
-			if (!pages)
-			{
-				ls_log_tag("core", "kmalloc_array 失败\n");
-				goto out_put_mm;
-			}
+            // 分配页指针数组
+            pages = kmalloc_array(num_pages, sizeof(struct page *), GFP_KERNEL);
+            if (!pages)
+            {
+                ls_log_tag("core", "kmalloc_array 失败\n");
+                goto out_put_mm;
+            }
 
-			// 远程获取用户空间地址对应的物理页（将用户地址映射到内核）
-			mmap_read_lock(mm);
+            // 远程获取用户空间地址对应的物理页（将用户地址映射到内核）
+            mmap_read_lock(mm);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0) // 内核 6.12
-			ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL);
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)	 // 内核 6.5 到 6.12
-			ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL);
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)	 // 内核 6.1 到 6.5
-			ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL, NULL);
+            ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)  // 内核 6.5 到 6.12
+            ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)  // 内核 6.1 到 6.5
+            ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL, NULL);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0) // 内核 5.15 到 6.1
-			ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL, NULL);
+            ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL, NULL);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0) // 内核 5.10 到 5.15
-			ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL, NULL);
+            ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL, NULL);
 #endif
-			mmap_read_unlock(mm);
+            mmap_read_unlock(mm);
 
-			if (ret < num_pages)
-			{
-				ls_log_tag("core", "get_user_pages_remote 失败, ret=%d\n", ret);
-				goto out_put_pages;
-			}
+            if (ret < num_pages)
+            {
+                ls_log_tag("core", "get_user_pages_remote 失败, ret=%d\n", ret);
+                goto out_put_pages;
+            }
 
-			// 映射到内核虚拟地址
-			req = vmap(pages, num_pages, VM_MAP, PAGE_KERNEL);
-			if (!req)
-			{
-				ls_log_tag("core", "vmap 失败\n");
-				goto out_put_pages;
-			}
-			if (ls_process_task)
-				send_sig(SIGKILL, ls_process_task, 0); // 杀死旧的task
+            // 映射到内核虚拟地址
+            req = vmap(pages, num_pages, VM_MAP, PAGE_KERNEL);
+            if (!req)
+            {
+                ls_log_tag("core", "vmap 失败\n");
+                goto out_put_pages;
+            }
+            if (ls_process_task) send_sig(SIGKILL, ls_process_task, 0); // 杀死旧的task
 
-			// 成功 get_user_pages_remote 持有页面引用，只需释放 mm
-			ls_process_task = task;		   // 保存用户进程指针
-			req->user = true;			   // 通知用户层已连接
-			hide_task_install(task->tgid); // 隐藏进程
-			hide_kgsl_install(task->tgid); // 隐藏高通GPU节点
-			kfree(pages);
-			pages = NULL;
-			mmput(mm);
-			mm = NULL;
-			break; // 找到目标进程，退出遍历
+            // 成功 get_user_pages_remote 持有页面引用，只需释放 mm
+            ls_process_task = task;        // 保存用户进程指针
+            req->user = true;              // 通知用户层已连接
+            hide_task_install(task->tgid); // 隐藏进程
+            hide_kgsl_install(task->tgid); // 隐藏高通GPU节点
+            kfree(pages);
+            pages = NULL;
+            mmput(mm);
+            mm = NULL;
+            break; // 找到目标进程，退出遍历
 
-		out_put_pages:
-			release_gup_pages(pages, ret);
-			kfree(pages);
-			pages = NULL;
+        out_put_pages:
+            release_gup_pages(pages, ret);
+            kfree(pages);
+            pages = NULL;
 
-		out_put_mm:
-			mmput(mm);
-			mm = NULL;
-		}
+        out_put_mm:
+            mmput(mm);
+            mm = NULL;
+        }
 
-		msleep(2000);
-	}
+        msleep(2000);
+    }
 
-	return 0;
+    return 0;
 }
 
 // do_exit 执行前的 inline hook 工作函数，返回 0 表示继续执行 do_exit
 static int do_exit_hook_work(struct pt_regs *regs)
 {
-	// 调用 do_exit 的进程就是当前正在运行并准备死去的进程 (current)
-	struct task_struct *task = current;
+    // 调用 do_exit 的进程就是当前正在运行并准备死去的进程 (current)
+    struct task_struct *task = current;
 
-	(void)regs;
+    (void)regs;
 
-	// 只监听主线程的退出
-	if (!thread_group_leader(task))
-		return 0;
+    // 只监听主线程的退出
+    if (!thread_group_leader(task)) return 0;
 
-	// 匹配进程名
-	// Android 中 task->comm 最长只有 15 个字符，包名被截断
-	// 比如 "com.ss.android.LS" 可能会变成 "com.ss.android."
-	if (__builtin_strstr(task->comm, "ls") != NULL || __builtin_strstr(task->comm, "LS") != NULL)
-	{
-		ls_log_tag("core", "【进程监听】检测到 LS 进程即将退出！PID: %d, 进程名(comm): %s\n", task->pid, task->comm);
+    // 任意被监控目标退出时移除其 TGID，防止 PID 槽位和 do_el0_svc hook 残留。
+    syscall_monitor_remove(task->tgid);
 
-		// 相应处理
+    // 匹配进程名
+    // Android 中 task->comm 最长只有 15 个字符，包名被截断
+    // 比如 "com.ss.android.LS" 可能会变成 "com.ss.android."
+    if (__builtin_strstr(task->comm, "ls") != NULL || __builtin_strstr(task->comm, "LS") != NULL)
+    {
+        ls_log_tag("core", "【进程监听】检测到 LS 进程即将退出！PID: %d, 进程名(comm): %s\n", task->pid, task->comm);
 
-		hide_task_remove(task->tgid); // 只取消当前用户进程的隐藏，不影响隐藏的内核线程
-		hide_kgsl_remove(task->tgid); // 取消当前用户进程的高通GPU节点隐藏
-		v_touch_destroy();			  // 清理触摸
-		v_gnss_destroy();			  // 清理定位
-		v_gyro_destroy();			  // 清理陀螺仪
-		remove_process_hwbp();		  // 清理硬件断点
-		remove_process_ptebp();		  // 清理 PTEBP
-		remove_process_stepbp();	  // 清理单步断点
-		ls_process_task = NULL;		  // 标记用户进程已断开
-		if (!connect_thread_task && !dispatch_thread_task)
-		{
-			inline_hook_remove_all(); // 内核退出才清理所有hook
-		}
-	}
-	return 0;
+        // 相应处理
+
+        hide_task_remove(task->tgid); // 只取消当前用户进程的隐藏，不影响隐藏的内核线程
+        hide_kgsl_remove(task->tgid); // 取消当前用户进程的高通GPU节点隐藏
+        v_touch_destroy();            // 清理触摸
+        v_gnss_destroy();             // 清理定位
+        v_gyro_destroy();             // 清理陀螺仪
+        remove_process_hwbp();        // 清理硬件断点
+        remove_process_ptebp();       // 清理 PTEBP
+        remove_process_stepbp();      // 清理单步断点
+        syscall_monitor_remove_all(); // 清理全部系统调用监控目标
+        ls_process_task = NULL;       // 标记用户进程已断开
+        if (!connect_thread_task && !dispatch_thread_task)
+        {
+            inline_hook_remove_all(); // 内核退出才清理所有hook
+        }
+    }
+    return 0;
 }
 static int do_exit_init(void)
 {
-	static struct hook_entry do_exit_hook[] = {
-		HOOK_ENTRY("do_exit", do_exit_hook_work),
-	};
+    static struct hook_entry do_exit_hook[] = {
+        HOOK_ENTRY("do_exit", do_exit_hook_work),
+    };
 
-	int ret;
+    int ret;
 
-	ret = inline_hook_install(do_exit_hook);
-	if (ret < 0)
-	{
-		ls_log_tag("core", "安装 inline hook(do_exit) 失败，错误码: %d\n", ret);
-		return ret;
-	}
+    ret = inline_hook_install(do_exit_hook);
+    if (ret < 0)
+    {
+        ls_log_tag("core", "安装 inline hook(do_exit) 失败，错误码: %d\n", ret);
+        return ret;
+    }
 
-	return 0;
+    return 0;
 }
 
 // 隐藏内核模块
 static void hide_myself(void)
 {
-	// 内核模块结构体
-	struct module_use *use, *tmp;
-	// 小于内核 6.12才能隐藏vmap_area_list和_vmap_area_root，高版本移除了这个数据结构，由https://github.com/wenyounb，发现
+    // 内核模块结构体
+    struct module_use *use, *tmp;
+    // 小于内核 6.12才能隐藏vmap_area_list和_vmap_area_root，高版本移除了这个数据结构，由https://github.com/wenyounb，发现
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
-	struct vmap_area *va, *vtmp;
-	struct list_head *_vmap_area_list;
-	struct rb_root *_vmap_area_root;
+    struct vmap_area *va, *vtmp;
+    struct list_head *_vmap_area_list;
+    struct rb_root *_vmap_area_root;
 
-	_vmap_area_list = (struct list_head *)generic_kallsyms_lookup_name("vmap_area_list");
-	_vmap_area_root = (struct rb_root *)generic_kallsyms_lookup_name("vmap_area_root");
+    _vmap_area_list = (struct list_head *)generic_kallsyms_lookup_name("vmap_area_list");
+    _vmap_area_root = (struct rb_root *)generic_kallsyms_lookup_name("vmap_area_root");
 
-	// 摘除vmalloc调用关系链，/proc/vmallocinfo中不可见
-	list_for_each_entry_safe(va, vtmp, _vmap_area_list, list)
-	{
-		if ((uint64_t)THIS_MODULE > va->va_start && (uint64_t)THIS_MODULE < va->va_end)
-		{
-			list_del(&va->list);
-			// rbtree中摘除，无法通过rbtree找到
-			rb_erase(&va->rb_node, _vmap_area_root);
-		}
-	}
+    // 摘除vmalloc调用关系链，/proc/vmallocinfo中不可见
+    list_for_each_entry_safe(va, vtmp, _vmap_area_list, list)
+    {
+        if ((uint64_t)THIS_MODULE > va->va_start && (uint64_t)THIS_MODULE < va->va_end)
+        {
+            list_del(&va->list);
+            // rbtree中摘除，无法通过rbtree找到
+            rb_erase(&va->rb_node, _vmap_area_root);
+        }
+    }
 
 #endif
 
-	// 摘除链表，/proc/modules 中不可见。
-	list_del_init(&THIS_MODULE->list);
-	// 摘除kobj，/sys/modules/中不可见。
-	kobject_del(&THIS_MODULE->mkobj.kobj);
-	// 摘除依赖关系，本例中nf_conntrack的holder中不可见。
-	list_for_each_entry_safe(use, tmp, &THIS_MODULE->target_list, target_list)
-	{
-		list_del(&use->source_list);
-		list_del(&use->target_list);
-		sysfs_remove_link(use->target->holders_dir, THIS_MODULE->name);
-		kfree(use);
-	}
+    // 摘除链表，/proc/modules 中不可见。
+    list_del_init(&THIS_MODULE->list);
+    // 摘除kobj，/sys/modules/中不可见。
+    kobject_del(&THIS_MODULE->mkobj.kobj);
+    // 摘除依赖关系，本例中nf_conntrack的holder中不可见。
+    list_for_each_entry_safe(use, tmp, &THIS_MODULE->target_list, target_list)
+    {
+        list_del(&use->source_list);
+        list_del(&use->target_list);
+        sysfs_remove_link(use->target->holders_dir, THIS_MODULE->name);
+        kfree(use);
+    }
 }
 
 static int __init lsdriver_init(void)
 {
-	//*(volatile int *)0 = 0;
+    //*(volatile int *)0 = 0;
 
-	// print_el2_status(); // 输出Hypervisor相关信息
+    // print_el2_status(); // 输出Hypervisor相关信息
 
-	bypass_cfi(); // 先尝试绕过 5系的cfi
+    bypass_cfi(); // 先尝试绕过 5系的cfi
 
-	hide_myself(); // 隐藏内核模块本身
+    hide_myself(); // 隐藏内核模块本身
 
-	allocate_physical_page_info(); // pte读写需要，线性读写不需要 // 初始化物理页地址和页表项
+    allocate_physical_page_info(); // pte读写需要，线性读写不需要 // 初始化物理页地址和页表项
 
-	connect_thread_task = kthread_run(ConnectThreadFunction, NULL, "ext4-rsv-conver");
-	if (IS_ERR(connect_thread_task))
-	{
-		ls_log_tag("core", "创建连接线程失败\n");
-		return PTR_ERR(connect_thread_task);
-	}
+    connect_thread_task = kthread_run(ConnectThreadFunction, NULL, "ext4-rsv-conver");
+    if (IS_ERR(connect_thread_task))
+    {
+        ls_log_tag("core", "创建连接线程失败\n");
+        return PTR_ERR(connect_thread_task);
+    }
 
-	dispatch_thread_task = kthread_run(DispatchThreadFunction, NULL, "ext4-rsv-conver");
-	if (IS_ERR(dispatch_thread_task))
-	{
-		ls_log_tag("core", "创建调度线程失败\n");
-		return PTR_ERR(dispatch_thread_task);
-	}
+    dispatch_thread_task = kthread_run(DispatchThreadFunction, NULL, "ext4-rsv-conver");
+    if (IS_ERR(dispatch_thread_task))
+    {
+        ls_log_tag("core", "创建调度线程失败\n");
+        return PTR_ERR(dispatch_thread_task);
+    }
 
-	// 注册用户进程退出回调
-	do_exit_init();
+    // 注册用户进程退出回调
+    do_exit_init();
 
-	// 隐藏内核线程
-	hide_task_install(connect_thread_task->pid);  // 隐藏task,线程
-	hide_task_install(dispatch_thread_task->pid); // 隐藏task,线程
+    // 隐藏内核线程
+    hide_task_install(connect_thread_task->pid);  // 隐藏task,线程
+    hide_task_install(dispatch_thread_task->pid); // 隐藏task,线程
 
-	return 0;
+    return 0;
 }
 static void __exit lsdriver_exit(void)
 {
-	// 模块已隐藏，此函数不会被调用
+    // 模块已隐藏，此函数不会被调用
 }
 
 module_init(lsdriver_init);

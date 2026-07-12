@@ -31,9 +31,9 @@ struct env_params
 };
 
 // 寄存器操作类型定义
-#define BP_OP_NONE 0x0  // 00: 不操作
-#define BP_OP_READ 0x1  // 01: 读
-#define BP_OP_WRITE 0x2 // 10: 写
+#define BP_OP_NONE    0x0 // 00: 不操作
+#define BP_OP_READ    0x1 // 01: 读
+#define BP_OP_WRITE   0x2 // 10: 写
 #define BP_CONFIG_MAX 16
 
 // 设置掩码位的宏，参数1:结构体指针，参数2:寄存器索引，参数3:操作类型
@@ -47,8 +47,7 @@ struct env_params
     } while (0)
 
 // 获取掩码位的宏，参数1:结构体指针，参数2:寄存器索引
-#define BP_GET_MASK(record, reg) \
-    (((record)->mask[(reg) >> 2] >> (((reg) & 0x3) << 1)) & 0x3)
+#define BP_GET_MASK(record, reg) (((record)->mask[(reg) >> 2] >> (((reg) & 0x3) << 1)) & 0x3)
 
 // 断点类型
 enum bp_type
@@ -231,10 +230,10 @@ struct virtual_input
     int x, y;                   // 触摸坐标
 };
 
-#define MAX_MODULES 1024
+#define MAX_MODULES      1024
 #define MAX_SCAN_REGIONS 16534
 
-#define MOD_NAME_LEN 256
+#define MOD_NAME_LEN        256
 #define MAX_SEGS_PER_MODULE 512
 
 struct segment_info
@@ -300,6 +299,9 @@ enum request_op
 
     request_op_stepbp_set,    // 设置单步 PC breakpoint
     request_op_stepbp_remove, // 删除单步 PC breakpoint
+
+    request_op_syscall_monitor_set,    // 监控指定进程的系统调用
+    request_op_syscall_monitor_remove, // 取消指定进程的系统调用监控
 
     request_op_env_get_params, // 获取指定进程环境参数
 

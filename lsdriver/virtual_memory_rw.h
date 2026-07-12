@@ -113,9 +113,7 @@ static inline void *pte_map_page(phys_addr_t paddr, size_t size, const void *buf
                         随后把坐标指针重定向到这个内存页，内核读取了这个内存页用了缓存，那么下次这个页的读取就会变快，进行缓存检测
     无缓存读会带来非常严重的性能下降和数据不一致情况
     */
-    static const uint64_t FLAGS = PTE_TYPE_PAGE | PTE_VALID | PTE_AF |
-                                  PTE_SHARED | PTE_PXN | PTE_UXN |
-                                  PTE_ATTRINDX(MT_NORMAL_NC);
+    static const uint64_t FLAGS = PTE_TYPE_PAGE | PTE_VALID | PTE_AF | PTE_SHARED | PTE_PXN | PTE_UXN | PTE_ATTRINDX(MT_NORMAL_NC);
     /*
     Device memory 不允许普通 RAM 那种随意访问方式
     代码使用__builtin_memcpy
@@ -137,14 +135,11 @@ static inline void *pte_map_page(phys_addr_t paddr, size_t size, const void *buf
     uint64_t pfn = __phys_to_pfn(paddr);
 
     // 参数检查
-    if (!size || !buffer)
-        return ERR_PTR(-EINVAL);
+    if (!size || !buffer) return ERR_PTR(-EINVAL);
     // PFN 有效性检查：确保物理页帧在系统内存管理范围内
-    if (!pfn_valid(pfn))
-        return ERR_PTR(-EFAULT);
+    if (!pfn_valid(pfn)) return ERR_PTR(-EFAULT);
     // 跨页检查：读写可能跨越页边界，访问到未映射的下一页
-    if (((paddr & ~PAGE_MASK) + size) > PAGE_SIZE)
-        return ERR_PTR(-EINVAL);
+    if (((paddr & ~PAGE_MASK) + size) > PAGE_SIZE) return ERR_PTR(-EINVAL);
 
     // 修改 PTE 指向目标物理页
     set_pte(pte_info.pte_address, pfn_pte(pfn, __pgprot(FLAGS)));
@@ -231,8 +226,7 @@ static inline int mmu_translate_va_to_pa(struct mm_struct *mm, uint64_t va, phys
     uint64_t phys_out;
     uint64_t tmp_daif, tmp_ttbr, tmp_par, tmp_offset, tmp_ttbr_new;
 
-    if (!mm || !mm->pgd || !pa)
-        return -EINVAL;
+    if (!mm || !mm->pgd || !pa) return -EINVAL;
 
     pgd_phys = virt_to_phys(mm->pgd);
 
@@ -337,20 +331,11 @@ static inline int mmu_translate_va_to_pa(struct mm_struct *mm, uint64_t va, phys
 
         ".L_end%=:\n"
 
-        : [ret] "=&r"(ret),
-          [phys_out] "=&r"(phys_out),
-          [tmp_daif] "=&r"(tmp_daif),
-          [tmp_ttbr] "=&r"(tmp_ttbr),
-          [tmp_par] "=&r"(tmp_par),
-          [tmp_offset] "=&r"(tmp_offset),
-          [tmp_ttbr_new] "=&r"(tmp_ttbr_new)
-        : [pgd_phys] "r"(pgd_phys),
-          [va] "r"(va),
-          [efault_val] "r"(-EFAULT)
+        : [ret] "=&r"(ret), [phys_out] "=&r"(phys_out), [tmp_daif] "=&r"(tmp_daif), [tmp_ttbr] "=&r"(tmp_ttbr), [tmp_par] "=&r"(tmp_par), [tmp_offset] "=&r"(tmp_offset), [tmp_ttbr_new] "=&r"(tmp_ttbr_new)
+        : [pgd_phys] "r"(pgd_phys), [va] "r"(va), [efault_val] "r"(-EFAULT)
         : "cc", "memory");
 
-    if (ret == 0)
-        *pa = phys_out;
+    if (ret == 0) *pa = phys_out;
 
     return ret;
 }
@@ -434,62 +419,52 @@ static inline int walk_translate_va_to_pa(struct mm_struct *mm, uint64_t vaddr, 
     pte_t *ptep, pte;
     unsigned long pfn;
 
-    if (!mm || !paddr)
-        return -1;
+    if (!mm || !paddr) return -1;
 
     // PGD Level
     pgd = pgd_offset(mm, vaddr);
-    if (pgd_none(*pgd) || pgd_bad(*pgd))
-        return -1;
+    if (pgd_none(*pgd) || pgd_bad(*pgd)) return -1;
 
     // P4D Level
     p4d = p4d_offset(pgd, vaddr);
-    if (p4d_none(*p4d) || p4d_bad(*p4d))
-        return -1;
+    if (p4d_none(*p4d) || p4d_bad(*p4d)) return -1;
 
     // PUD Level (可能遇到 1GB 大页)
     pud = pud_offset(p4d, vaddr);
-    if (pud_none(*pud))
-        return -1;
+    if (pud_none(*pud)) return -1;
 
     // 检查是否是 1G 大页
     if (pud_leaf(*pud))
     {
         // 检查pfn
         pfn = pud_pfn(*pud);
-        if (!pfn_valid(pfn))
-            return -1;
+        if (!pfn_valid(pfn)) return -1;
 
         *paddr = (pud_pfn(*pud) << PAGE_SHIFT) + (vaddr & ~PUD_MASK);
         return 0;
     }
-    if (pud_bad(*pud))
-        return -1;
+    if (pud_bad(*pud)) return -1;
 
     //  PMD Level (可能遇到 2MB 大页)
     pmd = pmd_offset(pud, vaddr);
-    if (pmd_none(*pmd))
-        return -1;
+    if (pmd_none(*pmd)) return -1;
 
     // 检查是否是 2M 大页
     if (pmd_leaf(*pmd))
     {
         // 检查pfn
         pfn = pmd_pfn(*pmd);
-        if (!pfn_valid(pfn))
-            return -1;
+        if (!pfn_valid(pfn)) return -1;
 
         *paddr = (pmd_pfn(*pmd) << PAGE_SHIFT) + (vaddr & ~PMD_MASK);
         return 0;
     }
-    if (pmd_bad(*pmd))
-        return -1;
+    if (pmd_bad(*pmd)) return -1;
 
     //  PTE Level (普通的 4KB 页)
     // 较新内核中 __pte_offset_map 不导出，对于 64位 系统直接使用 pte_offset_kernel 即可
     ptep = pte_offset_kernel(pmd, vaddr);
-    if (!ptep)
-        return -1;
+    if (!ptep) return -1;
 
     pte = *ptep;
 
@@ -499,8 +474,7 @@ static inline int walk_translate_va_to_pa(struct mm_struct *mm, uint64_t vaddr, 
     {
         // 检查pfn
         pfn = pte_pfn(pte);
-        if (!pfn_valid(pfn))
-            return -1;
+        if (!pfn_valid(pfn)) return -1;
 
         *paddr = (pte_pfn(pte) << PAGE_SHIFT) + (vaddr & ~PAGE_MASK);
         return 0;
@@ -524,8 +498,7 @@ static inline int virtual_memory_rw(enum request_op op, pid_t pid, uint64_t vadd
     size_t bytes_done = 0;
     int status = 0;
 
-    if (!buffer || size == 0)
-        return -EINVAL;
+    if (!buffer || size == 0) return -EINVAL;
 
     /* ---------- mm_struct 缓存 ---------- */
     if (pid != s_last_pid || s_last_mm == NULL)
@@ -554,8 +527,7 @@ static inline int virtual_memory_rw(enum request_op op, pid_t pid, uint64_t vadd
         size_t bytes_this_page = PAGE_SIZE - page_offset;
         uint64_t current_vpn = current_vaddr & PAGE_MASK;
 
-        if (bytes_this_page > bytes_remaining)
-            bytes_this_page = bytes_remaining;
+        if (bytes_this_page > bytes_remaining) bytes_this_page = bytes_remaining;
 
         /* 软件 TLB 缓存 */
         if (current_vpn == s_last_vpage_base)
@@ -572,7 +544,7 @@ static inline int virtual_memory_rw(enum request_op op, pid_t pid, uint64_t vadd
             因为传入的虚拟地址（va）是编造的，它并不在目标进程的合法地址空间内。
             其对应的页表项物理内存里可能残留着未初始化的脏数据（垃圾值）。MMU 读取到了这个非零的垃圾值，误认为它是一个“合法的下一级页表物理基地址”。
             并通过 AXI/AHB 系统总线发送读请求，试图去读取这个所谓的“下一级描述符”。
-            垃圾物理地址指向了一个物理上不存在的芯片空洞，总线控制器在限定周期内等不到硬件响应，触发总线超时
+            垃圾物理地址指向了一个物理上不存在的芯片空洞或者是总线控制器在限定周期内等不到硬件响应，触发总线超时
             物理地址指向了高通联发科芯片中受保护的区域（例如 TrustZone 运行的物理 SRAM/DRAM 区域、敏感数据区）
             抛出最高优先级的 Synchronous External Abort，
             */
@@ -581,8 +553,7 @@ static inline int virtual_memory_rw(enum request_op op, pid_t pid, uint64_t vadd
             {
                 status = -EFAULT;
                 s_last_vpage_base = -1ULL;
-                if (op == request_op_vmem_read && size > 8)
-                    __builtin_memset((uint8_t *)buffer + bytes_copied, 0, bytes_this_page);
+                if (op == request_op_vmem_read && size > 8) __builtin_memset((uint8_t *)buffer + bytes_copied, 0, bytes_this_page);
                 goto next_chunk;
             }
 
@@ -593,8 +564,7 @@ static inline int virtual_memory_rw(enum request_op op, pid_t pid, uint64_t vadd
             if (status != 0)
             {
                 s_last_vpage_base = -1ULL;
-                if (op == request_op_vmem_read && size > 8)
-                    __builtin_memset((uint8_t *)buffer + bytes_copied, 0, bytes_this_page);
+                if (op == request_op_vmem_read && size > 8) __builtin_memset((uint8_t *)buffer + bytes_copied, 0, bytes_this_page);
                 goto next_chunk;
             }
             s_last_vpage_base = current_vpn;
@@ -618,8 +588,7 @@ static inline int virtual_memory_rw(enum request_op op, pid_t pid, uint64_t vadd
         if (status != 0)
         {
             s_last_vpage_base = -1ULL;
-            if (op == request_op_vmem_read && size > 8)
-                __builtin_memset((uint8_t *)buffer + bytes_copied, 0, bytes_this_page);
+            if (op == request_op_vmem_read && size > 8) __builtin_memset((uint8_t *)buffer + bytes_copied, 0, bytes_this_page);
             goto next_chunk;
         }
 
