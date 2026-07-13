@@ -1,0 +1,8 @@
+[submodule "android/jni/capstone"]
+	path = android/jni/capstone
+	url = https://github.com/capstone-engine/capstone.git
+	branch = next
+[submodule "android/jni/ImGui"]
+	path = android/jni/ImGui
+	url = https://github.com/ocornut/imgui.git
+	branch = master

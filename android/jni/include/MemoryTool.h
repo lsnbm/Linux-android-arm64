@@ -2126,18 +2126,19 @@ public:
         {
             disasmCache_.clear();
             disasmBusy_ = false;
-            if (!buffer_.empty())
+            const size_t disasmSize = std::min(static_cast<size_t>(readBytes), buffer_.size()) & ~static_cast<size_t>(3);
+            if (disasmSize > 0)
             {
                 auto base = base_;
                 auto bytes = buffer_;
                 try
                 {
                     disasmFuture_ = Utils::GlobalPool.push(
-                        [base, bytes = std::move(bytes)]() mutable
+                        [base, bytes = std::move(bytes), disasmSize]() mutable
                         {
                             Disasm::Disassembler disasm;
                             if (!disasm.IsValid()) return std::vector<Disasm::DisasmLine>{};
-                            return disasm.Disassemble(base, bytes.data(), bytes.size(), Disasm::Disassembler::DEFAULT_MAX_INSTRUCTIONS, true);
+                            return disasm.Disassemble(base, bytes.data(), disasmSize, Disasm::Disassembler::DEFAULT_MAX_INSTRUCTIONS, true);
                         });
                     disasmBusy_ = true;
                 }
