@@ -22,9 +22,40 @@ $Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = $Utf8NoBom
 $OutputEncoding = $Utf8NoBom
 
+$CloudflaredVersion = "2026.7.1"
+$CloudflaredSha256 = "18f2c9bfc7a67a971bd96f1a5a1935def3c1e52aa386626f1566f04e9b5478d6"
+$CloudflaredPath = Join-Path $Root "android\jni\assets\cloudflared-linux-arm64"
+$CloudflaredUrl = "https://github.com/cloudflare/cloudflared/releases/download/$CloudflaredVersion/cloudflared-linux-arm64"
+
+function Ensure-CloudflaredPayload {
+    $payloadDirectory = Split-Path -Parent $CloudflaredPath
+    $downloadPath = "$CloudflaredPath.download"
+
+    if (-not (Test-Path -LiteralPath $CloudflaredPath)) {
+        New-Item -ItemType Directory -Path $payloadDirectory -Force | Out-Null
+        Write-Host ((Zh '\u6b63\u5728\u4e0b\u8f7d cloudflared {0} ARM64 ...') -f $CloudflaredVersion)
+        try {
+            Invoke-WebRequest -Uri $CloudflaredUrl -OutFile $downloadPath
+            Move-Item -LiteralPath $downloadPath -Destination $CloudflaredPath -Force
+        }
+        finally {
+            Remove-Item -LiteralPath $downloadPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    $actualHash = (Get-FileHash -LiteralPath $CloudflaredPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualHash -ne $CloudflaredSha256) {
+        throw ((Zh 'cloudflared SHA256 \u6821\u9a8c\u5931\u8d25: expected={0}, actual={1}, path={2}') -f $CloudflaredSha256, $actualHash, $CloudflaredPath)
+    }
+
+    Write-Host ((Zh 'cloudflared {0} \u8d44\u6e90\u6821\u9a8c\u901a\u8fc7') -f $CloudflaredVersion)
+}
+
 if (-not (Test-Path -LiteralPath $NdkBuild)) {
     throw ((Zh '\u672a\u627e\u5230 ndk-build: {0}') -f $NdkBuild)
 }
+
+Ensure-CloudflaredPayload
 
 $mkFiles = @(Get-ChildItem -Path $Root -Recurse -File -Filter "Android.mk" |
     Where-Object { $_.Directory.Name -ieq "jni" } |

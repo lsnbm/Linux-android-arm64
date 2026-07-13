@@ -13,8 +13,8 @@ PROJECT_WINDOWS_DIR = Path(__file__).resolve().parents[1] / "windows"
 if str(PROJECT_WINDOWS_DIR) not in sys.path:
     sys.path.insert(0, str(PROJECT_WINDOWS_DIR))
 
-from tcp_server import (  # noqa: E402
-    AndroidBridgeClient,
+from http_bridge import (  # noqa: E402
+    AndroidHttpClient,
     DEFAULT_ANDROID_HOST,
     DEFAULT_ANDROID_PORT,
     DEFAULT_ANDROID_TIMEOUT_SECONDS,
@@ -26,19 +26,13 @@ DEFAULT_MCP_BIND_HOST = os.getenv("ANDROID_MCP_BIND_HOST", "127.0.0.1").strip() 
 DEFAULT_MCP_BIND_PORT = int(os.getenv("ANDROID_MCP_BIND_PORT", "14447"))
 DEFAULT_MCP_PATH = os.getenv("ANDROID_MCP_PATH", "/mcp")
 
-bridge = AndroidBridgeClient(
+bridge = AndroidHttpClient(
     host=DEFAULT_ANDROID_HOST,
     port=DEFAULT_ANDROID_PORT,
     timeout_seconds=DEFAULT_ANDROID_TIMEOUT_SECONDS,
 )
 def _call_bridge_operation(operation: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-    response = bridge.call_operation(operation, params).require_ok().to_dict()
-    connection = response.setdefault("connection", {})
-    if isinstance(connection, dict):
-        state = bridge.connection_state()
-        connection["cached_target_pid"] = state.get("session_pid")
-        connection["session_connected"] = state.get("session_connected", False)
-    return response
+    return bridge.call_operation(operation, params).require_ok().to_dict()
 
 
 def _strip_scan_regions(response: dict[str, Any]) -> dict[str, Any]:
@@ -111,7 +105,7 @@ def _normalize_breakpoint_points(points: list[dict[str, Any]]) -> list[dict[str,
 
 
 mcp = FastMCP(
-    "NativeTcpBridge Android MCP",
+    "NativeHttpBridge Android MCP",
     host=DEFAULT_MCP_BIND_HOST,
     port=DEFAULT_MCP_BIND_PORT,
     streamable_http_path=DEFAULT_MCP_PATH,
@@ -120,7 +114,7 @@ mcp = FastMCP(
 
 @mcp.resource("android://connection")
 def android_connection() -> dict[str, Any]:
-    """Return the current Android TCP connection settings used by this MCP server."""
+    """Return the current Android HTTP connection settings used by this MCP server."""
     return bridge.connection_state()
 
 
@@ -129,14 +123,14 @@ def configure_android_bridge(
     host: str = DEFAULT_ANDROID_HOST,
     timeout_seconds: float = DEFAULT_ANDROID_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
-    """Configure the Android tcp_server target. Use host='auto' to scan the LAN for a reachable device."""
+    """Configure an Android HTTP bridge. Use host='auto' for LAN scan or pass a full HTTPS Tunnel URL."""
     bridge.configure(host=host, timeout_seconds=timeout_seconds)
     return bridge.connection_state()
 
 
 @mcp.tool()
 def discover_android_bridges() -> dict[str, Any]:
-    """Discover Android tcp_server candidates on the LAN and show the current TCP bridge state."""
+    """Discover Android HTTP bridge candidates on the LAN and show the current bridge state."""
     return bridge.discover()
 
 
@@ -144,35 +138,6 @@ def discover_android_bridges() -> dict[str, Any]:
 def android_bridge_ping() -> dict[str, Any]:
     """Diagnose bridge reachability; normal tools connect automatically and do not require this first."""
     return _call_bridge_operation("bridge.ping")
-
-
-@mcp.tool()
-def connect_android_bridge() -> dict[str, Any]:
-    """Explicitly diagnose/connect; normal business tools already auto-connect, reconnect, and restore PID."""
-    state = bridge.connect()
-    return {
-        "ok": True,
-        "operation": "bridge.connect",
-        "message": "connected",
-        "connection": {
-            "host": state["session_host"],
-            "port": state["session_port"],
-            "timeout_seconds": state["session_timeout_seconds"],
-            "persistent": True,
-        },
-        "pid": state["session_pid"],
-    }
-
-
-@mcp.tool()
-def disconnect_android_bridge() -> dict[str, Any]:
-    """Disconnect current persistent MCP bridge session. PID/session state will be reset."""
-    bridge.disconnect()
-    return {
-        "ok": True,
-        "operation": "bridge.disconnect",
-        "message": "disconnected",
-    }
 
 
 @mcp.tool()
@@ -195,7 +160,7 @@ def android_target_find_pid(package_name: str) -> dict[str, Any]:
 
 @mcp.tool()
 def android_target_current() -> dict[str, Any]:
-    """Read the current target process bound inside the Android tcp_server."""
+    """Read the current target process bound inside the Android HTTP bridge."""
     return _call_bridge_operation("target.get")
 
 
@@ -520,7 +485,7 @@ def _normalize_http_path(path: str) -> str:
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Expose the NativeTcpBridge Android bridge as an MCP server.",
+        description="Expose the NativeHttpBridge Android bridge as an MCP server.",
     )
     parser.add_argument(
         "--mcp-host",
@@ -541,13 +506,16 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--android-host",
         default=DEFAULT_ANDROID_HOST,
-        help=f"Target Android tcp_server host. Default is 'auto'; the Android port defaults to {DEFAULT_ANDROID_PORT}.",
+        help=(
+            "Target Android IP/host, a full HTTP(S) Tunnel URL, or 'auto' for LAN discovery. "
+            f"Bare hosts use port {DEFAULT_ANDROID_PORT}."
+        ),
     )
     parser.add_argument(
         "--android-timeout",
         type=float,
         default=DEFAULT_ANDROID_TIMEOUT_SECONDS,
-        help="Timeout in seconds for Android tcp_server requests.",
+        help="Timeout in seconds for Android HTTP bridge requests.",
     )
     return parser
 

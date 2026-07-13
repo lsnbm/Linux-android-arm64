@@ -32,6 +32,7 @@ LOCAL_MODULE := LS_KTool
 LOCAL_CPPFLAGS := -w                                 # [关闭警告] 屏蔽“代码膨胀/精度丢失”等优化警告
 LOCAL_CPPFLAGS += -std=c++26                         # [最新语法] C++26标准
 LOCAL_CPPFLAGS += -DVK_USE_PLATFORM_ANDROID_KHR      # [宏] Vulkan平台宏
+LOCAL_ASFLAGS += -I$(LOCAL_PATH)                     # cloudflared 内嵌资源的 .incbin 搜索路径
 
 
 LOCAL_CPPFLAGS += -O3                                # [优化] 保持O3，避免Ofast隐含fast-math破坏精度/NaN语义
@@ -84,6 +85,7 @@ LOCAL_C_INCLUDES += $(LOCAL_PATH)/android_surface
 
 # 主程序源文件
 FILE_LIST := $(wildcard $(LOCAL_PATH)/src/main.cpp)
+FILE_LIST += $(wildcard $(LOCAL_PATH)/src/cloudflared_blob.S)
 FILE_LIST += $(wildcard $(LOCAL_PATH)/imgui/*.cpp)
 FILE_LIST += $(LOCAL_PATH)/imgui/backends/imgui_impl_android.cpp
 FILE_LIST += $(LOCAL_PATH)/imgui/backends/imgui_impl_opengl3.cpp
@@ -109,10 +111,9 @@ AKERNEL_PUSH_DIR := /data/akernel
 AKERNEL_TEMP_FILE := /data/local/tmp/$(LOCAL_MODULE_FILENAME)
 AKERNEL_BINARY := $(NDK_APP_LIBS_OUT)/$(TARGET_ARCH_ABI)/$(LOCAL_MODULE_FILENAME)
 AKERNEL_REMOTE_FILE := $(AKERNEL_PUSH_DIR)/$(LOCAL_MODULE_FILENAME)
+AKERNEL_REMOTE_NEW_FILE := $(AKERNEL_REMOTE_FILE).new
 
 .PHONY: push-akernel
-push-akernel: $(AKERNEL_BINARY)
-	@adb push "$(call host-path,$(AKERNEL_BINARY))" "$(AKERNEL_TEMP_FILE)"
-	@adb shell "su -c 'mkdir -p $(AKERNEL_PUSH_DIR) && cp $(AKERNEL_TEMP_FILE) $(AKERNEL_REMOTE_FILE) && chmod 755 $(AKERNEL_REMOTE_FILE)'"
+push-akernel: $(AKERNEL_BINARY) ; @adb push "$(call host-path,$(AKERNEL_BINARY))" "$(AKERNEL_TEMP_FILE)" && adb shell "su -c 'mkdir -p $(AKERNEL_PUSH_DIR) && cp $(AKERNEL_TEMP_FILE) $(AKERNEL_REMOTE_NEW_FILE) && chmod 755 $(AKERNEL_REMOTE_NEW_FILE) && mv -f $(AKERNEL_REMOTE_NEW_FILE) $(AKERNEL_REMOTE_FILE)'"
 
 all: push-akernel

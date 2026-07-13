@@ -2741,8 +2741,7 @@ private:
         if (firstError) std::rethrow_exception(firstError);
     }
 
-    template <typename F>
-    void RunOperation(Operation operation, std::string_view fallbackError, F &&task) noexcept
+    template <typename F> void RunOperation(Operation operation, std::string_view fallbackError, F &&task) noexcept
     {
         bool succeeded = false;
         std::string error;
@@ -2845,11 +2844,8 @@ private:
         }
         regions_ = std::move(merged);
 
-        std::sort(moduleBases_.begin(), moduleBases_.end(), [](const BaseRange &left, const BaseRange &right)
-                  { return std::tie(left.start, left.end, left.sourceId, left.segment) < std::tie(right.start, right.end, right.sourceId, right.segment); });
-        moduleBases_.erase(std::unique(moduleBases_.begin(), moduleBases_.end(), [](const BaseRange &left, const BaseRange &right)
-                                       { return left.start == right.start && left.end == right.end && left.sourceId == right.sourceId && left.segment == right.segment; }),
-                           moduleBases_.end());
+        std::sort(moduleBases_.begin(), moduleBases_.end(), [](const BaseRange &left, const BaseRange &right) { return std::tie(left.start, left.end, left.sourceId, left.segment) < std::tie(right.start, right.end, right.sourceId, right.segment); });
+        moduleBases_.erase(std::unique(moduleBases_.begin(), moduleBases_.end(), [](const BaseRange &left, const BaseRange &right) { return left.start == right.start && left.end == right.end && left.sourceId == right.sourceId && left.segment == right.segment; }), moduleBases_.end());
         return !regions_.empty();
     }
 
@@ -2955,8 +2951,7 @@ private:
             }
         }
 
-        std::sort(bases.begin(), bases.end(), [](const BaseRange &left, const BaseRange &right)
-                  { return std::tie(left.start, left.end, left.sourceId) < std::tie(right.start, right.end, right.sourceId); });
+        std::sort(bases.begin(), bases.end(), [](const BaseRange &left, const BaseRange &right) { return std::tie(left.start, left.end, left.sourceId) < std::tie(right.start, right.end, right.sourceId); });
         return bases;
     }
 
@@ -3292,10 +3287,14 @@ public:
     {
         switch (operation)
         {
-        case Operation::Scanning: return "scanning";
-        case Operation::Merging: return "merging";
-        case Operation::Exporting: return "exporting";
-        default: return "idle";
+        case Operation::Scanning:
+            return "scanning";
+        case Operation::Merging:
+            return "merging";
+        case Operation::Exporting:
+            return "exporting";
+        default:
+            return "idle";
         }
     }
 
@@ -3540,93 +3539,93 @@ private:
             size_t totalChains = 0;
             bool wroteResults = false;
 
-        dirs[0].emplace_back(target, 0, 0, 1);
-        std::sort(dirs[0].begin(), dirs[0].end(), [](const PtrDir &a, const PtrDir &b) { return a.address < b.address; });
-        std::println("Level 0 初始化完成，目标地址数量: {}", dirs[0].size());
+            dirs[0].emplace_back(target, 0, 0, 1);
+            std::sort(dirs[0].begin(), dirs[0].end(), [](const PtrDir &a, const PtrDir &b) { return a.address < b.address; });
+            std::println("Level 0 初始化完成，目标地址数量: {}", dirs[0].size());
 
-        for (int level = 1; level <= depth; level++)
-        {
-            std::vector<PtrData *> curr;
-            search_in_pointers(dirs[level - 1], curr, static_cast<size_t>(maxOffset), false, 0);
-
-            if (curr.empty())
+            for (int level = 1; level <= depth; level++)
             {
-                std::println("扫描在 Level {} 结束: 未找到指向上级的指针", level);
-                break;
-            }
+                std::vector<PtrData *> curr;
+                search_in_pointers(dirs[level - 1], curr, static_cast<size_t>(maxOffset), false, 0);
 
-            std::println("Level {} 搜索结果: 找到 {} 个指针", level, curr.size());
-            std::sort(curr.begin(), curr.end(), [](auto a, auto b) { return a->address < b->address; });
-
-            filter_to_ranges(dirs, ranges, curr, level, bases);
-
-            auto futures = create_assoc_index(dirs[level - 1], dirs[level], static_cast<size_t>(maxOffset));
-            WaitFutures(futures);
-
-            scanProgress_ = static_cast<float>(level + 1) / (depth + 2);
-        }
-
-        for (auto &range : ranges)
-        {
-            if (range.level > 0)
-            {
-                auto futures = create_assoc_index(dirs[range.level - 1], range.results, static_cast<size_t>(maxOffset));
-                WaitFutures(futures);
-            }
-        }
-
-        if (!ranges.empty())
-        {
-            auto tree = build_dir_tree(dirs, ranges);
-            if (tree.valid)
-            {
-                for (auto &r : ranges)
+                if (curr.empty())
                 {
-                    if (r.level > 0 && static_cast<size_t>(r.level - 1) < tree.counts.size())
-                    {
-                        for (auto &v : r.results)
-                        {
-                            const auto &counts = tree.counts[r.level - 1];
-                            if (v.start >= v.end || v.end > counts.size()) continue;
-                            for (uint32_t child = v.start; child < v.end; ++child) totalChains = SaturatingAdd(totalChains, counts[child]);
-                        }
-                    }
+                    std::println("扫描在 Level {} 结束: 未找到指向上级的指针", level);
+                    break;
                 }
 
-                std::println("开始写入文件，正在保存 {} 条链条...", totalChains);
-                wroteResults = write_bin_file(tree.contents, ranges, outfile.get(), scanMode, target, manualBase, arrayBase, arrayCount);
-                if (wroteResults) std::println("文件写入完成，总链数: {}", totalChains);
-                else std::println(stderr, "指针结果序列化失败");
+                std::println("Level {} 搜索结果: 找到 {} 个指针", level, curr.size());
+                std::sort(curr.begin(), curr.end(), [](auto a, auto b) { return a->address < b->address; });
+
+                filter_to_ranges(dirs, ranges, curr, level, bases);
+
+                auto futures = create_assoc_index(dirs[level - 1], dirs[level], static_cast<size_t>(maxOffset));
+                WaitFutures(futures);
+
+                scanProgress_ = static_cast<float>(level + 1) / (depth + 2);
             }
-        }
-        else
-        {
-            std::vector<std::vector<PtrDir *>> emptyContents;
-            wroteResults = write_bin_file(emptyContents, ranges, outfile.get(), scanMode, target, manualBase, arrayBase, arrayCount);
-            std::println("扫描结果为空，已生成空图");
-        }
 
-        if (!wroteResults)
-        {
-            chainCount_ = 0;
-            error = "无法序列化指针结果";
-            return;
-        }
+            for (auto &range : ranges)
+            {
+                if (range.level > 0)
+                {
+                    auto futures = create_assoc_index(dirs[range.level - 1], range.results, static_cast<size_t>(maxOffset));
+                    WaitFutures(futures);
+                }
+            }
 
-        if (pid != dr->GetGlobalPid())
-        {
-            error = "目标进程在扫描期间发生变化";
-            return;
-        }
+            if (!ranges.empty())
+            {
+                auto tree = build_dir_tree(dirs, ranges);
+                if (tree.valid)
+                {
+                    for (auto &r : ranges)
+                    {
+                        if (r.level > 0 && static_cast<size_t>(r.level - 1) < tree.counts.size())
+                        {
+                            for (auto &v : r.results)
+                            {
+                                const auto &counts = tree.counts[r.level - 1];
+                                if (v.start >= v.end || v.end > counts.size()) continue;
+                                for (uint32_t child = v.start; child < v.end; ++child) totalChains = SaturatingAdd(totalChains, counts[child]);
+                            }
+                        }
+                    }
 
-        std::string autoName;
-        const bool saved = SaveUniqueBin(outfile.get(), autoName);
-        if (saved) std::println("结果已保存至: {}", autoName);
-        else std::println(stderr, "无法原子保存指针结果文件");
+                    std::println("开始写入文件，正在保存 {} 条链条...", totalChains);
+                    wroteResults = write_bin_file(tree.contents, ranges, outfile.get(), scanMode, target, manualBase, arrayBase, arrayCount);
+                    if (wroteResults) std::println("文件写入完成，总链数: {}", totalChains);
+                    else std::println(stderr, "指针结果序列化失败");
+                }
+            }
+            else
+            {
+                std::vector<std::vector<PtrDir *>> emptyContents;
+                wroteResults = write_bin_file(emptyContents, ranges, outfile.get(), scanMode, target, manualBase, arrayBase, arrayCount);
+                std::println("扫描结果为空，已生成空图");
+            }
 
-        chainCount_ = saved ? totalChains : 0;
-        succeeded = saved;
-        if (!saved) error = "无法完整保存指针结果";
+            if (!wroteResults)
+            {
+                chainCount_ = 0;
+                error = "无法序列化指针结果";
+                return;
+            }
+
+            if (pid != dr->GetGlobalPid())
+            {
+                error = "目标进程在扫描期间发生变化";
+                return;
+            }
+
+            std::string autoName;
+            const bool saved = SaveUniqueBin(outfile.get(), autoName);
+            if (saved) std::println("结果已保存至: {}", autoName);
+            else std::println(stderr, "无法原子保存指针结果文件");
+
+            chainCount_ = saved ? totalChains : 0;
+            succeeded = saved;
+            if (!saved) error = "无法完整保存指针结果";
         }
         catch (const std::exception &ex)
         {
@@ -4038,8 +4037,7 @@ public:
 
         std::map<RootIdentity, std::vector<const PtrDir *>> rootIndex;
         for (const auto &block : graphB.blocks)
-            for (const auto &root : block.roots)
-                rootIndex[MakeRootIdentity(block.sym, root)].push_back(&root);
+            for (const auto &root : block.roots) rootIndex[MakeRootIdentity(block.sym, root)].push_back(&root);
 
         output = {};
         output.hdr = graphA.hdr;
@@ -4134,8 +4132,7 @@ public:
         {
             const auto &childCounts = counts[block.sym.level - 1];
             for (const auto &root : block.roots)
-                for (uint32_t child = root.start; child < root.end; ++child)
-                    total = SaturatingAdd(total, childCounts[child]);
+                for (uint32_t child = root.start; child < root.end; ++child) total = SaturatingAdd(total, childCounts[child]);
         }
         return total;
     }
@@ -4151,84 +4148,84 @@ public:
         try
         {
             Config::CpuThreadPool().detach_task(
-            [this]()
-            {
-                RunOperation(Operation::Merging, "指针结果合并失败", [this](bool &succeeded, std::string &error)
+                [this]()
                 {
+                    RunOperation(Operation::Merging, "指针结果合并失败",
+                                 [this](bool &succeeded, std::string &error)
+                                 {
+                                     std::println("=== [MergeBins] 开始基于图裁剪算法的极速合并 ===");
 
-                std::println("=== [MergeBins] 开始基于图裁剪算法的极速合并 ===");
+                                     std::vector<std::string> files;
+                                     if (access("Pointer.bin", F_OK) == 0) files.push_back("Pointer.bin");
+                                     for (int i = 1; i < 9999; ++i)
+                                     {
+                                         char buf[64];
+                                         snprintf(buf, 64, "Pointer_%d.bin", i);
+                                         if (access(buf, F_OK) == 0) files.push_back(buf);
+                                     }
 
-                std::vector<std::string> files;
-                if (access("Pointer.bin", F_OK) == 0) files.push_back("Pointer.bin");
-                for (int i = 1; i < 9999; ++i)
-                {
-                    char buf[64];
-                    snprintf(buf, 64, "Pointer_%d.bin", i);
-                    if (access(buf, F_OK) == 0) files.push_back(buf);
-                }
+                                     if (files.size() < 2)
+                                     {
+                                         error = "至少需要两个指针结果文件";
+                                         std::println(stderr, "MergeBins: {}", error);
+                                         return;
+                                     }
 
-                if (files.size() < 2)
-                {
-                    error = "至少需要两个指针结果文件";
-                    std::println(stderr, "MergeBins: {}", error);
-                    return;
-                }
+                                     MemoryGraph GA;
+                                     std::println("加载基准指针图: {}", files[0]);
+                                     if (!GA.load(files[0]))
+                                     {
+                                         error = std::format("无法加载或校验 {}", files[0]);
+                                         return;
+                                     }
 
-                MemoryGraph GA;
-                std::println("加载基准指针图: {}", files[0]);
-                if (!GA.load(files[0]))
-                {
-                    error = std::format("无法加载或校验 {}", files[0]);
-                    return;
-                }
+                                     for (size_t f_idx = 1; f_idx < files.size(); ++f_idx)
+                                     {
+                                         std::println("正在比对并裁剪: {}", files[f_idx]);
+                                         MemoryGraph GB;
+                                         if (!GB.load(files[f_idx]))
+                                         {
+                                             error = std::format("无法加载或校验 {}", files[f_idx]);
+                                             return;
+                                         }
+                                         MemoryGraph nextGraph;
+                                         std::string intersectError;
+                                         if (!IntersectGraphs(GA, GB, nextGraph, intersectError))
+                                         {
+                                             error = std::format("{}: {}", files[f_idx], intersectError);
+                                             return;
+                                         }
+                                         GA = std::move(nextGraph);
+                                         scanProgress_ = static_cast<float>(f_idx + 1) / static_cast<float>(files.size() + 1);
 
-                for (size_t f_idx = 1; f_idx < files.size(); ++f_idx)
-                {
-                    std::println("正在比对并裁剪: {}", files[f_idx]);
-                    MemoryGraph GB;
-                    if (!GB.load(files[f_idx]))
-                    {
-                        error = std::format("无法加载或校验 {}", files[f_idx]);
-                        return;
-                    }
-                    MemoryGraph nextGraph;
-                    std::string intersectError;
-                    if (!IntersectGraphs(GA, GB, nextGraph, intersectError))
-                    {
-                        error = std::format("{}: {}", files[f_idx], intersectError);
-                        return;
-                    }
-                    GA = std::move(nextGraph);
-                    scanProgress_ = static_cast<float>(f_idx + 1) / static_cast<float>(files.size() + 1);
+                                         size_t remaining_roots = 0;
+                                         for (auto &blk : GA.blocks) remaining_roots += blk.roots.size();
+                                         std::println("  该轮裁剪完毕，剩余有效起始节点: {} 个", remaining_roots);
+                                     }
 
-                    size_t remaining_roots = 0;
-                    for (auto &blk : GA.blocks) remaining_roots += blk.roots.size();
-                    std::println("  该轮裁剪完毕，剩余有效起始节点: {} 个", remaining_roots);
-                }
+                                     const size_t mergedChainCount = CountGraphChains(GA);
+                                     remove("Pointer_Merged.tmp");
+                                     if (!GA.save("Pointer_Merged.tmp"))
+                                     {
+                                         error = "无法完整写入合并临时文件";
+                                         return;
+                                     }
+                                     if (rename("Pointer_Merged.tmp", "Pointer.bin") != 0)
+                                     {
+                                         error = std::format("无法替换 Pointer.bin: {}", std::strerror(errno));
+                                         remove("Pointer_Merged.tmp");
+                                         return;
+                                     }
+                                     for (const auto &fn : files)
+                                     {
+                                         if (fn != "Pointer.bin" && remove(fn.c_str()) != 0) std::println(stderr, "MergeBins: 无法删除旧文件 {}: {}", fn, std::strerror(errno));
+                                     }
 
-                const size_t mergedChainCount = CountGraphChains(GA);
-                remove("Pointer_Merged.tmp");
-                if (!GA.save("Pointer_Merged.tmp"))
-                {
-                    error = "无法完整写入合并临时文件";
-                    return;
-                }
-                if (rename("Pointer_Merged.tmp", "Pointer.bin") != 0)
-                {
-                    error = std::format("无法替换 Pointer.bin: {}", std::strerror(errno));
-                    remove("Pointer_Merged.tmp");
-                    return;
-                }
-                for (const auto &fn : files)
-                {
-                    if (fn != "Pointer.bin" && remove(fn.c_str()) != 0) std::println(stderr, "MergeBins: 无法删除旧文件 {}: {}", fn, std::strerror(errno));
-                }
-
-                chainCount_ = mergedChainCount;
-                succeeded = true;
-                std::println("图层合并结束！已成功剔除失效的指针树分支并生成 Pointer.bin");
+                                     chainCount_ = mergedChainCount;
+                                     succeeded = true;
+                                     std::println("图层合并结束！已成功剔除失效的指针树分支并生成 Pointer.bin");
+                                 });
                 });
-            });
         }
         catch (const std::exception &ex)
         {
@@ -4254,148 +4251,147 @@ public:
         try
         {
             Config::CpuThreadPool().detach_task(
-            [this]()
-            {
-                RunOperation(Operation::Exporting, "指针链导出失败", [this](bool &succeeded, std::string &error)
+                [this]()
                 {
+                    RunOperation(Operation::Exporting, "指针链导出失败",
+                                 [this](bool &succeeded, std::string &error)
+                                 {
+                                     std::println("=== 导出文本链条 ===");
 
-                std::println("=== 导出文本链条 ===");
+                                     MemoryGraph graph;
+                                     if (!graph.load("Pointer.bin"))
+                                     {
+                                         error = "无法加载或校验 Pointer.bin";
+                                         return;
+                                     }
 
-                MemoryGraph graph;
-                if (!graph.load("Pointer.bin"))
-                {
-                    error = "无法加载或校验 Pointer.bin";
-                    return;
-                }
+                                     constexpr const char *tempPath = "Pointer_Export.tmp";
+                                     constexpr const char *outputPath = "Pointer_Export.txt";
+                                     remove(tempPath);
+                                     FilePtr output(fopen(tempPath, "wb"));
+                                     if (!output)
+                                     {
+                                         error = std::format("无法创建导出临时文件: {}", std::strerror(errno));
+                                         return;
+                                     }
+                                     struct TempGuard
+                                     {
+                                         const char *path;
+                                         bool committed = false;
+                                         ~TempGuard()
+                                         {
+                                             if (!committed) remove(path);
+                                         }
+                                     } tempGuard{tempPath};
 
-                constexpr const char *tempPath = "Pointer_Export.tmp";
-                constexpr const char *outputPath = "Pointer_Export.txt";
-                remove(tempPath);
-                FilePtr output(fopen(tempPath, "wb"));
-                if (!output)
-                {
-                    error = std::format("无法创建导出临时文件: {}", std::strerror(errno));
-                    return;
-                }
-                struct TempGuard
-                {
-                    const char *path;
-                    bool committed = false;
-                    ~TempGuard()
-                    {
-                        if (!committed) remove(path);
-                    }
-                } tempGuard{tempPath};
+                                     bool writeOk = true;
+                                     auto writeText = [&](const char *text)
+                                     {
+                                         if (writeOk && fputs(text, output.get()) == EOF) writeOk = false;
+                                     };
+                                     auto writeFormat = [&](const char *format, auto... args)
+                                     {
+                                         if (writeOk && fprintf(output.get(), format, args...) < 0) writeOk = false;
+                                     };
 
-                bool writeOk = true;
-                auto writeText = [&](const char *text)
-                {
-                    if (writeOk && fputs(text, output.get()) == EOF) writeOk = false;
-                };
-                auto writeFormat = [&](const char *format, auto... args)
-                {
-                    if (writeOk && fprintf(output.get(), format, args...) < 0) writeOk = false;
-                };
+                                     writeText("// Pointer Scan Export\n");
+                                     writeFormat("// Version: %d, Depth: %d\n", graph.hdr.version, graph.hdr.level);
+                                     writeFormat("// Target: 0x%llX\n", static_cast<unsigned long long>(graph.hdr.scanTarget));
+                                     writeFormat("// Base Mode: %d (0=Module, 1=Manual, 2=Array)\n", graph.hdr.scanBaseMode);
+                                     writeText("// ========================================\n\n");
 
-                writeText("// Pointer Scan Export\n");
-                writeFormat("// Version: %d, Depth: %d\n", graph.hdr.version, graph.hdr.level);
-                writeFormat("// Target: 0x%llX\n", static_cast<unsigned long long>(graph.hdr.scanTarget));
-                writeFormat("// Base Mode: %d (0=Module, 1=Manual, 2=Array)\n", graph.hdr.scanBaseMode);
-                writeText("// ========================================\n\n");
+                                     size_t exportedChains = 0;
+                                     struct SignedOffset
+                                     {
+                                         bool negative;
+                                         uint64_t magnitude;
+                                     };
+                                     std::array<SignedOffset, 16> offsets{};
+                                     size_t offsetCount = 0;
+                                     std::string currentBasePrefix;
 
-                size_t exportedChains = 0;
-                struct SignedOffset
-                {
-                    bool negative;
-                    uint64_t magnitude;
-                };
-                std::array<SignedOffset, 16> offsets{};
-                size_t offsetCount = 0;
-                std::string currentBasePrefix;
+                                     std::function<void(int, const PtrDir &)> dfs = [&](int currentLevel, const PtrDir &node)
+                                     {
+                                         if (!writeOk) return;
+                                         if (currentLevel < 0)
+                                         {
+                                             writeFormat("%s", currentBasePrefix.c_str());
+                                             for (size_t i = 0; i < offsetCount; ++i) writeFormat(offsets[i].negative ? " - 0x%llX" : " + 0x%llX", static_cast<unsigned long long>(offsets[i].magnitude));
+                                             writeText("\n");
+                                             if (exportedChains < std::numeric_limits<size_t>::max()) ++exportedChains;
+                                             return;
+                                         }
 
-                std::function<void(int, const PtrDir &)> dfs = [&](int currentLevel, const PtrDir &node)
-                {
-                    if (!writeOk) return;
-                    if (currentLevel < 0)
-                    {
-                        writeFormat("%s", currentBasePrefix.c_str());
-                        for (size_t i = 0; i < offsetCount; ++i)
-                            writeFormat(offsets[i].negative ? " - 0x%llX" : " + 0x%llX", static_cast<unsigned long long>(offsets[i].magnitude));
-                        writeText("\n");
-                        if (exportedChains < std::numeric_limits<size_t>::max()) ++exportedChains;
-                        return;
-                    }
+                                         if (static_cast<size_t>(currentLevel) >= graph.levels.size() || node.start >= node.end || node.end > graph.levels[currentLevel].size())
+                                         {
+                                             writeOk = false;
+                                             return;
+                                         }
 
-                    if (static_cast<size_t>(currentLevel) >= graph.levels.size() || node.start >= node.end || node.end > graph.levels[currentLevel].size())
-                    {
-                        writeOk = false;
-                        return;
-                    }
+                                         for (uint32_t i = node.start; i < node.end; ++i)
+                                         {
+                                             if (offsetCount >= offsets.size())
+                                             {
+                                                 writeOk = false;
+                                                 return;
+                                             }
+                                             const auto &child = graph.levels[currentLevel][i];
+                                             offsets[offsetCount++] = child.address < node.value ? SignedOffset{true, node.value - child.address} : SignedOffset{false, child.address - node.value};
+                                             dfs(currentLevel - 1, child);
+                                             --offsetCount;
+                                         }
+                                     };
 
-                    for (uint32_t i = node.start; i < node.end; ++i)
-                    {
-                        if (offsetCount >= offsets.size())
-                        {
-                            writeOk = false;
-                            return;
-                        }
-                        const auto &child = graph.levels[currentLevel][i];
-                        offsets[offsetCount++] = child.address < node.value ? SignedOffset{true, node.value - child.address} : SignedOffset{false, child.address - node.value};
-                        dfs(currentLevel - 1, child);
-                        --offsetCount;
-                    }
-                };
+                                     for (const auto &block : graph.blocks)
+                                     {
+                                         char baseText[256];
+                                         uint64_t baseAddress = 0;
+                                         switch (block.sym.sourceMode)
+                                         {
+                                         case 1:
+                                             snprintf(baseText, sizeof(baseText), "\"Manual_0x%llX\"", static_cast<unsigned long long>(block.sym.manualBase));
+                                             baseAddress = block.sym.manualBase;
+                                             break;
+                                         case 2:
+                                             snprintf(baseText, sizeof(baseText), "\"Array[%llu]\"", static_cast<unsigned long long>(block.sym.arrayIndex));
+                                             baseAddress = block.sym.start;
+                                             break;
+                                         default:
+                                             snprintf(baseText, sizeof(baseText), "\"%s[%d]\"", block.sym.name, block.sym.segment);
+                                             baseAddress = block.sym.start;
+                                             break;
+                                         }
 
-                for (const auto &block : graph.blocks)
-                {
-                    char baseText[256];
-                    uint64_t baseAddress = 0;
-                    switch (block.sym.sourceMode)
-                    {
-                    case 1:
-                        snprintf(baseText, sizeof(baseText), "\"Manual_0x%llX\"", static_cast<unsigned long long>(block.sym.manualBase));
-                        baseAddress = block.sym.manualBase;
-                        break;
-                    case 2:
-                        snprintf(baseText, sizeof(baseText), "\"Array[%llu]\"", static_cast<unsigned long long>(block.sym.arrayIndex));
-                        baseAddress = block.sym.start;
-                        break;
-                    default:
-                        snprintf(baseText, sizeof(baseText), "\"%s[%d]\"", block.sym.name, block.sym.segment);
-                        baseAddress = block.sym.start;
-                        break;
-                    }
+                                         for (const auto &root : block.roots)
+                                         {
+                                             const bool negative = root.address < baseAddress;
+                                             const uint64_t magnitude = negative ? baseAddress - root.address : root.address - baseAddress;
+                                             currentBasePrefix = std::format("[{} {} 0x{:X}]", baseText, negative ? "-" : "+", magnitude);
+                                             offsetCount = 0;
+                                             dfs(block.sym.level - 1, root);
+                                         }
+                                     }
 
-                    for (const auto &root : block.roots)
-                    {
-                        const bool negative = root.address < baseAddress;
-                        const uint64_t magnitude = negative ? baseAddress - root.address : root.address - baseAddress;
-                        currentBasePrefix = std::format("[{} {} 0x{:X}]", baseText, negative ? "-" : "+", magnitude);
-                        offsetCount = 0;
-                        dfs(block.sym.level - 1, root);
-                    }
-                }
+                                     if (writeOk) writeOk = fflush(output.get()) == 0 && fsync(fileno(output.get())) == 0 && ferror(output.get()) == 0;
+                                     FILE *rawOutput = output.release();
+                                     if (fclose(rawOutput) != 0) writeOk = false;
+                                     if (!writeOk)
+                                     {
+                                         error = "导出文件写入不完整";
+                                         return;
+                                     }
+                                     if (rename(tempPath, outputPath) != 0)
+                                     {
+                                         error = std::format("无法替换 {}: {}", outputPath, std::strerror(errno));
+                                         return;
+                                     }
+                                     tempGuard.committed = true;
 
-                if (writeOk) writeOk = fflush(output.get()) == 0 && fsync(fileno(output.get())) == 0 && ferror(output.get()) == 0;
-                FILE *rawOutput = output.release();
-                if (fclose(rawOutput) != 0) writeOk = false;
-                if (!writeOk)
-                {
-                    error = "导出文件写入不完整";
-                    return;
-                }
-                if (rename(tempPath, outputPath) != 0)
-                {
-                    error = std::format("无法替换 {}: {}", outputPath, std::strerror(errno));
-                    return;
-                }
-                tempGuard.committed = true;
-
-                chainCount_ = exportedChains;
-                succeeded = true;
-                std::println("导出完成: 成功输出 {} 条链条", exportedChains);
+                                     chainCount_ = exportedChains;
+                                     succeeded = true;
+                                     std::println("导出完成: 成功输出 {} 条链条", exportedChains);
+                                 });
                 });
-            });
         }
         catch (const std::exception &ex)
         {
