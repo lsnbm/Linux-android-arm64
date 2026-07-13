@@ -76,7 +76,7 @@ namespace RenderGL
     static ANativeWindow *native_window = nullptr;
     static android::ANativeWindowCreator::DisplayInfo displayInfo{};
 
-    inline bool init(bool preventCapture = true)
+    inline bool init(bool preventCapture)
     {
         printf("[initEGLGUI] 开始初始化 EGL 和 GUI...\n");
         displayInfo = android::ANativeWindowCreator::GetDisplayInfo();
@@ -691,8 +691,8 @@ namespace RenderVK
         }
 
         const auto &target = s_cachedRecordDisplay;
-        const int32_t sourceWidth = std::max(displayInfo.width, displayInfo.height);
-        const int32_t sourceHeight = std::min(displayInfo.width, displayInfo.height);
+        const int32_t sourceWidth = displayInfo.width;
+        const int32_t sourceHeight = displayInfo.height;
         if (sourceWidth <= 0 || sourceHeight <= 0) return false;
 
         if (s_recordSurface.window && SameRecordDisplay(s_recordSurface.display, target) && s_recordSurface.sourceWidth == sourceWidth && s_recordSurface.sourceHeight == sourceHeight) return true;
@@ -820,7 +820,7 @@ namespace RenderVK
         if (result == VK_ERROR_OUT_OF_DATE_KHR) CleanupRecordSurface();
     }
 
-    inline bool init(bool preventCapture = true)
+    inline bool init(bool preventCapture)
     {
         s_preventCapture = preventCapture;
         displayInfo = android::ANativeWindowCreator::GetDisplayInfo();
@@ -836,17 +836,13 @@ namespace RenderVK
         int h = displayInfo.height;
         int max_side = (h > w ? h : w);
 
-        // Android 13+ 双 Surface 模式：主层始终跳过镜像，录屏/投屏只接收 LarkRecord，
-        // 避免主层与副层在录屏中重复合成。旧系统仍沿用单 Surface 行为。
-        const bool useDualSurfaceCapture = !preventCapture && android::ANativeWindowCreator::SupportsRecordLayerStack();
-        const bool skipMainCapture = preventCapture || useDualSurfaceCapture;
-        native_window = android::ANativeWindowCreator::Create("Lark", max_side, max_side, skipMainCapture);
+        native_window = android::ANativeWindowCreator::Create("Lark", max_side, max_side, preventCapture);
         if (native_window == nullptr)
         {
             std::println(stderr, "[RenderVK Error] Failed to create ANativeWindow!");
             return false;
         }
-        std::println(stderr, "[RenderVK] Capture policy preventCapture={} dualSurface={} skipMainCapture={}", preventCapture, useDualSurfaceCapture, skipMainCapture);
+        std::println(stderr, "[RenderVK] Capture policy preventCapture={}", preventCapture);
         ANativeWindow_acquire(native_window);
 
         const char *instance_extensions[] = {"VK_KHR_surface", "VK_KHR_android_surface"};

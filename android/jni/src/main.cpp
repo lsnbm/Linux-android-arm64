@@ -2081,9 +2081,9 @@ class MainUI
 int RunMemoryTool()
 {
     Config::g_Running = true;
-    constexpr bool preventCapture = false;
+    constexpr bool kPreventCapture = false;
 
-    if (!RenderVK::init(preventCapture))
+    if (!RenderVK::init(kPreventCapture))
     {
         std::println(stderr, "[错误] 初始化图形引擎失败。");
         return 1;

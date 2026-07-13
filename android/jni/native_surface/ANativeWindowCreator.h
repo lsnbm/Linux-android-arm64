@@ -827,7 +827,7 @@ namespace android
             return local_displayInfo;
         }
 
-        static ANativeWindow *Create(const char *name, int32_t width = -1, int32_t height = -1, bool skipScrenshot_ = true)
+        static ANativeWindow *Create(const char *name, int32_t width, int32_t height, bool preventCapture)
         {
             auto &surfaceComposerClient = GetComposerInstance();
 
@@ -845,7 +845,7 @@ namespace android
             if (width <= 0) width = 1080;
             if (height <= 0) height = 2340;
 
-            auto surfaceControl = surfaceComposerClient.CreateSurface(name, width, height, skipScrenshot_);
+            auto surfaceControl = surfaceComposerClient.CreateSurface(name, width, height, preventCapture, 0, true);
 
             // 修复：指明 Surface 的命名空间 detail::Surface
             detail::Surface *rawSurface = surfaceControl.GetSurface();
