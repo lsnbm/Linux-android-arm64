@@ -39,6 +39,7 @@ static struct break_point *g_ptebp_info;
 static struct mm_struct *g_ptebp_mm;
 static struct ptebp_slot g_ptebp_slots[BP_CONFIG_MAX];
 static DEFINE_SPINLOCK(g_ptebp_lock);
+static bool g_ptebp_stopping;
 
 static inline bool ptebp_point_is_active(struct bp_point *point)
 {
@@ -65,6 +66,20 @@ static inline pteval_t ptebp_make_execute_only_pte(pteval_t value)
     return value;
 }
 
+static inline void ptebp_sync_insn(phys_addr_t paddr)
+{
+    unsigned long addr = (unsigned long)phys_to_virt(paddr);
+
+    asm volatile("dc cvau, %0\n\t"
+                 "dsb ish\n\t"
+                 "ic ialluis\n\t"
+                 "dsb ish\n\t"
+                 "isb\n\t"
+                 :
+                 : "r"(addr)
+                 : "memory");
+}
+
 /*
  * PTEBP 页可能已经是 execute-only，不能依赖 EL0 数据访问权限翻译。
  * 指令读写统一通过当前 PTE 的 PFN 完成，写入后回读校验。
@@ -84,10 +99,11 @@ static inline int ptebp_access_insn(struct ptebp_slot *slot, uint32_t *insn, boo
     paddr = PFN_PHYS(pfn) + offset_in_page(slot->hook_addr);
     if (!write) return pte_read_physical(paddr, insn, sizeof(*insn));
 
-    status = pte_write_physical(paddr, insn, sizeof(*insn));
+    status = linear_write_physical(paddr, insn, sizeof(*insn));
     if (status) return status;
+    ptebp_sync_insn(paddr);
 
-    status = pte_read_physical(paddr, &readback, sizeof(readback));
+    status = linear_read_physical(paddr, &readback, sizeof(readback));
     if (status) return status;
     return readback == *insn ? 0 : -EIO;
 }
@@ -197,21 +213,26 @@ static void ptebp_drop_all_monitors(bool lock_mm)
     size_t point_slot;
 
     spin_lock_irqsave(&g_ptebp_lock, flags);
-    mm = g_ptebp_mm;
-    g_ptebp_info = NULL;
-    g_ptebp_mm = NULL;
-    memcpy(slots, g_ptebp_slots, sizeof(slots));
-    memset(g_ptebp_slots, 0, sizeof(g_ptebp_slots));
+    if (g_ptebp_stopping)
+    {
+        spin_unlock_irqrestore(&g_ptebp_lock, flags);
+        return;
+    }
 
+    mm = g_ptebp_mm;
     if (!mm)
     {
         spin_unlock_irqrestore(&g_ptebp_lock, flags);
         return;
     }
+
+    g_ptebp_stopping = true;
+    memcpy(slots, g_ptebp_slots, sizeof(slots));
     if (lock_mm)
     {
         spin_unlock_irqrestore(&g_ptebp_lock, flags);
         mmap_read_lock(mm);
+        spin_lock_irqsave(&g_ptebp_lock, flags);
     }
 
     for (point_slot = 0; point_slot < ARRAY_SIZE(slots); point_slot++)
@@ -228,8 +249,14 @@ static void ptebp_drop_all_monitors(bool lock_mm)
         if (!slot->hook_addr) continue;
         if (ptebp_validate_slot(slot, mm)) (void)write_user_pte_value(mm, slot->hook_addr & PAGE_MASK, pte_val(slot->orig_pte));
     }
+
+    g_ptebp_info = NULL;
+    g_ptebp_mm = NULL;
+    memset(g_ptebp_slots, 0, sizeof(g_ptebp_slots));
+    g_ptebp_stopping = false;
+    spin_unlock_irqrestore(&g_ptebp_lock, flags);
+
     if (lock_mm) mmap_read_unlock(mm);
-    else spin_unlock_irqrestore(&g_ptebp_lock, flags);
     mmput(mm);
 }
 

@@ -53,14 +53,42 @@ def _strip_scan_regions(response: dict[str, Any]) -> dict[str, Any]:
     return slim_response
 
 
-def _scan_params(value_type: str, mode: str, value: str, range_max: str) -> dict[str, Any]:
-    params: dict[str, Any] = {"value_type": value_type.strip().lower(), "mode": mode.strip().lower()}
-    if params["mode"] != "unknown" and not str(value).strip():
-        raise ValueError("value is required unless mode is 'unknown'")
-    if str(value).strip():
-        params["value"] = value
-    if str(range_max).strip():
-        params["range_max"] = range_max
+def _scan_params(value_type: str, mode: str, value: str, range_max: str, *, is_first: bool) -> dict[str, Any]:
+    mode_token = mode.strip().lower()
+    mode_token = {
+        "equal": "eq",
+        "greater": "gt",
+        "less": "lt",
+        "increased": "inc",
+        "decreased": "dec",
+        "chg": "changed",
+        "unchg": "unchanged",
+        "ptr": "pointer",
+        "str": "string",
+    }.get(mode_token, mode_token)
+    value_token = str(value).strip()
+    range_token = str(range_max).strip()
+    history_modes = {"inc", "dec", "changed", "unchanged"}
+    value_modes = {"eq", "gt", "lt", "range", "pointer", "string"}
+    if is_first and mode_token in history_modes:
+        raise ValueError("first scan cannot use inc, dec, changed, or unchanged")
+    if mode_token in value_modes and not value_token:
+        raise ValueError(f"value is required for mode '{mode_token}'")
+    if mode_token == "range" and not range_token:
+        raise ValueError("range_max is required for mode 'range'")
+
+    params: dict[str, Any] = {"mode": mode_token}
+    if mode_token == "pointer":
+        params["value_type"] = "i64"
+    elif mode_token != "string":
+        type_token = value_type.strip().lower()
+        if not type_token:
+            raise ValueError("value_type is required for numeric scans")
+        params["value_type"] = type_token
+    if mode_token in value_modes:
+        params["value"] = value_token
+    if mode_token == "range":
+        params["range_max"] = range_token
     return params
 
 
@@ -213,7 +241,7 @@ def android_memory_scan_start(
     range_max: str = "",
 ) -> dict[str, Any]:
     """Start a new memory scan. Example: value_type='i32', mode='eq', value='1234'."""
-    return _call_bridge_operation("scan.start", _scan_params(value_type, mode, value, range_max))
+    return _call_bridge_operation("scan.start", _scan_params(value_type, mode, value, range_max, is_first=True))
 
 
 @mcp.tool()
@@ -224,7 +252,7 @@ def android_memory_scan_refine(
     range_max: str = "",
 ) -> dict[str, Any]:
     """Refine the current memory scan result set."""
-    return _call_bridge_operation("scan.refine", _scan_params(value_type, mode, value, range_max))
+    return _call_bridge_operation("scan.refine", _scan_params(value_type, mode, value, range_max, is_first=False))
 
 
 @mcp.tool()
@@ -335,8 +363,8 @@ def android_pointer_scan(
     elif mode_token == "array":
         if array_base is None or array_count is None:
             raise ValueError("array mode requires array_base and array_count")
-        if array_count <= 0:
-            raise ValueError("array_count must be greater than 0")
+        if array_count <= 0 or array_count > 1_000_000:
+            raise ValueError("array_count must be in 1..1000000")
         params["array_base"] = format_address(array_base)
         params["array_count"] = array_count
 

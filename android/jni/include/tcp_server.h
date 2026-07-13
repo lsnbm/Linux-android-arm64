@@ -16,7 +16,13 @@ namespace
     std::atomic_bool gRunning{true};
     std::atomic_int gServerFd{-1};
     std::mutex gRequestMutex;
-    BS::thread_pool<> gClientThreadPool{std::max(16u, std::thread::hardware_concurrency() * 4)};
+
+    // 延迟创建，避免 daemonize() 的 fork() 丢弃线程池工作线程后留下不可用的任务队列。
+    BS::thread_pool<> &ClientThreadPool()
+    {
+        static BS::thread_pool<> pool{std::max(16u, std::thread::hardware_concurrency() * 4)};
+        return pool;
+    }
 
     void CloseTcpServerFd()
     {
@@ -79,7 +85,9 @@ namespace
     // 解析整数参数
     std::optional<int> parseInt(std::string_view text)
     {
-        return parseNumber<int>(text, [](const char *s, char **end) { return std::strtol(s, end, 0); });
+        const auto value = parseNumber<std::int64_t>(text, [](const char *s, char **end) { return std::strtoll(s, end, 0); });
+        if (!value || *value < std::numeric_limits<int>::min() || *value > std::numeric_limits<int>::max()) return std::nullopt;
+        return static_cast<int>(*value);
     }
 
     // 解析浮点数参数
@@ -676,7 +684,16 @@ namespace
             };
             auto parseIntValue = [](const json &value) -> std::optional<int>
             {
-                if (value.is_number_integer()) return value.get<int>();
+                if (value.is_number_unsigned())
+                {
+                    const auto raw = value.get<std::uint64_t>();
+                    return raw <= static_cast<std::uint64_t>(std::numeric_limits<int>::max()) ? std::optional<int>(static_cast<int>(raw)) : std::nullopt;
+                }
+                if (value.is_number_integer())
+                {
+                    const auto raw = value.get<std::int64_t>();
+                    return raw >= std::numeric_limits<int>::min() && raw <= std::numeric_limits<int>::max() ? std::optional<int>(static_cast<int>(raw)) : std::nullopt;
+                }
                 if (value.is_string()) return parseInt(value.get<std::string>());
                 return std::nullopt;
             };
@@ -779,10 +796,17 @@ namespace
 
         auto pointerStateJson = [&]() -> json
         {
+            const auto state = MemoryTool::Pointer().state();
             return {
-                {"scanning", MemoryTool::Pointer().isScanning()},
-                {"progress", MemoryTool::Pointer().scanProgress()},
-                {"count", MemoryTool::Pointer().count()},
+                {"busy", state.operation != PointerManager::Operation::Idle},
+                {"scanning", state.operation == PointerManager::Operation::Scanning},
+                {"operation", PointerManager::OperationName(state.operation)},
+                {"last_operation", PointerManager::OperationName(state.lastOperation)},
+                {"progress", state.progress},
+                {"count", state.count},
+                {"completed", state.completed},
+                {"success", state.success},
+                {"error", state.error},
             };
         };
 
@@ -1102,24 +1126,22 @@ namespace
 
             const int pid = dr->GetGlobalPid();
             if (pid <= 0) return fail("全局PID未设置，请先执行 target.select 或 target.attach");
-            if (MemoryTool::Pointer().isScanning()) return fail("当前已有指针扫描任务在运行");
+            if (MemoryTool::Pointer().isBusy()) return fail("当前已有指针操作在运行");
 
             const std::string moduleFilter = optionalString("module_filter");
-            if (!MemoryTool::Pointer().startAsync(pid, static_cast<uintptr_t>(std::get<std::uint64_t>(target)), std::get<int>(depth), std::get<int>(maxOffset), useManual, static_cast<uintptr_t>(manualBase), useArray, static_cast<uintptr_t>(arrayBase), arrayCount, moduleFilter)) return fail("当前已有指针扫描任务在运行");
+            if (!MemoryTool::Pointer().startAsync(pid, static_cast<uintptr_t>(std::get<std::uint64_t>(target)), std::get<int>(depth), std::get<int>(maxOffset), useManual, static_cast<uintptr_t>(manualBase), useArray, static_cast<uintptr_t>(arrayBase), arrayCount, moduleFilter)) return fail("指针扫描请求被拒绝，请检查目标、参数和当前操作状态");
             return okData(pointerStateJson());
         }
 
         if (op == "pointer.merge")
         {
-            if (MemoryTool::Pointer().isScanning()) return fail("指针扫描运行中，无法合并结果");
-            MemoryTool::Pointer().MergeBins();
+            if (!MemoryTool::Pointer().MergeBins()) return fail("当前已有指针操作在运行，无法合并结果");
             return okData(pointerStateJson());
         }
 
         if (op == "pointer.export")
         {
-            if (MemoryTool::Pointer().isScanning()) return fail("指针扫描运行中，无法导出结果");
-            MemoryTool::Pointer().ExportToTxt();
+            if (!MemoryTool::Pointer().ExportToTxt()) return fail("当前已有指针操作在运行，无法导出结果");
             return okData(pointerStateJson());
         }
 
@@ -1471,12 +1493,12 @@ int tcp_server()
             continue;
         }
 
-        gClientThreadPool.detach_task([clientFd, clientAddr] { HandleClientConnection(clientFd, clientAddr); });
+        ClientThreadPool().detach_task([clientFd, clientAddr] { HandleClientConnection(clientFd, clientAddr); });
     }
 
     CloseTcpServerFd();
-    gClientThreadPool.purge();
-    gClientThreadPool.wait();
+    ClientThreadPool().purge();
+    ClientThreadPool().wait();
 
     std::println("服务端已退出。");
     return 0;

@@ -21,7 +21,12 @@
 #define MAX_DEVICES 5
 #define MAX_FINGERS 10
 
-inline BS::thread_pool<> TouchThreadPool{MAX_DEVICES};
+// 延迟到 daemonize() 完成后创建；fork() 子进程不会保留已存在的线程池工作线程。
+static BS::thread_pool<> &TouchThreadPool()
+{
+    static BS::thread_pool<> pool{MAX_DEVICES};
+    return pool;
+}
 
 // 全局状态变量
 static std::atomic<uint32_t> orientation{0};
@@ -363,7 +368,7 @@ bool Touch_Init()
         config_ref.maxX = dev_info.maxX;
         config_ref.maxY = dev_info.maxY;
 
-        config_ref.task = TouchThreadPool.submit_task([config = &config_ref] { deviceHandlerThread(config); });
+        config_ref.task = TouchThreadPool().submit_task([config = &config_ref] { deviceHandlerThread(config); });
     }
     return true;
 }
