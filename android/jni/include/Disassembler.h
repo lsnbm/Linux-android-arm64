@@ -186,6 +186,7 @@ namespace Disasm
             }
 
             cs_option(m_handle, CS_OPT_DETAIL, CS_OPT_OFF);
+            cs_option(m_handle, CS_OPT_SKIPDATA, CS_OPT_ON);
 
             m_valid = true;
             printf("[+] 反汇编器初始化成功: ARM64\n");

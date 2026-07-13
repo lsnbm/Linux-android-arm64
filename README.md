@@ -9,6 +9,26 @@ TG:https://t.me/+ArHIx-Km9jkxNjZl
 
 ---
 
+## 依赖初始化
+
+Capstone 和 Dear ImGui 通过 Git 子模块引入，分别跟踪官方 `next` 和 `master` 分支。
+
+首次克隆仓库时初始化子模块：
+
+```bash
+git clone --recurse-submodules <repository-url>
+```
+
+已有工作区拉取两个官方分支的最新提交：
+
+```bash
+git submodule update --init --remote --recursive
+```
+
+GitHub 的 Download ZIP 不包含子模块源码，请使用 Git 克隆仓库。
+
+---
+
 ## 1. 功能总览
 
 `lsdriver` 是一个运行在 Android ARM64 内核中的内存调试与输入辅助模块。它不创建字符设备，也不通过 `ioctl`、`netlink`、`procfs` 或 `sysfs` 暴露命令接口；用户态程序通过固定地址共享内存与内核线程通信。
