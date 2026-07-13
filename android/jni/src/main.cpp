@@ -197,12 +197,8 @@ class MainUI
 
     struct PtrParams
     {
-        uintptr_t target = 0;
         int depth = 3;
         bool useManual = false, useArray = false;
-        uintptr_t manualBase = 0, arrayBase = 0;
-        size_t arrayCount = 0;
-        std::string filterModule;
     } ptrParams_;
 
     struct SigParams
@@ -459,11 +455,29 @@ class MainUI
                                });
     }
 
-    void startPtrScan()
+    bool startPtrScan()
     {
-        auto p = ptrParams_;
-        auto pid = dr->GetGlobalPid();
-        ptrManager_.startAsync(pid, p.target, p.depth, (selectedOffsetIdx_ + 1) * 500, p.useManual, p.manualBase, p.useArray, p.arrayBase, p.arrayCount, std::move(p.filterModule));
+        const auto target = ParseHexAddress(buf_.ptrTarget);
+        if (!target) return false;
+
+        uintptr_t manualBase = 0, arrayBase = 0;
+        size_t arrayCount = 0;
+        if (ptrParams_.useManual)
+        {
+            const auto parsed = ParseHexAddress(buf_.base);
+            if (!parsed) return false;
+            manualBase = *parsed;
+        }
+        else if (ptrParams_.useArray)
+        {
+            const auto parsedBase = ParseHexAddress(buf_.arrayBase);
+            const auto parsedCount = MemUtils::ParseUInt64(buf_.arrayCount, 10);
+            if (!parsedBase || !parsedCount || *parsedCount == 0 || *parsedCount > 1000000 || *parsedCount > std::numeric_limits<size_t>::max()) return false;
+            arrayBase = *parsedBase;
+            arrayCount = static_cast<size_t>(*parsedCount);
+        }
+
+        return ptrManager_.startAsync(dr->GetGlobalPid(), *target, ptrParams_.depth, (selectedOffsetIdx_ + 1) * 500, ptrParams_.useManual, manualBase, ptrParams_.useArray, arrayBase, arrayCount, buf_.filterModule);
     }
 
     void copyAddress(uintptr_t addr)
@@ -1114,7 +1128,7 @@ class MainUI
             if (strlen(buf_.moduleSearch) > 0)
             {
                 std::string target = buf_.moduleSearch;
-                Config::CpuThreadPool.detach_task([target] { dr->DumpMemory(target); });
+                Config::CpuThreadPool().detach_task([target] { dr->DumpMemory(target); });
             }
         }
         UI::Space(S(6));
@@ -1163,92 +1177,75 @@ class MainUI
     void drawPointerTab()
     {
         float w = ImGui::GetContentRegionAvail().x, bh = S(45);
+        const auto pointerState = ptrManager_.state();
+        const bool busy = pointerState.operation != PointerManager::Operation::Idle;
         ImGui::PushID("PtrScan");
         UI::Text(Colors::TITLE, "━━ 指针扫描 ━━");
         UI::Space(S(4));
 
-        if (!ptrManager_.isScanning())
+        ImGui::BeginDisabled(busy);
+        ImGui::Text("目标地址:");
+        ImGuiFloatingKeyboard::InputButton(buf_.ptrTarget, "点击输入Hex", {w, bh}, "目标地址(Hex)");
+        UI::Space(S(4));
+
+        ImGui::Text("深度:");
+        ImGui::SameLine();
+        char dLbl[8];
+        snprintf(dLbl, sizeof(dLbl), "%d层", ptrParams_.depth);
+        if (ImGui::Button(dLbl, {S(70), bh})) state_.showDepth = true;
+        ImGui::SameLine();
+        ImGui::Text("偏移:");
+        ImGui::SameLine();
+        if (ImGui::Button(offsetLabels_[selectedOffsetIdx_].c_str(), {S(70), bh})) state_.showOffset = true;
+
+        UI::Space(S(4));
+        UI::Text(Colors::LABEL, "指定模块 (可选):");
+        ImGuiFloatingKeyboard::InputButton(buf_.filterModule, "全部模块", {w - S(60), bh}, "模块名(如il2cpp)");
+        ImGui::SameLine();
+        if (ImGui::Button("清##scanFilter", {S(50), bh})) buf_.filterModule[0] = 0;
+
+        ImGui::Checkbox("手动基址##scan", &ptrParams_.useManual);
+        if (ptrParams_.useManual)
         {
-            ImGui::Text("目标地址:");
-            ImGuiFloatingKeyboard::InputButton(buf_.ptrTarget, "点击输入Hex", {w, bh}, "目标地址(Hex)");
-            UI::Space(S(4));
-
-            // 深度和偏移
-            ImGui::Text("深度:");
-            ImGui::SameLine();
-            char dLbl[8];
-            snprintf(dLbl, sizeof(dLbl), "%d层", ptrParams_.depth);
-            if (ImGui::Button(dLbl, {S(70), bh})) state_.showDepth = true;
-            ImGui::SameLine();
-            ImGui::Text("偏移:");
-            ImGui::SameLine();
-            if (ImGui::Button(offsetLabels_[selectedOffsetIdx_].c_str(), {S(70), bh})) state_.showOffset = true;
-
-            UI::Space(S(4));
-            UI::Text(Colors::LABEL, "指定模块 (可选):");
-            ImGuiFloatingKeyboard::InputButton(buf_.filterModule, "全部模块", {w - S(60), bh}, "模块名(如il2cpp)");
-            ImGui::SameLine();
-            if (ImGui::Button("清##scanFilter", {S(50), bh})) buf_.filterModule[0] = 0;
-
-            // 手动/数组基址
-            ImGui::Checkbox("手动基址##scan", &ptrParams_.useManual);
-            if (ptrParams_.useManual)
-            {
-                ptrParams_.useArray = false;
-                ImGuiFloatingKeyboard::InputButton(buf_.base, "基址(Hex)##scanBase", {w, bh}, "Hex基址");
-            }
-            ImGui::Checkbox("数组基址##scan", &ptrParams_.useArray);
-            if (ptrParams_.useArray)
-            {
-                ptrParams_.useManual = false;
-                float hw = (w - S(6)) / 2;
-                ImGuiFloatingKeyboard::InputButton(buf_.arrayBase, "数组地址(Hex)", {hw, bh}, "数组首地址");
-                ImGui::SameLine();
-                ImGuiFloatingKeyboard::InputButton(buf_.arrayCount, "数量", {hw, bh}, "元素数量");
-            }
-
-            UI::Space(S(6));
-            if (UI::Btn("开始扫描", {w, S(48)}, Colors::BTN_GREEN))
-            {
-                if (auto target = ParseHexAddress(buf_.ptrTarget))
-                {
-                    ptrParams_.target = *target;
-                    ptrParams_.filterModule = buf_.filterModule;
-                    if (ptrParams_.useManual && buf_.base[0]) ptrParams_.manualBase = static_cast<uintptr_t>(MemUtils::ParseUInt64(buf_.base, 16).value_or(0));
-                    if (ptrParams_.useArray)
-                    {
-                        if (buf_.arrayBase[0]) ptrParams_.arrayBase = static_cast<uintptr_t>(MemUtils::ParseUInt64(buf_.arrayBase, 16).value_or(0));
-                        if (buf_.arrayCount[0]) ptrParams_.arrayCount = static_cast<size_t>(MemUtils::ParseUInt64(buf_.arrayCount, 10).value_or(0));
-                    }
-                    startPtrScan();
-                }
-            }
-
-            // 文件操作
-            UI::Space(S(12));
-            ImGui::Separator();
-            UI::Space(S(8));
-            UI::Text({0.6f, 0.7f, 0.8f, 1}, "文件操作 (Pointer.bin)");
-            UI::Space(S(4));
-            UI::ButtonRow(w, S(40), {{"开始对比", Colors::BTN_PURPLE, [&] { ptrManager_.MergeBins(); }}, {"格式化输出", {0.45f, 0.35f, 0.2f, 1}, [&] { ptrManager_.ExportToTxt(); }}}, S(8));
-
-            if (auto cnt = ptrManager_.count(); cnt > 0)
-            {
-                UI::Space(S(6));
-                UI::Text({0.4f, 1, 0.4f, 1}, "扫描完成！找到 %zu 条指针链", cnt);
-            }
-            else if (ptrManager_.scanProgress() >= 1.0f)
-            {
-                UI::Space(S(6));
-                UI::Text(Colors::ERR, "扫描完成，未找到结果");
-            }
-            UI::Text(Colors::HINT, "保存到 Pointer.bin");
+            ptrParams_.useArray = false;
+            ImGuiFloatingKeyboard::InputButton(buf_.base, "基址(Hex)##scanBase", {w, bh}, "Hex基址");
         }
-        else
+        ImGui::Checkbox("数组基址##scan", &ptrParams_.useArray);
+        if (ptrParams_.useArray)
         {
-            UI::Text(Colors::WARN, "扫描中...");
-            ImGui::ProgressBar(ptrManager_.scanProgress(), {w, S(22)});
+            ptrParams_.useManual = false;
+            float hw = (w - S(6)) / 2;
+            ImGuiFloatingKeyboard::InputButton(buf_.arrayBase, "数组地址(Hex)", {hw, bh}, "数组首地址");
+            ImGui::SameLine();
+            ImGuiFloatingKeyboard::InputButton(buf_.arrayCount, "数量", {hw, bh}, "元素数量");
         }
+
+        UI::Space(S(6));
+        UI::Btn("开始扫描", {w, S(48)}, Colors::BTN_GREEN) && startPtrScan();
+
+        UI::Space(S(12));
+        ImGui::Separator();
+        UI::Space(S(8));
+        UI::Text({0.6f, 0.7f, 0.8f, 1}, "文件操作 (Pointer.bin)");
+        UI::Space(S(4));
+        UI::ButtonRow(w, S(40), {{"开始对比", Colors::BTN_PURPLE, [&] { ptrManager_.MergeBins(); }}, {"格式化输出", {0.45f, 0.35f, 0.2f, 1}, [&] { ptrManager_.ExportToTxt(); }}}, S(8));
+        ImGui::EndDisabled();
+
+        UI::Space(S(8));
+        if (busy)
+        {
+            UI::Text(Colors::WARN, "%.*s...", static_cast<int>(PointerManager::OperationName(pointerState.operation).size()), PointerManager::OperationName(pointerState.operation).data());
+            ImGui::ProgressBar(pointerState.progress, {w, S(22)});
+        }
+        else if (pointerState.completed && !pointerState.success)
+        {
+            UI::Text(Colors::ERR, "%s", pointerState.error.empty() ? "指针操作失败" : pointerState.error.c_str());
+        }
+        else if (pointerState.completed)
+        {
+            UI::Text(Colors::OK, "操作完成，指针链数量: %zu", pointerState.count);
+        }
+        else UI::Text(Colors::HINT, "扫描结果保存到 Pointer.bin");
         ImGui::PopID();
     }
 
@@ -2120,7 +2117,7 @@ int RunMemoryTool()
     return rc;
 }
 
-// 脱离终端后台运行
+// 脱离终端后台运行；调用前不得创建工作线程，fork() 后仅保留调用线程。
 static bool daemonize(const char *log_path)
 {
     pid_t pid;
@@ -2218,10 +2215,10 @@ int main()
                                         RunGyroTest,
                                         RunGnssTest};
     rc = run[mode]();
-    Config::CpuThreadPool.purge();
-    Config::IoThreadPool.purge();
-    Config::CpuThreadPool.wait();
-    Config::IoThreadPool.wait();
+    Config::CpuThreadPool().purge();
+    Config::IoThreadPool().purge();
+    Config::CpuThreadPool().wait();
+    Config::IoThreadPool().wait();
 
     delete dr;
     dr = nullptr;

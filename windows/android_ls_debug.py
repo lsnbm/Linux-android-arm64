@@ -53,6 +53,15 @@ VALUE_TYPE_OPTIONS = (
     ("Float", "Float"),
     ("Double", "Double"),
 )
+SCAN_HISTORY_MODES = {"inc", "dec", "changed", "unchanged"}
+SCAN_VALUE_MODES = {"eq", "gt", "lt", "range", "pointer", "string"}
+SCAN_MODE_ALIASES = {
+    "equal": "eq",
+    "greater": "gt",
+    "less": "lt",
+    "increased": "inc",
+    "decreased": "dec",
+}
 HWBP_OP_LABELS = {
     "none": "未设置",
     "read": "读取",
@@ -174,6 +183,7 @@ class TcpTestWindow(QWidget):
         self.scan_page_start = 0
         self.scan_total_count = 0
         self.scan_live_refresh_enabled = False
+        self.scan_session_type: str | None = None
         self.pointer_scan_running = False
         self.saved_items: list[dict[str, str]] = []
         self.browser_current_addr = 0
@@ -496,6 +506,7 @@ class TcpTestWindow(QWidget):
         self.scan_mode_combo.addItem("未变化", "unchanged")
         self.scan_mode_combo.addItem("范围", "range")
         self.scan_mode_combo.addItem("指针", "pointer")
+        self.scan_mode_combo.addItem("字符串", "string")
         eq_index = self.scan_mode_combo.findData("eq")
         self.scan_mode_combo.setCurrentIndex(eq_index if eq_index >= 0 else 0)
         row1.addWidget(self.scan_mode_combo)
@@ -559,6 +570,118 @@ class TcpTestWindow(QWidget):
         row3.addStretch(1)
         right_layout.addLayout(row3)
         right_layout.addStretch(1)
+
+        self.scan_mode_combo.currentIndexChanged.connect(self._apply_scan_control_state)
+        self._apply_scan_control_state()
+
+    def _scan_mode_token(self) -> str:
+        mode_data = self.scan_mode_combo.currentData()
+        return str(mode_data).strip().lower() if mode_data is not None else ""
+
+    def _selected_scan_type_token(self) -> str:
+        type_data = self.scan_type_combo.currentData()
+        return str(type_data).strip() if type_data is not None else self.scan_type_combo.currentText().strip()
+
+    @staticmethod
+    def _normalize_scan_type_token(value: object) -> str | None:
+        token = str(value or "").strip().lower()
+        return {
+            "i8": "I8",
+            "i16": "I16",
+            "i32": "I32",
+            "i64": "I64",
+            "float": "Float",
+            "f32": "Float",
+            "double": "Double",
+            "f64": "Double",
+            "str": "string",
+            "string": "string",
+            "text": "string",
+        }.get(token)
+
+    def _scan_result_type_token(self) -> str:
+        return self.scan_session_type or self._selected_scan_type_token()
+
+    def _set_scan_type_combo(self, type_token: str) -> None:
+        if type_token == "string":
+            return
+        index = self.scan_type_combo.findData(type_token)
+        if index >= 0 and index != self.scan_type_combo.currentIndex():
+            self.scan_type_combo.setCurrentIndex(index)
+
+    def _set_scan_mode_combo(self, mode_token: str) -> None:
+        normalized = SCAN_MODE_ALIASES.get(mode_token.strip().lower(), mode_token.strip().lower())
+        index = self.scan_mode_combo.findData(normalized)
+        if index >= 0 and index != self.scan_mode_combo.currentIndex():
+            self.scan_mode_combo.setCurrentIndex(index)
+
+    def _adopt_scan_state(self, data: dict, *, fallback_type: str | None = None, fallback_mode: str = "") -> None:
+        state_type = self._normalize_scan_type_token(data.get("value_type"))
+        if state_type is None and bool(data.get("string_scan", False)):
+            state_type = "string"
+        if state_type is None:
+            state_type = self._normalize_scan_type_token(fallback_type)
+        self.scan_session_type = state_type
+        if state_type is not None:
+            self._set_scan_type_combo(state_type)
+
+        state_mode = str(data.get("mode") or fallback_mode).strip().lower()
+        if state_type == "string":
+            state_mode = "string"
+        if state_mode:
+            self._set_scan_mode_combo(state_mode)
+        self._apply_scan_control_state()
+
+    def _reset_scan_session(self) -> None:
+        self.scan_session_type = None
+        self.scan_live_refresh_enabled = False
+        self._apply_scan_control_state()
+
+    def _apply_scan_control_state(self, *_args) -> None:
+        has_baseline = self.scan_session_type is not None
+        running = self.scan_live_refresh_enabled
+        mode = self._scan_mode_token()
+
+        if not has_baseline and mode in SCAN_HISTORY_MODES:
+            self._set_scan_mode_combo("eq")
+            mode = self._scan_mode_token()
+        if self.scan_session_type == "string" and mode != "string":
+            self._set_scan_mode_combo("string")
+            mode = "string"
+        if mode == "pointer":
+            self._set_scan_type_combo("I64")
+
+        mode_model = self.scan_mode_combo.model()
+        for index in range(self.scan_mode_combo.count()):
+            item = mode_model.item(index)
+            if item is None:
+                continue
+            item_mode = str(self.scan_mode_combo.itemData(index)).strip().lower()
+            enabled = True
+            if item_mode in SCAN_HISTORY_MODES:
+                enabled = has_baseline and self.scan_session_type != "string"
+            elif item_mode == "pointer":
+                enabled = not has_baseline or self.scan_session_type == "I64"
+            elif item_mode == "string":
+                enabled = not has_baseline or self.scan_session_type == "string"
+            item.setEnabled(enabled)
+
+        self.scan_type_combo.setEnabled(not running and not has_baseline and mode not in {"pointer", "string"})
+        self.scan_mode_combo.setEnabled(not running and self.scan_session_type != "string")
+        self.scan_value_input.setEnabled(not running and mode in SCAN_VALUE_MODES)
+        self.scan_range_input.setEnabled(not running and mode == "range")
+        self.scan_first_button.setEnabled(not running and not has_baseline and mode not in SCAN_HISTORY_MODES)
+        self.scan_next_button.setEnabled(not running and has_baseline)
+        self.scan_clear_button.setEnabled(not running and has_baseline)
+        self.scan_prev_button.setEnabled(not running and has_baseline)
+        self.scan_next_page_button.setEnabled(not running and has_baseline)
+
+        if mode == "string":
+            self.scan_value_input.setPlaceholderText("输入要扫描的文本")
+        elif mode == "pointer":
+            self.scan_value_input.setPlaceholderText("输入十六进制目标地址，例如 7F12345678")
+        else:
+            self.scan_value_input.setPlaceholderText("例如 100 或 3.14")
 
     def _build_browser_page(self) -> None:
         layout = self._create_page_layout(self.browser_page)
@@ -1134,7 +1257,7 @@ class TcpTestWindow(QWidget):
         self.scan_view.clear()
         self.scan_page_start = 0
         self.scan_total_count = 0
-        self.scan_live_refresh_enabled = False
+        self._reset_scan_session()
         self.scan_total_label.setText("总结果数: 0")
         self.saved_items.clear()
         self.saved_refresh_cursor = 0
@@ -1143,6 +1266,7 @@ class TcpTestWindow(QWidget):
         self.browser_addr_input.setText("0x0")
         self.browser_view.clear()
         self.pointer_scan_running = False
+        self._apply_pointer_control_state(False)
         self.pointer_status_label.setText("扫描状态: 未开始")
         self.pointer_view.clear()
         self.bp_info_data = None
@@ -1517,36 +1641,37 @@ class TcpTestWindow(QWidget):
         self._connect_device()
 
     def _build_scan_request(self, is_first: bool) -> tuple[str, dict] | None:
-        data_type_data = self.scan_type_combo.currentData()
-        data_type = str(data_type_data).strip() if data_type_data is not None else self.scan_type_combo.currentText().strip()
-        mode_data = self.scan_mode_combo.currentData()
-        mode = str(mode_data).strip() if mode_data is not None else ""
+        mode = self._scan_mode_token()
         value = self.scan_value_input.text().strip()
         range_text = self.scan_range_input.text().strip()
 
+        if is_first and mode in SCAN_HISTORY_MODES:
+            QMessageBox.warning(self, "输入提示", "首次扫描不能使用增加、减少、已变化或未变化模式。")
+            return None
+        if not is_first and self.scan_session_type is None:
+            QMessageBox.warning(self, "输入提示", "请先完成首次扫描。")
+            return None
+
         operation = "scan.start" if is_first else "scan.refine"
-        params: dict[str, str] = {
-            "value_type": data_type,
-            "mode": mode,
-        }
+        params: dict[str, str] = {"mode": mode}
+        if mode == "pointer":
+            params["value_type"] = "I64"
+        elif mode != "string":
+            params["value_type"] = self.scan_session_type or self._selected_scan_type_token()
+
         if mode == "unknown":
-            if range_text:
-                params["range_max"] = range_text
             return operation, params
 
-        if not value:
+        if mode in SCAN_VALUE_MODES and not value:
             QMessageBox.warning(self, "输入提示", "当前扫描模式需要输入“值”。")
             return None
 
-        params["value"] = value
+        if mode in SCAN_VALUE_MODES:
+            params["value"] = value
         if mode == "range":
             if not range_text:
                 QMessageBox.warning(self, "输入提示", "range 模式需要输入“范围”。")
                 return None
-            params["range_max"] = range_text
-            return operation, params
-
-        if range_text and range_text != "0":
             params["range_max"] = range_text
         return operation, params
 
@@ -2458,8 +2583,7 @@ class TcpTestWindow(QWidget):
         if action != save_action:
             return
 
-        type_data = self.scan_type_combo.currentData()
-        type_token = str(type_data).strip() if type_data is not None else self.scan_type_combo.currentText().strip()
+        type_token = self._scan_result_type_token()
 
         for addr, value in parsed_items:
             self._append_saved_item(addr, value, type_token)
@@ -2656,8 +2780,7 @@ class TcpTestWindow(QWidget):
         if page_count is None:
             return False
 
-        type_data = self.scan_type_combo.currentData()
-        type_token = str(type_data).strip() if type_data is not None else self.scan_type_combo.currentText().strip()
+        type_token = self._scan_result_type_token()
 
         data = self._request_data_dict(
             "scan.results",
@@ -2688,12 +2811,19 @@ class TcpTestWindow(QWidget):
             return
         operation, params = request
         label = "首次" if is_first else "再次"
-        if self._request_ok(operation, params, error_title="扫描失败", status_on_error=f"{label}扫描失败") is None:
+        response = self._request_ok(operation, params, error_title="扫描失败", status_on_error=f"{label}扫描失败")
+        if response is None:
             return
+        self._adopt_scan_state(
+            self._response_data_dict(response),
+            fallback_type="string" if params["mode"] == "string" else params.get("value_type"),
+            fallback_mode=params["mode"],
+        )
         self.scan_page_start = 0
         self.scan_total_count = 0
         self.scan_total_label.setText("总结果数: 0")
         self.scan_live_refresh_enabled = True
+        self._apply_scan_control_state()
         self._set_status(f"{label}扫描已启动")
         self.on_live_refresh_tick()
 
@@ -2710,7 +2840,7 @@ class TcpTestWindow(QWidget):
         self.scan_view.clear()
         self.scan_page_start = 0
         self.scan_total_count = 0
-        self.scan_live_refresh_enabled = False
+        self._reset_scan_session()
         self.scan_total_label.setText("总结果数: 0")
         self._set_status("扫描结果已清空")
 
@@ -2721,6 +2851,8 @@ class TcpTestWindow(QWidget):
         scanning = bool(data.get("scanning", False))
         progress = data.get("progress", 0)
         count = data.get("count", 0)
+        self.scan_live_refresh_enabled = scanning
+        self._adopt_scan_state(data)
         self.scan_total_label.setText(f"总结果数: {count}")
         self._set_status(f"扫描状态: scanning={1 if scanning else 0}, progress={progress}, count={count}")
 
@@ -3022,8 +3154,8 @@ class TcpTestWindow(QWidget):
             QMessageBox.warning(self, "输入提示", "目标地址/深度/最大偏移格式无效。")
             return None
 
-        if target <= 0 or depth <= 0 or max_offset <= 0:
-            QMessageBox.warning(self, "输入提示", "目标地址、深度、最大偏移必须大于 0。")
+        if target <= 0 or max_offset <= 0 or not 1 <= depth <= 16:
+            QMessageBox.warning(self, "输入提示", "目标地址和最大偏移必须大于 0，深度范围为 1-16。")
             return None
 
         mode_data = self.pointer_mode_combo.currentData()
@@ -3055,8 +3187,8 @@ class TcpTestWindow(QWidget):
             except ValueError:
                 QMessageBox.warning(self, "输入提示", "数组基址或数组数量格式无效。")
                 return None
-            if array_base <= 0 or array_count <= 0:
-                QMessageBox.warning(self, "输入提示", "数组基址和数组数量必须大于 0。")
+            if array_base <= 0 or not 1 <= array_count <= 1_000_000:
+                QMessageBox.warning(self, "输入提示", "数组基址必须大于 0，数组数量范围为 1-1000000。")
                 return None
             params["array_base"] = f"0x{array_base:X}"
             params["array_count"] = str(array_count)
@@ -3077,15 +3209,33 @@ class TcpTestWindow(QWidget):
 
         self.pointer_view.append(f"启动操作: {operation} {json.dumps(params, ensure_ascii=False)}")
         self.pointer_scan_running = True
+        self._apply_pointer_control_state(True)
         self._set_status("指针扫描任务已启动")
         self.on_pointer_status()
 
+    def _apply_pointer_control_state(self, busy: bool) -> None:
+        self.pointer_scan_button.setEnabled(not busy)
+        self.pointer_merge_button.setEnabled(not busy)
+        self.pointer_export_button.setEnabled(not busy)
+
     def _apply_pointer_status_data(self, data: dict, *, silent: bool = False) -> None:
-        scanning = bool(data.get("scanning", False))
+        busy = bool(data.get("busy", False))
+        operation = str(data.get("operation") or "idle")
+        completed = bool(data.get("completed", False))
+        success = bool(data.get("success", False))
+        error = str(data.get("error") or "")
         progress = data.get("progress", 0)
         count = data.get("count", 0)
-        self.pointer_scan_running = scanning
-        status_text = f"扫描状态: scanning={1 if scanning else 0}, progress={progress}, count={count}"
+        self.pointer_scan_running = busy
+        self._apply_pointer_control_state(busy)
+        if busy:
+            status_text = f"指针操作: {operation}, progress={progress}, count={count}"
+        elif completed and success:
+            status_text = f"指针操作完成: count={count}"
+        elif completed:
+            status_text = f"指针操作失败: {error or '未知错误'}"
+        else:
+            status_text = "指针状态: 未开始"
         self.pointer_status_label.setText(status_text)
         if not silent:
             self.pointer_view.append(status_text)
@@ -3102,6 +3252,8 @@ class TcpTestWindow(QWidget):
         if response is None:
             return
         self.pointer_view.append("已触发 Pointer.bin 合并任务。")
+        self.pointer_scan_running = True
+        self._apply_pointer_control_state(True)
         self._set_status("已触发合并任务")
 
     def on_pointer_export(self) -> None:
@@ -3109,6 +3261,8 @@ class TcpTestWindow(QWidget):
         if response is None:
             return
         self.pointer_view.append("已触发指针链文本导出。")
+        self.pointer_scan_running = True
+        self._apply_pointer_control_state(True)
         self._set_status("已触发导出任务")
 
     def on_live_refresh_tick(self) -> None:
@@ -3119,8 +3273,7 @@ class TcpTestWindow(QWidget):
         if self._is_scan_tab_active() and self.scan_live_refresh_enabled:
             page_count = self._get_scan_page_size(silent=True)
             if page_count is not None:
-                type_data = self.scan_type_combo.currentData()
-                type_token = str(type_data).strip() if type_data is not None else self.scan_type_combo.currentText().strip()
+                type_token = self._scan_result_type_token()
                 task = {"kind": "scan", "start": self.scan_page_start, "count": page_count, "value_type": type_token}
         elif self._is_save_tab_active() and self.saved_items:
             batch_size = min(20, len(self.saved_items))
@@ -3186,6 +3339,7 @@ class TcpTestWindow(QWidget):
         if not isinstance(result_obj, dict) or self.live_refresh_closing:
             return
         if result_obj.get("generation") != self.target_generation:
+            self.live_refresh_inflight = False
             return
         self.live_refresh_inflight = False
         connection_error = str(result_obj.get("connection_error") or "")
@@ -3201,6 +3355,7 @@ class TcpTestWindow(QWidget):
             status_data = self._response_data_dict(status)
             scanning = bool(status_data.get("scanning", False))
             count = self._safe_int(status_data.get("count"), 0)
+            self._adopt_scan_state(status_data, fallback_type=self.scan_session_type)
             self.scan_total_label.setText(f"总结果数: {count}")
             if scanning:
                 return
@@ -3212,6 +3367,7 @@ class TcpTestWindow(QWidget):
                 self.scan_total_count = self._safe_int(data.get("total_count"), count)
                 self.scan_total_label.setText(f"总结果数: {self.scan_total_count}")
             self.scan_live_refresh_enabled = False
+            self._apply_scan_control_state()
             self._set_status(f"扫描完成：共 {count} 项")
         elif kind == "saved":
             changed = False
