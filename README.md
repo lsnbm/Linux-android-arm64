@@ -11,7 +11,7 @@ TG:https://t.me/+ArHIx-Km9jkxNjZl
 
 ## 依赖初始化
 
-Capstone 和 Dear ImGui 通过 Git 子模块引入，分别跟踪官方 `next` 和 `master` 分支。
+Capstone、Dear ImGui、nlohmann/json 和 BS::thread_pool 通过 Git 子模块引入，分别跟踪官方 `next`、`master`、`develop` 和 `master` 分支。
 
 首次克隆仓库时初始化子模块：
 
@@ -76,7 +76,7 @@ GitHub 的 Download ZIP 不包含子模块源码，请使用 Git 克隆仓库。
    - 模块初始化时会隐藏模块链表、sysfs 模块对象、部分 vmalloc 信息和工作线程链表节点。
 
 8. [用户态封装和辅助工具](#11-用户态封装要点)
-   - `android/include/Driver.h` 在这些基础能力上提供 C++ 封装和上层工具。
+   - `android/jni/include/driver.h` 在这些基础能力上提供 C++ 封装和上层工具。
    - 包括读写模板、模块地址查询、扫描区域合并、模块 dump、硬件断点记录管理和特征扫描。
 
 用户态封装主要接口：
@@ -107,7 +107,7 @@ GitHub 的 Download ZIP 不包含子模块源码，请使用 Git 克隆仓库。
 - `export_fun.h`：`kallsyms_lookup_name` 获取、CFI 绕过、页表辅助函数
 - `Makefile`：模块编译参数
 
-`android/include/Driver.h` 是配套用户态 C++ 封装，负责共享内存映射、握手、同步、自旋锁、读写分片、坐标换算和上层辅助功能。
+`android/jni/include/driver.h` 是配套用户态 C++ 封装，负责共享内存映射、握手、同步、自旋锁、读写分片、坐标换算和上层辅助功能。
 
 ---
 
@@ -256,7 +256,7 @@ GitHub 的 Download ZIP 不包含子模块源码，请使用 Git 克隆仓库。
 - 参数错误：返回 `-EINVAL`
 - 找不到进程或 task：返回 `-ESRCH`
 
-用户态 `Driver.h` 还会对超过 `0x1000` 的读写进行二次分片，因为共享结构中的 `user_buffer` 固定为一页大小。
+用户态 `driver.h` 还会对超过 `0x1000` 的读写进行二次分片，因为共享结构中的 `user_buffer` 固定为一页大小。
 
 ---
 
@@ -605,7 +605,7 @@ inline hook 表：
 
 ## 11. 用户态封装要点
 
-实现文件：`android/include/Driver.h`
+实现文件：`android/jni/include/driver.h`
 
 ### 11.1 通信
 

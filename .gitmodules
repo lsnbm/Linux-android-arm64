@@ -2,7 +2,15 @@
 	path = android/jni/capstone
 	url = https://github.com/capstone-engine/capstone.git
 	branch = next
-[submodule "android/jni/ImGui"]
-	path = android/jni/ImGui
+[submodule "android/jni/imgui"]
+	path = android/jni/imgui
 	url = https://github.com/ocornut/imgui.git
+	branch = master
+[submodule "android/jni/json"]
+	path = android/jni/json
+	url = https://github.com/nlohmann/json.git
+	branch = develop
+[submodule "android/jni/thread-pool"]
+	path = android/jni/thread-pool
+	url = https://github.com/bshoshany/thread-pool.git
 	branch = master

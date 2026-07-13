@@ -1,6 +1,6 @@
 ﻿
 #include <imgui.h>
-#include <Android_touch/ImGuiFloatingKeyboard.h>
+#include <android_imgui_input/imgui_floating_keyboard.h>
 #include <cstdarg>
 #include <cstdint>
 #include <cstring>
@@ -17,16 +17,17 @@
 #include <vector>
 #include <span>
 
-#include "MemoryTool.h"
-#include "Driver.h"
-#include "Disassembler.h"
-#include "ReadWriteTest.h"
-#include "TcpServer.h"
-#include "TouchTest.h"
-#include "GyroTest.h"
-#include "GnssTest.h"
-#include "Android_touch/ImGuiTouchInput.h"
-#include "Android_draw/draw.h"
+#include "memory_tool.h"
+#include "driver.h"
+#include "disassembler.h"
+#include "read_write_test.h"
+#include "tcp_server.h"
+#include "touch_test.h"
+#include "gyro_test.h"
+#include "gnss_test.h"
+#include "android_imgui_input/imgui_touch_input.h"
+#include "android_draw/opengl_imgui_renderer.h"
+#include "android_draw/vulkan_imgui_renderer.h"
 
 // ============================================================================
 // UI 构建器
@@ -79,14 +80,6 @@ namespace UI
         if (col.w > 0) ImGui::PushStyleColor(ImGuiCol_Button, col);
         bool r = ImGui::Button(label, size);
         if (col.w > 0) ImGui::PopStyleColor();
-        return r;
-    }
-
-    inline bool KbBtn(const char *text, const char *empty, ImVec2 size, char *buf, int maxLen, const char *title)
-    {
-        ImGui::PushID((const void *)buf);
-        bool r = ImGui::Button(strlen(text) ? text : empty, size) && (ImGuiFloatingKeyboard::Open(buf, maxLen, title), true);
-        ImGui::PopID();
         return r;
     }
 
@@ -290,11 +283,6 @@ class MainUI
         return style_.S(v);
     }
 
-    static bool KeyboardValueReady(const char *buf)
-    {
-        return ImGuiFloatingKeyboard::ConsumeResult(buf) == ImGuiFloatingKeyboard::Result::Accepted && buf[0];
-    }
-
     static std::optional<uintptr_t> ParseHexAddress(const char *buf)
     {
         const auto addr = MemUtils::ParseUInt64(buf, 16);
@@ -350,7 +338,7 @@ class MainUI
         bpParams_.editingField = regIndex;
         std::snprintf(bpParams_.regEditBuf, sizeof(bpParams_.regEditBuf), "%.*s", static_cast<int>(std::min(hexValue.size(), sizeof(bpParams_.regEditBuf) - 1)), hexValue.data());
         const std::string title = std::format("修改 {} (Hex)", name);
-        ImGuiFloatingKeyboard::Open(bpParams_.regEditBuf, 63, title.c_str());
+        ImGuiFloatingKeyboard::Open(bpParams_.regEditBuf, title.c_str());
     }
 
     bool commitRegisterEdit(int recordIndex, int regIndex)
@@ -422,7 +410,6 @@ class MainUI
         auto mode = scanParams_.fuzzyMode;
         auto pid = dr->GetGlobalPid();
         std::string valCopy(valueStr);
-        double rangeMax = 0.0;
 
         if (mode == Types::FuzzyMode::Pointer)
         {
@@ -430,7 +417,7 @@ class MainUI
             auto parsed = MemUtils::ParseUInt64(valCopy, 16);
             if (!parsed) return;
             auto addr = MemUtils::Normalize(static_cast<uintptr_t>(*parsed));
-            scanner_.startAsync<int64_t>(pid, static_cast<int64_t>(addr), mode, isFirst, 0.0);
+            scanner_.startAsync<int64_t>(pid, static_cast<int64_t>(addr), type, mode, isFirst);
             return;
         }
         if (mode == Types::FuzzyMode::String)
@@ -440,35 +427,36 @@ class MainUI
             scanner_.startStringAsync(pid, std::move(valCopy), isFirst);
             return;
         }
-        if (mode == Types::FuzzyMode::Range)
-        {
-            auto pos = valCopy.find('~');
-            if (pos == std::string::npos) return;
-            try
-            {
-                rangeMax = std::stod(valCopy.substr(pos + 1));
-                valCopy = valCopy.substr(0, pos);
-            }
-            catch (...)
-            {
-                return;
-            }
-        }
-        try
-        {
-            MemUtils::DispatchType(type,
-                                   [&]<typename T>()
+
+        MemUtils::DispatchType(type,
+                               [&]<typename T>()
+                               {
+                                   if (mode == Types::FuzzyMode::Unknown)
                                    {
-                                       T val;
-                                       if constexpr (std::is_floating_point_v<T>) val = static_cast<T>(std::stod(valCopy));
-                                       else if constexpr (sizeof(T) <= 4) val = static_cast<T>(std::stoi(valCopy));
-                                       else val = static_cast<T>(std::stoll(valCopy));
-                                       scanner_.startAsync<T>(pid, val, mode, isFirst, rangeMax);
-                                   });
-        }
-        catch (...)
-        {
-        }
+                                       scanner_.startAsync<T>(pid, T{}, type, mode, isFirst);
+                                       return;
+                                   }
+
+                                   if (mode == Types::FuzzyMode::Increased || mode == Types::FuzzyMode::Decreased || mode == Types::FuzzyMode::Changed || mode == Types::FuzzyMode::Unchanged)
+                                   {
+                                       scanner_.startAsync<T>(pid, T{}, type, mode, isFirst);
+                                       return;
+                                   }
+
+                                   if (mode == Types::FuzzyMode::Range)
+                                   {
+                                       const auto pos = valCopy.find('~');
+                                       if (pos == std::string::npos) return;
+                                       const auto minValue = MemUtils::ParseScanValue<T>(std::string_view(valCopy).substr(0, pos));
+                                       const auto maxValue = MemUtils::ParseScanValue<T>(std::string_view(valCopy).substr(pos + 1));
+                                       if (!minValue || !maxValue) return;
+                                       scanner_.startAsync<T>(pid, *minValue, type, mode, isFirst, *maxValue);
+                                       return;
+                                   }
+
+                                   const auto value = MemUtils::ParseScanValue<T>(valCopy);
+                                   if (value) scanner_.startAsync<T>(pid, *value, type, mode, isFirst);
+                               });
     }
 
     void startPtrScan()
@@ -611,9 +599,9 @@ class MainUI
                 snprintf(sc, sizeof(sc), "%.0f%%", style_.scale * 100);
                 if (ImGui::Button(sc, {S(50), bh})) state_.showScale = !state_.showScale;
                 ImGui::SameLine();
-                UI::KbBtn(buf_.pid, "PID", {S(85), bh}, buf_.pid, 31, "PID");
+                const bool pidAccepted = ImGuiFloatingKeyboard::InputButton(buf_.pid, "PID", {S(85), bh});
                 ImGui::SameLine();
-                if (KeyboardValueReady(buf_.pid))
+                if (pidAccepted && buf_.pid[0])
                 {
                     int pid = ParseIntOr(buf_.pid);
                     if (pid > 0 && pid != dr->GetGlobalPid())
@@ -679,7 +667,7 @@ class MainUI
         UI::LabelValue(Colors::LABEL, "当前目标 PID: ", pid > 0 ? Colors::ADDR_GREEN : Colors::ERR, "%d", pid);
         UI::Space(S(10));
 
-        UI::KbBtn(buf_.envThread, "可选线程名 task->comm", {w, S(48)}, buf_.envThread, 15, "线程名(可选)");
+        ImGuiFloatingKeyboard::InputButton(buf_.envThread, "可选线程名 task->comm", {w, S(48)}, "线程名(可选)");
         UI::Space(S(8));
         ImGui::BeginDisabled(pid <= 0);
         if (UI::Btn("获取环境参数", {w, S(48)}, Colors::BTN_TEAL))
@@ -768,6 +756,11 @@ class MainUI
         float w = ImGui::GetContentRegionAvail().x;
         bool isPtrMode = scanParams_.fuzzyMode == Types::FuzzyMode::Pointer;
         bool isStringMode = scanParams_.fuzzyMode == Types::FuzzyMode::String;
+        const auto lockedType = scanner_.dataType();
+        bool typeLocked = lockedType.has_value();
+        bool firstModeValid = scanParams_.fuzzyMode != Types::FuzzyMode::Increased && scanParams_.fuzzyMode != Types::FuzzyMode::Decreased && scanParams_.fuzzyMode != Types::FuzzyMode::Changed && scanParams_.fuzzyMode != Types::FuzzyMode::Unchanged;
+        if (lockedType) scanParams_.dataType = *lockedType;
+        if (typeLocked || scanner_.isScanning()) state_.showType = false;
 
         // 数据类型
         UI::Text(Colors::LABEL, "数据类型:");
@@ -779,7 +772,9 @@ class MainUI
         }
         else
         {
+            ImGui::BeginDisabled(typeLocked || scanner_.isScanning());
             if (ImGui::Button(Types::Labels::TYPE[static_cast<int>(scanParams_.dataType)], {w, S(45)})) state_.showType = true;
+            ImGui::EndDisabled();
         }
 
         UI::Space(S(6));
@@ -788,7 +783,7 @@ class MainUI
 
         UI::Space(S(6));
         UI::Text(Colors::LABEL, isPtrMode ? "目标地址(Hex):" : "搜索数值:");
-        UI::KbBtn(buf_.value, isPtrMode ? "输入Hex地址..." : "点击输入...", {w, S(52)}, buf_.value, 63, isPtrMode ? "目标地址(Hex)" : "数值");
+        ImGuiFloatingKeyboard::InputButton(buf_.value, isPtrMode ? "输入Hex地址..." : "点击输入...", {w, S(52)}, isPtrMode ? "目标地址(Hex)" : "数值");
 
         if (isPtrMode) UI::Text(Colors::INFO_CYAN, "输入16进制地址，搜索指向该地址的指针");
         else if (isStringMode) UI::Text(Colors::INFO_CYAN, "按原始字节匹配，区分大小写；再次扫描会在当前结果中继续过滤");
@@ -796,7 +791,14 @@ class MainUI
 
         UI::Space(S(10));
         ImGui::BeginDisabled(scanner_.isScanning());
-        UI::ButtonRow(w, S(52), {{"首次扫描", Colors::BTN_GREEN, [&] { startScan(buf_.value, true); }}, {"再次扫描", Colors::BTN_BLUE, [&] { startScan(buf_.value, false); }}, {"清空", Colors::BTN_RED, [&] { scanner_.clear(); }}}, S(6));
+        float bw = (w - S(12)) / 3;
+        ImGui::BeginDisabled(!firstModeValid);
+        if (UI::Btn("首次扫描", {bw, S(52)}, Colors::BTN_GREEN)) startScan(buf_.value, true);
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (UI::Btn("再次扫描", {bw, S(52)}, Colors::BTN_BLUE)) startScan(buf_.value, false);
+        ImGui::SameLine();
+        if (UI::Btn("清空", {bw, S(52)}, Colors::BTN_RED)) scanner_.clear();
         ImGui::EndDisabled();
 
         UI::Space(S(6));
@@ -816,11 +818,23 @@ class MainUI
     // ================================================================
     void drawResultTab()
     {
+        if (scanner_.isScanning())
+        {
+            float w = ImGui::GetContentRegionAvail().x;
+            UI::Text(Colors::WARN, "扫描中，结果页暂不可操作");
+            ImGui::ProgressBar(scanner_.progress(), {w, S(18)});
+            return;
+        }
+
         size_t total = scanner_.count();
         float w = ImGui::GetContentRegionAvail().x, bh = S(40);
+        const auto resultType = scanner_.dataType().value_or(scanParams_.dataType);
+        const auto resultMode = scanner_.scanMode();
+        const bool isPtrMode = resultMode == Types::FuzzyMode::Pointer;
+        const bool isStringMode = scanner_.isStringScan();
 
         // 添加地址行
-        UI::KbBtn(buf_.addAddr, "Hex地址...", {w - S(76), bh}, buf_.addAddr, 31, "Hex地址");
+        ImGuiFloatingKeyboard::InputButton(buf_.addAddr, "Hex地址...", {w - S(76), bh}, "Hex地址");
         ImGui::SameLine();
         if (UI::Btn("添加", {S(70), bh}, Colors::BTN_GREEN))
         {
@@ -877,8 +891,7 @@ class MainUI
         UI::Space(S(4));
         ImGui::Text("每页:");
         ImGui::SameLine();
-        UI::KbBtn(buf_.page, buf_.page, {S(55), S(36)}, buf_.page, 10, "每页数量");
-        if (KeyboardValueReady(buf_.page))
+        if (ImGuiFloatingKeyboard::InputButton(buf_.page, "每页数量", {S(55), S(36)}) && buf_.page[0])
         {
             int v = ParseIntOr(buf_.page);
             if (v >= 1 && v <= 500)
@@ -894,7 +907,6 @@ class MainUI
         ImGui::SameLine();
 
         bool anyLocked = std::ranges::any_of(data, [&](auto a) { return lockManager_.isLocked(a); });
-        bool isStringMode = scanParams_.fuzzyMode == Types::FuzzyMode::String;
         if (anyLocked)
         {
             if (UI::Btn("解锁页", {S(70), S(36)}, {0.2f, 0.25f, 0.42f, 1})) lockManager_.unlockBatch(data);
@@ -907,18 +919,13 @@ class MainUI
         }
         else
         {
-            if (UI::Btn("锁定页", {S(70), S(36)}, {0.42f, 0.28f, 0.1f, 1})) lockManager_.lockBatch(data, scanParams_.fuzzyMode == Types::FuzzyMode::Pointer ? Types::DataType::I64 : scanParams_.dataType);
+            if (UI::Btn("锁定页", {S(70), S(36)}, {0.42f, 0.28f, 0.1f, 1})) lockManager_.lockBatch(data, isPtrMode ? Types::DataType::I64 : resultType);
         }
         ImGui::SameLine();
 
-        if (UI::Btn("偏移", {S(55), S(36)}, Colors::BTN_ORANGE))
+        if (ImGuiFloatingKeyboard::ActionButton("偏移", {S(55), S(36)}, buf_.resultOffset, "偏移量(Hex,可负)", Colors::BTN_ORANGE) && buf_.resultOffset[0])
         {
-            buf_.resultOffset[0] = 0;
-            ImGuiFloatingKeyboard::Open(buf_.resultOffset, 31, "偏移量(Hex,可负)");
-        }
-        if (KeyboardValueReady(buf_.resultOffset))
-        {
-            if (auto r = MemUtils::ParseHexOffset(buf_.resultOffset)) scanner_.applyOffset(r->negative ? -(int64_t)r->offset : (int64_t)r->offset);
+            if (auto r = MemUtils::ParseHexOffset(buf_.resultOffset)) scanner_.applyOffset(r->offset, r->negative);
             buf_.resultOffset[0] = 0;
         }
 
@@ -932,7 +939,7 @@ class MainUI
             for (int i = state_.resultScrollIdx; i < (int)data.size() && i < endIdx; ++i)
             {
                 const auto addr = data[i];
-                const bool locked = lockManager_.isLocked(addr), isPtr = scanParams_.fuzzyMode == Types::FuzzyMode::Pointer, isString = scanParams_.fuzzyMode == Types::FuzzyMode::String;
+                const bool locked = lockManager_.isLocked(addr), isPtr = isPtrMode, isString = isStringMode;
                 const size_t previewLen = std::clamp(scanParams_.lastStringPattern.size(), size_t(16), size_t(64));
                 ImGui::PushID((void *)addr);
                 UI::ColorChild(
@@ -944,7 +951,7 @@ class MainUI
                         ImGui::SameLine(cw * 0.45f);
                         if (isPtr) UI::LabelValue({0.5f, 0.6f, 0.7f, 1}, "指向:", Colors::VAL_YELLOW, "%s", MemUtils::ReadAsPointerString(addr).c_str());
                         else if (isString) UI::LabelValue({0.5f, 0.6f, 0.7f, 1}, "字符串:", Colors::VAL_YELLOW, "%s", MemUtils::ReadAsText(addr, previewLen).c_str());
-                        else UI::LabelValue({0.5f, 0.6f, 0.7f, 1}, "数值:", Colors::VAL_YELLOW, "%s", MemUtils::ReadAsString(addr, scanParams_.dataType).c_str());
+                        else UI::LabelValue({0.5f, 0.6f, 0.7f, 1}, "数值:", Colors::VAL_YELLOW, "%s", MemUtils::ReadAsString(addr, resultType).c_str());
                         if (locked)
                         {
                             ImGui::SameLine();
@@ -956,13 +963,13 @@ class MainUI
                         if (ImGui::Button("改", {bw, S(36)}))
                         {
                             state_.modifyAddr = addr;
-                            const auto current = isPtr ? MemUtils::ReadAsPointerString(addr) : isString ? MemUtils::ReadAsText(addr, previewLen) : MemUtils::ReadAsString(addr, scanParams_.dataType);
+                            const auto current = isPtr ? MemUtils::ReadAsPointerString(addr) : isString ? MemUtils::ReadAsText(addr, previewLen) : MemUtils::ReadAsString(addr, resultType);
                             std::snprintf(buf_.modify, sizeof(buf_.modify), "%s", current.c_str());
                             state_.showModify = true;
-                            ImGuiFloatingKeyboard::Open(buf_.modify, 63, isPtr ? "新地址(Hex)" : isString ? "新字符串" : "新数值");
+                            ImGuiFloatingKeyboard::Open(buf_.modify, isPtr ? "新地址(Hex)" : isString ? "新字符串" : "新数值");
                         }
                         ImGui::SameLine();
-                        if (UI::Btn(locked ? "解锁" : "锁定", {bw, S(36)}, locked ? Colors::BTN_UNLOCK : Colors::BTN_LOCK) && !(isString && !locked)) lockManager_.toggle(addr, isPtr ? Types::DataType::I64 : scanParams_.dataType);
+                        if (UI::Btn(locked ? "解锁" : "锁定", {bw, S(36)}, locked ? Colors::BTN_UNLOCK : Colors::BTN_LOCK) && !(isString && !locked)) lockManager_.toggle(addr, isPtr ? Types::DataType::I64 : resultType);
                         ImGui::SameLine();
                         if (UI::Btn("复制", {bw, S(36)}, Colors::BTN_COPY)) copyAddress(addr);
                         ImGui::SameLine();
@@ -994,19 +1001,14 @@ class MainUI
         float inputW = w - goW - ofsW - fmtW - refW - S(24);
 
         // 工具栏：一行五按钮
-        UI::KbBtn(buf_.viewAddr, "输入Hex地址...", {inputW, bh}, buf_.viewAddr, 31, "Hex地址");
+        ImGuiFloatingKeyboard::InputButton(buf_.viewAddr, "输入Hex地址...", {inputW, bh}, "Hex地址");
         ImGui::SameLine();
         if (UI::Btn("跳转", {goW, bh}, {0.15f, 0.4f, 0.25f, 1}))
         {
             if (auto addr = ParseHexAddress(buf_.viewAddr)) memViewer_.open(*addr);
         }
         ImGui::SameLine();
-        if (UI::Btn("偏移", {ofsW, bh}, Colors::BTN_ORANGE))
-        {
-            buf_.memOffset[0] = 0;
-            ImGuiFloatingKeyboard::Open(buf_.memOffset, 31, "偏移量(Hex,可负)");
-        }
-        if (KeyboardValueReady(buf_.memOffset))
+        if (ImGuiFloatingKeyboard::ActionButton("偏移", {ofsW, bh}, buf_.memOffset, "偏移量(Hex,可负)", Colors::BTN_ORANGE) && buf_.memOffset[0])
         {
             memViewer_.applyOffset(buf_.memOffset);
             buf_.memOffset[0] = 0;
@@ -1103,7 +1105,7 @@ class MainUI
     void drawModuleTab()
     {
         float w = ImGui::GetContentRegionAvail().x;
-        UI::KbBtn(buf_.moduleSearch, "模块名或Dump范围", {w, S(42)}, buf_.moduleSearch, 63, "模块名，或地址范围如 0x5000-0x6000");
+        ImGuiFloatingKeyboard::InputButton(buf_.moduleSearch, "模块名或Dump范围", {w, S(42)}, "模块名，或地址范围如 0x5000-0x6000");
         UI::Space(S(4));
         if (UI::Btn("刷新模块", {w, S(48)}, Colors::BTN_TEAL)) refreshModuleRows();
         UI::Space(S(6));
@@ -1112,7 +1114,7 @@ class MainUI
             if (strlen(buf_.moduleSearch) > 0)
             {
                 std::string target = buf_.moduleSearch;
-                Utils::GlobalPool.push([target] { dr->DumpMemory(target); });
+                Config::CpuThreadPool.detach_task([target] { dr->DumpMemory(target); });
             }
         }
         UI::Space(S(6));
@@ -1168,7 +1170,7 @@ class MainUI
         if (!ptrManager_.isScanning())
         {
             ImGui::Text("目标地址:");
-            UI::KbBtn(buf_.ptrTarget, "点击输入Hex", {w, bh}, buf_.ptrTarget, 31, "目标地址(Hex)");
+            ImGuiFloatingKeyboard::InputButton(buf_.ptrTarget, "点击输入Hex", {w, bh}, "目标地址(Hex)");
             UI::Space(S(4));
 
             // 深度和偏移
@@ -1184,7 +1186,7 @@ class MainUI
 
             UI::Space(S(4));
             UI::Text(Colors::LABEL, "指定模块 (可选):");
-            UI::KbBtn(buf_.filterModule, "全部模块", {w - S(60), bh}, buf_.filterModule, 63, "模块名(如il2cpp)");
+            ImGuiFloatingKeyboard::InputButton(buf_.filterModule, "全部模块", {w - S(60), bh}, "模块名(如il2cpp)");
             ImGui::SameLine();
             if (ImGui::Button("清##scanFilter", {S(50), bh})) buf_.filterModule[0] = 0;
 
@@ -1193,16 +1195,16 @@ class MainUI
             if (ptrParams_.useManual)
             {
                 ptrParams_.useArray = false;
-                UI::KbBtn(buf_.base, "基址(Hex)##scanBase", {w, bh}, buf_.base, 30, "Hex基址");
+                ImGuiFloatingKeyboard::InputButton(buf_.base, "基址(Hex)##scanBase", {w, bh}, "Hex基址");
             }
             ImGui::Checkbox("数组基址##scan", &ptrParams_.useArray);
             if (ptrParams_.useArray)
             {
                 ptrParams_.useManual = false;
                 float hw = (w - S(6)) / 2;
-                UI::KbBtn(buf_.arrayBase, "数组地址(Hex)", {hw, bh}, buf_.arrayBase, 30, "数组首地址");
+                ImGuiFloatingKeyboard::InputButton(buf_.arrayBase, "数组地址(Hex)", {hw, bh}, "数组首地址");
                 ImGui::SameLine();
-                UI::KbBtn(buf_.arrayCount, "数量", {hw, bh}, buf_.arrayCount, 15, "元素数量");
+                ImGuiFloatingKeyboard::InputButton(buf_.arrayCount, "数量", {hw, bh}, "元素数量");
             }
 
             UI::Space(S(6));
@@ -1261,7 +1263,7 @@ class MainUI
         UI::Text(Colors::TITLE, "━━ 特征码扫描 ━━");
         UI::Space(S(4));
         ImGui::Text("目标地址:");
-        UI::KbBtn(buf_.sigScanAddr, "点击输入Hex", {w, bh}, buf_.sigScanAddr, 31, "目标地址(Hex)");
+        ImGuiFloatingKeyboard::InputButton(buf_.sigScanAddr, "点击输入Hex", {w, bh}, "目标地址(Hex)");
         UI::Space(S(4));
         ImGui::Text("范围 (上下各N字节):");
         ImGui::SetNextItemWidth(w);
@@ -1291,7 +1293,7 @@ class MainUI
         UI::Text(Colors::TITLE, "━━ 特征码过滤 ━━");
         UI::Space(S(4));
         ImGui::Text("过滤地址:");
-        UI::KbBtn(buf_.sigVerifyAddr, "点击输入Hex", {w, bh}, buf_.sigVerifyAddr, 31, "过滤地址(Hex)");
+        ImGuiFloatingKeyboard::InputButton(buf_.sigVerifyAddr, "点击输入Hex", {w, bh}, "过滤地址(Hex)");
         UI::Space(S(8));
 
         if (UI::Btn("过滤并更新", {w, S(48)}, {0.4f, 0.3f, 0.15f, 1}))
@@ -1364,7 +1366,7 @@ class MainUI
             ImGui::PushID(i);
             UI::Text(Colors::LABEL, "P%d", i);
             ImGui::SameLine();
-            UI::KbBtn(row.addr, "地址", {addrW, bh}, row.addr, 31, "断点地址(Hex)");
+            ImGuiFloatingKeyboard::InputButton(row.addr, "地址", {addrW, bh}, "断点地址(Hex)");
             ImGui::SameLine();
             if (UI::Btn(bpTypeLabels[std::clamp(row.type, 0, 3)], {typeW, bh}, Colors::BTN_BLUE))
             {
@@ -1809,11 +1811,11 @@ class MainUI
         if (state_.showModify)
         {
             const auto result = ImGuiFloatingKeyboard::ConsumeResult(buf_.modify);
-            if (result == ImGuiFloatingKeyboard::Result::Accepted && state_.modifyAddr && strlen(buf_.modify))
+            if (result == ImGuiFloatingKeyboard::Result::Accepted && state_.modifyAddr && strlen(buf_.modify) && !scanner_.isScanning())
             {
-                if (scanParams_.fuzzyMode == Types::FuzzyMode::Pointer) MemUtils::WritePointerFromString(state_.modifyAddr, buf_.modify);
-                else if (scanParams_.fuzzyMode == Types::FuzzyMode::String) MemUtils::WriteText(state_.modifyAddr, buf_.modify);
-                else MemUtils::WriteFromString(state_.modifyAddr, scanParams_.dataType, buf_.modify);
+                if (scanner_.scanMode() == Types::FuzzyMode::Pointer) MemUtils::WritePointerFromString(state_.modifyAddr, buf_.modify);
+                else if (scanner_.isStringScan()) MemUtils::WriteText(state_.modifyAddr, buf_.modify);
+                else MemUtils::WriteFromString(state_.modifyAddr, scanner_.dataType().value_or(scanParams_.dataType), buf_.modify);
             }
             if (result != ImGuiFloatingKeyboard::Result::None)
             {
@@ -2216,10 +2218,12 @@ int main()
                                         RunGyroTest,
                                         RunGnssTest};
     rc = run[mode]();
+    Config::CpuThreadPool.purge();
+    Config::IoThreadPool.purge();
+    Config::CpuThreadPool.wait();
+    Config::IoThreadPool.wait();
+
     delete dr;
     dr = nullptr;
-
-    // 仅在 main 函数统一清理全局线程池。
-    Utils::GlobalPool.force_stop();
     return rc;
 }
