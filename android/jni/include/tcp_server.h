@@ -1,6 +1,7 @@
 ﻿#pragma once
-#include "Utils/json.hpp"
-#include "MemoryTool.h"
+#include <nlohmann/json.hpp>
+#include "BS_thread_pool.hpp"
+#include "memory_tool.h"
 
 // ============================================================================
 // TCP 服务器模块
@@ -15,6 +16,7 @@ namespace
     std::atomic_bool gRunning{true};
     std::atomic_int gServerFd{-1};
     std::mutex gRequestMutex;
+    BS::thread_pool<> gClientThreadPool{std::max(16u, std::thread::hardware_concurrency() * 4)};
 
     void CloseTcpServerFd()
     {
@@ -86,6 +88,11 @@ namespace
         return parseNumber<double>(text, [](const char *s, char **end) { return std::strtod(s, end); });
     }
 
+    std::optional<std::int64_t> parseInt64(std::string_view text)
+    {
+        return parseNumber<std::int64_t>(text, [](const char *s, char **end) { return std::strtoll(s, end, 0); });
+    }
+
     template <typename T> std::optional<T> readScalarValue(std::uint64_t address)
     {
         T value{};
@@ -144,12 +151,6 @@ namespace
         return total;
     }
 
-    // 解析有符号64位整数
-    std::optional<std::int64_t> parseInt64(std::string_view text)
-    {
-        return parseNumber<std::int64_t>(text, [](const char *s, char **end) { return std::strtoll(s, end, 0); });
-    }
-
     // 将字符串转换为小写ASCII
     std::string toLowerAscii(std::string_view input)
     {
@@ -191,6 +192,25 @@ namespace
         if (t == "ptr" || t == "pointer") return Types::FuzzyMode::Pointer;
         if (t == "str" || t == "string") return Types::FuzzyMode::String;
         return std::nullopt;
+    }
+
+    std::string_view fuzzyModeToken(Types::FuzzyMode mode)
+    {
+        switch (mode)
+        {
+        case Types::FuzzyMode::Unknown: return "unknown";
+        case Types::FuzzyMode::Equal: return "equal";
+        case Types::FuzzyMode::Greater: return "greater";
+        case Types::FuzzyMode::Less: return "less";
+        case Types::FuzzyMode::Increased: return "increased";
+        case Types::FuzzyMode::Decreased: return "decreased";
+        case Types::FuzzyMode::Changed: return "changed";
+        case Types::FuzzyMode::Unchanged: return "unchanged";
+        case Types::FuzzyMode::Range: return "range";
+        case Types::FuzzyMode::Pointer: return "pointer";
+        case Types::FuzzyMode::String: return "string";
+        default: return "";
+        }
     }
 
     // 解析内存浏览显示格式
@@ -314,29 +334,6 @@ namespace
             return "all";
         default:
             return "unknown";
-        }
-    }
-
-    // 按模板类型解析扫描输入值。
-    template <typename T> std::optional<T> parseScanValueToken(std::string_view token)
-    {
-        if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
-        {
-            const auto parsed = parseDouble(token);
-            if (!parsed.has_value())
-            {
-                return std::nullopt;
-            }
-            return static_cast<T>(*parsed);
-        }
-        else
-        {
-            const auto parsed = parseInt64(token);
-            if (!parsed.has_value())
-            {
-                return std::nullopt;
-            }
-            return static_cast<T>(*parsed);
         }
     }
 
@@ -766,14 +763,17 @@ namespace
 
         auto requiredInt64 = [&](std::string_view key, std::string_view desc) -> std::variant<std::int64_t, json> { return requiredParsed.template operator()<std::int64_t>(key, desc, parseInt64); };
 
-        auto requiredDouble = [&](std::string_view key, std::string_view desc) -> std::variant<double, json> { return requiredParsed.template operator()<double>(key, desc, parseDouble); };
-
         auto scannerStateJson = [&]() -> json
         {
+            const auto state = MemoryTool::Scanner().state();
             return {
-                {"scanning", MemoryTool::Scanner().isScanning()},
-                {"progress", MemoryTool::Scanner().progress()},
-                {"count", MemoryTool::Scanner().count()},
+                {"scanning", state.scanning},
+                {"progress", state.progress},
+                {"count", state.count},
+                {"string_scan", state.stringScan},
+                {"value_type", state.stringScan ? "string" : state.dataType.has_value() ? Types::Labels::TYPE[static_cast<size_t>(*state.dataType)] : ""},
+                {"mode", fuzzyModeToken(state.mode)},
+                {"value_format", state.mode == Types::FuzzyMode::Pointer ? "hex_address" : state.mode == Types::FuzzyMode::String ? "text" : "number"},
             };
         };
 
@@ -896,14 +896,10 @@ namespace
 
         if (op == "scan.start" || op == "scan.refine")
         {
-            const auto type = requiredString("value_type", "value_type");
             const auto mode = requiredString("mode", "mode");
-            if (std::holds_alternative<json>(type)) return std::get<json>(type);
             if (std::holds_alternative<json>(mode)) return std::get<json>(mode);
 
-            const auto dataType = parseDataTypeToken(std::get<std::string>(type));
             const auto fuzzyMode = parseFuzzyModeToken(std::get<std::string>(mode));
-            if (!dataType.has_value()) return fail("value_type 无效，支持: i8/i16/i32/i64/f32/f64");
             if (!fuzzyMode.has_value()) return fail("mode 无效，支持: unknown/eq/gt/lt/inc/dec/changed/unchanged/range/pointer/string");
 
             const int pid = dr->GetGlobalPid();
@@ -914,42 +910,58 @@ namespace
             if (*fuzzyMode == Types::FuzzyMode::String)
             {
                 if (valueToken.empty()) return fail("string 模式需要 value 参数");
-                if (!MemoryTool::Scanner().startStringAsync(pid, valueToken, isFirst)) return fail("当前已有内存扫描任务在运行");
+                if (!MemoryTool::Scanner().startStringAsync(pid, valueToken, isFirst)) return fail("扫描请求被拒绝，请检查任务状态和结果类型");
                 return okData(scannerStateJson());
             }
 
-            const bool needValue = (*fuzzyMode != Types::FuzzyMode::Unknown);
-            if (needValue && valueToken.empty()) return fail("当前模式需要 value 参数");
+            const auto type = requiredString("value_type", "value_type");
+            if (std::holds_alternative<json>(type)) return std::get<json>(type);
+            const auto dataType = parseDataTypeToken(std::get<std::string>(type));
+            if (!dataType.has_value()) return fail("value_type 无效，支持: i8/i16/i32/i64/f32/f64");
+            if (*fuzzyMode == Types::FuzzyMode::Pointer && *dataType != Types::DataType::I64) return fail("pointer 模式只支持 i64");
 
-            double rangeMax = 0.0;
-            if (*fuzzyMode == Types::FuzzyMode::Range)
+            if (*fuzzyMode == Types::FuzzyMode::Pointer)
             {
-                const auto range = requiredDouble("range_max", "range_max");
-                if (std::holds_alternative<json>(range)) return std::get<json>(range);
-                if (std::get<double>(range) < 0.0) return fail("range_max 无效");
-                rangeMax = std::get<double>(range);
+                if (valueToken.empty()) return fail("pointer 模式需要 value 参数");
+                const auto parsed = MemUtils::ParseUInt64(valueToken, 16);
+                if (!parsed) return fail("value 参数不是有效的十六进制地址");
+                const auto target = static_cast<int64_t>(MemUtils::Normalize(static_cast<uintptr_t>(*parsed)));
+                if (!MemoryTool::Scanner().startAsync<int64_t>(pid, target, Types::DataType::I64, *fuzzyMode, isFirst)) return fail("扫描请求被拒绝，请检查任务状态、数据类型和扫描模式");
+                return okData(scannerStateJson());
             }
-            else
-            {
-                const std::string rangeToken = optionalString("range_max");
-                if (!rangeToken.empty())
-                {
-                    const auto parsedRange = parseDouble(rangeToken);
-                    if (parsedRange.has_value() && *parsedRange >= 0.0) rangeMax = *parsedRange;
-                }
-            }
+
+            const bool needValue = *fuzzyMode == Types::FuzzyMode::Equal || *fuzzyMode == Types::FuzzyMode::Greater || *fuzzyMode == Types::FuzzyMode::Less || *fuzzyMode == Types::FuzzyMode::Range;
+            if (needValue && valueToken.empty()) return fail("当前模式需要 value 参数");
+            const std::string rangeToken = optionalString("range_max");
+            if (*fuzzyMode == Types::FuzzyMode::Range && rangeToken.empty()) return fail("range 模式需要 range_max 参数");
 
             return MemUtils::DispatchType(*dataType,
                                           [&]<typename T>() -> json
                                           {
-                                              T target{};
-                                              if (needValue)
+                                              if (*fuzzyMode == Types::FuzzyMode::Unknown)
                                               {
-                                                  const auto parsedValue = parseScanValueToken<T>(valueToken);
-                                                  if (!parsedValue.has_value()) return fail("value 参数无效");
-                                                  target = *parsedValue;
+                                                  if (!MemoryTool::Scanner().startAsync<T>(pid, T{}, *dataType, *fuzzyMode, isFirst)) return fail("扫描请求被拒绝，请检查任务状态、数据类型和扫描模式");
+                                                  return okData(scannerStateJson());
                                               }
-                                              if (!MemoryTool::Scanner().startAsync<T>(pid, target, *fuzzyMode, isFirst, rangeMax)) return fail("当前已有内存扫描任务在运行");
+
+                                              if (*fuzzyMode == Types::FuzzyMode::Increased || *fuzzyMode == Types::FuzzyMode::Decreased || *fuzzyMode == Types::FuzzyMode::Changed || *fuzzyMode == Types::FuzzyMode::Unchanged)
+                                              {
+                                                  if (!MemoryTool::Scanner().startAsync<T>(pid, T{}, *dataType, *fuzzyMode, isFirst)) return fail("扫描请求被拒绝，请检查任务状态、数据类型和扫描模式");
+                                                  return okData(scannerStateJson());
+                                              }
+
+                                              const auto target = MemUtils::ParseScanValue<T>(valueToken);
+                                              if (!target) return fail("value 参数超出目标有符号类型范围");
+
+                                              T rangeMax{};
+                                              if (*fuzzyMode == Types::FuzzyMode::Range)
+                                              {
+                                                  const auto parsedRange = MemUtils::ParseScanValue<T>(rangeToken);
+                                                  if (!parsedRange) return fail("range_max 参数超出目标有符号类型范围");
+                                                  rangeMax = *parsedRange;
+                                              }
+
+                                              if (!MemoryTool::Scanner().startAsync<T>(pid, *target, *dataType, *fuzzyMode, isFirst, rangeMax)) return fail("扫描请求被拒绝，请检查任务状态、数据类型和扫描模式");
                                               return okData(scannerStateJson());
                                           });
         }
@@ -965,7 +977,6 @@ namespace
 
         if (op == "scan.results")
         {
-            if (MemoryTool::Scanner().isScanning()) return fail("内存扫描运行中，请完成后获取结果");
             const auto start = requiredUInt64("start", "start");
             const auto count = requiredUInt64("count", "count");
             const auto type = requiredString("value_type", "value_type");
@@ -977,22 +988,29 @@ namespace
             const std::string typeToken = toLowerAscii(std::get<std::string>(type));
             const bool stringType = (typeToken == "str" || typeToken == "string" || typeToken == "text");
             const auto dataType = parseDataTypeToken(std::get<std::string>(type));
+            const auto pageState = MemoryTool::Scanner().pageState(static_cast<size_t>(std::get<std::uint64_t>(start)), static_cast<size_t>(std::get<std::uint64_t>(count)));
+            const auto &scannerState = pageState.state;
+            if (scannerState.scanning) return fail("内存扫描运行中，请完成后获取结果");
             if (!stringType && !dataType.has_value()) return fail("value_type 参数无效");
+            if (scannerState.stringScan != stringType) return fail("value_type 与当前扫描结果类型不一致");
+            if (!stringType && (!scannerState.dataType.has_value() || *scannerState.dataType != *dataType)) return fail("value_type 与当前扫描结果类型不一致");
+            const bool pointerType = scannerState.mode == Types::FuzzyMode::Pointer;
 
-            const auto page = MemoryTool::Scanner().getPage(static_cast<size_t>(std::get<std::uint64_t>(start)), static_cast<size_t>(std::get<std::uint64_t>(count)));
             json payload;
             payload["start"] = std::get<std::uint64_t>(start);
             payload["request_count"] = std::get<std::uint64_t>(count);
-            payload["result_count"] = page.size();
-            payload["total_count"] = MemoryTool::Scanner().count();
+            payload["result_count"] = pageState.results.size();
+            payload["total_count"] = scannerState.count;
             payload["type"] = std::get<std::string>(type);
+            payload["mode"] = fuzzyModeToken(scannerState.mode);
+            payload["value_format"] = pointerType ? "hex_address" : stringType ? "text" : "number";
             payload["items"] = json::array();
-            for (const auto addr : page)
+            for (const auto addr : pageState.results)
             {
                 payload["items"].push_back({
                     {"addr", static_cast<std::uint64_t>(addr)},
                     {"addr_hex", std::format("0x{:X}", static_cast<std::uint64_t>(addr))},
-                    {"value", stringType ? MemUtils::ReadAsText(addr) : MemUtils::ReadAsString(addr, *dataType)},
+                    {"value", stringType ? MemUtils::ReadAsText(addr) : pointerType ? MemUtils::ReadAsPointerString(addr) : MemUtils::ReadAsString(addr, *dataType)},
                 });
             }
             return okData(std::move(payload));
@@ -1453,14 +1471,12 @@ int tcp_server()
             continue;
         }
 
-        if (!Utils::GlobalPool.post_io(HandleClientConnection, clientFd, clientAddr))
-        {
-            printErrno("IO线程池已停止，无法派发连接");
-            close(clientFd);
-        }
+        gClientThreadPool.detach_task([clientFd, clientAddr] { HandleClientConnection(clientFd, clientAddr); });
     }
 
     CloseTcpServerFd();
+    gClientThreadPool.purge();
+    gClientThreadPool.wait();
 
     std::println("服务端已退出。");
     return 0;

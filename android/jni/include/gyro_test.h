@@ -6,7 +6,7 @@
 #include <print>
 #include <thread>
 
-#include "Driver.h"
+#include "driver.h"
 
 inline void GyroLog(const char *fmt, ...)
 {

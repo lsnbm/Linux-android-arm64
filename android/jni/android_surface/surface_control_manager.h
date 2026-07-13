@@ -1,5 +1,5 @@
-#ifndef A_NATIVE_WINDOW_CREATOR_H // !A_NATIVE_WINDOW_CREATOR_H
-#define A_NATIVE_WINDOW_CREATOR_H
+#ifndef SURFACE_CONTROL_MANAGER_H
+#define SURFACE_CONTROL_MANAGER_H
 
 #include <android/native_window.h>
 #include <android/log.h>
@@ -748,7 +748,7 @@ namespace android
         }
     } // namespace detail
 
-    class ANativeWindowCreator
+    class SurfaceControlManager
     {
     public:
         struct DisplayInfo
@@ -973,4 +973,4 @@ namespace android
 #undef ResolveMethod
 #undef SAFE_CALL_RET
 #undef SAFE_CALL_VOID
-#endif // !A_NATIVE_WINDOW_CREATOR_H
+#endif // SURFACE_CONTROL_MANAGER_H

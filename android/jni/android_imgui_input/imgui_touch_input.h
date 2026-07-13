@@ -8,7 +8,7 @@
 #include <linux/input.h>
 #include <linux/uinput.h>
 #include <poll.h> // 引入 poll 机制
-#include "ImGui/imgui.h"
+#include "imgui/imgui.h"
 #include <atomic>
 #include <future>
 #include <vector>
@@ -16,10 +16,12 @@
 #include <string.h>
 #include <errno.h>
 #include <algorithm>
-#include "Utils/ThreadPool.h"
+#include "BS_thread_pool.hpp"
 
 #define MAX_DEVICES 5
 #define MAX_FINGERS 10
+
+inline BS::thread_pool<> TouchThreadPool{MAX_DEVICES};
 
 // 全局状态变量
 static std::atomic<uint32_t> orientation{0};
@@ -35,6 +37,20 @@ struct TouchPoint
     int id = -1;
 };
 
+enum class TouchInputEventType
+{
+    Position,
+    Button
+};
+
+struct TouchInputEvent
+{
+    TouchInputEventType type;
+    float x = 0.0f;
+    float y = 0.0f;
+    bool down = false;
+};
+
 // 设备配置结构
 struct DeviceConfig
 {
@@ -48,6 +64,7 @@ struct DeviceConfig
 // 全局变量
 static TouchPoint fingers[MAX_DEVICES][MAX_FINGERS];
 static std::vector<DeviceConfig> devices;
+static std::vector<TouchInputEvent> pendingTouchEvents;
 static std::mutex touch_mutex; // 全局触摸数据锁
 
 static bool testInputBit(int bit, const uint8_t *array)
@@ -146,7 +163,20 @@ static void deviceHandlerThread(DeviceConfig *config)
                 float sh = screenHeight.load(std::memory_order_relaxed);
                 uint32_t orient = orientation.load(std::memory_order_relaxed);
 
-                std::lock_guard<std::mutex> lock(touch_mutex); // 保护全局数组
+                std::lock_guard<std::mutex> lock(touch_mutex); // 保护全局触摸状态和待提交事件
+
+                bool wasDown = false;
+                int previousX = 0;
+                int previousY = 0;
+                for (int s = 0; s < MAX_FINGERS; ++s)
+                {
+                    if (!fingers[deviceIndex][s].isDown) continue;
+                    wasDown = true;
+                    previousX = fingers[deviceIndex][s].x;
+                    previousY = fingers[deviceIndex][s].y;
+                    break;
+                }
+
                 for (int s = 0; s < MAX_FINGERS; s++)
                 {
                     fingers[deviceIndex][s].isDown = slot_active[s];
@@ -178,6 +208,27 @@ static void deviceHandlerThread(DeviceConfig *config)
                         fingers[deviceIndex][s].y = (int)fy;
                     }
                 }
+
+                bool isDown = false;
+                int currentX = 0;
+                int currentY = 0;
+                for (int s = 0; s < MAX_FINGERS; ++s)
+                {
+                    if (!fingers[deviceIndex][s].isDown) continue;
+                    isDown = true;
+                    currentX = fingers[deviceIndex][s].x;
+                    currentY = fingers[deviceIndex][s].y;
+                    break; // 仅取第一个手指给 ImGui
+                }
+
+                if (isDown && (!wasDown || currentX != previousX || currentY != previousY))
+                {
+                    pendingTouchEvents.push_back({TouchInputEventType::Position, (float)currentX, (float)currentY, false});
+                }
+                if (wasDown != isDown)
+                {
+                    pendingTouchEvents.push_back({TouchInputEventType::Button, 0.0f, 0.0f, isDown});
+                }
                 // 注意：这里已经移除了 ImGui 的操作，交由主线程处理！
             }
         }
@@ -190,30 +241,35 @@ void Touch_UpdateImGui()
 {
     if (!Touch_initialized.load(std::memory_order_acquire)) return;
 
-    std::lock_guard<std::mutex> lock(touch_mutex);
-    ImGuiIO &io = ImGui::GetIO();
-
-    bool is_any_down = false;
-    for (size_t d = 0; d < devices.size(); ++d)
+    std::vector<TouchInputEvent> events;
     {
-        for (int f = 0; f < MAX_FINGERS; ++f)
-        {
-            if (fingers[d][f].isDown)
-            {
-                io.MousePos = ImVec2((float)fingers[d][f].x, (float)fingers[d][f].y);
-                is_any_down = true;
-                break; // 仅取第一个手指给 ImGui
-            }
-        }
-        if (is_any_down) break;
+        std::lock_guard<std::mutex> lock(touch_mutex);
+        events.swap(pendingTouchEvents);
     }
+    if (events.empty()) return;
 
-    io.MouseDown[0] = is_any_down;
+    ImGuiIO &io = ImGui::GetIO();
+    io.AddMouseSourceEvent(ImGuiMouseSource_TouchScreen);
+    for (const TouchInputEvent &event : events)
+    {
+        if (event.type == TouchInputEventType::Position)
+            io.AddMousePosEvent(event.x, event.y);
+        else
+            io.AddMouseButtonEvent(0, event.down);
+    }
 }
 
 bool Touch_Init()
 {
     if (Touch_initialized.load(std::memory_order_acquire)) return true;
+
+    {
+        std::lock_guard<std::mutex> lock(touch_mutex);
+        pendingTouchEvents.clear();
+        for (auto &deviceFingers : fingers)
+            for (TouchPoint &finger : deviceFingers)
+                finger = {};
+    }
 
     DIR *dir = opendir("/dev/input/");
     if (!dir) return false;
@@ -307,7 +363,7 @@ bool Touch_Init()
         config_ref.maxX = dev_info.maxX;
         config_ref.maxY = dev_info.maxY;
 
-        config_ref.task = Utils::GlobalPool.push([config = &config_ref] { deviceHandlerThread(config); });
+        config_ref.task = TouchThreadPool.submit_task([config = &config_ref] { deviceHandlerThread(config); });
     }
     return true;
 }
@@ -354,4 +410,10 @@ void Touch_Shutdown()
     for (size_t i = 0; i < devices.size(); ++i)
         if (devices[i].task.valid()) devices[i].task.wait();
     devices.clear();
+
+    std::lock_guard<std::mutex> lock(touch_mutex);
+    pendingTouchEvents.clear();
+    for (auto &deviceFingers : fingers)
+        for (TouchPoint &finger : deviceFingers)
+            finger = {};
 }

@@ -72,19 +72,23 @@ LOCAL_CPPFLAGS += -O3                                # [优化] 保持O3，避�
 # 头文件路径
 LOCAL_C_INCLUDES += $(LOCAL_PATH)/include
 LOCAL_C_INCLUDES += $(LOCAL_PATH)
-LOCAL_C_INCLUDES += $(LOCAL_PATH)/Android_draw
-LOCAL_C_INCLUDES += $(LOCAL_PATH)/Android_touch
-LOCAL_C_INCLUDES += $(LOCAL_PATH)/ImGui
-LOCAL_C_INCLUDES += $(LOCAL_PATH)/ImGui/backends
-LOCAL_C_INCLUDES += $(LOCAL_PATH)/native_surface
+LOCAL_C_INCLUDES += $(LOCAL_PATH)/driver
+LOCAL_C_INCLUDES += $(LOCAL_PATH)/font
+LOCAL_C_INCLUDES += $(LOCAL_PATH)/android_draw
+LOCAL_C_INCLUDES += $(LOCAL_PATH)/android_imgui_input
+LOCAL_C_INCLUDES += $(LOCAL_PATH)/imgui
+LOCAL_C_INCLUDES += $(LOCAL_PATH)/imgui/backends
+LOCAL_C_INCLUDES += $(LOCAL_PATH)/json/single_include
+LOCAL_C_INCLUDES += $(LOCAL_PATH)/thread-pool/include
+LOCAL_C_INCLUDES += $(LOCAL_PATH)/android_surface
 
 # 主程序源文件
 FILE_LIST := $(wildcard $(LOCAL_PATH)/src/main.cpp)
-FILE_LIST += $(wildcard $(LOCAL_PATH)/ImGui/*.cpp)
-FILE_LIST += $(LOCAL_PATH)/ImGui/backends/imgui_impl_android.cpp
-FILE_LIST += $(LOCAL_PATH)/ImGui/backends/imgui_impl_opengl3.cpp
-FILE_LIST += $(LOCAL_PATH)/ImGui/backends/imgui_impl_vulkan.cpp
-FILE_LIST += $(wildcard $(LOCAL_PATH)/native_surface/*.cpp)
+FILE_LIST += $(wildcard $(LOCAL_PATH)/imgui/*.cpp)
+FILE_LIST += $(LOCAL_PATH)/imgui/backends/imgui_impl_android.cpp
+FILE_LIST += $(LOCAL_PATH)/imgui/backends/imgui_impl_opengl3.cpp
+FILE_LIST += $(LOCAL_PATH)/imgui/backends/imgui_impl_vulkan.cpp
+FILE_LIST += $(wildcard $(LOCAL_PATH)/android_surface/*.cpp)
 LOCAL_SRC_FILES := $(FILE_LIST:$(LOCAL_PATH)/%=%)
 
 

@@ -50,6 +50,11 @@ namespace ImGuiFloatingKeyboard
         Internal::need_reposition = true;
     }
 
+    template <size_t N> inline void Open(char (&buffer)[N], const char *title = "Keyboard")
+    {
+        Open(buffer, N, title);
+    }
+
     inline void Close()
     {
         Internal::is_visible = false;
@@ -82,6 +87,35 @@ namespace ImGuiFloatingKeyboard
         Internal::result_buffer = nullptr;
         Internal::result = Result::None;
         return result;
+    }
+
+    template <size_t N> inline bool InputButton(char (&buffer)[N], const char *placeholder, ImVec2 size, const char *title = nullptr)
+    {
+        std::string label = buffer[0] ? buffer : placeholder;
+        label += "###keyboard_input";
+
+        ImGui::PushID(static_cast<const void *>(buffer));
+        const bool pressed = ImGui::Button(label.c_str(), size);
+        ImGui::PopID();
+
+        if (pressed) Open(buffer, title ? title : placeholder);
+        return ConsumeResult(buffer) == Result::Accepted;
+    }
+
+    template <size_t N> inline bool ActionButton(const char *label, ImVec2 size, char (&buffer)[N], const char *title, ImVec4 color = {}, bool clearOnOpen = true)
+    {
+        ImGui::PushID(static_cast<const void *>(buffer));
+        if (color.w > 0.0f) ImGui::PushStyleColor(ImGuiCol_Button, color);
+        const bool pressed = ImGui::Button(label, size);
+        if (color.w > 0.0f) ImGui::PopStyleColor();
+        ImGui::PopID();
+
+        if (pressed)
+        {
+            if (clearOnOpen) buffer[0] = '\0';
+            Open(buffer, title);
+        }
+        return ConsumeResult(buffer) == Result::Accepted;
     }
 
     // ========== 辅助函数 ==========
