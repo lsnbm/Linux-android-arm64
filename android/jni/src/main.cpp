@@ -21,7 +21,7 @@
 #include "driver.h"
 #include "disassembler.h"
 #include "read_write_test.h"
-#include "tcp_server.h"
+#include "http_server.h"
 #include "touch_test.h"
 #include "gyro_test.h"
 #include "gnss_test.h"
@@ -2175,7 +2175,7 @@ int main()
     std::println(stdout, "  1) 读写测试");
     std::println(stdout, "  2) 触摸测试");
     std::println(stdout, "  3) 内存工具");
-    std::println(stdout, "  4) TCP服务器");
+    std::println(stdout, "  4) HTTP服务器");
     std::println(stdout, "  5) 陀螺仪测试");
     std::println(stdout, "  6) 定位测试");
     std::print(stdout, "请输入 [0/1/2/3/4/5/6]: ");
@@ -2211,7 +2211,7 @@ int main()
                                         RunReadWriteTest,
                                         RunTouchTest,
                                         RunMemoryTool,
-                                        tcp_server,
+                                        http_server,
                                         RunGyroTest,
                                         RunGnssTest};
     rc = run[mode]();

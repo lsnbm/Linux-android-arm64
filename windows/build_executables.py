@@ -10,7 +10,7 @@ from pathlib import Path
 SCRIPT_PATH = Path(__file__).resolve()
 SCRIPT_DIR = SCRIPT_PATH.parent
 DEFAULT_OUTPUT_DIR = SCRIPT_DIR
-DEFAULT_EXCLUDED_FILES = {"tcp_server.py"}
+DEFAULT_EXCLUDED_FILES = {"http_bridge.py"}
 
 GUI_MARKERS = (
     "import PySide6",

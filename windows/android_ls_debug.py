@@ -11,8 +11,8 @@ CURRENT_DIR = Path(__file__).resolve().parent
 if str(CURRENT_DIR) not in sys.path:
     sys.path.insert(0, str(CURRENT_DIR))
 
-from tcp_server import (
-    AndroidBridgeSession,
+from http_bridge import (
+    AndroidHttpBridge,
     BridgeConnectionError,
     BridgeError,
     DEFAULT_ANDROID_PORT,
@@ -171,13 +171,13 @@ class BrowserTextEdit(QTextEdit):
         self.setTextCursor(selection_cursor)
 
 
-class TcpTestWindow(QWidget):
+class HttpBridgeWindow(QWidget):
     scan_lan_finished = Signal(object, str, object)
     live_refresh_finished = Signal(object)
 
     def __init__(self) -> None:
         super().__init__()
-        self.bridge_session = AndroidBridgeSession(timeout_seconds=DEFAULT_ANDROID_TIMEOUT_SECONDS)
+        self.http_bridge = AndroidHttpBridge(timeout_seconds=DEFAULT_ANDROID_TIMEOUT_SECONDS)
         self.is_scanning = False
         self.memory_info_data: dict | None = None
         self.scan_page_start = 0
@@ -199,7 +199,7 @@ class TcpTestWindow(QWidget):
         self.live_refresh_timer = QTimer(self)
         self.live_refresh_timer.setInterval(1000)
         self.live_refresh_timer.timeout.connect(self.on_live_refresh_tick)
-        self.setWindowTitle("Native TCP Bridge 控制台")
+        self.setWindowTitle("Native HTTP Bridge 控制台")
         self.resize(1140, 760)
         self.setMinimumSize(980, 680)
         self.scan_lan_finished.connect(self._on_scan_lan_finished)
@@ -240,7 +240,7 @@ class TcpTestWindow(QWidget):
     def _update_connection_badge(self, connected: bool) -> None:
         if not hasattr(self, "connection_badge"):
             return
-        self.connection_badge.setText("已连接" if connected else "未连接")
+        self.connection_badge.setText("通信成功" if connected else "未通信")
 
     def _build_header_panel(self, root: QVBoxLayout) -> None:
         hero_card = self._create_card("heroCard")
@@ -252,7 +252,7 @@ class TcpTestWindow(QWidget):
         status_row.setContentsMargins(0, 0, 0, 0)
         status_row.setSpacing(8)
 
-        self.connection_badge = QLabel("未连接")
+        self.connection_badge = QLabel("未通信")
         self.connection_badge.setObjectName("connectionBadge")
         self._update_connection_badge(False)
         status_row.addWidget(self.connection_badge)
@@ -304,8 +304,8 @@ class TcpTestWindow(QWidget):
         self.device_combo.addItem("", "")
         self.device_combo.setCurrentText("")
         if self.device_combo.lineEdit() is not None:
-            self.device_combo.lineEdit().setPlaceholderText("输入设备 IP，或点击扫描设备")
-            self.device_combo.lineEdit().returnPressed.connect(self.on_toggle_connection)
+            self.device_combo.lineEdit().setPlaceholderText("设备 IP 或 https://xxxx.trycloudflare.com")
+            self.device_combo.lineEdit().returnPressed.connect(self.on_test_communication)
         self.device_combo.setMinimumWidth(320)
         self.device_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         connection_row.addWidget(self.device_combo, 1)
@@ -319,8 +319,8 @@ class TcpTestWindow(QWidget):
         self.port_input.setFixedWidth(78)
         connection_row.addWidget(self.port_input)
 
-        self.test_button = QPushButton("连接到设备")
-        self.test_button.clicked.connect(self.on_toggle_connection)
+        self.test_button = QPushButton("测试通信")
+        self.test_button.clicked.connect(self.on_test_communication)
         connection_row.addWidget(self.test_button)
         hero_layout.addLayout(connection_row)
         hero_layout.addLayout(status_row)
@@ -1140,7 +1140,7 @@ class TcpTestWindow(QWidget):
         self._log(f"状态: {text}")
 
     def _is_connected(self) -> bool:
-        return self.bridge_session.is_connected()
+        return self.http_bridge.is_connected()
 
     def _set_feature_gate(self, connected: bool) -> None:
         # 断开后保留所有页面可见，方便继续查看已获取的数据。
@@ -1157,11 +1157,13 @@ class TcpTestWindow(QWidget):
         return [(device.host, device.mac) for device in discover_lan_devices()]
 
     def _current_device_host_text(self) -> str:
-        host_data = self.device_combo.currentData()
-        host = str(host_data).strip() if host_data else ""
-        if host:
-            return host
-        return self.device_combo.currentText().strip()
+        host_text = self.device_combo.currentText().strip()
+        current_index = self.device_combo.currentIndex()
+        if current_index >= 0 and host_text == self.device_combo.itemText(current_index).strip():
+            host_data = self.device_combo.itemData(current_index)
+            if host_data:
+                return str(host_data).strip()
+        return host_text
 
     def _finish_scan_lan_devices(self, devices: list[tuple[str, str]], previous_ip: str, error_text: str | None = None) -> None:
         self.device_combo.clear()
@@ -1217,8 +1219,11 @@ class TcpTestWindow(QWidget):
     def _parse_endpoint(self) -> tuple[str, int] | None:
         host = self._current_device_host_text()
         if not host:
-            QMessageBox.warning(self, "输入提示", "请输入设备 IP，或先扫描并选择局域网设备。")
+            QMessageBox.warning(self, "输入提示", "请输入设备 IP、HTTP(S) URL，或先扫描局域网设备。")
             return None
+
+        if "://" in host:
+            return host, DEFAULT_ANDROID_PORT
 
         port_text = self.port_input.text().strip()
         try:
@@ -1234,15 +1239,15 @@ class TcpTestWindow(QWidget):
         return host, port
 
     def _set_connection_ui(self, connected: bool) -> None:
-        self.test_button.setText("断开连接" if connected else "连接到设备")
-        self.device_combo.setEnabled(not connected)
-        self.scan_device_button.setEnabled(not connected)
-        self.port_input.setEnabled(not connected)
+        self.test_button.setText("测试通信")
+        self.device_combo.setEnabled(True)
+        self.scan_device_button.setEnabled(True)
+        self.port_input.setEnabled(True)
         self._update_connection_badge(connected)
         self._set_feature_gate(connected)
 
     def _disconnect_device(self, reason: str | None = None) -> None:
-        self.bridge_session.disconnect()
+        self.http_bridge.disconnect()
         self._set_connection_ui(False)
         self._invalidate_target_ui_state()
         self.live_refresh_inflight = False
@@ -1289,41 +1294,43 @@ class TcpTestWindow(QWidget):
 
         host, port = endpoint
         try:
-            self.bridge_session.connect(host, port)
-            ping_response = self.bridge_session.call_operation("bridge.ping", {})
+            self.http_bridge.connect(host, port)
+            ping_response = self.http_bridge.call_operation("bridge.ping", {})
             ping_response.require_ok()
-            target_response = self.bridge_session.call_operation("target.get", {})
+            target_response = self.http_bridge.call_operation("target.get", {})
             target_response.require_ok()
         except BridgeConnectionError as exc:
-            self.bridge_session.disconnect()
+            self.http_bridge.disconnect()
             self._set_status(str(exc))
             return
         except BridgeError as exc:
-            self.bridge_session.disconnect()
+            self.http_bridge.disconnect()
             error_text = str(exc).strip()
             if "未知 operation" in error_text or "unknown operation" in error_text.lower():
-                error_text = "Android 端 TCP 程序版本过旧，请重新编译并部署当前源码中的可执行程序。"
+                error_text = "Android 端 HTTP 程序版本过旧，请重新编译并部署当前源码中的可执行程序。"
             QMessageBox.warning(self, "协议不兼容", error_text)
-            self._set_status(f"连接失败：{error_text}")
+            self._set_status(f"通信失败：{error_text}")
             return
 
+        if not self.live_refresh_timer.isActive():
+            self.live_refresh_timer.start()
         self._set_connection_ui(True)
-        self._set_status(f"已连接到设备：{host}:{port}")
+        self._set_status(f"通信成功：{self.http_bridge.url}")
 
     def _send_operation(self, operation: str, params: dict | None = None, *, log_enabled: bool = True) -> dict | None:
         operation_name = operation.strip()
         request_params = params or {}
         if log_enabled:
             self._log(f"发送操作: {operation_name} params={json.dumps(request_params, ensure_ascii=False)}")
-        if not self.bridge_session.is_connected():
-            self._set_status("未连接设备，请先点击“连接到设备”")
+        if not self.http_bridge.is_connected():
+            self._set_status("尚未建立通信，请先点击“测试通信”")
             return None
 
         try:
-            bridge_response = self.bridge_session.call_operation(operation_name, request_params)
+            bridge_response = self.http_bridge.call_operation(operation_name, request_params)
             response_payload = bridge_response.to_dict()
         except BridgeConnectionError as exc:
-            self._disconnect_device(f"连接已断开：{exc}")
+            self._set_status(f"请求失败：{exc}")
             return None
         except BridgeError as exc:
             response_payload = {
@@ -1473,12 +1480,12 @@ class TcpTestWindow(QWidget):
 
     @staticmethod
     def _format_addr(value: object) -> str:
-        addr = TcpTestWindow._safe_int(value, 0)
+        addr = HttpBridgeWindow._safe_int(value, 0)
         return f"0x{addr:016X}"
 
     @staticmethod
     def _format_prot(prot_value: object) -> str:
-        prot = TcpTestWindow._safe_int(prot_value, 0)
+        prot = HttpBridgeWindow._safe_int(prot_value, 0)
         return f"{'r' if (prot & 1) else '-'}{'w' if (prot & 2) else '-'}{'x' if (prot & 4) else '-'}({prot})"
 
     def _module_matches_keyword(self, module: object, keyword: str) -> bool:
@@ -1634,10 +1641,7 @@ class TcpTestWindow(QWidget):
         filtered_info = self._filter_memory_info(self.memory_info_data, keyword)
         self.memory_view.setPlainText(self._format_memory_info_text(filtered_info))
 
-    def on_toggle_connection(self) -> None:
-        if self._is_connected():
-            self._disconnect_device("已断开连接")
-            return
+    def on_test_communication(self) -> None:
         self._connect_device()
 
     def _build_scan_request(self, is_first: bool) -> tuple[str, dict] | None:
@@ -1893,23 +1897,23 @@ class TcpTestWindow(QWidget):
         byte_idx = reg_idx >> 2
         if byte_idx < 0 or byte_idx >= len(mask_raw):
             return None
-        byte_value = TcpTestWindow._safe_int(mask_raw[byte_idx], 0) & 0xFF
+        byte_value = HttpBridgeWindow._safe_int(mask_raw[byte_idx], 0) & 0xFF
         bit_offset = (reg_idx & 0x3) << 1
         return (byte_value >> bit_offset) & 0x3
 
     @staticmethod
     def _hwbp_mask_op_value(rec: dict, field_name: str) -> int | None:
-        reg_idx = TcpTestWindow._hwbp_reg_index(field_name)
+        reg_idx = HttpBridgeWindow._hwbp_reg_index(field_name)
         if reg_idx is None:
             return None
-        return TcpTestWindow._hwbp_mask_op_at_index(rec, reg_idx)
+        return HttpBridgeWindow._hwbp_mask_op_at_index(rec, reg_idx)
 
     @staticmethod
     def _hwbp_mask_counts(rec: dict) -> tuple[int, int]:
         read_count = 0
         write_count = 0
         for reg_idx in range(HWBP_MAX_REG_COUNT):
-            op_value = TcpTestWindow._hwbp_mask_op_at_index(rec, reg_idx)
+            op_value = HttpBridgeWindow._hwbp_mask_op_at_index(rec, reg_idx)
             if op_value == 1:
                 read_count += 1
             elif op_value == 2:
@@ -1932,23 +1936,23 @@ class TcpTestWindow(QWidget):
     def _hwbp_qreg_parts(qreg: object) -> tuple[int, int]:
         if isinstance(qreg, dict):
             return (
-                TcpTestWindow._safe_int(qreg.get("hi"), 0),
-                TcpTestWindow._safe_int(qreg.get("lo"), 0),
+                HttpBridgeWindow._safe_int(qreg.get("hi"), 0),
+                HttpBridgeWindow._safe_int(qreg.get("lo"), 0),
             )
-        value = TcpTestWindow._safe_int(qreg, 0)
+        value = HttpBridgeWindow._safe_int(qreg, 0)
         return ((value >> 64) & ((1 << 64) - 1), value & ((1 << 64) - 1))
 
     @staticmethod
     def _hwbp_point_type_label(point: dict) -> str:
-        return HWBP_POINT_TYPE_LABELS.get(TcpTestWindow._safe_int(point.get("bt"), 0), "未知")
+        return HWBP_POINT_TYPE_LABELS.get(HttpBridgeWindow._safe_int(point.get("bt"), 0), "未知")
 
     @staticmethod
     def _hwbp_point_scope_label(point: dict) -> str:
-        return HWBP_SCOPE_LABELS.get(TcpTestWindow._safe_int(point.get("bs"), 0), "未知")
+        return HWBP_SCOPE_LABELS.get(HttpBridgeWindow._safe_int(point.get("bs"), 0), "未知")
 
     @staticmethod
     def _hwbp_point_length_text(point: dict) -> str:
-        length = TcpTestWindow._safe_int(point.get("bl"), 0)
+        length = HttpBridgeWindow._safe_int(point.get("bl"), 0)
         return f"{length}字节" if length > 0 else "未知"
 
     def _decode_hwbp_rw_text(self, rec: dict) -> str:
@@ -2234,8 +2238,8 @@ class TcpTestWindow(QWidget):
     @staticmethod
     def _format_sig_result(data: dict) -> str:
         lines: list[str] = []
-        count = TcpTestWindow._safe_int(data.get("count"), 0)
-        returned_count = TcpTestWindow._safe_int(data.get("returned_count"), 0)
+        count = HttpBridgeWindow._safe_int(data.get("count"), 0)
+        returned_count = HttpBridgeWindow._safe_int(data.get("returned_count"), 0)
         truncated = bool(data.get("truncated", False))
         changed_count = data.get("changed_count")
         total_count = data.get("total_count")
@@ -2315,7 +2319,7 @@ class TcpTestWindow(QWidget):
 
     @staticmethod
     def _extract_value_field(response: dict | None, type_token: str) -> str | None:
-        data = TcpTestWindow._response_data_dict(response)
+        data = HttpBridgeWindow._response_data_dict(response)
         data_hex = str(data.get("data_hex") or "")
         try:
             raw = bytes.fromhex(data_hex)
@@ -2993,7 +2997,7 @@ class TcpTestWindow(QWidget):
             "Double": ("<d", 8),
         }
         if fmt not in mapping:
-            return TcpTestWindow._render_hex_dump(addr, data)
+            return HttpBridgeWindow._render_hex_dump(addr, data)
 
         unpack_fmt, unit = mapping[fmt]
         lines: list[str] = []
@@ -3010,7 +3014,7 @@ class TcpTestWindow(QWidget):
 
     @staticmethod
     def _extract_disasm_window(snapshot: dict) -> tuple[list[dict], int]:
-        base_addr = TcpTestWindow._safe_int(snapshot.get("base"), 0)
+        base_addr = HttpBridgeWindow._safe_int(snapshot.get("base"), 0)
         disasm_list_raw = snapshot.get("disasm")
         disasm_list = disasm_list_raw if isinstance(disasm_list_raw, list) else []
         if not disasm_list:
@@ -3026,13 +3030,13 @@ class TcpTestWindow(QWidget):
         if not window_items:
             return [], base_addr
 
-        visible_addr = TcpTestWindow._safe_int(window_items[0].get("address"), base_addr)
+        visible_addr = HttpBridgeWindow._safe_int(window_items[0].get("address"), base_addr)
         return window_items, visible_addr
 
     @staticmethod
     def _render_disasm_dump(snapshot: dict) -> str:
         lines: list[str] = []
-        window_items, _visible_addr = TcpTestWindow._extract_disasm_window(snapshot)
+        window_items, _visible_addr = HttpBridgeWindow._extract_disasm_window(snapshot)
         if not window_items:
             return "没有可显示的反汇编结果。"
 
@@ -3306,11 +3310,11 @@ class TcpTestWindow(QWidget):
         try:
             kind = task.get("kind")
             if kind == "scan":
-                status = self.bridge_session.call_operation("scan.get").to_dict()
+                status = self.http_bridge.call_operation("scan.get").to_dict()
                 result["status"] = status
                 status_data = self._response_data_dict(status)
                 if self._response_ok(status) and not bool(status_data.get("scanning", False)):
-                    result["page"] = self.bridge_session.call_operation(
+                    result["page"] = self.http_bridge.call_operation(
                         "scan.results",
                         {"start": task["start"], "count": task["count"], "value_type": task["value_type"]},
                     ).to_dict()
@@ -3319,15 +3323,15 @@ class TcpTestWindow(QWidget):
                 for entry in task.get("entries", []):
                     if not isinstance(entry, dict):
                         continue
-                    response = self.bridge_session.call_operation(str(entry["operation"]), entry["params"]).to_dict()
+                    response = self.http_bridge.call_operation(str(entry["operation"]), entry["params"]).to_dict()
                     values.append({**entry, "value": self._extract_value_field(response, str(entry["type"]))})
                 result["values"] = values
             elif kind == "pointer":
-                result["response"] = self.bridge_session.call_operation("pointer.get").to_dict()
+                result["response"] = self.http_bridge.call_operation("pointer.get").to_dict()
             elif kind == "breakpoint":
-                result["response"] = self.bridge_session.call_operation("breakpoint.get").to_dict()
+                result["response"] = self.http_bridge.call_operation("breakpoint.get").to_dict()
             elif kind == "syscall":
-                result["response"] = self.bridge_session.call_operation("syscall.read").to_dict()
+                result["response"] = self.http_bridge.call_operation("syscall.read").to_dict()
         except BridgeConnectionError as exc:
             result["connection_error"] = str(exc)
         except BridgeError as exc:
@@ -3344,7 +3348,8 @@ class TcpTestWindow(QWidget):
         self.live_refresh_inflight = False
         connection_error = str(result_obj.get("connection_error") or "")
         if connection_error:
-            self._disconnect_device(f"连接已断开：{connection_error}")
+            self.live_refresh_timer.stop()
+            self._set_status(f"后台刷新失败：{connection_error}")
             return
 
         kind = result_obj.get("kind")
@@ -3840,7 +3845,7 @@ class TcpTestWindow(QWidget):
 
 def main() -> int:
     app = QApplication(sys.argv)
-    window = TcpTestWindow()
+    window = HttpBridgeWindow()
     window.show()
     return app.exec()
 

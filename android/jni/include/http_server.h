@@ -1,11 +1,21 @@
 ﻿#pragma once
+#include <ifaddrs.h>
+#include <net/if.h>
 #include <nlohmann/json.hpp>
+#include <sched.h>
+#include <sys/mount.h>
 #include "BS_thread_pool.hpp"
 #include "memory_tool.h"
 
 // ============================================================================
-// TCP 服务器模块
+// HTTP 服务器模块
 // ============================================================================
+
+extern "C"
+{
+    extern const unsigned char cloudflared_blob_start[];
+    extern const unsigned char cloudflared_blob_end[];
+}
 
 namespace
 {
@@ -13,8 +23,10 @@ namespace
 
     constexpr std::uint16_t kServerPort = 9494;
     constexpr int kListenBacklog = 32;
-    std::atomic_bool gRunning{true};
-    std::atomic_int gServerFd{-1};
+    constexpr std::size_t kMaxHttpHeaderBytes = 64 * 1024;
+    constexpr std::size_t kMaxHttpBodyBytes = 16 * 1024 * 1024;
+    constexpr std::string_view kCloudflaredPath = "/data/akernel/.cloudflared";
+    constexpr std::string_view kCloudflaredTempPath = "/data/akernel/.cloudflared.tmp";
     std::mutex gRequestMutex;
 
     // 延迟创建，避免 daemonize() 的 fork() 丢弃线程池工作线程后留下不可用的任务队列。
@@ -24,26 +36,171 @@ namespace
         return pool;
     }
 
-    void CloseTcpServerFd()
-    {
-        const int serverFd = gServerFd.exchange(-1, std::memory_order_acq_rel);
-        if (serverFd >= 0)
-        {
-            shutdown(serverFd, SHUT_RDWR);
-            close(serverFd);
-        }
-    }
-
-    void StopTcpServer()
-    {
-        gRunning.store(false, std::memory_order_release);
-        CloseTcpServerFd();
-    }
-
     // 打印系统错误信息
     void printErrno(std::string_view action)
     {
         std::println(stderr, "{}，错误码：{}", action, errno);
+    }
+
+    bool IsLanInterface(std::string_view interfaceName)
+    {
+        constexpr std::array<std::string_view, 6> prefixes = {"wlan", "eth", "ap", "rndis", "usb", "bt-pan"};
+        return std::ranges::any_of(prefixes, [interfaceName](std::string_view prefix) { return interfaceName.starts_with(prefix); });
+    }
+
+    void PrintLanHttpAddresses()
+    {
+        ifaddrs *interfaces = nullptr;
+        if (getifaddrs(&interfaces) != 0)
+        {
+            printErrno("枚举局域网地址失败");
+            return;
+        }
+
+        bool found = false;
+        std::vector<std::string> printedAddresses;
+        for (const ifaddrs *entry = interfaces; entry != nullptr; entry = entry->ifa_next)
+        {
+            if (entry->ifa_addr == nullptr || entry->ifa_addr->sa_family != AF_INET) continue;
+            if ((entry->ifa_flags & IFF_UP) == 0 || (entry->ifa_flags & IFF_LOOPBACK) != 0) continue;
+
+            const std::string_view interfaceName = entry->ifa_name != nullptr ? entry->ifa_name : "";
+            if (!IsLanInterface(interfaceName)) continue;
+
+            char addressBuffer[INET_ADDRSTRLEN]{};
+            const auto *ipv4Address = reinterpret_cast<const sockaddr_in *>(entry->ifa_addr);
+            if (inet_ntop(AF_INET, &ipv4Address->sin_addr, addressBuffer, sizeof(addressBuffer)) == nullptr) continue;
+
+            const std::string address = addressBuffer;
+            if (std::ranges::find(printedAddresses, address) != printedAddresses.end()) continue;
+            printedAddresses.push_back(address);
+            found = true;
+            std::println("局域网地址 [{}]：http://{}:{}", interfaceName, address, kServerPort);
+            std::println("局域网 RPC [{}]：http://{}:{}/api/rpc", interfaceName, address, kServerPort);
+        }
+        freeifaddrs(interfaces);
+
+        if (!found) std::println("未检测到局域网 IPv4 地址，HTTP 服务仍监听 http://0.0.0.0:{}", kServerPort);
+    }
+
+    bool WritePrivateEtcFile(const char *path, std::string_view content)
+    {
+        const int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+        if (fd < 0) return false;
+
+        std::size_t written = 0;
+        while (written < content.size())
+        {
+            const ssize_t result = write(fd, content.data() + written, content.size() - written);
+            if (result < 0)
+            {
+                if (errno == EINTR) continue;
+                close(fd);
+                return false;
+            }
+            if (result == 0)
+            {
+                close(fd);
+                return false;
+            }
+            written += static_cast<std::size_t>(result);
+        }
+
+        return close(fd) == 0;
+    }
+
+    bool ConfigureCloudflaredDns()
+    {
+        if (unshare(CLONE_NEWNS) != 0) return false;
+        if (mount(nullptr, "/", nullptr, MS_REC | MS_PRIVATE, nullptr) != 0) return false;
+        if (mount("tmpfs", "/system/etc", "tmpfs", MS_NOSUID | MS_NODEV, "mode=0755,size=64k") != 0) return false;
+
+        constexpr std::string_view resolvConf = "nameserver 1.1.1.1\n"
+                                                "nameserver 8.8.8.8\n"
+                                                "options timeout:2 attempts:2\n";
+        constexpr std::string_view hosts = "127.0.0.1 localhost\n"
+                                           "::1 ip6-localhost\n";
+
+        if (!WritePrivateEtcFile("/system/etc/resolv.conf", resolvConf)) return false;
+        if (!WritePrivateEtcFile("/system/etc/hosts", hosts)) return false;
+        return setenv("SSL_CERT_DIR", "/apex/com.android.conscrypt/cacerts", 1) == 0;
+    }
+
+    bool ExtractCloudflared()
+    {
+        const std::size_t blobSize = static_cast<std::size_t>(cloudflared_blob_end - cloudflared_blob_start);
+        if (blobSize == 0) return false;
+
+        const int fd = open(kCloudflaredTempPath.data(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0700);
+        if (fd < 0)
+        {
+            printErrno("创建 cloudflared 临时文件失败");
+            return false;
+        }
+
+        std::size_t written = 0;
+        while (written < blobSize)
+        {
+            const ssize_t result = write(fd, cloudflared_blob_start + written, blobSize - written);
+            if (result < 0)
+            {
+                if (errno == EINTR) continue;
+                printErrno("释放 cloudflared 失败");
+                close(fd);
+                unlink(kCloudflaredTempPath.data());
+                return false;
+            }
+            if (result == 0)
+            {
+                close(fd);
+                unlink(kCloudflaredTempPath.data());
+                return false;
+            }
+            written += static_cast<std::size_t>(result);
+        }
+
+        if (fchmod(fd, 0700) != 0)
+        {
+            printErrno("设置 cloudflared 权限失败");
+            close(fd);
+            unlink(kCloudflaredTempPath.data());
+            return false;
+        }
+        close(fd);
+
+        if (rename(kCloudflaredTempPath.data(), kCloudflaredPath.data()) != 0)
+        {
+            printErrno("安装 cloudflared 失败");
+            unlink(kCloudflaredTempPath.data());
+            return false;
+        }
+        return true;
+    }
+
+    void StartCloudflared()
+    {
+        if (!ExtractCloudflared()) return;
+
+        const pid_t pid = fork();
+        if (pid < 0)
+        {
+            printErrno("启动 cloudflared 失败");
+            unlink(kCloudflaredPath.data());
+            return;
+        }
+        if (pid == 0)
+        {
+            prctl(PR_SET_PDEATHSIG, SIGTERM);
+            if (!ConfigureCloudflaredDns())
+            {
+                printErrno("配置 cloudflared 私有 DNS 失败");
+                _exit(126);
+            }
+            execl(kCloudflaredPath.data(), kCloudflaredPath.data(), "tunnel", "--no-autoupdate", "--edge-ip-version", "4", "--url", "http://127.0.0.1:9494", static_cast<char *>(nullptr));
+            _exit(127);
+        }
+
+        std::println("cloudflared Tunnel 已启动，PID={}，公网地址将写入 /sdcard/log.txt", pid);
     }
 
     // 去除字符串末尾换行符
@@ -206,18 +363,30 @@ namespace
     {
         switch (mode)
         {
-        case Types::FuzzyMode::Unknown: return "unknown";
-        case Types::FuzzyMode::Equal: return "equal";
-        case Types::FuzzyMode::Greater: return "greater";
-        case Types::FuzzyMode::Less: return "less";
-        case Types::FuzzyMode::Increased: return "increased";
-        case Types::FuzzyMode::Decreased: return "decreased";
-        case Types::FuzzyMode::Changed: return "changed";
-        case Types::FuzzyMode::Unchanged: return "unchanged";
-        case Types::FuzzyMode::Range: return "range";
-        case Types::FuzzyMode::Pointer: return "pointer";
-        case Types::FuzzyMode::String: return "string";
-        default: return "";
+        case Types::FuzzyMode::Unknown:
+            return "unknown";
+        case Types::FuzzyMode::Equal:
+            return "equal";
+        case Types::FuzzyMode::Greater:
+            return "greater";
+        case Types::FuzzyMode::Less:
+            return "less";
+        case Types::FuzzyMode::Increased:
+            return "increased";
+        case Types::FuzzyMode::Decreased:
+            return "decreased";
+        case Types::FuzzyMode::Changed:
+            return "changed";
+        case Types::FuzzyMode::Unchanged:
+            return "unchanged";
+        case Types::FuzzyMode::Range:
+            return "range";
+        case Types::FuzzyMode::Pointer:
+            return "pointer";
+        case Types::FuzzyMode::String:
+            return "string";
+        default:
+            return "";
         }
     }
 
@@ -582,7 +751,7 @@ namespace
         std::size_t sentTotal = 0;
         while (sentTotal < data.size())
         {
-            const ssize_t sent = send(fd, data.data() + sentTotal, data.size() - sentTotal, 0);
+            const ssize_t sent = send(fd, data.data() + sentTotal, data.size() - sentTotal, MSG_NOSIGNAL);
             if (sent < 0)
             {
                 if (errno == EINTR)
@@ -598,6 +767,121 @@ namespace
             }
             sentTotal += static_cast<std::size_t>(sent);
         }
+        return true;
+    }
+
+    bool sendHttpResponse(int fd, int statusCode, std::string_view statusText, std::string_view body)
+    {
+        const std::string response = std::format("HTTP/1.1 {} {}\r\n"
+                                                 "Content-Type: application/json; charset=utf-8\r\n"
+                                                 "Content-Length: {}\r\n"
+                                                 "Connection: close\r\n"
+                                                 "Access-Control-Allow-Origin: *\r\n"
+                                                 "Access-Control-Allow-Headers: Content-Type, Authorization\r\n"
+                                                 "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+                                                 "\r\n{}",
+                                                 statusCode, statusText, body.size(), body);
+        return sendAll(fd, response);
+    }
+
+    bool receiveHttpRequest(int fd, std::string *method, std::string *path, std::string *body, int *errorStatus)
+    {
+        std::string request;
+        request.reserve(4096);
+        std::array<char, 4096> chunk{};
+        std::size_t headerEnd = std::string::npos;
+
+        while (headerEnd == std::string::npos)
+        {
+            const ssize_t received = recv(fd, chunk.data(), chunk.size(), 0);
+            if (received == 0) return false;
+            if (received < 0)
+            {
+                if (errno == EINTR) continue;
+                return false;
+            }
+
+            request.append(chunk.data(), static_cast<std::size_t>(received));
+            if (request.size() > kMaxHttpHeaderBytes)
+            {
+                *errorStatus = 431;
+                return false;
+            }
+            headerEnd = request.find("\r\n\r\n");
+        }
+
+        const std::size_t requestLineEnd = request.find("\r\n");
+        if (requestLineEnd == std::string::npos)
+        {
+            *errorStatus = 400;
+            return false;
+        }
+
+        const std::string_view requestLine(request.data(), requestLineEnd);
+        const std::size_t firstSpace = requestLine.find(' ');
+        const std::size_t secondSpace = firstSpace == std::string_view::npos ? std::string_view::npos : requestLine.find(' ', firstSpace + 1);
+        if (firstSpace == std::string_view::npos || secondSpace == std::string_view::npos)
+        {
+            *errorStatus = 400;
+            return false;
+        }
+        *method = std::string(requestLine.substr(0, firstSpace));
+        *path = std::string(requestLine.substr(firstSpace + 1, secondSpace - firstSpace - 1));
+
+        std::size_t contentLength = 0;
+        std::size_t lineStart = requestLineEnd + 2;
+        while (lineStart < headerEnd)
+        {
+            const std::size_t lineEnd = request.find("\r\n", lineStart);
+            if (lineEnd == std::string::npos || lineEnd > headerEnd) break;
+
+            const std::string_view line(request.data() + lineStart, lineEnd - lineStart);
+            const std::size_t colon = line.find(':');
+            if (colon != std::string_view::npos && toLowerAscii(line.substr(0, colon)) == "content-length")
+            {
+                std::string_view value = line.substr(colon + 1);
+                const std::size_t valueStart = value.find_first_not_of(" \t");
+                const std::size_t valueEnd = value.find_last_not_of(" \t");
+                if (valueStart == std::string_view::npos)
+                {
+                    *errorStatus = 400;
+                    return false;
+                }
+                value = value.substr(valueStart, valueEnd - valueStart + 1);
+                const auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), contentLength);
+                if (ec != std::errc{} || ptr != value.data() + value.size())
+                {
+                    *errorStatus = 400;
+                    return false;
+                }
+            }
+            lineStart = lineEnd + 2;
+        }
+
+        if (contentLength > kMaxHttpBodyBytes)
+        {
+            *errorStatus = 413;
+            return false;
+        }
+
+        const std::size_t bodyStart = headerEnd + 4;
+        while (request.size() - bodyStart < contentLength)
+        {
+            const ssize_t received = recv(fd, chunk.data(), chunk.size(), 0);
+            if (received == 0)
+            {
+                *errorStatus = 400;
+                return false;
+            }
+            if (received < 0)
+            {
+                if (errno == EINTR) continue;
+                return false;
+            }
+            request.append(chunk.data(), static_cast<std::size_t>(received));
+        }
+
+        body->assign(request.data() + bodyStart, contentLength);
         return true;
     }
 
@@ -784,13 +1068,7 @@ namespace
         {
             const auto state = MemoryTool::Scanner().state();
             return {
-                {"scanning", state.scanning},
-                {"progress", state.progress},
-                {"count", state.count},
-                {"string_scan", state.stringScan},
-                {"value_type", state.stringScan ? "string" : state.dataType.has_value() ? Types::Labels::TYPE[static_cast<size_t>(*state.dataType)] : ""},
-                {"mode", fuzzyModeToken(state.mode)},
-                {"value_format", state.mode == Types::FuzzyMode::Pointer ? "hex_address" : state.mode == Types::FuzzyMode::String ? "text" : "number"},
+                {"scanning", state.scanning}, {"progress", state.progress}, {"count", state.count}, {"string_scan", state.stringScan}, {"value_type", state.stringScan ? "string" : state.dataType.has_value() ? Types::Labels::TYPE[static_cast<size_t>(*state.dataType)] : ""}, {"mode", fuzzyModeToken(state.mode)}, {"value_format", state.mode == Types::FuzzyMode::Pointer ? "hex_address" : state.mode == Types::FuzzyMode::String ? "text" : "number"},
             };
         };
 
@@ -798,15 +1076,7 @@ namespace
         {
             const auto state = MemoryTool::Pointer().state();
             return {
-                {"busy", state.operation != PointerManager::Operation::Idle},
-                {"scanning", state.operation == PointerManager::Operation::Scanning},
-                {"operation", PointerManager::OperationName(state.operation)},
-                {"last_operation", PointerManager::OperationName(state.lastOperation)},
-                {"progress", state.progress},
-                {"count", state.count},
-                {"completed", state.completed},
-                {"success", state.success},
-                {"error", state.error},
+                {"busy", state.operation != PointerManager::Operation::Idle}, {"scanning", state.operation == PointerManager::Operation::Scanning}, {"operation", PointerManager::OperationName(state.operation)}, {"last_operation", PointerManager::OperationName(state.lastOperation)}, {"progress", state.progress}, {"count", state.count}, {"completed", state.completed}, {"success", state.success}, {"error", state.error},
             };
         };
 
@@ -1034,7 +1304,9 @@ namespace
                 payload["items"].push_back({
                     {"addr", static_cast<std::uint64_t>(addr)},
                     {"addr_hex", std::format("0x{:X}", static_cast<std::uint64_t>(addr))},
-                    {"value", stringType ? MemUtils::ReadAsText(addr) : pointerType ? MemUtils::ReadAsPointerString(addr) : MemUtils::ReadAsString(addr, *dataType)},
+                    {"value", stringType    ? MemUtils::ReadAsText(addr)
+                              : pointerType ? MemUtils::ReadAsPointerString(addr)
+                                            : MemUtils::ReadAsString(addr, *dataType)},
                 });
             }
             return okData(std::move(payload));
@@ -1378,82 +1650,59 @@ namespace
         }
 
         const auto clientPort = ntohs(clientAddr.sin_port);
-        std::println("客户端已连接：{}:{}", clientIp, clientPort);
-
-        std::string buffer;
-        buffer.reserve(4096);
-        char recvChunk[4096]{};
-
-        while (gRunning)
+        std::string method;
+        std::string path;
+        std::string body;
+        int errorStatus = 0;
+        if (!receiveHttpRequest(clientFd, &method, &path, &body, &errorStatus))
         {
-            const ssize_t receivedBytes = recv(clientFd, recvChunk, sizeof(recvChunk), 0);
-            if (receivedBytes == 0)
-            {
-                std::println("客户端已断开连接：{}:{}", clientIp, clientPort);
-                break;
-            }
-
-            if (receivedBytes < 0)
-            {
-                if (errno == EINTR)
-                {
-                    continue;
-                }
-                printErrno("接收数据失败");
-                break;
-            }
-
-            buffer.append(recvChunk, recvChunk + receivedBytes);
-
-            for (;;)
-            {
-                const auto newlinePos = buffer.find('\n');
-                if (newlinePos == std::string::npos)
-                {
-                    break;
-                }
-
-                std::string message = buffer.substr(0, newlinePos);
-                buffer.erase(0, newlinePos + 1);
-                trimLineEnding(message);
-                if (message.empty())
-                {
-                    continue;
-                }
-
-                std::println("收到命令：{}:{} {}", clientIp, clientPort, message);
-                const std::string response = DispatchCommandUnified(message) + "\n";
-                if (!sendAll(clientFd, response))
-                {
-                    printErrno("发送回复失败");
-                    close(clientFd);
-                    return;
-                }
-            }
+            if (errorStatus == 413) sendHttpResponse(clientFd, 413, "Payload Too Large", R"({"ok":false,"error":"请求体过大"})");
+            else if (errorStatus == 431) sendHttpResponse(clientFd, 431, "Request Header Fields Too Large", R"({"ok":false,"error":"请求头过大"})");
+            else if (errorStatus != 0) sendHttpResponse(clientFd, 400, "Bad Request", R"({"ok":false,"error":"HTTP 请求格式无效"})");
+            close(clientFd);
+            return;
         }
 
+        std::println("收到 HTTP 请求：{}:{} {} {}", clientIp, clientPort, method, path);
+        if (method == "OPTIONS")
+        {
+            sendHttpResponse(clientFd, 204, "No Content", "");
+        }
+        else if (method == "GET" && path == "/health")
+        {
+            sendHttpResponse(clientFd, 200, "OK", R"({"ok":true,"service":"LS_KTool","transport":"http"})");
+        }
+        else if (method == "POST" && path == "/api/rpc")
+        {
+            const std::string response = DispatchCommandUnified(body);
+            if (!sendHttpResponse(clientFd, 200, "OK", response)) printErrno("发送 HTTP 回复失败");
+        }
+        else if (method != "GET" && method != "POST")
+        {
+            sendHttpResponse(clientFd, 405, "Method Not Allowed", R"({"ok":false,"error":"不支持的 HTTP 方法"})");
+        }
+        else
+        {
+            sendHttpResponse(clientFd, 404, "Not Found", R"({"ok":false,"error":"接口不存在"})");
+        }
         close(clientFd);
     }
 } // namespace
 
-// 程序入口：初始化服务并处理客户端请求。
-int tcp_server()
+// 程序入口：初始化 HTTP 服务并处理客户端请求。
+int http_server()
 {
-    gRunning.store(true, std::memory_order_release);
-
-    const int serverFd = socket(AF_INET, SOCK_STREAM, 0);
+    const int serverFd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (serverFd < 0)
     {
         printErrno("创建套接字失败");
         return 1;
     }
-    gServerFd.store(serverFd, std::memory_order_release);
-
     constexpr int enableReuse = 1;
     if (setsockopt(serverFd, SOL_SOCKET, SO_REUSEADDR, &enableReuse, sizeof(enableReuse)) < 0)
     {
         printErrno("设置套接字选项失败");
-        CloseTcpServerFd();
+        close(serverFd);
         return 1;
     }
 
@@ -1465,41 +1714,34 @@ int tcp_server()
     if (bind(serverFd, reinterpret_cast<sockaddr *>(&address), sizeof(address)) < 0)
     {
         printErrno("绑定端口失败");
-        CloseTcpServerFd();
+        close(serverFd);
         return 1;
     }
 
     if (listen(serverFd, kListenBacklog) < 0)
     {
         printErrno("开始监听失败");
-        CloseTcpServerFd();
+        close(serverFd);
         return 1;
     }
 
-    std::println("TCP 服务端已监听 0.0.0.0:{}", kServerPort);
+    std::println("HTTP 服务端已监听 http://0.0.0.0:{}", kServerPort);
+    PrintLanHttpAddresses();
+    std::fflush(stdout);
+    StartCloudflared();
 
-    while (gRunning)
+    for (;;)
     {
         sockaddr_in clientAddr{};
         socklen_t clientLen = sizeof(clientAddr);
         const int clientFd = accept(serverFd, reinterpret_cast<sockaddr *>(&clientAddr), &clientLen);
         if (clientFd < 0)
         {
-            if (!gRunning || errno == EINTR)
-            {
-                continue;
-            }
+            if (errno == EINTR) continue;
             printErrno("接受连接失败");
             continue;
         }
 
         ClientThreadPool().detach_task([clientFd, clientAddr] { HandleClientConnection(clientFd, clientAddr); });
     }
-
-    CloseTcpServerFd();
-    ClientThreadPool().purge();
-    ClientThreadPool().wait();
-
-    std::println("服务端已退出。");
-    return 0;
 }

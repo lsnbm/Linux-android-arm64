@@ -55,3 +55,6 @@ Thumbs.db
 # android root-level binaries
 android/*.a
 android/*.so
+
+# Downloaded cloudflared payload embedded into LS_KTool at build time
+android/jni/assets/cloudflared-linux-arm64
