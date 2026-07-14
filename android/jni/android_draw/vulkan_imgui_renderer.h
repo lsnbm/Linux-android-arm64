@@ -1006,6 +1006,7 @@ namespace RenderVK
 
         if (native_window)
         {
+            android::SurfaceControlManager::Destroy(native_window);
             ANativeWindow_release(native_window);
             native_window = nullptr;
         }
