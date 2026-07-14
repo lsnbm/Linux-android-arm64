@@ -10,23 +10,15 @@
 #include <poll.h> // 引入 poll 机制
 #include "imgui/imgui.h"
 #include <atomic>
-#include <future>
+#include <thread>
 #include <vector>
 #include <mutex>
 #include <string.h>
 #include <errno.h>
 #include <algorithm>
-#include "BS_thread_pool.hpp"
 
 #define MAX_DEVICES 5
 #define MAX_FINGERS 10
-
-// 延迟到 daemonize() 完成后创建；fork() 子进程不会保留已存在的线程池工作线程。
-static BS::thread_pool<> &TouchThreadPool()
-{
-    static BS::thread_pool<> pool{MAX_DEVICES};
-    return pool;
-}
 
 // 全局状态变量
 static std::atomic<uint32_t> orientation{0};
@@ -63,7 +55,7 @@ struct DeviceConfig
     int maxX;
     int maxY;
     int deviceFd;
-    std::future<void> task;
+    std::thread task;
 };
 
 // 全局变量
@@ -93,14 +85,11 @@ static bool isMultiTouchDevice(int fd)
     return testInputBit(ABS_MT_SLOT, abs_bits) && testInputBit(ABS_MT_POSITION_X, abs_bits) && testInputBit(ABS_MT_POSITION_Y, abs_bits);
 }
 
-// 触摸事件处理线程
-static void deviceHandlerThread(DeviceConfig *config)
+// 触摸事件处理线程。参数按值传入，避免 devices 扩容或清理后留下悬空指针。
+static void deviceHandlerThread(int deviceIndex, int fd, int maxX, int maxY)
 {
-    int deviceIndex = config->deviceIndex;
-    int fd = config->deviceFd;
-
-    float hwMaxX = (float)(config->maxX > 0 ? config->maxX : 1);
-    float hwMaxY = (float)(config->maxY > 0 ? config->maxY : 1);
+    float hwMaxX = (float)(maxX > 0 ? maxX : 1);
+    float hwMaxY = (float)(maxY > 0 ? maxY : 1);
 
     input_event inputEvents[64];
     int currentSlot = 0;
@@ -119,12 +108,24 @@ static void deviceHandlerThread(DeviceConfig *config)
     {
         // 使用 poll 等待输入事件，超时设置为 50ms 以便及时响应退出指令
         int poll_ret = poll(&pfd, 1, 50);
-        if (poll_ret <= 0) continue; // 超时或被中断
+        if (poll_ret == 0) continue;
+        if (poll_ret < 0)
+        {
+            if (errno == EINTR) continue;
+            fprintf(stderr, "[Touch Error] poll failed for event device: %s\n", strerror(errno));
+            break;
+        }
+        if ((pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0)
+        {
+            fprintf(stderr, "[Touch Error] event device disconnected, revents=0x%x\n", pfd.revents);
+            break;
+        }
 
         auto readSize = read(fd, inputEvents, sizeof(inputEvents));
         if (readSize <= 0)
         {
             if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
+            fprintf(stderr, "[Touch Error] read failed for event device: %s\n", strerror(errno));
             break; // 设备断开
         }
 
@@ -286,6 +287,8 @@ bool Touch_Init()
     {
         int fd, eventNum, maxX, maxY;
         bool isDirect, isPointer;
+        char path[256];
+        char name[128];
     };
     std::vector<DeviceInfo> found_devices;
 
@@ -304,6 +307,10 @@ bool Touch_Init()
                 info.fd = fd;
                 info.isDirect = false;
                 info.isPointer = false;
+                snprintf(info.path, sizeof(info.path), "%s", device_path);
+                memset(info.name, 0, sizeof(info.name));
+                if (ioctl(fd, EVIOCGNAME(sizeof(info.name)), info.name) < 0)
+                    snprintf(info.name, sizeof(info.name), "unknown");
                 sscanf(ptr->d_name, "event%d", &info.eventNum);
 
                 input_absinfo absX, absY;
@@ -351,6 +358,8 @@ bool Touch_Init()
     for (size_t i = 1; i < found_devices.size(); ++i) close(found_devices[i].fd);
     found_devices.resize(1);
 
+    devices.clear();
+    devices.reserve(found_devices.size());
     Touch_initialized.store(true, std::memory_order_release);
 
     for (const auto &dev_info : found_devices)
@@ -368,7 +377,23 @@ bool Touch_Init()
         config_ref.maxX = dev_info.maxX;
         config_ref.maxY = dev_info.maxY;
 
-        config_ref.task = TouchThreadPool().submit_task([config = &config_ref] { deviceHandlerThread(config); });
+        fprintf(stderr,
+            "[Touch] selected %s name=%s direct=%d pointer=%d range=%dx%d\n",
+            dev_info.path,
+            dev_info.name,
+            dev_info.isDirect ? 1 : 0,
+            dev_info.isPointer ? 1 : 0,
+            dev_info.maxX,
+            dev_info.maxY);
+
+        // 必须在 Touch_Init() 中创建线程。很多调用方会在 main() 内先 fork()
+        // 守护化；若在线程池全局构造阶段提前创建线程，fork 后子进程只保留
+        // 调用线程，继承的线程池将永远没有 worker 来消费触摸任务。
+        config_ref.task = std::thread(deviceHandlerThread,
+                          config_ref.deviceIndex,
+                          config_ref.deviceFd,
+                          config_ref.maxX,
+                          config_ref.maxY);
     }
     return true;
 }
@@ -413,7 +438,7 @@ void Touch_Shutdown()
     Touch_initialized.store(false, std::memory_order_release);
 
     for (size_t i = 0; i < devices.size(); ++i)
-        if (devices[i].task.valid()) devices[i].task.wait();
+        if (devices[i].task.joinable()) devices[i].task.join();
     devices.clear();
 
     std::lock_guard<std::mutex> lock(touch_mutex);
