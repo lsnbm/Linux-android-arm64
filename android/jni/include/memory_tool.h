@@ -145,7 +145,7 @@ namespace Types
     enum class ViewFormat : int
     {
         Hex = 0,
-        Hex64,
+        Hexadecimal,
         I8,
         I16,
         I32,
@@ -167,7 +167,7 @@ namespace Types
         case ViewFormat::I32:
             return sizeof(int32_t);
         case ViewFormat::I64:
-        case ViewFormat::Hex64:
+        case ViewFormat::Hexadecimal:
             return sizeof(int64_t);
         case ViewFormat::Float:
             return sizeof(float);
@@ -186,7 +186,7 @@ namespace Types
 
         inline constexpr std::array<const char *, static_cast<size_t>(FuzzyMode::Count)> FUZZY = {"未知", "等于", "大于", "小于", "增大", "减小", "已改变", "未改变", "范围", "指针", "字符串"};
 
-        inline constexpr std::array<const char *, static_cast<size_t>(ViewFormat::Count)> VIEW_FORMAT = {"Hex", "Hex64", "I8", "I16", "I32", "I64", "Float", "Double", "Disasm"};
+        inline constexpr std::array<const char *, static_cast<size_t>(ViewFormat::Count)> VIEW_FORMAT = {"Hex", "Hexadecimal", "I8", "I16", "I32", "I64", "Float", "Double", "Disasm"};
     } // namespace Labels
 } // namespace Types
 
@@ -2367,7 +2367,7 @@ class MemViewer
 {
 private:
     uintptr_t base_ = 0;
-    Types::ViewFormat format_ = Types::ViewFormat::Hex;
+    Types::ViewFormat format_ = Types::ViewFormat::Hexadecimal;
     std::vector<uint8_t> buffer_;
     bool readSuccess_ = false;
     std::vector<Disasm::DisasmLine> disasmCache_;

@@ -24,7 +24,7 @@ LAN_DISCOVERY_MAX_WORKERS = 24
 LAN_DISCOVERY_PING_TIMEOUT_MS = 150
 MAX_HTTP_RESPONSE_BYTES = 16 * 1024 * 1024
 AUTO_HOST_TOKENS = {"", "auto", "*"}
-VIEWER_FORMAT_TOKENS = {"hex", "hex64", "i8", "i16", "i32", "i64", "f32", "f64", "disasm"}
+VIEWER_FORMAT_TOKENS = {"hexadecimal", "hex", "i8", "i16", "i32", "i64", "f32", "f64", "disasm"}
 
 
 class BridgeError(RuntimeError):
@@ -101,7 +101,7 @@ def format_address(value: int | str) -> str:
 def normalize_view_format(view_format: str) -> str:
     token = str(view_format).strip().lower()
     if token not in VIEWER_FORMAT_TOKENS:
-        raise ValueError("view_format must be one of: hex, hex64, i8, i16, i32, i64, f32, f64, disasm")
+        raise ValueError("view_format must be one of: hexadecimal, hex, i8, i16, i32, i64, f32, f64, disasm")
     return token
 
 
