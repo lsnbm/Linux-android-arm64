@@ -349,7 +349,7 @@ def android_pointer_export() -> dict[str, Any]:
 
 
 @mcp.tool()
-def android_memory_view_open(address: int | str, view_format: str = "hex") -> dict[str, Any]:
+def android_memory_view_open(address: int | str, view_format: str = "hexadecimal") -> dict[str, Any]:
     """Open an address and return its freshly read 100-byte snapshot."""
     return _call_bridge_operation(
         "viewer.open",

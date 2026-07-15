@@ -395,7 +395,7 @@ namespace
     {
         const std::string t = toLowerAscii(token);
         if (t == "hex") return Types::ViewFormat::Hex;
-        if (t == "hex64") return Types::ViewFormat::Hex64;
+        if (t == "hexadecimal") return Types::ViewFormat::Hexadecimal;
         if (t == "i8" || t == "int8") return Types::ViewFormat::I8;
         if (t == "i16" || t == "int16") return Types::ViewFormat::I16;
         if (t == "i32" || t == "int32") return Types::ViewFormat::I32;
@@ -459,8 +459,8 @@ namespace
         {
         case Types::ViewFormat::Hex:
             return "hex";
-        case Types::ViewFormat::Hex64:
-            return "hex64";
+        case Types::ViewFormat::Hexadecimal:
+            return "hexadecimal";
         case Types::ViewFormat::I8:
             return "i8";
         case Types::ViewFormat::I16:
@@ -476,7 +476,7 @@ namespace
         case Types::ViewFormat::Disasm:
             return "disasm";
         default:
-            return "hex";
+            return "hexadecimal";
         }
     }
 
@@ -1321,7 +1321,7 @@ namespace
             if (!viewFormat.empty())
             {
                 format = parseViewFormatToken(viewFormat);
-                if (!format.has_value()) return fail("view_format 无效，支持: hex/hex64/i8/i16/i32/i64/f32/f64/disasm");
+                if (!format.has_value()) return fail("view_format 无效，支持: hexadecimal/hex/i8/i16/i32/i64/f32/f64/disasm");
             }
             MemoryTool::Viewer().open(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), format);
             if (MemoryTool::Viewer().format() == Types::ViewFormat::Disasm) MemoryTool::Viewer().waitDisasm();
@@ -1342,7 +1342,7 @@ namespace
             const auto viewFormat = requiredString("view_format", "view_format");
             if (std::holds_alternative<json>(viewFormat)) return std::get<json>(viewFormat);
             const auto format = parseViewFormatToken(std::get<std::string>(viewFormat));
-            if (!format.has_value()) return fail("view_format 无效，支持: hex/hex64/i8/i16/i32/i64/f32/f64/disasm");
+            if (!format.has_value()) return fail("view_format 无效，支持: hexadecimal/hex/i8/i16/i32/i64/f32/f64/disasm");
             MemoryTool::Viewer().setFormat(*format);
             if (MemoryTool::Viewer().format() == Types::ViewFormat::Disasm) MemoryTool::Viewer().waitDisasm();
             return okData(buildViewerSnapshotJson(MemoryTool::Viewer()));

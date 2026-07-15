@@ -1,4 +1,5 @@
 ﻿#!/usr/bin/env python3
+import ctypes
 import json
 from pathlib import Path
 import re
@@ -21,9 +22,10 @@ from http_bridge import (
 )
 
 from PySide6.QtCore import QPoint, Qt, QTimer, Signal
-from PySide6.QtGui import QMouseEvent, QTextCursor, QWheelEvent
+from PySide6.QtGui import QFontDatabase, QIcon, QMouseEvent, QTextCursor, QWheelEvent
 from PySide6.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QComboBox,
     QFrame,
     QHBoxLayout,
@@ -32,6 +34,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QRadioButton,
     QSizePolicy,
     QSplitter,
     QTabWidget,
@@ -45,6 +48,24 @@ from PySide6.QtWidgets import (
 
 BROWSER_WINDOW_BYTES = 100
 BROWSER_DISASM_CACHE_LINES = BROWSER_WINDOW_BYTES // 4
+APPLICATION_NAME = "LuckyStar"
+APPLICATION_ID = "LuckyStar.AndroidDebugTool"
+
+
+def _resource_path(name: str) -> Path:
+    bundle_dir = Path(getattr(sys, "_MEIPASS", CURRENT_DIR))
+    return bundle_dir / name
+
+
+def _set_windows_app_id() -> None:
+    if sys.platform != "win32":
+        return
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APPLICATION_ID)
+    except (AttributeError, OSError):
+        pass
+
+
 VALUE_TYPE_OPTIONS = (
     ("I8", "I8"),
     ("I16", "I16"),
@@ -199,7 +220,8 @@ class HttpBridgeWindow(QWidget):
         self.live_refresh_timer = QTimer(self)
         self.live_refresh_timer.setInterval(1000)
         self.live_refresh_timer.timeout.connect(self.on_live_refresh_tick)
-        self.setWindowTitle("Native HTTP Bridge 控制台")
+        self.setWindowTitle(APPLICATION_NAME)
+        self.setWindowIcon(QIcon(str(_resource_path("icon.png"))))
         self.resize(1140, 760)
         self.setMinimumSize(980, 680)
         self.scan_lan_finished.connect(self._on_scan_lan_finished)
@@ -236,6 +258,14 @@ class HttpBridgeWindow(QWidget):
             layout.addWidget(title)
 
         return card, layout
+
+    @staticmethod
+    def _configure_data_view(editor: QTextEdit) -> None:
+        font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+        font.setPointSize(10)
+        editor.setFont(font)
+        editor.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+        editor.setTabStopDistance(editor.fontMetrics().horizontalAdvance(" ") * 4)
 
     def _update_connection_badge(self, connected: bool) -> None:
         if not hasattr(self, "connection_badge"):
@@ -274,22 +304,7 @@ class HttpBridgeWindow(QWidget):
         status_prefix = QLabel("状态")
         status_prefix.setObjectName("metricTitle")
         status_row.addWidget(status_prefix)
-        status_row.addWidget(self.status_label)
-
-        pid_input_prefix = QLabel("PID / 包名")
-        pid_input_prefix.setObjectName("metricTitle")
-        status_row.addWidget(pid_input_prefix)
-
-        self.pid_input = QLineEdit()
-        self.pid_input.setPlaceholderText("例如 12345 或 me.hd.ggtutorial")
-        self.pid_input.setMinimumWidth(260)
-        self.pid_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.pid_input.returnPressed.connect(self.on_sync_pid)
-        status_row.addWidget(self.pid_input, 1)
-
-        self.sync_pid_button = QPushButton("同步 PID")
-        self.sync_pid_button.clicked.connect(self.on_sync_pid)
-        status_row.addWidget(self.sync_pid_button)
+        status_row.addWidget(self.status_label, 1)
 
         connection_row = QHBoxLayout()
         connection_row.setContentsMargins(0, 0, 0, 0)
@@ -322,6 +337,22 @@ class HttpBridgeWindow(QWidget):
         self.test_button = QPushButton("测试通信")
         self.test_button.clicked.connect(self.on_test_communication)
         connection_row.addWidget(self.test_button)
+
+        pid_input_prefix = QLabel("PID / 包名")
+        pid_input_prefix.setObjectName("metricTitle")
+        connection_row.addWidget(pid_input_prefix)
+
+        self.pid_input = QLineEdit()
+        self.pid_input.setPlaceholderText("例如 12345 或 me.hd.ggtutorial")
+        self.pid_input.setMinimumWidth(260)
+        self.pid_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.pid_input.returnPressed.connect(self.on_sync_pid)
+        connection_row.addWidget(self.pid_input, 1)
+
+        self.sync_pid_button = QPushButton("同步 PID")
+        self.sync_pid_button.clicked.connect(self.on_sync_pid)
+        connection_row.addWidget(self.sync_pid_button)
+
         hero_layout.addLayout(connection_row)
         hero_layout.addLayout(status_row)
 
@@ -350,7 +381,6 @@ class HttpBridgeWindow(QWidget):
         self.signature_page = QWidget()
         self.save_page = QWidget()
         self.log_page = QWidget()
-        self.settings_page = QWidget()
 
         self.tabs.addTab(self.memory_page, "内存信息页")
         self.tabs.addTab(self.search_page, "扫描页")
@@ -362,7 +392,6 @@ class HttpBridgeWindow(QWidget):
         self.tabs.addTab(self.environment_page, "环境参数页")
         self.tabs.addTab(self.signature_page, "特征码页")
         self.tabs.addTab(self.log_page, "日志页")
-        self.tabs.addTab(self.settings_page, "设置页")
         self.tabs.currentChanged.connect(self.on_tab_changed)
 
         self._build_memory_page()
@@ -376,7 +405,6 @@ class HttpBridgeWindow(QWidget):
         self._build_save_page()
         self._build_log_page()
 
-        self._build_settings_page()
         self._log("客户端已启动。")
         self._set_connection_ui(False)
 
@@ -439,6 +467,7 @@ class HttpBridgeWindow(QWidget):
 
         self.memory_view = QTextEdit()
         self.memory_view.setReadOnly(True)
+        self._configure_data_view(self.memory_view)
         self.memory_view.setPlaceholderText("点击“刷新内存信息”后显示可读的 memory_info 结构数据。")
         card_layout.addWidget(self.memory_view, 1)
 
@@ -472,12 +501,11 @@ class HttpBridgeWindow(QWidget):
         splitter = QSplitter(Qt.Horizontal)
         layout.addWidget(splitter, 1)
 
-        left_panel, left_layout = self._create_section_card("扫描结果", parent=self.search_page)
+        left_panel, left_layout = self._create_section_card(parent=self.search_page)
         splitter.addWidget(left_panel)
 
         self.scan_view = QTextEdit()
         self.scan_view.setReadOnly(True)
-        self.scan_view.setPlaceholderText("这里显示 MemScanner 扫描结果。")
         self.scan_view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.scan_view.customContextMenuRequested.connect(self.on_scan_view_context_menu)
         left_layout.addWidget(self.scan_view, 1)
@@ -704,8 +732,8 @@ class HttpBridgeWindow(QWidget):
 
         row1.addWidget(QLabel("显示"))
         self.browser_view_combo = QComboBox()
+        self.browser_view_combo.addItem("Hexadecimal", "hexadecimal")
         self.browser_view_combo.addItem("Hex", "hex")
-        self.browser_view_combo.addItem("Hex64", "hex64")
         self.browser_view_combo.addItem("I8", "i8")
         self.browser_view_combo.addItem("I16", "i16")
         self.browser_view_combo.addItem("I32", "i32")
@@ -723,12 +751,12 @@ class HttpBridgeWindow(QWidget):
         row1.addStretch(1)
         toolbar_layout.addLayout(row1)
 
-        viewer_card, viewer_layout = self._create_section_card("浏览结果", parent=self.browser_page)
+        viewer_card, viewer_layout = self._create_section_card(parent=self.browser_page)
         layout.addWidget(viewer_card, 1)
 
         self.browser_view = BrowserTextEdit()
         self.browser_view.setReadOnly(True)
-        self.browser_view.setPlaceholderText("内存浏览结果将显示在这里。")
+        self._configure_data_view(self.browser_view)
         self.browser_view.wheel_navigate_handler = self.on_browser_wheel_navigate
         self.browser_view_combo.currentIndexChanged.connect(self.on_browser_format_changed)
         viewer_layout.addWidget(self.browser_view, 1)
@@ -759,37 +787,47 @@ class HttpBridgeWindow(QWidget):
         row1.addWidget(self.pointer_max_offset_input)
         config_layout.addLayout(row1)
 
-        row2 = QHBoxLayout()
-        row2.setSpacing(8)
-        row2.addWidget(QLabel("基址模式"))
-        self.pointer_mode_combo = QComboBox()
-        self.pointer_mode_combo.addItem("Module", "module")
-        self.pointer_mode_combo.addItem("Manual", "manual")
-        self.pointer_mode_combo.addItem("Array", "array")
-        self.pointer_mode_combo.setMaximumWidth(120)
-        row2.addWidget(self.pointer_mode_combo)
+        self.pointer_mode_group = QButtonGroup(self)
 
-        row2.addWidget(QLabel("模块过滤"))
+        module_row = QHBoxLayout()
+        module_row.setSpacing(8)
+        self.pointer_module_mode_button = QRadioButton("Module")
+        self.pointer_module_mode_button.setChecked(True)
+        self.pointer_module_mode_button.toggled.connect(self._update_pointer_mode_inputs)
+        self.pointer_mode_group.addButton(self.pointer_module_mode_button)
+        module_row.addWidget(self.pointer_module_mode_button)
+        module_row.addWidget(QLabel("模块过滤"))
         self.pointer_filter_input = QLineEdit()
         self.pointer_filter_input.setPlaceholderText("可选，例如 libil2cpp.so")
-        row2.addWidget(self.pointer_filter_input, 1)
-        config_layout.addLayout(row2)
+        module_row.addWidget(self.pointer_filter_input, 1)
+        config_layout.addLayout(module_row)
 
-        row3 = QHBoxLayout()
-        row3.setSpacing(8)
-        row3.addWidget(QLabel("手动基址"))
+        manual_row = QHBoxLayout()
+        manual_row.setSpacing(8)
+        self.pointer_manual_mode_button = QRadioButton("Manual")
+        self.pointer_manual_mode_button.toggled.connect(self._update_pointer_mode_inputs)
+        self.pointer_mode_group.addButton(self.pointer_manual_mode_button)
+        manual_row.addWidget(self.pointer_manual_mode_button)
+        manual_row.addWidget(QLabel("手动基址"))
         self.pointer_manual_base_input = QLineEdit("0x0")
-        self.pointer_manual_base_input.setMaximumWidth(160)
-        row3.addWidget(self.pointer_manual_base_input)
-        row3.addWidget(QLabel("数组基址"))
+        manual_row.addWidget(self.pointer_manual_base_input, 1)
+        config_layout.addLayout(manual_row)
+
+        array_row = QHBoxLayout()
+        array_row.setSpacing(8)
+        self.pointer_array_mode_button = QRadioButton("Array")
+        self.pointer_array_mode_button.toggled.connect(self._update_pointer_mode_inputs)
+        self.pointer_mode_group.addButton(self.pointer_array_mode_button)
+        array_row.addWidget(self.pointer_array_mode_button)
+        array_row.addWidget(QLabel("数组基址"))
         self.pointer_array_base_input = QLineEdit("0x0")
-        self.pointer_array_base_input.setMaximumWidth(160)
-        row3.addWidget(self.pointer_array_base_input)
-        row3.addWidget(QLabel("数组数量"))
+        array_row.addWidget(self.pointer_array_base_input, 1)
+        array_row.addWidget(QLabel("数组数量"))
         self.pointer_array_count_input = QLineEdit("128")
         self.pointer_array_count_input.setMaximumWidth(100)
-        row3.addWidget(self.pointer_array_count_input)
-        config_layout.addLayout(row3)
+        array_row.addWidget(self.pointer_array_count_input)
+        config_layout.addLayout(array_row)
+        self._update_pointer_mode_inputs()
 
         row4 = QHBoxLayout()
         row4.setSpacing(8)
@@ -811,7 +849,7 @@ class HttpBridgeWindow(QWidget):
         row4.addStretch(1)
         config_layout.addLayout(row4)
 
-        result_card, result_layout = self._create_section_card("扫描输出", parent=self.pointer_page)
+        result_card, result_layout = self._create_section_card(parent=self.pointer_page)
         layout.addWidget(result_card, 1)
 
         self.pointer_status_label = QLabel("扫描状态: 未开始")
@@ -819,7 +857,6 @@ class HttpBridgeWindow(QWidget):
 
         self.pointer_view = QTextEdit()
         self.pointer_view.setReadOnly(True)
-        self.pointer_view.setPlaceholderText("这里显示指针扫描指令与状态。")
         result_layout.addWidget(self.pointer_view, 1)
 
     def _build_breakpoint_page(self) -> None:
@@ -891,7 +928,7 @@ class HttpBridgeWindow(QWidget):
         config_layout.addLayout(action_row)
         self._apply_hwbp_active_state()
 
-        result_card, result_layout = self._create_section_card("断点记录", parent=self.breakpoint_page)
+        result_card, result_layout = self._create_section_card(parent=self.breakpoint_page)
         layout.addWidget(result_card, 1)
 
         self.hwbp_tree = QTreeWidget()
@@ -1035,7 +1072,7 @@ class HttpBridgeWindow(QWidget):
         pattern_row.addWidget(self.sig_scan_pattern_button)
         action_layout.addLayout(pattern_row)
 
-        result_card, result_layout = self._create_section_card("执行结果", parent=self.signature_page)
+        result_card, result_layout = self._create_section_card(parent=self.signature_page)
         layout.addWidget(result_card, 1)
 
         self.sig_status_label = QLabel("特征码状态: 未执行")
@@ -1043,7 +1080,6 @@ class HttpBridgeWindow(QWidget):
 
         self.sig_view = QTextEdit()
         self.sig_view.setReadOnly(True)
-        self.sig_view.setPlaceholderText("这里显示特征码扫描和过滤结果。")
         result_layout.addWidget(self.sig_view, 1)
 
     def _build_save_page(self) -> None:
@@ -1079,15 +1115,6 @@ class HttpBridgeWindow(QWidget):
         self.saved_view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.saved_view.customContextMenuRequested.connect(self.on_saved_view_context_menu)
         card_layout.addWidget(self.saved_view, 1)
-
-    def _build_settings_page(self) -> None:
-        layout = self._create_page_layout(self.settings_page)
-        card, card_layout = self._create_section_card(parent=self.settings_page)
-        layout.addWidget(card, 1)
-        tip = QLabel("设置页已留空。设备扫描和连接在顶部控制栏完成。")
-        tip.setWordWrap(True)
-        card_layout.addWidget(tip)
-        card_layout.addStretch(1)
 
     def _build_log_page(self) -> None:
         layout = self._create_page_layout(self.log_page)
@@ -1488,6 +1515,16 @@ class HttpBridgeWindow(QWidget):
         prot = HttpBridgeWindow._safe_int(prot_value, 0)
         return f"{'r' if (prot & 1) else '-'}{'w' if (prot & 2) else '-'}{'x' if (prot & 4) else '-'}({prot})"
 
+    @staticmethod
+    def _format_size(byte_count: int) -> str:
+        size = max(0, byte_count)
+        value = float(size)
+        for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+            if value < 1024.0 or unit == "TiB":
+                return f"{value:.0f} {unit}" if unit == "B" else f"{value:.2f} {unit}"
+            value /= 1024.0
+        return f"{size} B"
+
     def _module_matches_keyword(self, module: object, keyword: str) -> bool:
         if not isinstance(module, dict):
             return keyword in str(module).lower()
@@ -1570,23 +1607,16 @@ class HttpBridgeWindow(QWidget):
         modules = modules_raw if isinstance(modules_raw, list) else []
         regions = regions_raw if isinstance(regions_raw, list) else []
 
-        lines: list[str] = []
-        lines.append("【内存信息概要】")
-        lines.append(f"状态: {status}")
+        lines: list[str] = ["MEMORY INFO", "==========="]
+        lines.append(f"STATUS   {status}")
+        lines.append(f"MODULES  {len(modules)} / {source_module_count if filter_keyword else module_count}")
+        lines.append(f"REGIONS  {len(regions)} / {source_region_count if filter_keyword else region_count}")
         if filter_keyword:
-            lines.append(f"筛选关键字: {filter_keyword}")
-        lines.append(f"模块数量(头部): {module_count}")
-        lines.append(f"内存区域数量(头部): {region_count}")
-        lines.append(f"模块数量(实际): {len(modules)}")
-        lines.append(f"内存区域数量(实际): {len(regions)}")
-        if filter_keyword:
-            lines.append(f"模块总量(筛选前): {source_module_count}")
-            lines.append(f"区域总量(筛选前): {source_region_count}")
-        lines.append("")
+            lines.append(f"FILTER   {filter_keyword}")
 
-        lines.append("【模块信息】")
+        lines.extend(["", "MODULES", "-------"])
         if not modules:
-            lines.append("无模块数据。")
+            lines.append("(none)")
         else:
             for idx, module in enumerate(modules, start=1):
                 if isinstance(module, dict):
@@ -1599,36 +1629,44 @@ class HttpBridgeWindow(QWidget):
                     segs = []
                     seg_count = 0
 
-                lines.append(f"{idx}. 模块: {name if name else '(空名称)'}")
-                lines.append(f"   段数量: {seg_count}")
+                lines.append(f"[{idx:03d}] {name if name else '(unnamed)'}  segments={seg_count}")
                 if not segs:
-                    lines.append("   段列表: (空)")
+                    lines.append("      (no segments)")
                     continue
 
+                lines.append("      SEG  PERM    START               END                 SIZE")
+                lines.append("      ---  ------- ------------------- ------------------- ----------")
                 for seg_idx, seg in enumerate(segs, start=1):
                     if not isinstance(seg, dict):
-                        lines.append(f"   - 段{seg_idx}: 非法数据")
+                        lines.append(f"      {seg_idx:>3}  (invalid)")
                         continue
                     seg_index = self._safe_int(seg.get("index"), -999)
                     prot_text = self._format_prot(seg.get("prot"))
-                    start_text = self._format_addr(seg.get("start"))
-                    end_text = self._format_addr(seg.get("end"))
+                    start_value = self._safe_int(seg.get("start"), 0)
+                    end_value = self._safe_int(seg.get("end"), 0)
+                    start_text = self._format_addr(start_value)
+                    end_text = self._format_addr(end_value)
+                    size_text = self._format_size(end_value - start_value)
                     lines.append(
-                        f"   - 段{seg_idx}: index={seg_index} prot={prot_text} start={start_text} end={end_text}"
+                        f"      {seg_index:>3}  {prot_text:<7} {start_text}  {end_text}  {size_text:>10}"
                     )
-        lines.append("")
 
-        lines.append("【可扫描内存区域】")
+        lines.extend(["", "SCAN REGIONS", "------------"])
         if not regions:
-            lines.append("无区域数据。")
+            lines.append("(none)")
         else:
+            lines.append("  #   START               END                 SIZE")
+            lines.append("----  ------------------- ------------------- ----------")
             for idx, region in enumerate(regions, start=1):
                 if not isinstance(region, dict):
-                    lines.append(f"{idx}. 非法数据")
+                    lines.append(f"{idx:>4}  (invalid)")
                     continue
-                start_text = self._format_addr(region.get("start"))
-                end_text = self._format_addr(region.get("end"))
-                lines.append(f"{idx}. start={start_text} end={end_text}")
+                start_value = self._safe_int(region.get("start"), 0)
+                end_value = self._safe_int(region.get("end"), 0)
+                start_text = self._format_addr(start_value)
+                end_text = self._format_addr(end_value)
+                size_text = self._format_size(end_value - start_value)
+                lines.append(f"{idx:>4}  {start_text}  {end_text}  {size_text:>10}")
 
         return "\n".join(lines)
 
@@ -2935,13 +2973,13 @@ class HttpBridgeWindow(QWidget):
 
     def _current_browser_view_mode(self) -> str:
         mode_data = self.browser_view_combo.currentData()
-        return str(mode_data).strip() if mode_data is not None else "hex"
+        return str(mode_data).strip() if mode_data is not None else "hexadecimal"
 
     @staticmethod
     def _browser_scroll_unit(view_mode: str) -> int:
         mapping = {
+            "hexadecimal": 8,
             "hex": 16,
-            "hex64": 8,
             "i8": 1,
             "i16": 2,
             "i32": 4,
@@ -2959,25 +2997,31 @@ class HttpBridgeWindow(QWidget):
 
     @staticmethod
     def _render_hex_dump(addr: int, data: bytes) -> str:
-        lines: list[str] = []
+        lines = [
+            "OFFSET  ADDRESS             BYTES                                            ASCII",
+            "------  ------------------  -----------------------------------------------  ----------------",
+        ]
         for offset in range(0, len(data), 16):
             chunk = data[offset : offset + 16]
             hex_part = " ".join(f"{b:02X}" for b in chunk)
             ascii_part = "".join(chr(b) if 32 <= b <= 126 else "." for b in chunk)
-            lines.append(f"0x{addr + offset:016X}  {hex_part:<47}  {ascii_part}")
+            lines.append(f"+{offset:04X}   0x{addr + offset:016X}  {hex_part:<47}  {ascii_part:<16}")
         return "\n".join(lines)
 
     @staticmethod
-    def _render_hex64_dump(addr: int, data: bytes) -> str:
-        lines: list[str] = []
+    def _render_hexadecimal_dump(addr: int, data: bytes) -> str:
+        lines = [
+            "OFFSET  ADDRESS             VALUE (U64 LE)",
+            "------  ------------------  ------------------",
+        ]
         for offset in range(0, len(data), 8):
             chunk = data[offset : offset + 8]
             if len(chunk) == 8:
                 value = struct.unpack("<Q", chunk)[0]
-                lines.append(f"0x{addr + offset:016X}  0x{value:016X}")
+                lines.append(f"+{offset:04X}   0x{addr + offset:016X}  0x{value:016X}")
             else:
                 raw_hex = " ".join(f"{b:02X}" for b in chunk)
-                lines.append(f"0x{addr + offset:016X}  {raw_hex}")
+                lines.append(f"+{offset:04X}   0x{addr + offset:016X}  {raw_hex}")
         return "\n".join(lines)
 
     @staticmethod
@@ -3000,16 +3044,31 @@ class HttpBridgeWindow(QWidget):
             return HttpBridgeWindow._render_hex_dump(addr, data)
 
         unpack_fmt, unit = mapping[fmt]
-        lines: list[str] = []
+        type_label = {
+            "i8": "I8",
+            "i16": "I16",
+            "i32": "I32",
+            "i64": "I64",
+            "f32": "FLOAT",
+            "f64": "DOUBLE",
+        }.get(fmt.lower(), fmt.upper())
+        lines = [
+            f"OFFSET  ADDRESS             VALUE ({type_label})",
+            "------  ------------------  ------------------------",
+        ]
         for offset in range(0, len(data) - (len(data) % unit), unit):
             chunk = data[offset : offset + unit]
             try:
                 value = struct.unpack(unpack_fmt, chunk)[0]
             except struct.error:
                 continue
-            lines.append(f"0x{addr + offset:016X}  {value}")
-        if not lines:
-            lines.append("没有可显示的数据。")
+            if isinstance(value, float):
+                value_text = f"{value:.9g}" if unit == 4 else f"{value:.17g}"
+            else:
+                value_text = str(value)
+            lines.append(f"+{offset:04X}   0x{addr + offset:016X}  {value_text}")
+        if len(lines) == 2:
+            lines.append("(no data)")
         return "\n".join(lines)
 
     @staticmethod
@@ -3035,10 +3094,13 @@ class HttpBridgeWindow(QWidget):
 
     @staticmethod
     def _render_disasm_dump(snapshot: dict) -> str:
-        lines: list[str] = []
+        lines = [
+            "ADDRESS             BYTES                    INSTRUCTION",
+            "------------------  -----------------------  ----------------------------------------",
+        ]
         window_items, _visible_addr = HttpBridgeWindow._extract_disasm_window(snapshot)
         if not window_items:
-            return "没有可显示的反汇编结果。"
+            return "\n".join(lines + ["(no data)"])
 
         for item in window_items:
             address_hex = str(item.get("address_hex", "0x0"))
@@ -3046,11 +3108,11 @@ class HttpBridgeWindow(QWidget):
             mnemonic = str(item.get("mnemonic", "")).strip()
             op_str = str(item.get("op_str", "")).strip()
             if op_str:
-                lines.append(f"{address_hex:<18} {bytes_hex:<24} {mnemonic} {op_str}")
+                lines.append(f"{address_hex:<18}  {bytes_hex:<23}  {mnemonic} {op_str}")
             else:
-                lines.append(f"{address_hex:<18} {bytes_hex:<24} {mnemonic}")
+                lines.append(f"{address_hex:<18}  {bytes_hex:<23}  {mnemonic}")
 
-        return "\n".join(lines) if lines else "没有可显示的反汇编结果。"
+        return "\n".join(lines)
 
     def _open_viewer_snapshot(self, addr: int, mode_token: str) -> dict | None:
         snapshot = self._request_data_dict(
@@ -3084,8 +3146,8 @@ class HttpBridgeWindow(QWidget):
             return
         if view_mode == "hex":
             text = self._render_hex_dump(base_addr, data)
-        elif view_mode == "hex64":
-            text = self._render_hex64_dump(base_addr, data)
+        elif view_mode == "hexadecimal":
+            text = self._render_hexadecimal_dump(base_addr, data)
         else:
             text = self._render_typed_dump(base_addr, data, view_mode)
         self.browser_current_addr = base_addr
@@ -3162,8 +3224,7 @@ class HttpBridgeWindow(QWidget):
             QMessageBox.warning(self, "输入提示", "目标地址和最大偏移必须大于 0，深度范围为 1-16。")
             return None
 
-        mode_data = self.pointer_mode_combo.currentData()
-        mode = str(mode_data).strip() if mode_data is not None else "module"
+        mode = self._current_pointer_mode()
         params: dict[str, str] = {
             "mode": mode,
             "target": f"0x{target:X}",
@@ -3200,6 +3261,20 @@ class HttpBridgeWindow(QWidget):
         if filter_text:
             params["module_filter"] = filter_text
         return "pointer.scan", params
+
+    def _current_pointer_mode(self) -> str:
+        if self.pointer_manual_mode_button.isChecked():
+            return "manual"
+        if self.pointer_array_mode_button.isChecked():
+            return "array"
+        return "module"
+
+    def _update_pointer_mode_inputs(self) -> None:
+        mode = self._current_pointer_mode()
+        self.pointer_filter_input.setEnabled(mode == "module")
+        self.pointer_manual_base_input.setEnabled(mode == "manual")
+        self.pointer_array_base_input.setEnabled(mode == "array")
+        self.pointer_array_count_input.setEnabled(mode == "array")
 
     def on_pointer_scan(self) -> None:
         request = self._build_pointer_scan_request()
@@ -3844,7 +3919,12 @@ class HttpBridgeWindow(QWidget):
 
 
 def main() -> int:
+    _set_windows_app_id()
     app = QApplication(sys.argv)
+    app.setApplicationName(APPLICATION_NAME)
+    app.setApplicationDisplayName(APPLICATION_NAME)
+    app.setOrganizationName(APPLICATION_NAME)
+    app.setWindowIcon(QIcon(str(_resource_path("icon.png"))))
     window = HttpBridgeWindow()
     window.show()
     return app.exec()

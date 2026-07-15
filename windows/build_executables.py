@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -10,7 +11,9 @@ from pathlib import Path
 SCRIPT_PATH = Path(__file__).resolve()
 SCRIPT_DIR = SCRIPT_PATH.parent
 DEFAULT_OUTPUT_DIR = SCRIPT_DIR
+DEFAULT_ICON_PATH = SCRIPT_DIR / "icon.png"
 DEFAULT_EXCLUDED_FILES = {"http_bridge.py"}
+EXECUTABLE_VERSION = (1, 0, 0, 0)
 
 GUI_MARKERS = (
     "import PySide6",
@@ -56,6 +59,41 @@ def _is_gui_script(script_text: str) -> bool:
 
 def _needs_mcp_bundle(script_text: str) -> bool:
     return any(marker in script_text for marker in MCP_MARKERS)
+
+
+def _write_version_file(target_name: str, spec_dir: Path) -> Path:
+        version_text = ".".join(str(part) for part in EXECUTABLE_VERSION)
+        version_file = spec_dir / f"{target_name}.version.txt"
+        version_file.write_text(
+                f"""VSVersionInfo(
+    ffi=FixedFileInfo(
+        filevers={EXECUTABLE_VERSION},
+        prodvers={EXECUTABLE_VERSION},
+        mask=0x3f,
+        flags=0x0,
+        OS=0x40004,
+        fileType=0x1,
+        subtype=0x0,
+        date=(0, 0)
+    ),
+    kids=[
+        StringFileInfo([
+            StringTable('040904B0', [
+                StringStruct('FileDescription', {target_name!r}),
+                StringStruct('FileVersion', {version_text!r}),
+                StringStruct('InternalName', {target_name!r}),
+                StringStruct('OriginalFilename', {f'{target_name}.exe'!r}),
+                StringStruct('ProductName', {target_name!r}),
+                StringStruct('ProductVersion', {version_text!r})
+            ])
+        ]),
+        VarFileInfo([VarStruct('Translation', [1033, 1200])])
+    ]
+)
+""",
+                encoding="utf-8",
+        )
+        return version_file
 
 
 def _discover_local_python_files() -> list[Path]:
@@ -134,12 +172,17 @@ def _build_script(
     script_text = _read_script_text(target)
     target_name = target.stem
     target_work_dir = work_root / target_name
+    version_file = _write_version_file(target_name, spec_dir)
 
     cmd = [
         "--noconfirm",
         "--onefile",
         "--name",
         target_name,
+        "--icon",
+        str(DEFAULT_ICON_PATH),
+        "--version-file",
+        str(version_file),
         "--distpath",
         str(dist_dir),
         "--workpath",
@@ -153,6 +196,7 @@ def _build_script(
     ]
 
     if _is_gui_script(script_text):
+        cmd.extend(["--add-data", f"{DEFAULT_ICON_PATH}{os.pathsep}."])
         cmd.append("--windowed")
 
     if _needs_mcp_bundle(script_text):
@@ -245,6 +289,9 @@ def main(args: argparse.Namespace) -> int:
 
         if args.list_only:
             return 0
+
+        if not DEFAULT_ICON_PATH.is_file():
+            raise SystemExit(f"Executable icon not found: {DEFAULT_ICON_PATH}")
 
         _ensure_pyinstaller()
 

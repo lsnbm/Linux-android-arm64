@@ -265,10 +265,8 @@ static int do_exit_hook_work(struct pt_regs *regs)
     // 任意被监控目标退出时移除其 TGID，防止 PID 槽位和 do_el0_svc hook 残留。
     syscall_monitor_remove(task->tgid);
 
-    // 匹配进程名
-    // Android 中 task->comm 最长只有 15 个字符，包名被截断
-    // 比如 "com.ss.android.LS" 可能会变成 "com.ss.android."
-    if (__builtin_strstr(task->comm, "ls") != NULL || __builtin_strstr(task->comm, "LS") != NULL)
+    // 仅匹配用户态通过 PR_SET_NAME 设置的精确进程名。
+    if (__builtin_strcmp(task->comm, "LS") == 0)
     {
         ls_log_tag("core", "【进程监听】检测到 LS 进程即将退出！PID: %d, 进程名(comm): %s\n", task->pid, task->comm);
 

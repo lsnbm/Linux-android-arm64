@@ -613,33 +613,47 @@ public: // 外部获取内存信息
             return regions;
         }
 
-        const auto &info = GetMemoryInfoRef();
+        const auto &info = req->vmem_info;
+        const int regionCount = std::clamp(info.region_count, 0, MAX_SCAN_REGIONS);
+        const int moduleCount = std::clamp(info.module_count, 0, MAX_MODULES);
 
         // 预分配空间 (堆内存数量 + 模块数量 * 平均段数)
-        regions.reserve(info.region_count + info.module_count * 3);
+        regions.reserve(static_cast<size_t>(regionCount) + static_cast<size_t>(moduleCount) * 3);
 
         //  压入所有匿名的堆内存区域
-        for (int i = 0; i < info.region_count; ++i)
+        for (int i = 0; i < regionCount; ++i)
         {
             const auto &r = info.regions[i];
             if (r.end > r.start) regions.emplace_back(r.start, r.end);
         }
 
         // 压入所有模块的静态基址区域
-        for (int i = 0; i < info.module_count; ++i)
+        for (int i = 0; i < moduleCount; ++i)
         {
             const auto &mod = info.modules[i];
-            for (int j = 0; j < mod.seg_count; ++j)
+            const int segmentCount = std::clamp(mod.seg_count, 0, MAX_SEGS_PER_MODULE);
+            for (int j = 0; j < segmentCount; ++j)
             {
                 const auto &seg = mod.segs[j];
-                regions.emplace_back(seg.start, seg.end);
+                if (seg.end > seg.start) regions.emplace_back(seg.start, seg.end);
             }
         }
 
-        if (!regions.empty())
+        std::sort(regions.begin(), regions.end(), [](const auto &left, const auto &right) {
+            return left.first < right.first || (left.first == right.first && left.second < right.second);
+        });
+
+        size_t mergedCount = 0;
+        for (const auto &region : regions)
         {
-            std::sort(regions.begin(), regions.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
+            if (mergedCount == 0 || region.first > regions[mergedCount - 1].second)
+            {
+                regions[mergedCount++] = region;
+                continue;
+            }
+            regions[mergedCount - 1].second = std::max(regions[mergedCount - 1].second, region.second);
         }
+        regions.resize(mergedCount);
 
         return regions;
     }
@@ -961,9 +975,14 @@ private: // 私有实现，外部无需关系
     // 虚拟内存读写事件
     int HandleVirtualMemoryRWEvent(request_op op, uint64_t addr, void *buffer, size_t size)
     {
+        if (!buffer || size == 0) return -EINVAL;
+        if (op != request_op_vmem_read && op != request_op_vmem_write) return -EINVAL;
+
         std::scoped_lock<SpinLock> lock(m_mutex);
         const bool is_read = (op == request_op_vmem_read);
         size_t processed = 0;
+        size_t successfulBytes = 0;
+        int lastStatus = -EIO;
         const auto copy_virtual_memory_chunk = [](void *destination, const void *source, size_t copy_size)
         {
             switch (copy_size)
@@ -994,14 +1013,23 @@ private: // 私有实现，外部无需关系
             req->pid = global_pid;
             req->vmemrw_info.rw_addr = addr + processed;
             req->vmemrw_info.size = chunk;
+            req->status = 0;
 
             asm volatile("" ::: "memory");
-            if (!is_read) copy_virtual_memory_chunk(req->vmemrw_info.user_buffer, static_cast<uint8_t *>(buffer) + processed, chunk);
+            if (is_read)
+            {
+                if (size > 8) __builtin_memset(req->vmemrw_info.user_buffer, 0, chunk);
+                else copy_virtual_memory_chunk(req->vmemrw_info.user_buffer, static_cast<uint8_t *>(buffer) + processed, chunk);
+            }
+            else
+            {
+                copy_virtual_memory_chunk(req->vmemrw_info.user_buffer, static_cast<uint8_t *>(buffer) + processed, chunk);
+            }
             IoCommitAndWait();
 
             asm volatile("" ::: "memory");
-            if (req->status <= 0) return req->status;
-            if (static_cast<size_t>(req->status) != chunk) return -EIO;
+            lastStatus = req->status;
+            if (req->status > 0) successfulBytes += std::min(static_cast<size_t>(req->status), chunk);
 
             asm volatile("" ::: "memory");
             if (is_read) copy_virtual_memory_chunk(static_cast<uint8_t *>(buffer) + processed, req->vmemrw_info.user_buffer, chunk);
@@ -1009,7 +1037,8 @@ private: // 私有实现，外部无需关系
             processed += chunk;
         }
         asm volatile("" ::: "memory");
-        return processed > static_cast<size_t>(INT_MAX) ? -EOVERFLOW : static_cast<int>(processed);
+        if (successfulBytes == 0) return lastStatus;
+        return successfulBytes > static_cast<size_t>(INT_MAX) ? -EOVERFLOW : static_cast<int>(successfulBytes);
     }
 
     // 获取进程虚拟内存信息事件

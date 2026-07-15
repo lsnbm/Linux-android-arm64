@@ -292,7 +292,7 @@ class MainUI
         return end != buf && *end == '\0' ? static_cast<int>(value) : fallback;
     }
 
-    static std::string Hex64(std::uint64_t value)
+    static std::string Hexadecimal(std::uint64_t value)
     {
         return std::format("{:X}", value);
     }
@@ -482,7 +482,7 @@ class MainUI
 
     void copyAddress(uintptr_t addr)
     {
-        CopyText(Hex64(addr));
+        CopyText(Hexadecimal(addr));
     }
 
   public:
@@ -1011,7 +1011,7 @@ class MainUI
         memViewer_.pollDisasm();
 
         float w = ImGui::GetContentRegionAvail().x, bh = S(42);
-        float goW = S(55), ofsW = S(55), fmtW = S(85), refW = S(55);
+        float goW = S(55), ofsW = S(55), fmtW = S(110), refW = S(55);
         float inputW = w - goW - ofsW - fmtW - refW - S(24);
 
         // 工具栏：一行五按钮
@@ -1591,7 +1591,7 @@ class MainUI
         auto scalarLine = [&](const char *name, int regIndex, bool narrow32 = false)
         {
             const auto val = narrow32 ? HwbpRead<std::uint32_t>(show, regIndex) : HwbpRead<std::uint64_t>(show, regIndex);
-            const auto hex = Hex64(val);
+            const auto hex = Hexadecimal(val);
             UI::Text({0.7f, 0.85f, 1, 1}, "%s: ", name);
             ImGui::SameLine();
             UI::Text(Colors::ADDR_GREEN, "0x%llX", (unsigned long long)val);
@@ -1616,7 +1616,7 @@ class MainUI
             const auto value = HwbpRead<std::uint64_t>(show, regIndex);
             decimal ? UI::Text(Colors::LABEL, "%s: %llu", label, (unsigned long long)value) : UI::Text(Colors::LABEL, "%s: 0x%llX", label, (unsigned long long)value);
             ImGui::SameLine();
-            drawRegisterEditButton(button, r, regIndex, label, Hex64(value), {S(40), S(28)});
+            drawRegisterEditButton(button, r, regIndex, label, Hexadecimal(value), {S(40), S(28)});
         };
 
         editableLine("PSTATE", "改##pst", Driver::IDX_PSTATE);
@@ -1656,7 +1656,7 @@ class MainUI
                       {
                           const int regIndex = Driver::IDX_X0 + i;
                           const auto value = HwbpRead<std::uint64_t>(show, regIndex);
-                          const auto hex = Hex64(value);
+                          const auto hex = Hexadecimal(value);
                           ImGui::TableSetColumnIndex(0);
                           UI::Text({0.7f, 0.85f, 1, 1}, "X%d", i);
                           ImGui::TableSetColumnIndex(1);
@@ -1861,7 +1861,7 @@ class MainUI
                 ImGui::TableSetColumnIndex(1);
                 switch (format)
                 {
-                case Types::ViewFormat::Hex64:
+                case Types::ViewFormat::Hexadecimal:
                     ptrVal = *(const uint64_t *)p;
                     UI::Text({0.6f, 1, 0.6f, 1}, "%lX", ptrVal);
                     break;
@@ -1892,7 +1892,7 @@ class MainUI
                 if (UI::Btn("存", {S(42), S(28)}, {0.2f, 0.4f, 0.25f, 1})) scanner_.add(addr);
                 ImGui::TableSetColumnIndex(3);
                 uintptr_t jump = MemUtils::Normalize(ptrVal);
-                bool canJump = (format == Types::ViewFormat::I32 || format == Types::ViewFormat::I64 || format == Types::ViewFormat::Hex64) && MemUtils::IsValidAddr(jump);
+                bool canJump = (format == Types::ViewFormat::I32 || format == Types::ViewFormat::I64 || format == Types::ViewFormat::Hexadecimal) && MemUtils::IsValidAddr(jump);
                 if (canJump)
                 {
                     if (UI::Btn("->", {S(42), S(28)}, Colors::BTN_PURPLE)) memViewer_.open(jump);
