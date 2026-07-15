@@ -47,8 +47,9 @@ enum emu_insn_result
 
   暂不支持：
   - 数据处理：RMIF、SETF8、SETF16、CFINV、AXFLAG、XAFLAG。
-  - 独占/有序访存：LDXR、STXR、LDAXR、STLXR、LDAR、STLR。
-  - 其它 LSE/有序访存：LDAPR、LDAPUR 等未列出的编码。
+    - 独占指令按普通访存模拟：LDXR、STXR、LDAXR、STLXR、LDXP、STXP、
+        LDAXP、STLXP；STXR/STXP 固定返回成功，不保留硬件独占语义。
+    - 有序/非特权访存：LDAR、STLR、LDAPR、LDAPUR、STLUR、LDTR、STTR。
   - 指针认证和 MTE：PACIA/AUTIA、LDRAA/LDRAB、IRG/GMI/SUBP 等。
   - SVE/SME 以及向量长度相关指令。
   - FP16、复杂 AdvSIMD 重排/结构化访存：TBL/TBX、ZIP/UZP/TRN、INS/DUP、
@@ -88,10 +89,12 @@ static __always_inline void addr_reg_write(struct pt_regs *regs, uint32_t n, uin
 }
 
 typedef int (*emu_read_mem_fn)(void *ctx, uint64_t addr, int bytes, __uint128_t *out);
+typedef int (*emu_write_mem_fn)(void *ctx, uint64_t addr, int bytes, __uint128_t value);
 
 struct emu_mem_access
 {
     emu_read_mem_fn read;
+    emu_write_mem_fn write;
     void *ctx;
 };
 
@@ -152,9 +155,38 @@ static __always_inline int emu_read_mem(const struct emu_mem_access *access, uin
     return 0;
 }
 
+/* 自定义写入器返回 -EOPNOTSUPP 表示该地址不归它处理，继续使用 __put_user。 */
+static __always_inline int emu_write_mem(const struct emu_mem_access *access, uint64_t addr, int bytes, __uint128_t value)
+{
+    int status;
+
+    if (access && access->write)
+    {
+        status = access->write(access->ctx, addr, bytes, value);
+        if (status != -EOPNOTSUPP) return status;
+    }
+
+    switch (bytes)
+    {
+    case 1:
+        return __put_user((u8)value, (u8 __user *)addr) ? -EFAULT : 0;
+    case 2:
+        return __put_user((u16)value, (u16 __user *)addr) ? -EFAULT : 0;
+    case 4:
+        return __put_user((u32)value, (u32 __user *)addr) ? -EFAULT : 0;
+    case 8:
+        return __put_user((u64)value, (u64 __user *)addr) ? -EFAULT : 0;
+    case 16:
+        if (__put_user((u64)value, (u64 __user *)addr)) return -EFAULT;
+        return __put_user((u64)(value >> 64), (u64 __user *)(addr + 8)) ? -EFAULT : 0;
+    default:
+        return -EFAULT;
+    }
+}
+
 static __always_inline bool emu_is_lse_atomic(uint32_t insn)
 {
-    if ((insn & 0x3F200C00) == 0x38200000)
+    if ((insn & 0x3F200C00) == 0x38200000 && ((insn >> 12) & 0xF) <= 8)
     {
         uint32_t op = (insn >> 12) & 0xF;
 
@@ -576,37 +608,9 @@ static __always_inline enum emu_insn_result emu_simulate_branch_insn(struct pt_r
     return EMU_INSN_SKIP;
 }
 
-#define EMU_LDST_MASK(B)  (~0ULL >> (64 - (B) * 8))
-#define EMU_LDST_SX(V, B) ((uint64_t)sign_extend64((uint64_t)(V), (B) * 8 - 1))
-#define EMU_LDST_ST(A, B, V)                                                           \
-    ({                                                                                 \
-        uint64_t __a = (A);                                                            \
-        int __b = (B), __ret;                                                          \
-        __uint128_t __v = (V);                                                         \
-        switch (__b)                                                                   \
-        {                                                                              \
-        case 1:                                                                        \
-            __ret = __put_user((u8)__v, (u8 __user *)__a);                             \
-            break;                                                                     \
-        case 2:                                                                        \
-            __ret = __put_user((u16)__v, (u16 __user *)__a);                           \
-            break;                                                                     \
-        case 4:                                                                        \
-            __ret = __put_user((u32)__v, (u32 __user *)__a);                           \
-            break;                                                                     \
-        case 8:                                                                        \
-            __ret = __put_user((u64)__v, (u64 __user *)__a);                           \
-            break;                                                                     \
-        case 16:                                                                       \
-            __ret = __put_user((u64)__v, (u64 __user *)__a);                           \
-            if (!__ret) __ret = __put_user((u64)(__v >> 64), (u64 __user *)(__a + 8)); \
-            break;                                                                     \
-        default:                                                                       \
-            __ret = -EFAULT;                                                           \
-            break;                                                                     \
-        }                                                                              \
-        __ret ? -EFAULT : 0;                                                           \
-    })
+#define EMU_LDST_MASK(B)     (~0ULL >> (64 - (B) * 8))
+#define EMU_LDST_SX(V, B)    ((uint64_t)sign_extend64((uint64_t)(V), (B) * 8 - 1))
+#define EMU_LDST_ST(A, B, V) emu_write_mem(mem_access, (A), (B), (V))
 
 static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct pt_regs *regs, uint32_t insn, uint64_t pc, const struct emu_mem_access *mem_access)
 {
@@ -749,6 +753,106 @@ static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct 
         return EMU_INSN_HANDLED;
     }
 
+    if ((insn & 0x3F000000) == 0x08000000)
+    {
+        bool ordered = (insn >> 23) & 1;
+        bool load = (insn >> 22) & 1;
+        bool pair = (insn >> 21) & 1;
+        bool acquire_release = (insn >> 15) & 1;
+        uint32_t rs = (insn >> 16) & 0x1F;
+        uint32_t rt2 = (insn >> 10) & 0x1F;
+        uint32_t rn = (insn >> 5) & 0x1F;
+        uint32_t rt = insn & 0x1F;
+        uint64_t addr = addr_reg_read(regs, rn);
+        int bytes = 1 << size;
+        int total = pair ? bytes * 2 : bytes;
+        __uint128_t val0;
+
+        if (ordered)
+        {
+            if (pair || !acquire_release || rs != 31 || rt2 != 31) return EMU_INSN_SKIP;
+        }
+        else
+        {
+            if (pair && size < 2) return EMU_INSN_SKIP;
+            if (!pair && rt2 != 31) return EMU_INSN_SKIP;
+            if (load && rs != 31) return EMU_INSN_SKIP;
+        }
+        if (addr & (total - 1)) return EMU_INSN_FAULT;
+
+        if (load)
+        {
+            if (emu_read_mem(mem_access, addr, bytes, &val0)) return EMU_INSN_FAULT;
+            reg_write(regs, rt, (u64)val0, size == 3);
+            if (pair)
+            {
+                __uint128_t val1;
+
+                if (emu_read_mem(mem_access, addr + bytes, bytes, &val1)) return EMU_INSN_FAULT;
+                reg_write(regs, rt2, (u64)val1, size == 3);
+            }
+            if (ordered || acquire_release) smp_mb();
+        }
+        else
+        {
+            if (ordered || acquire_release) smp_mb();
+            if (emu_write_mem(mem_access, addr, bytes, reg_read(regs, rt))) return EMU_INSN_FAULT;
+            if (pair && emu_write_mem(mem_access, addr + bytes, bytes, reg_read(regs, rt2))) return EMU_INSN_FAULT;
+            if (!ordered) reg_write(regs, rs, 0, false);
+        }
+
+        regs->pc = pc + 4;
+        return EMU_INSN_HANDLED;
+    }
+
+    if ((insn & 0x3F200C00) == 0x19000000)
+    {
+        uint32_t opc = (insn >> 22) & 0x3;
+        uint32_t rn = (insn >> 5) & 0x1F;
+        uint32_t rt = insn & 0x1F;
+        int bytes = 1 << size;
+        s64 imm9 = sign_extend64((s64)((insn >> 12) & 0x1FF), 8);
+        uint64_t addr = addr_reg_read(regs, rn) + imm9;
+
+        if (size == 3 && opc > 1) return EMU_INSN_SKIP;
+        if (size == 2 && opc == 3) return EMU_INSN_SKIP;
+
+        if (opc == 0)
+        {
+            smp_mb();
+            if (emu_write_mem(mem_access, addr, bytes, reg_read(regs, rt))) return EMU_INSN_FAULT;
+        }
+        else
+        {
+            __uint128_t val;
+            uint64_t raw;
+
+            if (emu_read_mem(mem_access, addr, bytes, &val)) return EMU_INSN_FAULT;
+            raw = (u64)val;
+            if (opc >= 2) raw = EMU_LDST_SX(raw, bytes);
+            reg_write(regs, rt, raw, size == 3 || opc == 2);
+            smp_mb();
+        }
+        regs->pc = pc + 4;
+        return EMU_INSN_HANDLED;
+    }
+
+    if ((insn & 0x3FFFFC00) == 0x38BFC000)
+    {
+        uint32_t rn = (insn >> 5) & 0x1F;
+        uint32_t rt = insn & 0x1F;
+        int bytes = 1 << size;
+        uint64_t addr = addr_reg_read(regs, rn);
+        __uint128_t val;
+
+        if (addr & (bytes - 1)) return EMU_INSN_FAULT;
+        if (emu_read_mem(mem_access, addr, bytes, &val)) return EMU_INSN_FAULT;
+        reg_write(regs, rt, (u64)val, size == 3);
+        smp_mb();
+        regs->pc = pc + 4;
+        return EMU_INSN_HANDLED;
+    }
+
     if (is_fp)
     {
         int i;
@@ -822,8 +926,8 @@ static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct 
         }
         off = sign_extend64((s64)((insn >> 15) & 0x7F), 6) * bytes;
         addr = (idx == 1) ? base : (base + off);
-        if ((idx & 1) && rn != 31 && (rn == rt || rn == rt2)) return EMU_INSN_SKIP;
-        if (load && rt == rt2) return EMU_INSN_SKIP;
+        if (!is_fp && (idx & 1) && rn != 31 && (rn == rt || rn == rt2)) return EMU_INSN_SKIP;
+        if (!is_fp && load && rt == rt2) return EMU_INSN_SKIP;
 
         if (load)
         {
@@ -912,8 +1016,12 @@ static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct 
                 ext = emu_extend_reg(ext, opt, shift);
                 addr = base + ext;
             }
+            else if (idx == 2)
+            {
+                addr = base + imm9;
+            }
             else return EMU_INSN_SKIP;
-            if (writeback && rn != 31 && rn == rt) return EMU_INSN_SKIP;
+            if (!is_fp && writeback && rn != 31 && rn == rt) return EMU_INSN_SKIP;
         }
 
         is_load = is_fp ? ((insn >> 22) & 1) : (opc != 0);
@@ -2777,7 +2885,7 @@ static __always_inline enum emu_insn_result emu_simulate_data_processing_insn(st
 #undef EMU_DP_ROR_HW
 #undef EMU_DP_MASK
 
-static __always_inline bool emulate_insn_with_mem(struct pt_regs *regs, const uint32_t *specified_insn, const struct emu_mem_access *mem_access)
+static __always_inline bool emulate_insn(struct pt_regs *regs, const uint32_t *specified_insn, const struct emu_mem_access *mem_access)
 {
     uint32_t insn;
     uint64_t pc = regs->pc;
@@ -2790,7 +2898,7 @@ static __always_inline bool emulate_insn_with_mem(struct pt_regs *regs, const ui
     {
         if (emu_read_mem(mem_access, pc, sizeof(insn), &fetched_insn))
         {
-            ls_log_tag("emulate_insn", "failed pc=0x%llx insn_read_failed\n", (unsigned long long)pc);
+            ls_log_always_tag("emulate_insn", "failed pc=0x%llx insn_read_failed\n", (unsigned long long)pc);
             return false;
         }
         insn = (uint32_t)fetched_insn;
@@ -2801,19 +2909,14 @@ static __always_inline bool emulate_insn_with_mem(struct pt_regs *regs, const ui
     if (((insn & EMU_SYSREG_INSN_MASK) == EMU_SYSREG_MRS_INSN) || ((insn & EMU_SYSREG_INSN_MASK) == EMU_SYSREG_MSR_INSN) || insn == EMU_HINT_NOP_INSN || ((insn & 0x1F000000) == 0x10000000)) result = emu_simulate_system_insn(regs, insn, pc);
     else if ((iclass & 0xE) == 0xA) result = emu_simulate_branch_insn(regs, insn, pc);
     else if (iclass == 0x7 || iclass == 0xF) result = emu_simulate_fp_simd_insn(regs, insn, pc);
-    else if (emu_is_lse_atomic(insn) || ((insn & 0x3A000000) == 0x28000000) || ((insn & 0x3A000000) == 0x38000000) || ((insn & 0x3B000000) == 0x18000000)) result = emu_simulate_load_store_insn(regs, insn, pc, mem_access);
+    else if (emu_is_lse_atomic(insn) || ((insn & 0x3F000000) == 0x08000000) || ((insn & 0x3F200C00) == 0x19000000) || ((insn & 0x3FFFFC00) == 0x38BFC000) || ((insn & 0x3A000000) == 0x28000000) || ((insn & 0x3A000000) == 0x38000000) || ((insn & 0x3B000000) == 0x18000000)) result = emu_simulate_load_store_insn(regs, insn, pc, mem_access);
     else result = emu_simulate_data_processing_insn(regs, insn);
 
     if (result == EMU_INSN_NOP) regs->pc = pc + 4;
     if (result == EMU_INSN_HANDLED || result == EMU_INSN_NOP) return true;
 
-    ls_log_tag("emulate_insn", "failed pc=0x%llx insn=0x%08x bytes=%02x %02x %02x %02x\n", (unsigned long long)pc, insn, insn & 0xff, (insn >> 8) & 0xff, (insn >> 16) & 0xff, (insn >> 24) & 0xff);
+    ls_log_always_tag("emulate_insn", "failed pc=0x%llx insn=0x%08x bytes=%02x %02x %02x %02x\n", (unsigned long long)pc, insn, insn & 0xff, (insn >> 8) & 0xff, (insn >> 16) & 0xff, (insn >> 24) & 0xff);
     return false;
-}
-
-static __always_inline bool emulate_insn(struct pt_regs *regs, const uint32_t *specified_insn)
-{
-    return emulate_insn_with_mem(regs, specified_insn, NULL);
 }
 
 #endif // EMULATE_INSN_H
