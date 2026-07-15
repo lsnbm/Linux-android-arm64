@@ -329,7 +329,7 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
 
                 point->on_hit((void *)regs, (void *)point);
                 // 模拟指令步过,失败走禁用进行步过
-                if (!emulate_insn(regs, NULL))
+                if (!emulate_insn(regs, NULL, NULL))
                 {
                     // 只清 enable 位，保留原有寄存器配置，继续走原异常处理链
                     write_wb_reg(AARCH64_DBG_REG_BCR, slot, ctrl & ~0x1);
@@ -417,7 +417,7 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
 
     // 模拟指令步过,失败走禁用进行步过
     {
-        if (!emulate_insn(regs, NULL))
+        if (!emulate_insn(regs, NULL, NULL))
         {
             // 只清 enable 位，保留原有寄存器配置，继续走原异常处理链
             write_wb_reg(AARCH64_DBG_REG_WCR, hit_slot, hit_ctrl & ~0x1);
