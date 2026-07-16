@@ -125,7 +125,7 @@ static int DispatchThreadFunction(void *data)
                     break;
                 }
                 asm volatile("" ::: "memory");
-                req->user = true; // 通知用户层完成rong'h
+                req->user = true; // 通知用户层完成
             }
             else
             {
