@@ -88,13 +88,10 @@ static __always_inline void addr_reg_write(struct pt_regs *regs, uint32_t n, uin
     else regs->regs[n] = val;
 }
 
-typedef int (*emu_read_mem_fn)(void *ctx, uint64_t addr, int bytes, __uint128_t *out);
-typedef int (*emu_write_mem_fn)(void *ctx, uint64_t addr, int bytes, __uint128_t value);
-
 struct emu_mem_access
 {
-    emu_read_mem_fn read;
-    emu_write_mem_fn write;
+    int (*read)(void *ctx, uint64_t addr, int bytes, __uint128_t *out);
+    int (*write)(void *ctx, uint64_t addr, int bytes, __uint128_t value);
     void *ctx;
 };
 

@@ -639,9 +639,7 @@ public: // 外部获取内存信息
             }
         }
 
-        std::sort(regions.begin(), regions.end(), [](const auto &left, const auto &right) {
-            return left.first < right.first || (left.first == right.first && left.second < right.second);
-        });
+        std::sort(regions.begin(), regions.end(), [](const auto &left, const auto &right) { return left.first < right.first || (left.first == right.first && left.second < right.second); });
 
         size_t mergedCount = 0;
         for (const auto &region : regions)
@@ -936,7 +934,13 @@ private: // 私有实现，外部无需关系
         printf("当前进程 PID: %d\n", getpid());
         printf("等待驱动握手...\n");
 
-        IoCommitAndWait();
+        asm volatile("" ::: "memory");
+        while (!req->user)
+        {
+            asm volatile("yield");
+        }
+        asm volatile("" ::: "memory");
+        req->user = false;
 
         printf("驱动已经连接\n");
     }
