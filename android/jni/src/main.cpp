@@ -184,7 +184,7 @@ class MainUI
   private:
     MemScanner &scanner_ = MemoryTool::Scanner();
     PointerManager &ptrManager_ = MemoryTool::Pointer();
-    LockManager &lockManager_ = MemoryTool::Locks();
+        SavedAddressManager &savedManager_ = MemoryTool::Saved();
     MemViewer &memViewer_ = MemoryTool::Viewer();
 
     struct ScanParams
@@ -194,6 +194,12 @@ class MainUI
         int page = 0;
         std::string lastStringPattern;
     } scanParams_;
+
+    struct SavedParams
+    {
+        Types::DataType dataType = Types::DataType::I32;
+        int page = 0;
+    } savedParams_;
 
     struct PtrParams
     {
@@ -256,8 +262,9 @@ class MainUI
 
     struct Buf
     {
-        char pid[32] = {}, value[64] = {}, addAddr[32] = {}, base[32] = {}, page[16] = "20";
-        char modify[64] = {}, memOffset[32] = {}, resultOffset[32] = {}, moduleSearch[64] = {}, envThread[16] = {};
+        char pid[32] = {}, value[64] = {}, savedAddr[32] = {}, base[32] = {}, page[16] = "20";
+        char modify[64] = {}, memOffset[32] = {}, savedOffset[32] = {}, moduleSearch[64] = {}, envThread[16] = {};
+        char savedNote[257] = {};
         char ptrTarget[32] = {}, arrayBase[32] = {}, arrayCount[16] = "100", filterModule[64] = {};
         char sigScanAddr[32] = {}, sigVerifyAddr[32] = {};
         char viewAddr[32] = {};
@@ -265,11 +272,11 @@ class MainUI
 
     struct State
     {
-        int tab = 0, resultScrollIdx = 0;
-        uintptr_t modifyAddr = 0;
-        bool showModify = false, floating = false, dragging = false, dragMoved = false;
+        int tab = 0, resultScrollIdx = 0, savedScrollIdx = 0;
+        uintptr_t modifyAddr = 0, noteAddr = 0;
+        bool showModify = false, showSavedNote = false, floating = false, dragging = false, dragMoved = false;
         ImVec2 floatPos = {50, 200}, dragOffset = {}, dragStartMouse = {};
-        bool showType = false, showMode = false, showDepth = false, showOffset = false, showScale = false, showFormat = false;
+        bool showType = false, showSavedType = false, showMode = false, showDepth = false, showOffset = false, showScale = false, showFormat = false;
         bool showBpType = false, showBpScope = false, showBpLen = false;
         int bpPopupPoint = -1;
     } state_;
@@ -406,6 +413,24 @@ class MainUI
         auto mode = scanParams_.fuzzyMode;
         auto pid = dr->GetGlobalPid();
         std::string valCopy(valueStr);
+        const auto lockedType = scanner_.dataType();
+        const bool stringBaseline = scanner_.isStringScan();
+        const bool hasBaseline = lockedType.has_value() || stringBaseline;
+
+        if (isFirst)
+        {
+            if (hasBaseline || mode == Types::FuzzyMode::Increased || mode == Types::FuzzyMode::Decreased || mode == Types::FuzzyMode::Changed || mode == Types::FuzzyMode::Unchanged) return;
+        }
+        else
+        {
+            if (!hasBaseline || mode == Types::FuzzyMode::Unknown) return;
+            if (stringBaseline && mode != Types::FuzzyMode::String) return;
+            if (lockedType)
+            {
+                if (mode == Types::FuzzyMode::String || (mode == Types::FuzzyMode::Pointer && *lockedType != Types::DataType::I64)) return;
+                type = *lockedType;
+            }
+        }
 
         if (mode == Types::FuzzyMode::Pointer)
         {
@@ -483,6 +508,42 @@ class MainUI
     void copyAddress(uintptr_t addr)
     {
         CopyText(Hexadecimal(addr));
+    }
+
+    static Types::DataType savedTypeForViewFormat(Types::ViewFormat format)
+    {
+        switch (format)
+        {
+        case Types::ViewFormat::I8:
+            return Types::DataType::I8;
+        case Types::ViewFormat::I16:
+            return Types::DataType::I16;
+        case Types::ViewFormat::I64:
+        case Types::ViewFormat::Hexadecimal:
+            return Types::DataType::I64;
+        case Types::ViewFormat::Float:
+            return Types::DataType::Float;
+        case Types::ViewFormat::Double:
+            return Types::DataType::Double;
+        case Types::ViewFormat::I32:
+        case Types::ViewFormat::Hex:
+        case Types::ViewFormat::Disasm:
+        default:
+            return Types::DataType::I32;
+        }
+    }
+
+    bool saveScanAddress(uintptr_t address)
+    {
+        if (scanner_.isStringScan())
+        {
+            const size_t textLength = std::clamp(scanParams_.lastStringPattern.size(), size_t(1), size_t(256));
+            return savedManager_.add(address, Types::DataType::I8, Types::SavedValueKind::Text, textLength);
+        }
+        const auto type = scanner_.dataType();
+        if (!type) return false;
+        const auto kind = scanner_.scanMode() == Types::FuzzyMode::Pointer ? Types::SavedValueKind::Pointer : Types::SavedValueKind::Numeric;
+        return savedManager_.add(address, *type, kind);
     }
 
   public:
@@ -639,7 +700,7 @@ class MainUI
     void drawContent(float w, float h)
     {
         using DrawFn = void (MainUI::*)();
-        DrawFn tabs[] = {&MainUI::drawScanTab, &MainUI::drawResultTab, &MainUI::drawViewerTab, &MainUI::drawModuleTab, &MainUI::drawPointerTab, &MainUI::drawSignatureTab, &MainUI::drawBreakpointTab, &MainUI::drawSyscallTab, &MainUI::drawEnvTab};
+        DrawFn tabs[] = {&MainUI::drawScanTab, &MainUI::drawSavedTab, &MainUI::drawViewerTab, &MainUI::drawModuleTab, &MainUI::drawPointerTab, &MainUI::drawSignatureTab, &MainUI::drawBreakpointTab, &MainUI::drawSyscallTab, &MainUI::drawEnvTab};
         UI::ColorChild("Content", {w, h}, Colors::BG_MID, [&] { (this->*tabs[state_.tab])(); });
     }
 
@@ -652,7 +713,7 @@ class MainUI
             {
                 constexpr int N = 9;
                 float bw = (w - S(36)) / N;
-                const char *labels[] = {"扫描", "结果", "浏览", "模块", "指针", "特征", "断点", "调用", "环境"};
+                const char *labels[] = {"扫描", "保存", "浏览", "模块", "指针", "特征", "断点", "调用", "环境"};
                 for (int i = 0; i < N; ++i)
                 {
                     if (i > 0) ImGui::SameLine();
@@ -765,15 +826,111 @@ class MainUI
     // ================================================================
     // 扫描页
     // ================================================================
+    void drawScanResults(float width)
+    {
+        if (scanner_.isScanning()) return;
+
+        const size_t total = scanner_.count();
+        if (!total) return;
+
+        const auto resultType = scanner_.dataType().value_or(scanParams_.dataType);
+        const bool pointerMode = scanner_.scanMode() == Types::FuzzyMode::Pointer;
+        const bool stringMode = scanner_.isStringScan();
+        const int perPage = Config::g_ItemsPerPage.load();
+        const int maxPage = static_cast<int>((total - 1) / perPage);
+        scanParams_.page = std::clamp(scanParams_.page, 0, maxPage);
+        const auto data = scanner_.getPage(scanParams_.page * perPage, perPage);
+
+        UI::Space(S(6));
+        ImGui::Separator();
+        UI::Text(Colors::TITLE, "扫描结果");
+
+        const float pageWidth = S(65);
+        const float pageHeight = S(38);
+        ImGui::BeginDisabled(scanParams_.page <= 0);
+        if (ImGui::Button("上页##scan", {pageWidth, pageHeight}))
+        {
+            --scanParams_.page;
+            state_.resultScrollIdx = 0;
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::Text("%d/%d  共 %zu", scanParams_.page + 1, maxPage + 1, total);
+        ImGui::SameLine(width - pageWidth);
+        ImGui::BeginDisabled(scanParams_.page >= maxPage);
+        if (ImGui::Button("下页##scan", {pageWidth, pageHeight}))
+        {
+            ++scanParams_.page;
+            state_.resultScrollIdx = 0;
+        }
+        ImGui::EndDisabled();
+
+        const float listHeight = ImGui::GetContentRegionAvail().y;
+        const float contentWidth = width - S(56);
+        const int maxIndex = std::max(0, static_cast<int>(data.size()) - static_cast<int>(listHeight / S(76)));
+        state_.resultScrollIdx = std::clamp(state_.resultScrollIdx, 0, maxIndex);
+        if (ImGui::BeginChild("ScanResultList", {contentWidth, listHeight}, false, ImGuiWindowFlags_NoScrollbar))
+        {
+            const int endIndex = state_.resultScrollIdx + static_cast<int>(listHeight / S(76)) + 1;
+            for (int index = state_.resultScrollIdx; index < static_cast<int>(data.size()) && index < endIndex; ++index)
+            {
+                const uintptr_t address = data[index];
+                const bool saved = savedManager_.contains(address);
+                const size_t previewLength = std::clamp(scanParams_.lastStringPattern.size(), size_t(16), size_t(64));
+                ImGui::PushID(reinterpret_cast<void *>(address));
+                UI::ColorChild(
+                    "ScanResult", {contentWidth - S(10), S(68)}, Colors::BG_PANEL,
+                    [&]
+                    {
+                        const float cardWidth = ImGui::GetContentRegionAvail().x;
+                        UI::LabelValue(Colors::LABEL, "地址: ", Colors::ADDR_GREEN, "%lX", address);
+                        ImGui::SameLine(cardWidth * 0.42f);
+                        if (pointerMode) UI::LabelValue(Colors::LABEL, "指向: ", Colors::VAL_YELLOW, "%s", MemUtils::ReadAsPointerString(address).c_str());
+                        else if (stringMode) UI::LabelValue(Colors::LABEL, "文本: ", Colors::VAL_YELLOW, "%s", MemUtils::ReadAsText(address, previewLength).c_str());
+                        else UI::LabelValue(Colors::LABEL, "数值: ", Colors::VAL_YELLOW, "%s", MemUtils::ReadAsString(address, resultType).c_str());
+
+                        const float buttonWidth = (cardWidth - S(6)) / 2;
+                        ImGui::BeginDisabled(saved);
+                        if (UI::Btn(saved ? "已保存" : "保存", {buttonWidth, S(30)}, Colors::BTN_GREEN)) saveScanAddress(address);
+                        ImGui::EndDisabled();
+                        ImGui::SameLine();
+                        if (UI::Btn("复制地址", {buttonWidth, S(30)}, Colors::BTN_COPY)) copyAddress(address);
+                    },
+                    ImGuiWindowFlags_NoScrollbar);
+                ImGui::PopID();
+                UI::Space(S(3));
+            }
+        }
+        ImGui::EndChild();
+        ImGui::SameLine();
+        UI::ArrowScroll("ScanResultArrows", S(50), listHeight, state_.resultScrollIdx, 0, maxIndex);
+    }
+
     void drawScanTab()
     {
         float w = ImGui::GetContentRegionAvail().x;
-        bool isPtrMode = scanParams_.fuzzyMode == Types::FuzzyMode::Pointer;
-        bool isStringMode = scanParams_.fuzzyMode == Types::FuzzyMode::String;
         const auto lockedType = scanner_.dataType();
-        bool typeLocked = lockedType.has_value();
-        bool firstModeValid = scanParams_.fuzzyMode != Types::FuzzyMode::Increased && scanParams_.fuzzyMode != Types::FuzzyMode::Decreased && scanParams_.fuzzyMode != Types::FuzzyMode::Changed && scanParams_.fuzzyMode != Types::FuzzyMode::Unchanged;
+        const bool stringBaseline = scanner_.isStringScan();
+        const bool hasBaseline = lockedType.has_value() || stringBaseline;
+        const bool typeLocked = lockedType.has_value();
         if (lockedType) scanParams_.dataType = *lockedType;
+        if (stringBaseline)
+        {
+            scanParams_.fuzzyMode = Types::FuzzyMode::String;
+        }
+        else if (lockedType && (scanParams_.fuzzyMode == Types::FuzzyMode::Unknown || scanParams_.fuzzyMode == Types::FuzzyMode::String || (scanParams_.fuzzyMode == Types::FuzzyMode::Pointer && *lockedType != Types::DataType::I64)))
+        {
+            scanParams_.fuzzyMode = Types::FuzzyMode::Equal;
+        }
+        else if (!hasBaseline && (scanParams_.fuzzyMode == Types::FuzzyMode::Increased || scanParams_.fuzzyMode == Types::FuzzyMode::Decreased || scanParams_.fuzzyMode == Types::FuzzyMode::Changed || scanParams_.fuzzyMode == Types::FuzzyMode::Unchanged))
+        {
+            scanParams_.fuzzyMode = Types::FuzzyMode::Equal;
+        }
+
+        const bool isPtrMode = scanParams_.fuzzyMode == Types::FuzzyMode::Pointer;
+        const bool isStringMode = scanParams_.fuzzyMode == Types::FuzzyMode::String;
+        const bool firstModeValid = scanParams_.fuzzyMode != Types::FuzzyMode::Increased && scanParams_.fuzzyMode != Types::FuzzyMode::Decreased && scanParams_.fuzzyMode != Types::FuzzyMode::Changed && scanParams_.fuzzyMode != Types::FuzzyMode::Unchanged;
+        const bool nextModeValid = hasBaseline && scanParams_.fuzzyMode != Types::FuzzyMode::Unknown && (stringBaseline ? isStringMode : !isStringMode && (!isPtrMode || lockedType == Types::DataType::I64));
         if (typeLocked || scanner_.isScanning()) state_.showType = false;
 
         // 数据类型
@@ -793,7 +950,9 @@ class MainUI
 
         UI::Space(S(6));
         UI::Text(Colors::LABEL, "搜索模式:");
+        ImGui::BeginDisabled(scanner_.isScanning() || stringBaseline);
         if (ImGui::Button(Types::Labels::FUZZY[static_cast<int>(scanParams_.fuzzyMode)], {w, S(45)})) state_.showMode = true;
+        ImGui::EndDisabled();
 
         UI::Space(S(6));
         UI::Text(Colors::LABEL, isPtrMode ? "目标地址(Hex):" : "搜索数值:");
@@ -806,13 +965,20 @@ class MainUI
         UI::Space(S(10));
         ImGui::BeginDisabled(scanner_.isScanning());
         float bw = (w - S(12)) / 3;
-        ImGui::BeginDisabled(!firstModeValid);
+        ImGui::BeginDisabled(hasBaseline || !firstModeValid);
         if (UI::Btn("首次扫描", {bw, S(52)}, Colors::BTN_GREEN)) startScan(buf_.value, true);
         ImGui::EndDisabled();
         ImGui::SameLine();
+        ImGui::BeginDisabled(!nextModeValid);
         if (UI::Btn("再次扫描", {bw, S(52)}, Colors::BTN_BLUE)) startScan(buf_.value, false);
+        ImGui::EndDisabled();
         ImGui::SameLine();
-        if (UI::Btn("清空", {bw, S(52)}, Colors::BTN_RED)) scanner_.clear();
+        if (UI::Btn("清空", {bw, S(52)}, Colors::BTN_RED))
+        {
+            scanner_.clear();
+            scanParams_.page = 0;
+            scanParams_.lastStringPattern.clear();
+        }
         ImGui::EndDisabled();
 
         UI::Space(S(6));
@@ -825,173 +991,135 @@ class MainUI
         {
             scanner_.count() ? UI::Text(Colors::OK, "找到 %zu 个", scanner_.count()) : UI::Text(Colors::HINT, "暂无结果");
         }
+        drawScanResults(w);
     }
 
     // ================================================================
-    // 结果页
+    // 保存页
     // ================================================================
-    void drawResultTab()
+    void drawSavedTab()
     {
-        if (scanner_.isScanning())
-        {
-            float w = ImGui::GetContentRegionAvail().x;
-            UI::Text(Colors::WARN, "扫描中，结果页暂不可操作");
-            ImGui::ProgressBar(scanner_.progress(), {w, S(18)});
-            return;
-        }
+        const float width = ImGui::GetContentRegionAvail().x;
+        const float buttonHeight = S(40);
 
-        size_t total = scanner_.count();
-        float w = ImGui::GetContentRegionAvail().x, bh = S(40);
-        const auto resultType = scanner_.dataType().value_or(scanParams_.dataType);
-        const auto resultMode = scanner_.scanMode();
-        const bool isPtrMode = resultMode == Types::FuzzyMode::Pointer;
-        const bool isStringMode = scanner_.isStringScan();
-
-        // 添加地址行
-        ImGuiFloatingKeyboard::InputButton(buf_.addAddr, "Hex地址...", {w - S(76), bh}, "Hex地址");
+        ImGuiFloatingKeyboard::InputButton(buf_.savedAddr, "手工添加 Hex 地址...", {width - S(210), buttonHeight}, "Hex地址");
         ImGui::SameLine();
-        if (UI::Btn("添加", {S(70), bh}, Colors::BTN_GREEN))
+        if (UI::Btn(Types::Labels::TYPE[static_cast<size_t>(savedParams_.dataType)], {S(90), buttonHeight}, Colors::BTN_INACTIVE)) state_.showSavedType = true;
+        ImGui::SameLine();
+        if (UI::Btn("添加", {S(108), buttonHeight}, Colors::BTN_GREEN))
         {
-            if (auto addr = ParseHexAddress(buf_.addAddr))
+            if (const auto address = ParseHexAddress(buf_.savedAddr))
             {
-                scanner_.add(*addr);
-                buf_.addAddr[0] = 0;
+                savedManager_.add(*address, savedParams_.dataType);
+                buf_.savedAddr[0] = 0;
             }
         }
+
+        auto items = savedManager_.snapshot();
+        const size_t total = items.size();
         if (!total)
         {
-            UI::Text(Colors::HINT, "暂无结果");
+            UI::Space(S(12));
+            UI::Text(Colors::HINT, "暂无保存地址，可从扫描页保存或手工添加");
             return;
         }
 
-        int perPage = Config::g_ItemsPerPage.load();
-        int maxPage = static_cast<int>((total - 1) / perPage);
-        scanParams_.page = std::clamp(scanParams_.page, 0, maxPage);
-        auto data = scanner_.getPage(scanParams_.page * perPage, perPage);
+        const int perPage = Config::g_ItemsPerPage.load();
+        const int maxPage = static_cast<int>((total - 1) / perPage);
+        savedParams_.page = std::clamp(savedParams_.page, 0, maxPage);
+        const size_t pageStart = static_cast<size_t>(savedParams_.page) * perPage;
+        const size_t pageCount = std::min<size_t>(perPage, total - pageStart);
+        const std::span<const SavedAddressManager::Item> page(items.data() + pageStart, pageCount);
 
-        // 翻页行
         UI::Space(S(4));
-        float pgW = S(65);
-        ImGui::BeginDisabled(scanParams_.page <= 0);
-        if (ImGui::Button("上页", {pgW, bh}))
+        const float pageWidth = S(65);
+        ImGui::BeginDisabled(savedParams_.page <= 0);
+        if (ImGui::Button("上页##saved", {pageWidth, buttonHeight}))
         {
-            --scanParams_.page;
-            state_.resultScrollIdx = 0;
+            --savedParams_.page;
+            state_.savedScrollIdx = 0;
         }
         ImGui::EndDisabled();
         ImGui::SameLine();
-
-        char info[64];
-        snprintf(info, sizeof(info), "%d/%d (共%zu)", scanParams_.page + 1, maxPage + 1, scanner_.count());
-        float infoW = w - pgW * 2 - S(12);
-        UI::ColorChild(
-            "PageInfo", {infoW, bh}, Colors::BG_PANEL,
-            [&]
-            {
-                ImGui::SetCursorPos({(infoW - ImGui::CalcTextSize(info).x) / 2, (bh - ImGui::GetTextLineHeight()) / 2 - S(4)});
-                ImGui::Text("%s", info);
-            },
-            ImGuiWindowFlags_NoScrollbar);
-        ImGui::SameLine();
-
-        ImGui::BeginDisabled(scanParams_.page >= maxPage);
-        if (ImGui::Button("下页", {pgW, bh}))
+        ImGui::Text("%d/%d  已保存 %zu", savedParams_.page + 1, maxPage + 1, total);
+        ImGui::SameLine(width - pageWidth);
+        ImGui::BeginDisabled(savedParams_.page >= maxPage);
+        if (ImGui::Button("下页##saved", {pageWidth, buttonHeight}))
         {
-            ++scanParams_.page;
-            state_.resultScrollIdx = 0;
+            ++savedParams_.page;
+            state_.savedScrollIdx = 0;
         }
         ImGui::EndDisabled();
 
-        UI::Space(S(4));
-        ImGui::Text("每页:");
+        const bool anyLocked = std::ranges::any_of(page, [&](const auto &item) { return savedManager_.isLocked(item.address); });
+        if (UI::Btn(anyLocked ? "解锁本页" : "锁定本页", {S(90), S(36)}, anyLocked ? Colors::BTN_UNLOCK : Colors::BTN_LOCK)) savedManager_.togglePage(page, !anyLocked);
         ImGui::SameLine();
-        if (ImGuiFloatingKeyboard::InputButton(buf_.page, "每页数量", {S(55), S(36)}) && buf_.page[0])
+        if (ImGuiFloatingKeyboard::ActionButton("偏移全部", {S(90), S(36)}, buf_.savedOffset, "偏移量(Hex,可负)", Colors::BTN_ORANGE) && buf_.savedOffset[0])
         {
-            int v = ParseIntOr(buf_.page);
-            if (v >= 1 && v <= 500)
-            {
-                if (v != Config::g_ItemsPerPage.load())
-                {
-                    Config::g_ItemsPerPage = v;
-                    scanParams_.page = state_.resultScrollIdx = 0;
-                }
-            }
-            else snprintf(buf_.page, sizeof(buf_.page), "%d", Config::g_ItemsPerPage.load());
+            if (const auto offset = MemUtils::ParseHexOffset(buf_.savedOffset)) savedManager_.applyOffset(offset->offset, offset->negative);
+            buf_.savedOffset[0] = 0;
+            savedParams_.page = 0;
+            state_.savedScrollIdx = 0;
+            return;
         }
         ImGui::SameLine();
-
-        bool anyLocked = std::ranges::any_of(data, [&](auto a) { return lockManager_.isLocked(a); });
-        if (anyLocked)
+        if (UI::Btn("清空保存", {S(90), S(36)}, Colors::BTN_RED))
         {
-            if (UI::Btn("解锁页", {S(70), S(36)}, {0.2f, 0.25f, 0.42f, 1})) lockManager_.unlockBatch(data);
-        }
-        else if (isStringMode)
-        {
-            ImGui::BeginDisabled();
-            UI::Btn("Lock", {S(70), S(36)}, {0.2f, 0.2f, 0.2f, 1});
-            ImGui::EndDisabled();
-        }
-        else
-        {
-            if (UI::Btn("锁定页", {S(70), S(36)}, {0.42f, 0.28f, 0.1f, 1})) lockManager_.lockBatch(data, isPtrMode ? Types::DataType::I64 : resultType);
-        }
-        ImGui::SameLine();
-
-        if (ImGuiFloatingKeyboard::ActionButton("偏移", {S(55), S(36)}, buf_.resultOffset, "偏移量(Hex,可负)", Colors::BTN_ORANGE) && buf_.resultOffset[0])
-        {
-            if (auto r = MemUtils::ParseHexOffset(buf_.resultOffset)) scanner_.applyOffset(r->offset, r->negative);
-            buf_.resultOffset[0] = 0;
+            savedManager_.clearSaved();
+            savedParams_.page = 0;
+            state_.savedScrollIdx = 0;
+            return;
         }
 
         ImGui::Separator();
-        float listH = ImGui::GetContentRegionAvail().y, contentW = w - S(56);
-        int maxIdx = std::max(0, (int)data.size() - (int)(listH / S(93)));
-        state_.resultScrollIdx = std::clamp(state_.resultScrollIdx, 0, maxIdx);
-        if (ImGui::BeginChild("ListContent", {contentW, listH}, false, ImGuiWindowFlags_NoScrollbar))
+        const float listHeight = ImGui::GetContentRegionAvail().y;
+        const float contentWidth = width - S(56);
+        const int maxIndex = std::max(0, static_cast<int>(page.size()) - static_cast<int>(listHeight / S(122)));
+        state_.savedScrollIdx = std::clamp(state_.savedScrollIdx, 0, maxIndex);
+        if (ImGui::BeginChild("SavedList", {contentWidth, listHeight}, false, ImGuiWindowFlags_NoScrollbar))
         {
-            int endIdx = state_.resultScrollIdx + (int)(listH / S(93)) + 1;
-            for (int i = state_.resultScrollIdx; i < (int)data.size() && i < endIdx; ++i)
+            const int endIndex = state_.savedScrollIdx + static_cast<int>(listHeight / S(122)) + 1;
+            for (int index = state_.savedScrollIdx; index < static_cast<int>(page.size()) && index < endIndex; ++index)
             {
-                const auto addr = data[i];
-                const bool locked = lockManager_.isLocked(addr), isPtr = isPtrMode, isString = isStringMode;
-                const size_t previewLen = std::clamp(scanParams_.lastStringPattern.size(), size_t(16), size_t(64));
-                ImGui::PushID((void *)addr);
+                const auto item = page[index];
+                const bool locked = savedManager_.isLocked(item.address);
+                const std::string value = savedManager_.value(item);
+                const char *kindLabel = item.kind == Types::SavedValueKind::Pointer ? "指针" : item.kind == Types::SavedValueKind::Text ? "文本" : Types::Labels::TYPE[static_cast<size_t>(item.type)];
+                ImGui::PushID(reinterpret_cast<void *>(item.address));
                 UI::ColorChild(
-                    "Card", {contentW - S(10), S(85)}, locked ? Colors::LOCKED : Colors::BG_PANEL,
+                    "SavedItem", {contentWidth - S(10), S(114)}, locked ? Colors::LOCKED : Colors::BG_PANEL,
                     [&]
                     {
-                        float cw = ImGui::GetContentRegionAvail().x;
-                        UI::LabelValue({0.5f, 0.6f, 0.7f, 1}, "地址:", locked ? ImVec4{1, 0.5f, 0.5f, 1} : Colors::ADDR_GREEN, "%lX", addr);
-                        ImGui::SameLine(cw * 0.45f);
-                        if (isPtr) UI::LabelValue({0.5f, 0.6f, 0.7f, 1}, "指向:", Colors::VAL_YELLOW, "%s", MemUtils::ReadAsPointerString(addr).c_str());
-                        else if (isString) UI::LabelValue({0.5f, 0.6f, 0.7f, 1}, "字符串:", Colors::VAL_YELLOW, "%s", MemUtils::ReadAsText(addr, previewLen).c_str());
-                        else UI::LabelValue({0.5f, 0.6f, 0.7f, 1}, "数值:", Colors::VAL_YELLOW, "%s", MemUtils::ReadAsString(addr, resultType).c_str());
-                        if (locked)
-                        {
-                            ImGui::SameLine();
-                            UI::Text({1, 0.3f, 0.3f, 1}, "[锁定]");
-                        }
+                        const float cardWidth = ImGui::GetContentRegionAvail().x;
+                        UI::LabelValue(Colors::LABEL, "地址: ", locked ? ImVec4{1, 0.5f, 0.5f, 1} : Colors::ADDR_GREEN, "%lX", item.address);
+                        ImGui::SameLine(cardWidth * 0.42f);
+                        UI::LabelValue(Colors::LABEL, kindLabel, Colors::VAL_YELLOW, ": %s", value.c_str());
 
-                        UI::Space(S(4));
-                        float bw = (cw - S(15)) / 4;
-                        if (ImGui::Button("改", {bw, S(36)}))
+                        ImGui::TextColored(Colors::HINT, "备注: %s", item.note.empty() ? "--" : item.note.c_str());
+                        if (!item.note.empty() && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", item.note.c_str());
+
+                        const float actionWidth = (cardWidth - S(20)) / 5;
+                        if (UI::Btn("修改", {actionWidth, S(36)}))
                         {
-                            state_.modifyAddr = addr;
-                            const auto current = isPtr ? MemUtils::ReadAsPointerString(addr) : isString ? MemUtils::ReadAsText(addr, previewLen) : MemUtils::ReadAsString(addr, resultType);
-                            std::snprintf(buf_.modify, sizeof(buf_.modify), "%s", current.c_str());
+                            state_.modifyAddr = item.address;
+                            std::snprintf(buf_.modify, sizeof(buf_.modify), "%s", value.c_str());
                             state_.showModify = true;
-                            ImGuiFloatingKeyboard::Open(buf_.modify, isPtr ? "新地址(Hex)" : isString ? "新字符串" : "新数值");
+                            ImGuiFloatingKeyboard::Open(buf_.modify, item.kind == Types::SavedValueKind::Pointer ? "新地址(Hex)" : item.kind == Types::SavedValueKind::Text ? "新字符串" : "新数值");
                         }
                         ImGui::SameLine();
-                        if (UI::Btn(locked ? "解锁" : "锁定", {bw, S(36)}, locked ? Colors::BTN_UNLOCK : Colors::BTN_LOCK) && !(isString && !locked)) lockManager_.toggle(addr, isPtr ? Types::DataType::I64 : resultType);
-                        ImGui::SameLine();
-                        if (UI::Btn("复制", {bw, S(36)}, Colors::BTN_COPY)) copyAddress(addr);
-                        ImGui::SameLine();
-                        if (UI::Btn("删除", {bw, S(36)}, Colors::BTN_DEL))
+                        if (UI::Btn("备注", {actionWidth, S(36)}))
                         {
-                            if (locked) lockManager_.unlock(addr);
-                            scanner_.remove(addr);
+                            state_.noteAddr = item.address;
+                            std::snprintf(buf_.savedNote, sizeof(buf_.savedNote), "%s", item.note.c_str());
+                            state_.showSavedNote = true;
+                            ImGuiFloatingKeyboard::Open(buf_.savedNote, "文字备注");
                         }
+                        ImGui::SameLine();
+                        if (UI::Btn(locked ? "解锁" : "锁定", {actionWidth, S(36)}, locked ? Colors::BTN_UNLOCK : Colors::BTN_LOCK)) savedManager_.toggle(item.address);
+                        ImGui::SameLine();
+                        if (UI::Btn("复制", {actionWidth, S(36)}, Colors::BTN_COPY)) copyAddress(item.address);
+                        ImGui::SameLine();
+                        if (UI::Btn("删除", {actionWidth, S(36)}, Colors::BTN_DEL)) savedManager_.remove(item.address);
                     },
                     ImGuiWindowFlags_NoScrollbar);
                 ImGui::PopID();
@@ -1000,7 +1128,7 @@ class MainUI
         }
         ImGui::EndChild();
         ImGui::SameLine();
-        UI::ArrowScroll("ListArrows", S(50), listH, state_.resultScrollIdx, 0, maxIdx);
+        UI::ArrowScroll("SavedArrows", S(50), listHeight, state_.savedScrollIdx, 0, maxIndex);
     }
 
     // ================================================================
@@ -1733,6 +1861,7 @@ class MainUI
         };
 
         if (state_.showType) doSelector("类型", &state_.showType, Types::Labels::TYPE.data(), (int)Types::Labels::TYPE.size(), &scanParams_.dataType);
+        if (state_.showSavedType) doSelector("保存类型", &state_.showSavedType, Types::Labels::TYPE.data(), (int)Types::Labels::TYPE.size(), &savedParams_.dataType);
         if (state_.showMode) doSelector("模式", &state_.showMode, Types::Labels::FUZZY.data(), (int)Types::Labels::FUZZY.size(), &scanParams_.fuzzyMode);
         if (state_.showFormat)
         {
@@ -1808,17 +1937,24 @@ class MainUI
         if (state_.showModify)
         {
             const auto result = ImGuiFloatingKeyboard::ConsumeResult(buf_.modify);
-            if (result == ImGuiFloatingKeyboard::Result::Accepted && state_.modifyAddr && strlen(buf_.modify) && !scanner_.isScanning())
-            {
-                if (scanner_.scanMode() == Types::FuzzyMode::Pointer) MemUtils::WritePointerFromString(state_.modifyAddr, buf_.modify);
-                else if (scanner_.isStringScan()) MemUtils::WriteText(state_.modifyAddr, buf_.modify);
-                else MemUtils::WriteFromString(state_.modifyAddr, scanner_.dataType().value_or(scanParams_.dataType), buf_.modify);
-            }
+            if (result == ImGuiFloatingKeyboard::Result::Accepted && state_.modifyAddr && strlen(buf_.modify)) savedManager_.write(state_.modifyAddr, buf_.modify);
             if (result != ImGuiFloatingKeyboard::Result::None)
             {
                 state_.showModify = false;
                 state_.modifyAddr = 0;
                 buf_.modify[0] = 0;
+            }
+        }
+
+        if (state_.showSavedNote)
+        {
+            const auto result = ImGuiFloatingKeyboard::ConsumeResult(buf_.savedNote);
+            if (result == ImGuiFloatingKeyboard::Result::Accepted && state_.noteAddr) savedManager_.setNote(state_.noteAddr, buf_.savedNote);
+            if (result != ImGuiFloatingKeyboard::Result::None)
+            {
+                state_.showSavedNote = false;
+                state_.noteAddr = 0;
+                buf_.savedNote[0] = 0;
             }
         }
     }
@@ -1889,7 +2025,7 @@ class MainUI
                     ImGui::Text("?");
                 }
                 ImGui::TableSetColumnIndex(2);
-                if (UI::Btn("存", {S(42), S(28)}, {0.2f, 0.4f, 0.25f, 1})) scanner_.add(addr);
+                if (UI::Btn("存", {S(42), S(28)}, {0.2f, 0.4f, 0.25f, 1})) savedManager_.add(addr, savedTypeForViewFormat(format));
                 ImGui::TableSetColumnIndex(3);
                 uintptr_t jump = MemUtils::Normalize(ptrVal);
                 bool canJump = (format == Types::ViewFormat::I32 || format == Types::ViewFormat::I64 || format == Types::ViewFormat::Hexadecimal) && MemUtils::IsValidAddr(jump);
@@ -1959,7 +2095,7 @@ class MainUI
                 ImGui::TableSetColumnIndex(5);
                 UI::Text({0.65f, 0.65f, 0.5f, 1}, "%s", ascii);
                 ImGui::TableSetColumnIndex(6);
-                if (UI::Btn("存", {S(32), S(22)}, {0.2f, 0.4f, 0.25f, 1})) scanner_.add(rowAddr);
+                if (UI::Btn("存", {S(32), S(22)}, {0.2f, 0.4f, 0.25f, 1})) savedManager_.add(rowAddr, Types::DataType::I32);
                 ImGui::TableSetColumnIndex(7);
                 // 跳转逻辑
                 uintptr_t ptrVal = 0;
@@ -2041,7 +2177,7 @@ class MainUI
                         if (UI::Btn("跳", {S(35), S(24)}, Colors::BTN_PURPLE)) memViewer_.open(t);
                     ImGui::SameLine();
                 }
-                if (UI::Btn("存", {S(35), S(24)}, {0.2f, 0.4f, 0.25f, 1})) scanner_.add(line.address);
+                if (UI::Btn("存", {S(35), S(24)}, {0.2f, 0.4f, 0.25f, 1})) savedManager_.add(line.address, Types::DataType::I32);
                 ImGui::PopID();
             }
             ImGui::EndTable();

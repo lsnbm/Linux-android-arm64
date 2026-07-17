@@ -546,12 +546,6 @@ public: // 外部获取内存信息
 
         *outAddress = 0;
 
-        if (HandleVirtualMemoryInfo() != 0)
-        {
-            std::fprintf(stderr, "驱动获取内存信息失败\n");
-            return false;
-        }
-
         const auto &info = GetMemoryInfoRef();
 
         for (int i = 0; i < info.module_count; ++i)

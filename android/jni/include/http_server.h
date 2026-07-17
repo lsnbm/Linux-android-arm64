@@ -341,6 +341,59 @@ namespace
         return std::nullopt;
     }
 
+    std::string_view dataTypeToken(Types::DataType type)
+    {
+        switch (type)
+        {
+        case Types::DataType::I8:
+            return "i8";
+        case Types::DataType::I16:
+            return "i16";
+        case Types::DataType::I32:
+            return "i32";
+        case Types::DataType::I64:
+            return "i64";
+        case Types::DataType::Float:
+            return "f32";
+        case Types::DataType::Double:
+            return "f64";
+        default:
+            return "";
+        }
+    }
+
+    std::optional<Types::SavedValueKind> parseSavedValueKindToken(std::string_view token)
+    {
+        const std::string t = toLowerAscii(token);
+        if (t.empty() || t == "numeric" || t == "number") return Types::SavedValueKind::Numeric;
+        if (t == "pointer" || t == "ptr") return Types::SavedValueKind::Pointer;
+        if (t == "text" || t == "string") return Types::SavedValueKind::Text;
+        return std::nullopt;
+    }
+
+    std::string_view savedValueKindToken(Types::SavedValueKind kind)
+    {
+        switch (kind)
+        {
+        case Types::SavedValueKind::Numeric:
+            return "numeric";
+        case Types::SavedValueKind::Pointer:
+            return "pointer";
+        case Types::SavedValueKind::Text:
+            return "text";
+        default:
+            return "";
+        }
+    }
+
+    std::optional<bool> parseBoolToken(std::string_view token)
+    {
+        const std::string t = toLowerAscii(token);
+        if (t == "true" || t == "1" || t == "yes" || t == "on") return true;
+        if (t == "false" || t == "0" || t == "no" || t == "off") return false;
+        return std::nullopt;
+    }
+
     // 解析扫描模式标记
     std::optional<Types::FuzzyMode> parseFuzzyModeToken(std::string_view token)
     {
@@ -1080,6 +1133,27 @@ namespace
             };
         };
 
+        auto savedStatesJson = [&]() -> json
+        {
+            json items = json::array();
+            for (const auto &state : MemoryTool::Saved().snapshotStates())
+            {
+                items.push_back({
+                    {"address", state.item.address},
+                    {"address_hex", std::format("0x{:X}", state.item.address)},
+                    {"value_type", std::string(dataTypeToken(state.item.type))},
+                    {"value_type_label", Types::Labels::TYPE[static_cast<size_t>(state.item.type)]},
+                    {"value_kind", std::string(savedValueKindToken(state.item.kind))},
+                    {"text_length", state.item.textLength},
+                    {"note", state.item.note},
+                    {"value", state.value},
+                    {"locked", state.locked},
+                    {"lock_value", state.lockValue},
+                });
+            }
+            return json{{"count", items.size()}, {"items", std::move(items)}};
+        };
+
         std::lock_guard<std::mutex> requestLock(gRequestMutex);
 
         if (op == "bridge.ping") return okData({{"protocol_version", 1}, {"target_operations", true}});
@@ -1530,26 +1604,95 @@ namespace
             return okData({{"success", result.success}, {"changed_count", result.changedCount}, {"total_count", result.totalCount}, {"old_signature", result.oldSignature}, {"new_signature", result.newSignature}, {"file", fileName}});
         }
 
-        if (op == "lock.set")
+        if (op == "saved.list") return okData(savedStatesJson());
+
+        if (op == "saved.add")
         {
             const auto address = requiredUInt64("address", "address");
             const auto valueType = requiredString("value_type", "value_type");
-            const auto value = requiredString("value", "value");
             if (std::holds_alternative<json>(address)) return std::get<json>(address);
             if (std::holds_alternative<json>(valueType)) return std::get<json>(valueType);
-            if (std::holds_alternative<json>(value)) return std::get<json>(value);
             const auto dataType = parseDataTypeToken(std::get<std::string>(valueType));
             if (!dataType.has_value()) return fail("value_type 无效");
-            MemoryTool::Locks().lock(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), *dataType, std::get<std::string>(value));
-            return okData({{"locked", MemoryTool::Locks().isLocked(static_cast<uintptr_t>(std::get<std::uint64_t>(address)))}});
+
+            const std::string kindText = optionalString("value_kind");
+            const auto kind = parseSavedValueKindToken(kindText);
+            if (!kind.has_value()) return fail("value_kind 无效");
+            if (*kind == Types::SavedValueKind::Pointer && *dataType != Types::DataType::I64) return fail("pointer 保存项必须使用 i64");
+            if (*kind == Types::SavedValueKind::Text && *dataType != Types::DataType::I8) return fail("text 保存项必须使用 i8");
+
+            size_t textLength = 64;
+            if (const std::string textLengthValue = optionalString("text_length"); !textLengthValue.empty())
+            {
+                const auto parsed = parseInt(textLengthValue);
+                if (!parsed || *parsed < 1 || *parsed > 256) return fail("text_length 范围 1-256");
+                textLength = static_cast<size_t>(*parsed);
+            }
+
+            auto &saved = MemoryTool::Saved();
+            const uintptr_t savedAddress = static_cast<uintptr_t>(std::get<std::uint64_t>(address));
+            const bool created = saved.add(savedAddress, *dataType, *kind, textLength);
+            if (!created && !saved.contains(savedAddress)) return fail("保存地址失败");
+            if (const std::string note = optionalString("note"); !note.empty() && !saved.setNote(savedAddress, note)) return fail("设置备注失败");
+            json data = savedStatesJson();
+            data["created"] = created;
+            return okData(std::move(data));
         }
 
-        if (op == "lock.remove")
+        if (op == "saved.remove")
         {
             const auto address = requiredUInt64("address", "address");
             if (std::holds_alternative<json>(address)) return std::get<json>(address);
-            MemoryTool::Locks().unlock(static_cast<uintptr_t>(std::get<std::uint64_t>(address)));
-            return okData({{"locked", MemoryTool::Locks().isLocked(static_cast<uintptr_t>(std::get<std::uint64_t>(address)))}});
+            const bool removed = MemoryTool::Saved().remove(static_cast<uintptr_t>(std::get<std::uint64_t>(address)));
+            json data = savedStatesJson();
+            data["removed"] = removed;
+            return okData(std::move(data));
+        }
+
+        if (op == "saved.write")
+        {
+            const auto address = requiredUInt64("address", "address");
+            const auto value = requiredString("value", "value");
+            if (std::holds_alternative<json>(address)) return std::get<json>(address);
+            if (std::holds_alternative<json>(value)) return std::get<json>(value);
+            if (!MemoryTool::Saved().write(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), std::get<std::string>(value))) return fail("写入保存地址失败");
+            return okData(savedStatesJson());
+        }
+
+        if (op == "saved.note.set")
+        {
+            const auto address = requiredUInt64("address", "address");
+            if (std::holds_alternative<json>(address)) return std::get<json>(address);
+            if (!MemoryTool::Saved().setNote(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), optionalString("note"))) return fail("保存地址不存在");
+            return okData(savedStatesJson());
+        }
+
+        if (op == "saved.lock.set")
+        {
+            const auto address = requiredUInt64("address", "address");
+            const auto lockedText = requiredString("locked", "locked");
+            if (std::holds_alternative<json>(address)) return std::get<json>(address);
+            if (std::holds_alternative<json>(lockedText)) return std::get<json>(lockedText);
+            const auto locked = parseBoolToken(std::get<std::string>(lockedText));
+            if (!locked.has_value()) return fail("locked 无效");
+            if (!MemoryTool::Saved().setLocked(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), *locked, optionalString("value"))) return fail(*locked ? "锁定保存地址失败" : "保存地址不存在");
+            return okData(savedStatesJson());
+        }
+
+        if (op == "saved.offset")
+        {
+            const auto offsetText = requiredString("offset", "offset");
+            if (std::holds_alternative<json>(offsetText)) return std::get<json>(offsetText);
+            const auto offset = MemUtils::ParseHexOffset(std::get<std::string>(offsetText));
+            if (!offset.has_value()) return fail("offset 无效");
+            MemoryTool::Saved().applyOffset(offset->offset, offset->negative);
+            return okData(savedStatesJson());
+        }
+
+        if (op == "saved.clear")
+        {
+            MemoryTool::Saved().clearSaved();
+            return okData(savedStatesJson());
         }
 
         if (op == "memory.read")

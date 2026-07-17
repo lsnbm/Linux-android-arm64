@@ -25,6 +25,42 @@ LAN_DISCOVERY_PING_TIMEOUT_MS = 150
 MAX_HTTP_RESPONSE_BYTES = 16 * 1024 * 1024
 AUTO_HOST_TOKENS = {"", "auto", "*"}
 VIEWER_FORMAT_TOKENS = {"hexadecimal", "hex", "i8", "i16", "i32", "i64", "f32", "f64", "disasm"}
+SCAN_HISTORY_MODES = {"inc", "dec", "changed", "unchanged"}
+SCAN_VALUE_MODES = {"eq", "gt", "lt", "range", "pointer", "string"}
+SCAN_MODE_ALIASES = {
+    "equal": "eq",
+    "greater": "gt",
+    "less": "lt",
+    "increased": "inc",
+    "decreased": "dec",
+    "chg": "changed",
+    "unchg": "unchanged",
+    "ptr": "pointer",
+    "str": "string",
+}
+VALUE_TYPE_ALIASES = {
+    "i8": "i8",
+    "int8": "i8",
+    "i16": "i16",
+    "int16": "i16",
+    "i32": "i32",
+    "int32": "i32",
+    "i64": "i64",
+    "int64": "i64",
+    "f32": "f32",
+    "float": "f32",
+    "f64": "f64",
+    "double": "f64",
+}
+VALUE_TYPE_LABELS = {
+    "i8": "I8",
+    "i16": "I16",
+    "i32": "I32",
+    "i64": "I64",
+    "f32": "Float",
+    "f64": "Double",
+}
+SAVED_VALUE_KINDS = {"numeric", "pointer", "text"}
 
 
 class BridgeError(RuntimeError):
@@ -103,6 +139,219 @@ def normalize_view_format(view_format: str) -> str:
     if token not in VIEWER_FORMAT_TOKENS:
         raise ValueError("view_format must be one of: hexadecimal, hex, i8, i16, i32, i64, f32, f64, disasm")
     return token
+
+
+def normalize_scan_mode(mode: str) -> str:
+    token = str(mode).strip().lower()
+    return SCAN_MODE_ALIASES.get(token, token)
+
+
+def normalize_value_type(value_type: str) -> str:
+    token = str(value_type).strip().lower()
+    normalized = VALUE_TYPE_ALIASES.get(token)
+    if normalized is None:
+        raise ValueError("value_type must be one of: i8, i16, i32, i64, f32, f64")
+    return normalized
+
+
+def normalize_saved_kind(value_kind: str) -> str:
+    token = str(value_kind or "numeric").strip().lower()
+    aliases = {"number": "numeric", "ptr": "pointer", "string": "text"}
+    token = aliases.get(token, token)
+    if token not in SAVED_VALUE_KINDS:
+        raise ValueError("value_kind must be one of: numeric, pointer, text")
+    return token
+
+
+def parse_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    token = str(value).strip().lower()
+    if token in {"true", "1", "yes", "on"}:
+        return True
+    if token in {"false", "0", "no", "off", ""}:
+        return False
+    raise ValueError(f"invalid boolean value: {value}")
+
+
+def build_saved_add_params(
+    address: int | str,
+    value_type: str,
+    *,
+    value_kind: str = "numeric",
+    text_length: int = 64,
+    note: str = "",
+) -> dict[str, Any]:
+    kind = normalize_saved_kind(value_kind)
+    if kind == "pointer":
+        type_token = "i64"
+    elif kind == "text":
+        type_token = "i8"
+    else:
+        type_token = normalize_value_type(value_type)
+    if text_length < 1 or text_length > 256:
+        raise ValueError("text_length must be in 1..256")
+    return {
+        "address": format_address(address),
+        "value_type": type_token,
+        "value_kind": kind,
+        "text_length": text_length,
+        "note": str(note),
+    }
+
+
+def build_scan_params(value_type: str, mode: str, value: str = "", range_max: str = "", *, is_first: bool) -> dict[str, Any]:
+    mode_token = normalize_scan_mode(mode)
+    value_token = str(value).strip()
+    range_token = str(range_max).strip()
+    if is_first and mode_token in SCAN_HISTORY_MODES:
+        raise ValueError("first scan cannot use inc, dec, changed, or unchanged")
+    if not is_first and mode_token == "unknown":
+        raise ValueError("unknown initial value can only be used for the first scan")
+    if mode_token in SCAN_VALUE_MODES and not value_token:
+        raise ValueError(f"value is required for mode '{mode_token}'")
+    if mode_token == "range" and not range_token:
+        raise ValueError("range_max is required for mode 'range'")
+
+    params: dict[str, Any] = {"mode": mode_token}
+    if mode_token == "pointer":
+        params["value_type"] = "i64"
+    elif mode_token != "string":
+        params["value_type"] = normalize_value_type(value_type)
+    if mode_token in SCAN_VALUE_MODES:
+        params["value"] = value_token
+    if mode_token == "range":
+        params["range_max"] = range_token
+    return params
+
+
+def normalize_breakpoint_points(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for point in points:
+        if not isinstance(point, dict):
+            raise ValueError("points must contain objects with address, bp_type, bp_scope, length")
+        length = int(point["length"])
+        if length < 1 or length > 8:
+            raise ValueError("breakpoint length must be in 1..8")
+        normalized.append(
+            {
+                "address": format_address(point["address"]),
+                "bp_type": point["bp_type"],
+                "bp_scope": point["bp_scope"],
+                "length": length,
+            }
+        )
+    if not normalized:
+        raise ValueError("points must not be empty")
+    return normalized
+
+
+@dataclass(frozen=True)
+class SavedAddressState:
+    address: int
+    address_hex: str
+    value_type: str
+    value_type_label: str
+    value_kind: str
+    text_length: int
+    note: str
+    value: str
+    locked: bool
+    lock_value: str
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "SavedAddressState":
+        value_type = normalize_value_type(str(payload.get("value_type", "")))
+        value_kind = normalize_saved_kind(str(payload.get("value_kind", "numeric")))
+        address = int(payload.get("address", 0))
+        address_hex = str(payload.get("address_hex") or format_address(address))
+        return cls(
+            address=address,
+            address_hex=address_hex,
+            value_type=value_type,
+            value_type_label=str(payload.get("value_type_label") or VALUE_TYPE_LABELS[value_type]),
+            value_kind=value_kind,
+            text_length=max(1, min(256, int(payload.get("text_length", 64)))),
+            note=str(payload.get("note", "")),
+            value=str(payload.get("value", "")),
+            locked=parse_bool(payload.get("locked", False)),
+            lock_value=str(payload.get("lock_value", "")),
+        )
+
+
+def parse_saved_states(data: dict[str, Any]) -> list[SavedAddressState]:
+    raw_items = data.get("items", [])
+    if not isinstance(raw_items, list):
+        raise ValueError("saved state response items must be a list")
+    return [SavedAddressState.from_dict(item) for item in raw_items if isinstance(item, dict)]
+
+
+class AndroidProtocolMixin:
+    def scan_start(self, value_type: str, mode: str, value: str = "", range_max: str = "") -> BridgeResponse:
+        return self.call_operation("scan.start", build_scan_params(value_type, mode, value, range_max, is_first=True))
+
+    def scan_refine(self, value_type: str, mode: str, value: str = "", range_max: str = "") -> BridgeResponse:
+        return self.call_operation("scan.refine", build_scan_params(value_type, mode, value, range_max, is_first=False))
+
+    def breakpoint_set(self, mode: str, points: list[dict[str, Any]]) -> BridgeResponse:
+        mode_token = str(mode).strip().lower()
+        if mode_token not in {"hwbp", "ptebp", "stepbp"}:
+            raise ValueError("mode must be one of: hwbp, ptebp, stepbp")
+        return self.call_operation("breakpoint.set", {"mode": mode_token, "points": normalize_breakpoint_points(points)})
+
+    def saved_list(self) -> BridgeResponse:
+        return self.call_operation("saved.list")
+
+    def saved_add(
+        self,
+        address: int | str,
+        value_type: str,
+        *,
+        value_kind: str = "numeric",
+        text_length: int = 64,
+        note: str = "",
+    ) -> BridgeResponse:
+        return self.call_operation(
+            "saved.add",
+            build_saved_add_params(
+                address,
+                value_type,
+                value_kind=value_kind,
+                text_length=text_length,
+                note=note,
+            ),
+        )
+
+    def saved_remove(self, address: int | str) -> BridgeResponse:
+        return self.call_operation("saved.remove", {"address": format_address(address)})
+
+    def saved_write(self, address: int | str, value: str) -> BridgeResponse:
+        return self.call_operation("saved.write", {"address": format_address(address), "value": str(value)})
+
+    def saved_set_note(self, address: int | str, note: str) -> BridgeResponse:
+        return self.call_operation("saved.note.set", {"address": format_address(address), "note": str(note)})
+
+    def saved_set_locked(self, address: int | str, locked: bool, value: str = "") -> BridgeResponse:
+        params: dict[str, Any] = {
+            "address": format_address(address),
+            "locked": bool(locked),
+            "value": str(value).strip() if locked else "",
+        }
+        return self.call_operation("saved.lock.set", params)
+
+    def saved_offset(self, offset: str) -> BridgeResponse:
+        return self.call_operation("saved.offset", {"offset": str(offset).strip()})
+
+    def saved_clear(self) -> BridgeResponse:
+        return self.call_operation("saved.clear")
+
+    def viewer_open(self, address: int | str, view_format: str = "hexadecimal") -> BridgeResponse:
+        return self.call_operation(
+            "viewer.open",
+            {"address": format_address(address), "view_format": normalize_view_format(view_format)},
+        )
 
 
 def normalize_bridge_host(host: str | None) -> str:
@@ -257,7 +506,7 @@ def _coerce_bridge_response(
     )
 
 
-class AndroidHttpBridge:
+class AndroidHttpBridge(AndroidProtocolMixin):
     """HTTP endpoint used by interactive clients such as the Windows UI."""
 
     def __init__(
@@ -394,7 +643,7 @@ class AndroidHttpBridge:
         return self.request({"operation": operation.strip(), "params": params or {}})
 
 
-class AndroidHttpClient:
+class AndroidHttpClient(AndroidProtocolMixin):
     """Configurable HTTP client used by MCP, scripts, and non-interactive flows."""
 
     def __init__(

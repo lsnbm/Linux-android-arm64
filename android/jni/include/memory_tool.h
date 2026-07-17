@@ -59,7 +59,6 @@
 
 #include "BS_thread_pool.hpp"
 #include "driver.h"
-#include "utils/mapped_file.h"
 #include "disassembler.h"
 
 // ============================================================================
@@ -154,6 +153,13 @@ namespace Types
         Double,
         Disasm,
         Count
+    };
+
+    enum class SavedValueKind : int
+    {
+        Numeric = 0,
+        Pointer,
+        Text
     };
 
     constexpr size_t GetViewSize(ViewFormat format) noexcept
@@ -1076,109 +1082,6 @@ namespace SignatureScanner
 } // namespace SignatureScanner
 
 // ============================================================================
-// 位图包装
-// ============================================================================
-class Bitmap
-{
-    MappedFile storage_;
-    size_t totalBits_ = 0;
-
-public:
-    // 按位数初始化位图存储。
-    bool init(size_t bits, bool allSet)
-    {
-        if (bits == 0 || bits > std::numeric_limits<size_t>::max() - 7) return false;
-        totalBits_ = bits;
-        size_t bytes = (bits + 7) / 8;
-        if (!storage_.allocate(bytes))
-        {
-            totalBits_ = 0;
-            return false;
-        }
-
-        if (allSet)
-        {
-            std::memset(storage_.as(), 0xFF, bytes);
-            size_t tail = bits % 8;
-            if (tail) storage_.as<uint8_t>()[bytes - 1] = static_cast<uint8_t>((1u << tail) - 1);
-        }
-        else
-        {
-            std::memset(storage_.as(), 0, bytes);
-        }
-        return true;
-    }
-
-    // 释放当前对象持有的底层资源。
-    void release()
-    {
-        storage_.release();
-        totalBits_ = 0;
-    }
-
-    // 返回位图可表示的总位数。
-    size_t totalBits() const noexcept
-    {
-        return totalBits_;
-    }
-    // 返回位图底层字节数组大小。
-    size_t byteCount() const noexcept
-    {
-        return storage_.size();
-    }
-    // 判断位图底层存储是否可用。
-    bool valid() const noexcept
-    {
-        return storage_.valid();
-    }
-    uint8_t *data() noexcept
-    {
-        return storage_.as<uint8_t>();
-    }
-    const uint8_t *data() const noexcept
-    {
-        return storage_.as<const uint8_t>();
-    }
-
-    // 读取指定位当前是否为 1。
-    bool get(size_t i) const noexcept
-    {
-        uint8_t byte = __atomic_load_n(&data()[i / 8], __ATOMIC_RELAXED);
-        return (byte >> (i % 8)) & 1;
-    }
-
-    // 把指定位设置为 1。
-    void setOn(size_t i) noexcept
-    {
-        __atomic_fetch_or(&data()[i / 8], static_cast<uint8_t>(1u << (i % 8)), __ATOMIC_RELAXED);
-    }
-
-    // 把指定位清零为 0。
-    void setOff(size_t i) noexcept
-    {
-        __atomic_fetch_and(&data()[i / 8], static_cast<uint8_t>(~(1u << (i % 8))), __ATOMIC_RELAXED);
-    }
-
-    // 快速 popcount
-    size_t popcount() const noexcept
-    {
-        size_t count = 0;
-        const uint8_t *p = data();
-        size_t bytes = byteCount();
-
-        // 按 8 字节批处理
-        size_t chunks = bytes / 8;
-        const uint64_t *p64 = reinterpret_cast<const uint64_t *>(p);
-        for (size_t i = 0; i < chunks; ++i) count += __builtin_popcountll(p64[i]);
-
-        // 处理尾部
-        for (size_t i = chunks * 8; i < bytes; ++i) count += __builtin_popcount(p[i]);
-
-        return count;
-    }
-};
-
-// ============================================================================
 // 内存扫描器
 // ============================================================================
 class MemScanner
@@ -1187,26 +1090,35 @@ public:
     using Results = std::vector<uintptr_t>;
 
 private:
-    // ── 区域描述 ──
-    struct Region
-    {
-        uintptr_t start, end;
-        size_t bitOffset, bitCount;
-    };
-
-    struct ExplicitResult
+    struct CandidateRecord
     {
         uintptr_t address;
         std::uint64_t value;
     };
 
-    // ── 核心状态 ──
-    Bitmap bitmap_;
-    MappedFile values_;
-    std::vector<Region> regions_;
-    std::vector<ExplicitResult> addedList_;
+    struct SnapshotSpan
+    {
+        uintptr_t address;
+        std::uint64_t fileOffset;
+        size_t size;
+    };
 
-    size_t setBits_ = 0;
+    struct FileCloser
+    {
+        void operator()(FILE *file) const noexcept
+        {
+            if (file) fclose(file);
+        }
+    };
+
+    using FilePtr = std::unique_ptr<FILE, FileCloser>;
+
+    FilePtr candidates_;
+    FilePtr snapshot_;
+    std::vector<SnapshotSpan> snapshotSpans_;
+
+    size_t candidateCount_ = 0;
+    size_t snapshotCount_ = 0;
     size_t valueSize_ = 0;
     std::optional<Types::DataType> dataType_;
     Types::FuzzyMode scanMode_ = Types::FuzzyMode::Unknown;
@@ -1216,6 +1128,7 @@ private:
     mutable std::shared_mutex mutex_;
     std::atomic<float> progress_{0.0f};
     std::atomic<bool> scanning_{false};
+    std::atomic<size_t> liveCount_{0};
 
     struct ScanRunGuard
     {
@@ -1228,118 +1141,73 @@ private:
         }
     };
 
-    template <typename HitBuckets> static Results mergeUniqueAddresses(HitBuckets &threadHits)
+    static FilePtr createCandidateFile()
     {
-        Results merged;
-        size_t total = 0;
-        for (auto &hits : threadHits) total += hits.size();
-        merged.reserve(total);
-
-        for (auto &hits : threadHits) merged.insert(merged.end(), hits.begin(), hits.end());
-        std::sort(merged.begin(), merged.end());
-        merged.erase(std::unique(merged.begin(), merged.end()), merged.end());
-        return merged;
+        FilePtr file(tmpfile());
+        if (!file) throw std::runtime_error("无法创建扫描候选临时文件");
+        return file;
     }
 
-    //  位 ↔ 地址映射
-    size_t addrToBit(uintptr_t addr) const noexcept
+    static void writeCandidates(FILE *file, std::span<const CandidateRecord> records)
     {
-        // 二分查找所属区域
-        auto it = std::upper_bound(regions_.begin(), regions_.end(), addr, [](uintptr_t a, const Region &r) { return a < r.end; });
-
-        // upper_bound 找到第一个 end > addr 的区域
-        if (it == regions_.end() || addr < it->start) return SIZE_MAX;
-
-        size_t off = addr - it->start;
-        if (off % valueSize_ != 0) return SIZE_MAX;
-
-        size_t index = off / valueSize_;
-        if (index >= it->bitCount) return SIZE_MAX;
-
-        return it->bitOffset + index;
+        if (!records.empty() && fwrite(records.data(), sizeof(CandidateRecord), records.size(), file) != records.size()) throw std::runtime_error("写入扫描候选临时文件失败");
     }
 
-    // 把位图索引换算为实际内存地址。
-    uintptr_t bitToAddr(size_t gb) const noexcept
+    static void finishFile(FILE *file)
     {
-        auto it = std::upper_bound(regions_.begin(), regions_.end(), gb, [](size_t b, const Region &r) { return b < r.bitOffset + r.bitCount; });
-        if (it == regions_.end()) return 0;
-        return it->start + (gb - it->bitOffset) * valueSize_;
+        if (fflush(file) != 0 || ferror(file) != 0) throw std::runtime_error("刷新扫描候选临时文件失败");
+        rewind(file);
     }
 
-    // 位图初始化
-    bool initStorage(size_t valSz, const std::vector<std::pair<uintptr_t, uintptr_t>> &scanRegs, bool allSet)
+    static bool readExactAt(FILE *file, void *buffer, size_t size, std::uint64_t offset)
     {
-        bitmap_.release();
-        values_.release();
-        regions_.clear();
-        setBits_ = 0;
-        valueSize_ = valSz;
+        if (!file || size > static_cast<size_t>(std::numeric_limits<ssize_t>::max())) return false;
+        return pread(fileno(file), buffer, size, static_cast<off_t>(offset)) == static_cast<ssize_t>(size);
+    }
 
+    static std::vector<std::pair<uintptr_t, uintptr_t>> normalizeScanRegions(std::vector<std::pair<uintptr_t, uintptr_t>> regions, size_t alignment)
+    {
         std::vector<std::pair<uintptr_t, uintptr_t>> normalized;
-        normalized.reserve(scanRegs.size());
-        for (const auto &[start, end] : scanRegs)
+        normalized.reserve(regions.size());
+        for (auto [start, end] : regions)
         {
-            if (end > start && end - start >= valSz) normalized.emplace_back(start, end);
+            if (end <= start) continue;
+            const uintptr_t remainder = start % alignment;
+            if (remainder != 0)
+            {
+                const uintptr_t adjustment = alignment - remainder;
+                if (start > std::numeric_limits<uintptr_t>::max() - adjustment) continue;
+                start += adjustment;
+            }
+            end -= end % alignment;
+            if (end - start >= alignment) normalized.emplace_back(start, end);
         }
-        std::sort(normalized.begin(), normalized.end(), [](const auto &a, const auto &b) { return a.first < b.first || (a.first == b.first && a.second < b.second); });
+
+        std::sort(normalized.begin(), normalized.end());
         size_t write = 0;
         for (const auto &[start, end] : normalized)
         {
-            if (write == 0 || start >= normalized[write - 1].second) normalized[write++] = {start, end};
-            else if (end > normalized[write - 1].second) normalized[write - 1].second = end;
+            if (write == 0 || start > normalized[write - 1].second) normalized[write++] = {start, end};
+            else normalized[write - 1].second = std::max(normalized[write - 1].second, end);
         }
         normalized.resize(write);
-
-        size_t totalBits = 0;
-        regions_.reserve(normalized.size());
-        for (const auto &[start, end] : normalized)
-        {
-            const size_t bits = (end - start) / valSz;
-            if (bits > std::numeric_limits<size_t>::max() - totalBits)
-            {
-                regions_.clear();
-                valueSize_ = 0;
-                return false;
-            }
-            regions_.push_back({start, end, totalBits, bits});
-            totalBits += bits;
-        }
-        if (!totalBits || totalBits > std::numeric_limits<size_t>::max() / sizeof(std::uint64_t))
-        {
-            regions_.clear();
-            valueSize_ = 0;
-            return false;
-        }
-
-        if (!bitmap_.init(totalBits, allSet))
-        {
-            regions_.clear();
-            valueSize_ = 0;
-            return false;
-        }
-
-        size_t valBytes = totalBits * sizeof(std::uint64_t);
-        if (!values_.allocate(valBytes))
-        {
-            bitmap_.release();
-            regions_.clear();
-            valueSize_ = 0;
-            return false;
-        }
-        values_.advise(MADV_SEQUENTIAL);
-
-        setBits_ = allSet ? totalBits : 0;
-        return true;
+        return normalized;
     }
 
-    std::uint64_t *valuesMap() noexcept
+    static size_t regionBytes(const std::vector<std::pair<uintptr_t, uintptr_t>> &regions)
     {
-        return values_.as<std::uint64_t>();
+        size_t total = 0;
+        for (const auto &[start, end] : regions)
+        {
+            const size_t bytes = static_cast<size_t>(end - start);
+            total = bytes > std::numeric_limits<size_t>::max() - total ? std::numeric_limits<size_t>::max() : total + bytes;
+        }
+        return total;
     }
-    const std::uint64_t *valuesMap() const noexcept
+
+    void updateByteProgress(size_t completed, size_t total)
     {
-        return values_.as<const std::uint64_t>();
+        if (total != 0) progress_ = std::min(1.0f, static_cast<float>(completed) / static_cast<float>(total));
     }
 
     template <typename T> static std::uint64_t storeValue(T value) noexcept
@@ -1363,478 +1231,441 @@ private:
         size_t done = 0;
         while (done < size)
         {
-            const int result = dr->Read(addr + done, buf + done, size - done);
-            if (result <= 0) break;
-            const size_t read = std::min(static_cast<size_t>(result), size - done);
-            if (read == 0) break;
-            done += read;
+            const size_t pageOffset = static_cast<size_t>((addr + done) % Config::Constants::SCAN_BUFFER);
+            const size_t request = std::min(size - done, Config::Constants::SCAN_BUFFER - pageOffset);
+            if (dr->Read(addr + done, buf + done, request) != static_cast<int>(request)) break;
+            done += request;
         }
         return done;
     }
 
-    static bool readStoredValue(uintptr_t addr, Types::DataType dataType, std::uint64_t &stored)
+    static bool scanReadExact(uintptr_t addr, void *buffer, size_t size)
     {
-        return MemUtils::DispatchType(dataType,
-                                      [&]<typename T>()
-                                      {
-                                          T value{};
-                                          if (scanRead(addr, reinterpret_cast<uint8_t *>(&value), sizeof(T)) != sizeof(T)) return false;
-                                          if constexpr (std::is_floating_point_v<T>)
-                                          {
-                                              if (!MemUtils::IsValidFloat(value)) return false;
-                                          }
-                                          stored = storeValue(value);
-                                          return true;
-                                      });
+        return scanRead(addr, static_cast<uint8_t *>(buffer), size) == size;
     }
 
-    // 并行线程分配
-    unsigned threadCount() const
+    void clearStorage()
     {
-        return std::max(1u, static_cast<unsigned>(std::min(Config::CpuThreadPool().get_thread_count(), regions_.size())));
+        candidates_.reset();
+        snapshot_.reset();
+        snapshotSpans_.clear();
+        candidateCount_ = 0;
+        snapshotCount_ = 0;
+        liveCount_ = 0;
+        valueSize_ = 0;
     }
 
-    //  统一的区域遍历核心
-    template <typename ProcessFn>
-    // 并发遍历内存区域执行扫描逻辑。
-    void parallelRegionScan(ProcessFn &&process)
+    void publishCandidates(FilePtr candidates, size_t count, Types::FuzzyMode mode)
     {
-        unsigned tc = threadCount();
-        size_t chunk = (regions_.size() + tc - 1) / tc;
-        std::atomic<size_t> done{0};
-
-        std::vector<std::future<void>> futs;
-        futs.reserve(tc);
-
-        for (unsigned t = 0; t < tc; ++t)
-        {
-            futs.push_back(Config::CpuThreadPool().submit_task(
-                [&, t, chunk]
-                {
-                    size_t end = std::min(t * chunk + chunk, regions_.size());
-                    std::vector<uint8_t> buf(Config::Constants::SCAN_BUFFER);
-
-                    for (size_t ri = t * chunk; ri < end && Config::g_Running; ++ri)
-                    {
-                        auto &reg = regions_[ri];
-                        for (uintptr_t addr = reg.start; addr < reg.end;)
-                        {
-                            size_t sz = std::min(static_cast<size_t>(reg.end - addr), Config::Constants::SCAN_BUFFER);
-                            const size_t readBytes = scanRead(addr, buf.data(), sz);
-                            size_t advance = sz;
-                            if (readBytes < sz)
-                            {
-                                advance = (readBytes / valueSize_) * valueSize_;
-                                if (advance == 0) advance = std::min(valueSize_, sz);
-                            }
-                            process(reg, buf.data(), addr, readBytes, advance);
-                            addr += advance;
-                        }
-                        if ((done.fetch_add(1) & 0x3F) == 0) progress_ = static_cast<float>(done) / regions_.size();
-                    }
-                }));
-        }
-        for (auto &f : futs) f.get();
-    }
-
-    // 清除不可读范围对应的位标记。
-    template <typename T>
-
-    void clearUnreadableBits(const Region &reg, uintptr_t addr, size_t from, size_t to)
-    {
-        for (size_t off = from; off + sizeof(T) <= to; off += sizeof(T))
-        {
-            size_t gb = reg.bitOffset + (addr + off - reg.start) / sizeof(T);
-            if (gb < bitmap_.totalBits() && bitmap_.get(gb)) bitmap_.setOff(gb);
-        }
-    }
-
-    // ================================================================
-    //  首扫 Unknown — bitmap 全 1 + 记录旧值
-    // ================================================================
-    template <typename T> void scanFirstUnknown(Types::DataType dataType)
-    {
-        auto scanRegs = dr->GetScanRegions();
-
-        {
-            std::unique_lock lock(mutex_);
-            addedList_.clear();
-            dataType_ = dataType;
-            scanMode_ = Types::FuzzyMode::Unknown;
-            stringScan_ = false;
-            if (!initStorage(sizeof(T), scanRegs, true)) return;
-        }
-
-        parallelRegionScan(
-            [this](const Region &reg, uint8_t *buf, uintptr_t addr, size_t readBytes, size_t sz)
-            {
-                if (readBytes == 0)
-                {
-                    clearUnreadableBits<T>(reg, addr, 0, sz);
-                    return;
-                }
-
-                // 有效数据部分：记录值，过滤无效浮点
-                for (size_t off = 0; off + sizeof(T) <= readBytes; off += sizeof(T))
-                {
-                    T value;
-                    std::memcpy(&value, buf + off, sizeof(T));
-                    size_t gb = reg.bitOffset + (addr + off - reg.start) / sizeof(T);
-
-                    if constexpr (std::is_floating_point_v<T>)
-                    {
-                        if (!MemUtils::IsValidFloat(value))
-                        {
-                            if (gb < bitmap_.totalBits() && bitmap_.get(gb)) bitmap_.setOff(gb);
-                            continue;
-                        }
-                    }
-                    valuesMap()[gb] = storeValue(value);
-                }
-
-                // 不完整尾部：清除位
-                size_t alignedEnd = readBytes & ~(sizeof(T) - 1);
-                clearUnreadableBits<T>(reg, addr, alignedEnd, sz);
-            });
-
         std::unique_lock lock(mutex_);
-        setBits_ = bitmap_.popcount();
+        candidates_ = std::move(candidates);
+        snapshot_.reset();
+        snapshotSpans_.clear();
+        candidateCount_ = count;
+        snapshotCount_ = 0;
+        liveCount_ = count;
+        scanMode_ = mode;
     }
 
-    // ================================================================
-    //  首扫有目标值
-    // ================================================================
-    template <typename T> void scanFirst(T target, Types::DataType dataType, Types::FuzzyMode mode, T rangeMax)
+    void publishSnapshot(FilePtr snapshot, std::vector<SnapshotSpan> spans, size_t count)
     {
-        auto scanRegs = dr->GetScanRegions();
-
-        {
-            std::unique_lock lock(mutex_);
-            addedList_.clear();
-            dataType_ = dataType;
-            scanMode_ = mode;
-            stringScan_ = false;
-            if (!initStorage(sizeof(T), scanRegs, false)) return;
-        }
-
-        // 每线程收集结果
-        unsigned tc = threadCount();
-        size_t chunk = (regions_.size() + tc - 1) / tc;
-        std::atomic<size_t> done{0};
-
-        struct HitEntry
-        {
-            uintptr_t addr;
-            std::uint64_t val;
-        };
-        std::vector<std::deque<HitEntry>> threadHits(tc);
-
-        std::vector<std::future<void>> futs;
-        futs.reserve(tc);
-
-        for (unsigned t = 0; t < tc; ++t)
-        {
-            futs.push_back(Config::CpuThreadPool().submit_task(
-                [&, t, rangeMax, chunk]
-                {
-                    // 使用 scanRegs 而不是 regions_ 进行遍历
-                    auto &myHits = threadHits[t];
-                    std::vector<uint8_t> buf(Config::Constants::SCAN_BUFFER);
-                    size_t end = std::min(t * chunk + chunk, regions_.size());
-
-                    for (size_t ri = t * chunk; ri < end && Config::g_Running; ++ri)
-                    {
-                        auto &reg = regions_[ri];
-                        for (uintptr_t addr = reg.start; addr < reg.end;)
-                        {
-                            size_t sz = std::min(static_cast<size_t>(reg.end - addr), Config::Constants::SCAN_BUFFER);
-                            const size_t usable = scanRead(addr, buf.data(), sz);
-                            for (size_t off = 0; off + sizeof(T) <= usable; off += sizeof(T))
-                            {
-                                T value;
-                                std::memcpy(&value, buf.data() + off, sizeof(T));
-
-                                if constexpr (std::is_floating_point_v<T>)
-                                {
-                                    if (!MemUtils::IsValidFloat(value)) continue;
-                                }
-
-                                if (MemUtils::Compare(value, target, mode, T{}, rangeMax))
-                                {
-                                    myHits.push_back({addr + off, storeValue(value)});
-                                }
-                            }
-                            size_t advance = sz;
-                            if (usable < sz)
-                            {
-                                advance = (usable / sizeof(T)) * sizeof(T);
-                                if (advance == 0) advance = std::min(sizeof(T), sz);
-                            }
-                            addr += advance;
-                        }
-                        if ((done.fetch_add(1) & 0x7F) == 0) progress_ = static_cast<float>(done) / regions_.size();
-                    }
-                }));
-        }
-        for (auto &f : futs) f.get();
-
-        // 合并结果到位图
         std::unique_lock lock(mutex_);
-        size_t actualSet = 0;
-        for (auto &hits : threadHits)
+        candidates_.reset();
+        snapshot_ = std::move(snapshot);
+        snapshotSpans_ = std::move(spans);
+        candidateCount_ = 0;
+        snapshotCount_ = count;
+        liveCount_ = count;
+        scanMode_ = Types::FuzzyMode::Unknown;
+    }
+
+    template <typename Process> void scanMemoryRegions(const std::vector<std::pair<uintptr_t, uintptr_t>> &regions, Process &&process)
+    {
+        const size_t totalBytes = regionBytes(regions);
+        size_t completedBytes = 0;
+        std::vector<uint8_t> batch(Config::Constants::BATCH_SIZE);
+        std::vector<uint8_t> page(Config::Constants::SCAN_BUFFER);
+
+        for (const auto &[start, end] : regions)
         {
-            for (auto &[addr, val] : hits)
+            for (uintptr_t address = start; address < end && Config::g_Running;)
             {
-                size_t gb = addrToBit(addr);
-                if (gb != SIZE_MAX)
+                const size_t request = std::min(static_cast<size_t>(end - address), batch.size());
+                if (dr->Read(address, batch.data(), request) == static_cast<int>(request))
                 {
-                    if (!bitmap_.get(gb))
-                    {
-                        bitmap_.setOn(gb);
-                        ++actualSet;
-                    }
-                    valuesMap()[gb] = val;
+                    process(address, batch.data(), request);
                 }
+                else
+                {
+                    for (size_t offset = 0; offset < request;)
+                    {
+                        const size_t pageOffset = static_cast<size_t>((address + offset) % Config::Constants::SCAN_BUFFER);
+                        const size_t chunk = std::min(request - offset, Config::Constants::SCAN_BUFFER - pageOffset);
+                        if (scanReadExact(address + offset, page.data(), chunk)) process(address + offset, page.data(), chunk);
+                        offset += chunk;
+                    }
+                }
+                address += request;
+                completedBytes += request;
+                updateByteProgress(completedBytes, totalBytes);
             }
         }
-        setBits_ = actualSet;
     }
 
-    // ================================================================
-    //  二次扫描
-    // ================================================================
-    template <typename T> void scanNext(T target, Types::FuzzyMode mode, T rangeMax)
+    static void appendCandidate(FILE *file, std::vector<CandidateRecord> &buffer, CandidateRecord record)
     {
-        std::atomic<size_t> survived{0};
+        buffer.push_back(record);
+        if (buffer.size() >= 4096)
+        {
+            writeCandidates(file, buffer);
+            buffer.clear();
+        }
+    }
 
-        parallelRegionScan(
-            [&, rangeMax](const Region &reg, uint8_t *buf, uintptr_t addr, size_t readBytes, size_t sz)
-            {
-                if (readBytes == 0)
-                {
-                    clearUnreadableBits<T>(reg, addr, 0, sz);
-                    return;
-                }
+    static void finishCandidates(FILE *file, std::vector<CandidateRecord> &buffer)
+    {
+        writeCandidates(file, buffer);
+        buffer.clear();
+        finishFile(file);
+    }
 
-                // 有效数据部分
-                for (size_t off = 0; off + sizeof(T) <= readBytes; off += sizeof(T))
-                {
-                    size_t gb = reg.bitOffset + (addr + off - reg.start) / sizeof(T);
-                    if (!bitmap_.get(gb)) continue;
+    static void appendSnapshotSpan(std::vector<SnapshotSpan> &spans, uintptr_t address, std::uint64_t fileOffset, size_t size)
+    {
+        if (!spans.empty() && spans.back().address + spans.back().size == address && spans.back().fileOffset + spans.back().size == fileOffset)
+        {
+            spans.back().size += size;
+            return;
+        }
+        spans.push_back({address, fileOffset, size});
+    }
 
-                    T value;
-                    std::memcpy(&value, buf + off, sizeof(T));
+    template <typename T> static size_t countValidValues(const uint8_t *buffer, size_t size)
+    {
+        if constexpr (!std::is_floating_point_v<T>) return size / sizeof(T);
 
-                    // 浮点值/旧值有效性检查
-                    if constexpr (std::is_floating_point_v<T>)
-                    {
-                        if (!MemUtils::IsValidFloat(value))
-                        {
-                            bitmap_.setOff(gb);
-                            continue;
-                        }
-                        const T oldVal = loadValue<T>(valuesMap()[gb]);
-                        if (std::isnan(oldVal) || std::isinf(oldVal))
-                        {
-                            bitmap_.setOff(gb);
-                            continue;
-                        }
-                    }
-
-                    const T oldVal = loadValue<T>(valuesMap()[gb]);
-                    if (MemUtils::Compare(value, target, mode, oldVal, rangeMax))
-                    {
-                        valuesMap()[gb] = storeValue(value);
-                        survived.fetch_add(1, std::memory_order_relaxed);
-                    }
-                    else
-                    {
-                        bitmap_.setOff(gb);
-                    }
-                }
-
-                // 不完整尾部
-                size_t alignedEnd = readBytes & ~(sizeof(T) - 1);
-                clearUnreadableBits<T>(reg, addr, alignedEnd, sz);
-            });
-
-        std::vector<ExplicitResult> explicitSurvivors;
-        explicitSurvivors.reserve(addedList_.size());
-        for (const auto &entry : addedList_)
+        size_t count = 0;
+        for (size_t offset = 0; offset + sizeof(T) <= size; offset += sizeof(T))
         {
             T value{};
-            if (scanRead(entry.address, reinterpret_cast<uint8_t *>(&value), sizeof(T)) != sizeof(T)) continue;
-            if constexpr (std::is_floating_point_v<T>)
-            {
-                if (!MemUtils::IsValidFloat(value)) continue;
-            }
+            std::memcpy(&value, buffer + offset, sizeof(value));
+            if (MemUtils::IsValidFloat(value)) ++count;
+        }
+        return count;
+    }
 
-            const T oldValue = loadValue<T>(entry.value);
-            if (MemUtils::Compare(value, target, mode, oldValue, rangeMax)) explicitSurvivors.push_back({entry.address, storeValue(value)});
+    template <typename T> void scanFirstUnknown(Types::DataType dataType)
+    {
+        auto regions = normalizeScanRegions(dr->GetScanRegions(), sizeof(T));
+        auto snapshot = createCandidateFile();
+        std::vector<SnapshotSpan> spans;
+        std::uint64_t fileOffset = 0;
+        size_t count = 0;
+
+        scanMemoryRegions(
+            regions,
+            [&](uintptr_t address, const uint8_t *buffer, size_t size)
+            {
+                const size_t usable = size / sizeof(T) * sizeof(T);
+                if (usable == 0) return;
+                if (fwrite(buffer, 1, usable, snapshot.get()) != usable) throw std::runtime_error("写入 Unknown 快照失败");
+                appendSnapshotSpan(spans, address, fileOffset, usable);
+                fileOffset += usable;
+                count += countValidValues<T>(buffer, usable);
+                liveCount_ = count;
+            });
+
+        finishFile(snapshot.get());
+        publishSnapshot(std::move(snapshot), std::move(spans), count);
+    }
+
+    template <typename T> void scanFirst(T target, Types::DataType dataType, Types::FuzzyMode mode, T rangeMax)
+    {
+        auto regions = normalizeScanRegions(dr->GetScanRegions(), sizeof(T));
+        auto output = createCandidateFile();
+        std::vector<CandidateRecord> outputBuffer;
+        outputBuffer.reserve(4096);
+        size_t count = 0;
+
+        scanMemoryRegions(
+            regions,
+            [&](uintptr_t address, const uint8_t *buffer, size_t size)
+            {
+                for (size_t offset = 0; offset + sizeof(T) <= size; offset += sizeof(T))
+                {
+                    T value{};
+                    std::memcpy(&value, buffer + offset, sizeof(value));
+                    if constexpr (std::is_floating_point_v<T>)
+                    {
+                        if (!MemUtils::IsValidFloat(value)) continue;
+                    }
+                    if (!MemUtils::Compare(value, target, mode, T{}, rangeMax)) continue;
+                    appendCandidate(output.get(), outputBuffer, {address + offset, storeValue(value)});
+                    liveCount_ = ++count;
+                }
+            });
+
+        finishCandidates(output.get(), outputBuffer);
+        publishCandidates(std::move(output), count, mode);
+    }
+
+    template <typename T> void scanSnapshot(T target, Types::FuzzyMode mode, T rangeMax)
+    {
+        auto output = createCandidateFile();
+        std::vector<CandidateRecord> outputBuffer;
+        outputBuffer.reserve(4096);
+        std::vector<uint8_t> oldValues(Config::Constants::BATCH_SIZE);
+        std::vector<uint8_t> currentValues(Config::Constants::BATCH_SIZE);
+        const size_t totalBytes = std::accumulate(snapshotSpans_.begin(), snapshotSpans_.end(), size_t{}, [](size_t total, const SnapshotSpan &span) { return total + span.size; });
+        size_t completedBytes = 0;
+        size_t count = 0;
+
+        auto compareBlock = [&](uintptr_t address, const uint8_t *oldBuffer, const uint8_t *currentBuffer, size_t size)
+        {
+            for (size_t offset = 0; offset + sizeof(T) <= size; offset += sizeof(T))
+            {
+                T oldValue{};
+                T currentValue{};
+                std::memcpy(&oldValue, oldBuffer + offset, sizeof(oldValue));
+                std::memcpy(&currentValue, currentBuffer + offset, sizeof(currentValue));
+                if constexpr (std::is_floating_point_v<T>)
+                {
+                    if (!MemUtils::IsValidFloat(oldValue) || !MemUtils::IsValidFloat(currentValue)) continue;
+                }
+                if (!MemUtils::Compare(currentValue, target, mode, oldValue, rangeMax)) continue;
+                appendCandidate(output.get(), outputBuffer, {address + offset, storeValue(currentValue)});
+                liveCount_ = ++count;
+            }
+        };
+
+        liveCount_ = 0;
+        for (const auto &span : snapshotSpans_)
+        {
+            for (size_t offset = 0; offset < span.size && Config::g_Running;)
+            {
+                const size_t request = std::min(span.size - offset, oldValues.size());
+                if (!readExactAt(snapshot_.get(), oldValues.data(), request, span.fileOffset + offset)) throw std::runtime_error("读取 Unknown 快照失败");
+                const uintptr_t address = span.address + offset;
+                if (dr->Read(address, currentValues.data(), request) == static_cast<int>(request))
+                {
+                    compareBlock(address, oldValues.data(), currentValues.data(), request);
+                }
+                else
+                {
+                    for (size_t pageOffset = 0; pageOffset < request;)
+                    {
+                        const size_t inPage = static_cast<size_t>((address + pageOffset) % Config::Constants::SCAN_BUFFER);
+                        const size_t chunk = std::min(request - pageOffset, Config::Constants::SCAN_BUFFER - inPage);
+                        if (scanReadExact(address + pageOffset, currentValues.data() + pageOffset, chunk)) compareBlock(address + pageOffset, oldValues.data() + pageOffset, currentValues.data() + pageOffset, chunk);
+                        pageOffset += chunk;
+                    }
+                }
+                offset += request;
+                completedBytes += request;
+                updateByteProgress(completedBytes, totalBytes);
+            }
         }
 
-        std::unique_lock lock(mutex_);
-        setBits_ = survived.load();
-        addedList_.swap(explicitSurvivors);
-        scanMode_ = mode;
+        finishCandidates(output.get(), outputBuffer);
+        publishCandidates(std::move(output), count, mode);
+    }
+
+    template <typename T> void scanCandidates(T target, Types::FuzzyMode mode, T rangeMax)
+    {
+        auto output = createCandidateFile();
+        std::vector<CandidateRecord> outputBuffer;
+        outputBuffer.reserve(4096);
+        std::vector<CandidateRecord> pageCandidates;
+        std::array<uint8_t, Config::Constants::SCAN_BUFFER> page{};
+        size_t processed = 0;
+        size_t count = 0;
+
+        auto processPage = [&](uintptr_t pageBase)
+        {
+            if (pageCandidates.empty()) return;
+            const bool pageReadable = scanReadExact(pageBase, page.data(), page.size());
+            for (const auto &record : pageCandidates)
+            {
+                T value{};
+                const size_t offset = static_cast<size_t>(record.address - pageBase);
+                const bool readable = offset + sizeof(T) <= page.size() && pageReadable ? (std::memcpy(&value, page.data() + offset, sizeof(value)), true) : scanReadExact(record.address, &value, sizeof(value));
+                bool valid = readable;
+                if constexpr (std::is_floating_point_v<T>)
+                {
+                    valid = valid && MemUtils::IsValidFloat(value);
+                }
+                if (valid && MemUtils::Compare(value, target, mode, loadValue<T>(record.value), rangeMax))
+                {
+                    appendCandidate(output.get(), outputBuffer, {record.address, storeValue(value)});
+                    liveCount_ = ++count;
+                }
+                ++processed;
+            }
+            pageCandidates.clear();
+            updateByteProgress(processed, candidateCount_);
+        };
+
+        liveCount_ = 0;
+        rewind(candidates_.get());
+        CandidateRecord record{};
+        uintptr_t pageBase = 0;
+        while (Config::g_Running && fread(&record, sizeof(record), 1, candidates_.get()) == 1)
+        {
+            const uintptr_t recordPage = record.address & ~static_cast<uintptr_t>(Config::Constants::SCAN_BUFFER - 1);
+            if (!pageCandidates.empty() && recordPage != pageBase) processPage(pageBase);
+            if (pageCandidates.empty()) pageBase = recordPage;
+            pageCandidates.push_back(record);
+        }
+        if (ferror(candidates_.get()) != 0) throw std::runtime_error("读取扫描候选临时文件失败");
+        processPage(pageBase);
+
+        finishCandidates(output.get(), outputBuffer);
+        publishCandidates(std::move(output), count, mode);
+    }
+
+    template <typename T> void scanNext(T target, Types::FuzzyMode mode, T rangeMax)
+    {
+        if (snapshot_) scanSnapshot(target, mode, rangeMax);
+        else scanCandidates(target, mode, rangeMax);
     }
 
     void scanFirstString(const std::string &needle)
     {
-        if (needle.empty() || needle.size() > Config::Constants::SCAN_BUFFER) return;
+        if (needle.empty()) return;
+        auto regions = normalizeScanRegions(dr->GetScanRegions(), 1);
+        auto output = createCandidateFile();
+        std::vector<CandidateRecord> outputBuffer;
+        outputBuffer.reserve(4096);
+        std::vector<uint8_t> carry;
+        std::vector<uint8_t> combined;
+        uintptr_t previousEnd = 0;
+        size_t count = 0;
 
-        {
-            std::unique_lock lock(mutex_);
-            bitmap_.release();
-            values_.release();
-            regions_.clear();
-            setBits_ = 0;
-            valueSize_ = 0;
-            addedList_.clear();
-            dataType_.reset();
-            scanMode_ = Types::FuzzyMode::String;
-            stringScan_ = true;
-        }
-
-        auto scanRegs = dr->GetScanRegions();
-        std::erase_if(scanRegs, [&](const auto &region) { return region.second <= region.first || region.second - region.first < needle.size(); });
-        std::sort(scanRegs.begin(), scanRegs.end(), [](const auto &a, const auto &b) { return a.first < b.first || (a.first == b.first && a.second < b.second); });
-        size_t write = 0;
-        for (const auto &[start, end] : scanRegs)
-        {
-            if (write == 0 || start >= scanRegs[write - 1].second) scanRegs[write++] = {start, end};
-            else if (end > scanRegs[write - 1].second) scanRegs[write - 1].second = end;
-        }
-        scanRegs.resize(write);
-        if (scanRegs.empty()) return;
-
-        const size_t patLen = needle.size();
-
-        unsigned tc = std::max(1u, static_cast<unsigned>(std::min(Config::CpuThreadPool().get_thread_count(), scanRegs.size())));
-        size_t chunk = (scanRegs.size() + tc - 1) / tc;
-        std::atomic<size_t> done{0};
-
-        std::vector<std::deque<uintptr_t>> threadHits(tc);
-        std::vector<std::future<void>> futs;
-        futs.reserve(tc);
-
-        const size_t step = (Config::Constants::SCAN_BUFFER > patLen) ? (Config::Constants::SCAN_BUFFER - patLen + 1) : 1;
-
-        for (unsigned t = 0; t < tc; ++t)
-        {
-            futs.push_back(Config::CpuThreadPool().submit_task(
-                [&, t]
+        scanMemoryRegions(
+            regions,
+            [&](uintptr_t address, const uint8_t *buffer, size_t size)
+            {
+                if (address != previousEnd) carry.clear();
+                combined.clear();
+                combined.reserve(carry.size() + size);
+                combined.insert(combined.end(), carry.begin(), carry.end());
+                combined.insert(combined.end(), buffer, buffer + size);
+                const uintptr_t base = address - carry.size();
+                for (size_t offset = 0; offset + needle.size() <= combined.size(); ++offset)
                 {
-                    auto &myHits = threadHits[t];
-                    std::vector<uint8_t> buf(Config::Constants::SCAN_BUFFER);
-                    size_t end = std::min(t * chunk + chunk, scanRegs.size());
+                    if (std::memcmp(combined.data() + offset, needle.data(), needle.size()) != 0) continue;
+                    appendCandidate(output.get(), outputBuffer, {base + offset, 0});
+                    liveCount_ = ++count;
+                }
+                const size_t carrySize = std::min(needle.size() - 1, combined.size());
+                carry.assign(combined.end() - carrySize, combined.end());
+                previousEnd = address + size;
+            });
 
-                    for (size_t ri = t * chunk; ri < end && Config::g_Running; ++ri)
+        finishCandidates(output.get(), outputBuffer);
+        publishCandidates(std::move(output), count, Types::FuzzyMode::String);
+    }
+
+    size_t storedCount() const noexcept
+    {
+        return candidateCount_ + snapshotCount_;
+    }
+
+    template <typename T> void appendSnapshotPage(size_t start, size_t count, Results &results) const
+    {
+        std::vector<uint8_t> buffer(Config::Constants::BATCH_SIZE);
+        size_t skipped = 0;
+        for (const auto &span : snapshotSpans_)
+        {
+            for (size_t spanOffset = 0; spanOffset < span.size && results.size() < count;)
+            {
+                const size_t request = std::min(span.size - spanOffset, buffer.size());
+                if (!readExactAt(snapshot_.get(), buffer.data(), request, span.fileOffset + spanOffset)) return;
+                for (size_t offset = 0; offset + sizeof(T) <= request && results.size() < count; offset += sizeof(T))
+                {
+                    if constexpr (std::is_floating_point_v<T>)
                     {
-                        auto [start, finish] = scanRegs[ri];
-                        if (finish <= start || static_cast<size_t>(finish - start) < patLen)
-                        {
-                            if ((done.fetch_add(1) & 0x3F) == 0) progress_ = static_cast<float>(done) / scanRegs.size();
-                            continue;
-                        }
-
-                        for (uintptr_t addr = start; static_cast<size_t>(finish - addr) >= patLen;)
-                        {
-                            size_t readSize = std::min(static_cast<size_t>(finish - addr), Config::Constants::SCAN_BUFFER);
-                            const size_t usable = scanRead(addr, buf.data(), readSize);
-                            if (usable > 0)
-                            {
-                                if (usable >= patLen)
-                                {
-                                    size_t uniqueLimit = (addr + step < finish) ? std::min(step, usable) : usable;
-                                    for (size_t off = 0; off + patLen <= usable && off < uniqueLimit; ++off)
-                                    {
-                                        if (std::memcmp(buf.data() + off, needle.data(), patLen) == 0) myHits.push_back(addr + off);
-                                    }
-                                }
-                            }
-
-                            size_t advance = step;
-                            if (usable < readSize)
-                            {
-                                advance = usable >= patLen ? usable - patLen + 1 : usable;
-                                if (advance == 0) advance = 1;
-                            }
-                            if (advance == 0 || advance >= static_cast<size_t>(finish - addr)) break;
-                            addr += advance;
-                        }
-
-                        if ((done.fetch_add(1) & 0x3F) == 0) progress_ = static_cast<float>(done) / scanRegs.size();
+                        T value{};
+                        std::memcpy(&value, buffer.data() + offset, sizeof(value));
+                        if (!MemUtils::IsValidFloat(value)) continue;
                     }
-                }));
+                    if (skipped++ < start) continue;
+                    results.push_back(span.address + spanOffset + offset);
+                }
+                spanOffset += request;
+            }
+            if (results.size() >= count) break;
+        }
+    }
+
+    void appendResultPage(size_t start, size_t count, Results &results) const
+    {
+        if (count == 0 || start >= storedCount()) return;
+        results.reserve(count);
+        if (snapshot_ && dataType_)
+        {
+            MemUtils::DispatchType(*dataType_, [&]<typename T> { appendSnapshotPage<T>(start, count, results); });
+            return;
         }
 
-        for (auto &f : futs) f.get();
-
-        auto merged = mergeUniqueAddresses(threadHits);
-
-        std::unique_lock lock(mutex_);
-        addedList_.clear();
-        addedList_.reserve(merged.size());
-        for (uintptr_t address : merged) addedList_.push_back({address, 0});
-        setBits_ = 0;
-        scanMode_ = Types::FuzzyMode::String;
-        stringScan_ = true;
+        const size_t end = std::min(candidateCount_, start + count);
+        std::vector<CandidateRecord> records(end - start);
+        if (records.empty() || !readExactAt(candidates_.get(), records.data(), records.size() * sizeof(CandidateRecord), start * sizeof(CandidateRecord))) return;
+        for (const auto &record : records)
+        {
+            results.push_back(record.address);
+        }
     }
 
     void scanNextString(const std::string &needle)
     {
-        if (needle.empty()) return;
+        auto output = createCandidateFile();
+        std::vector<CandidateRecord> outputBuffer;
+        outputBuffer.reserve(4096);
+        std::vector<CandidateRecord> pageCandidates;
+        std::vector<uint8_t> window(Config::Constants::SCAN_BUFFER + needle.size() - 1);
+        size_t processed = 0;
+        size_t count = 0;
 
-        std::vector<uintptr_t> current;
+        auto processPage = [&](uintptr_t pageBase)
         {
-            std::shared_lock lock(mutex_);
-            current.reserve(addedList_.size());
-            for (const auto &entry : addedList_) current.push_back(entry.address);
-        }
-        if (current.empty()) return;
-
-        const size_t patLen = needle.size();
-        unsigned tc = std::max(1u, static_cast<unsigned>(std::min(Config::CpuThreadPool().get_thread_count(), current.size())));
-        size_t chunk = (current.size() + tc - 1) / tc;
-        std::atomic<size_t> done{0};
-
-        std::vector<std::vector<uintptr_t>> threadHits(tc);
-        std::vector<std::future<void>> futs;
-        futs.reserve(tc);
-
-        for (unsigned t = 0; t < tc; ++t)
-        {
-            futs.push_back(Config::CpuThreadPool().submit_task(
-                [&, t]
+            if (pageCandidates.empty()) return;
+            const bool windowReadable = scanReadExact(pageBase, window.data(), window.size());
+            for (const auto &record : pageCandidates)
+            {
+                const size_t offset = static_cast<size_t>(record.address - pageBase);
+                bool matches = offset + needle.size() <= window.size() && windowReadable && std::memcmp(window.data() + offset, needle.data(), needle.size()) == 0;
+                if (!windowReadable)
                 {
-                    auto &myHits = threadHits[t];
-                    std::vector<uint8_t> buf(patLen);
-                    size_t end = std::min(t * chunk + chunk, current.size());
-                    for (size_t i = t * chunk; i < end && Config::g_Running; ++i)
-                    {
-                        uintptr_t addr = current[i];
-                        const size_t readBytes = scanRead(addr, buf.data(), patLen);
-                        if (readBytes >= patLen && std::memcmp(buf.data(), needle.data(), patLen) == 0)
-                        {
-                            myHits.push_back(addr);
-                        }
+                    std::vector<uint8_t> value(needle.size());
+                    matches = scanReadExact(record.address, value.data(), value.size()) && std::memcmp(value.data(), needle.data(), needle.size()) == 0;
+                }
+                if (matches)
+                {
+                    appendCandidate(output.get(), outputBuffer, record);
+                    liveCount_ = ++count;
+                }
+                ++processed;
+            }
+            pageCandidates.clear();
+            updateByteProgress(processed, candidateCount_);
+        };
 
-                        size_t finished = done.fetch_add(1) + 1;
-                        if ((finished & 0x3FF) == 0) progress_ = static_cast<float>(finished) / current.size();
-                    }
-                }));
+        liveCount_ = 0;
+        rewind(candidates_.get());
+        CandidateRecord record{};
+        uintptr_t pageBase = 0;
+        while (Config::g_Running && fread(&record, sizeof(record), 1, candidates_.get()) == 1)
+        {
+            const uintptr_t recordPage = record.address & ~static_cast<uintptr_t>(Config::Constants::SCAN_BUFFER - 1);
+            if (!pageCandidates.empty() && recordPage != pageBase) processPage(pageBase);
+            if (pageCandidates.empty()) pageBase = recordPage;
+            pageCandidates.push_back(record);
         }
-        for (auto &f : futs) f.get();
+        if (ferror(candidates_.get()) != 0) throw std::runtime_error("读取字符串候选临时文件失败");
+        processPage(pageBase);
 
-        auto merged = mergeUniqueAddresses(threadHits);
-
-        std::unique_lock lock(mutex_);
-        addedList_.clear();
-        addedList_.reserve(merged.size());
-        for (uintptr_t address : merged) addedList_.push_back({address, 0});
-        setBits_ = 0;
-        scanMode_ = Types::FuzzyMode::String;
+        finishCandidates(output.get(), outputBuffer);
+        publishCandidates(std::move(output), count, Types::FuzzyMode::String);
     }
 
     template <typename T> void runScan(T target, Types::DataType dataType, Types::FuzzyMode mode, bool isFirst, T rangeMax)
@@ -1842,15 +1673,27 @@ private:
         std::lock_guard operationLock(operationMutex_);
         ScanRunGuard guard{scanning_, progress_};
         progress_ = 0.0f;
-
-        if (isFirst)
+        try
         {
-            if (mode == Types::FuzzyMode::Unknown) scanFirstUnknown<T>(dataType);
-            else scanFirst<T>(target, dataType, mode, rangeMax);
+            if (isFirst)
+            {
+                if (mode == Types::FuzzyMode::Unknown) scanFirstUnknown<T>(dataType);
+                else scanFirst<T>(target, dataType, mode, rangeMax);
+            }
+            else
+            {
+                scanNext<T>(target, mode, rangeMax);
+            }
         }
-        else
+        catch (const std::exception &error)
         {
-            scanNext<T>(target, mode, rangeMax);
+            liveCount_ = storedCount();
+            std::println(stderr, "内存扫描失败: {}", error.what());
+        }
+        catch (...)
+        {
+            liveCount_ = storedCount();
+            std::println(stderr, "内存扫描失败: 未知异常");
         }
     }
 
@@ -1859,8 +1702,21 @@ private:
         std::lock_guard operationLock(operationMutex_);
         ScanRunGuard guard{scanning_, progress_};
         progress_ = 0.0f;
-        if (isFirst) scanFirstString(needle);
-        else scanNextString(needle);
+        try
+        {
+            if (isFirst) scanFirstString(needle);
+            else scanNextString(needle);
+        }
+        catch (const std::exception &error)
+        {
+            liveCount_ = storedCount();
+            std::println(stderr, "字符串扫描失败: {}", error.what());
+        }
+        catch (...)
+        {
+            liveCount_ = storedCount();
+            std::println(stderr, "字符串扫描失败: 未知异常");
+        }
     }
 
 public:
@@ -1899,51 +1755,23 @@ public:
     State state() const
     {
         std::shared_lock lock(mutex_);
-        return {scanning_.load(), progress_.load(), setBits_ + addedList_.size(), dataType_, scanMode_, stringScan_};
+        return {scanning_.load(), progress_.load(), liveCount_.load(), dataType_, scanMode_, stringScan_};
     }
 
     PageState pageState(size_t start, size_t cnt) const
     {
+        if (scanning_)
+        {
+            std::shared_lock lock(mutex_);
+            return {{true, progress_.load(), liveCount_.load(), dataType_, scanMode_, stringScan_}, {}};
+        }
+
         std::lock_guard operationLock(operationMutex_);
         std::shared_lock lock(mutex_);
 
-        PageState snapshot{{scanning_.load(), progress_.load(), setBits_ + addedList_.size(), dataType_, scanMode_, stringScan_}, {}};
+        PageState snapshot{{scanning_.load(), progress_.load(), liveCount_.load(), dataType_, scanMode_, stringScan_}, {}};
         if (snapshot.state.scanning || snapshot.state.count == 0) return snapshot;
-
-        snapshot.results.reserve(cnt);
-        size_t skipped = 0;
-
-        for (const auto &entry : addedList_)
-        {
-            if (snapshot.results.size() >= cnt) break;
-            if (skipped++ < start) continue;
-            snapshot.results.push_back(entry.address);
-        }
-
-        if (snapshot.results.size() < cnt && bitmap_.valid() && setBits_ > 0)
-        {
-            for (const auto &reg : regions_)
-            {
-                if (snapshot.results.size() >= cnt) break;
-                size_t byteS = reg.bitOffset / 8;
-                size_t byteE = (reg.bitOffset + reg.bitCount + 7) / 8;
-
-                for (size_t b = byteS; b < byteE && snapshot.results.size() < cnt; ++b)
-                {
-                    uint8_t byte = bitmap_.data()[b];
-                    if (!byte) continue;
-
-                    for (int bit = 0; bit < 8 && snapshot.results.size() < cnt; ++bit)
-                    {
-                        if (!(byte & (1 << bit))) continue;
-                        size_t gb = b * 8 + bit;
-                        if (gb < reg.bitOffset || gb >= reg.bitOffset + reg.bitCount) continue;
-                        if (skipped++ < start) continue;
-                        snapshot.results.push_back(bitToAddr(gb));
-                    }
-                }
-            }
-        }
+        appendResultPage(start, cnt, snapshot.results);
         return snapshot;
     }
 
@@ -1968,8 +1796,7 @@ public:
     // 返回当前结果数量。
     size_t count() const
     {
-        std::shared_lock lock(mutex_);
-        return setBits_ + addedList_.size();
+        return liveCount_.load();
     }
 
     // 结果分页获取
@@ -1979,45 +1806,9 @@ public:
         std::lock_guard operationLock(operationMutex_);
         if (scanning_) return {};
         std::shared_lock lock(mutex_);
-        if (setBits_ == 0 && addedList_.empty()) return {};
-
-        Results r;
-        r.reserve(cnt);
-        size_t skipped = 0;
-
-        // 手动添加列表
-        for (size_t i = 0; i < addedList_.size() && r.size() < cnt; ++i)
-        {
-            if (skipped++ < start) continue;
-            r.push_back(addedList_[i].address);
-        }
-
-        // 位图结果
-        if (r.size() < cnt && bitmap_.valid() && setBits_ > 0)
-        {
-            for (const auto &reg : regions_)
-            {
-                if (r.size() >= cnt) break;
-                size_t byteS = reg.bitOffset / 8;
-                size_t byteE = (reg.bitOffset + reg.bitCount + 7) / 8;
-
-                for (size_t b = byteS; b < byteE && r.size() < cnt; ++b)
-                {
-                    uint8_t byte = bitmap_.data()[b];
-                    if (!byte) continue;
-
-                    for (int bit = 0; bit < 8 && r.size() < cnt; ++bit)
-                    {
-                        if (!(byte & (1 << bit))) continue;
-                        size_t gb = b * 8 + bit;
-                        if (gb < reg.bitOffset || gb >= reg.bitOffset + reg.bitCount) continue;
-                        if (skipped++ < start) continue;
-                        r.push_back(bitToAddr(gb));
-                    }
-                }
-            }
-        }
-        return r;
+        Results results;
+        appendResultPage(start, cnt, results);
+        return results;
     }
 
     // 清除
@@ -2027,135 +1818,10 @@ public:
         std::lock_guard operationLock(operationMutex_);
         if (scanning_) return;
         std::unique_lock lock(mutex_);
-        bitmap_.release();
-        values_.release();
-        regions_.clear();
-        addedList_.clear();
-        setBits_ = 0;
-        valueSize_ = 0;
+        clearStorage();
         dataType_.reset();
         scanMode_ = Types::FuzzyMode::Unknown;
         stringScan_ = false;
-    }
-
-    // 单项操作
-    void remove(uintptr_t addr)
-    {
-        if (scanning_) return;
-        std::lock_guard operationLock(operationMutex_);
-        if (scanning_) return;
-        std::unique_lock lock(mutex_);
-        auto it = std::find_if(addedList_.begin(), addedList_.end(), [addr](const ExplicitResult &entry) { return entry.address == addr; });
-        if (it != addedList_.end())
-        {
-            addedList_.erase(it);
-            return;
-        }
-
-        size_t gb = addrToBit(addr);
-        if (gb != SIZE_MAX && bitmap_.get(gb))
-        {
-            bitmap_.setOff(gb);
-            --setBits_;
-        }
-    }
-
-    // 向结果集合追加单个地址。
-    void add(uintptr_t addr)
-    {
-        if (scanning_) return;
-        std::lock_guard operationLock(operationMutex_);
-        if (scanning_) return;
-        std::unique_lock lock(mutex_);
-        size_t gb = addrToBit(addr);
-        if (gb != SIZE_MAX)
-        {
-            if (!bitmap_.get(gb))
-            {
-                if (!dataType_) return;
-                std::uint64_t stored = 0;
-                if (!readStoredValue(addr, *dataType_, stored)) return;
-                bitmap_.setOn(gb);
-                valuesMap()[gb] = stored;
-                ++setBits_;
-            }
-        }
-        else
-        {
-            if (std::ranges::none_of(addedList_, [addr](const ExplicitResult &entry) { return entry.address == addr; }))
-            {
-                std::uint64_t stored = 0;
-                if (stringScan_ || (dataType_ && readStoredValue(addr, *dataType_, stored))) addedList_.push_back({addr, stored});
-            }
-        }
-    }
-
-    void applyOffset(uintptr_t offset, bool negative)
-    {
-        if (scanning_) return;
-        std::lock_guard operationLock(operationMutex_);
-        if (scanning_) return;
-        std::unique_lock lock(mutex_);
-
-        auto apply = [offset, negative](uintptr_t address) -> std::optional<uintptr_t>
-        {
-            if (negative)
-            {
-                if (address < offset) return std::nullopt;
-                return address - offset;
-            }
-            if (address > std::numeric_limits<uintptr_t>::max() - offset) return std::nullopt;
-            return address + offset;
-        };
-
-        std::vector<uintptr_t> shifted;
-        shifted.reserve(setBits_ + addedList_.size());
-        for (const auto &entry : addedList_)
-        {
-            if (const auto address = apply(entry.address)) shifted.push_back(*address);
-        }
-
-        if (bitmap_.valid() && setBits_ > 0)
-        {
-            for (const auto &reg : regions_)
-            {
-                size_t byteS = reg.bitOffset / 8;
-                size_t byteE = (reg.bitOffset + reg.bitCount + 7) / 8;
-                for (size_t b = byteS; b < byteE; ++b)
-                {
-                    uint8_t byte = bitmap_.data()[b];
-                    if (!byte) continue;
-                    for (int bit = 0; bit < 8; ++bit)
-                    {
-                        if (!(byte & (1 << bit))) continue;
-                        size_t gb = b * 8 + bit;
-                        if (gb < reg.bitOffset || gb >= reg.bitOffset + reg.bitCount) continue;
-                        if (const auto address = apply(bitToAddr(gb))) shifted.push_back(*address);
-                    }
-                }
-            }
-        }
-
-        std::sort(shifted.begin(), shifted.end());
-        shifted.erase(std::unique(shifted.begin(), shifted.end()), shifted.end());
-
-        std::vector<ExplicitResult> replacement;
-        replacement.reserve(shifted.size());
-        for (uintptr_t address : shifted)
-        {
-            std::uint64_t stored = 0;
-            uint8_t readable = 0;
-            if ((stringScan_ && address != 0 && scanRead(address, &readable, sizeof(readable)) == sizeof(readable)) || (dataType_ && readStoredValue(address, *dataType_, stored)))
-            {
-                replacement.push_back({address, stored});
-            }
-        }
-
-        bitmap_.release();
-        values_.release();
-        regions_.clear();
-        addedList_.swap(replacement);
-        setBits_ = 0;
     }
 
     template <typename T> bool startAsync(pid_t pid, T target, Types::DataType dataType, Types::FuzzyMode mode, bool isFirst, T rangeMax = T{})
@@ -2179,7 +1845,7 @@ public:
         }
         else
         {
-            accepted = accepted && dataType_.has_value() && *dataType_ == dataType && !stringScan_ && mode != Types::FuzzyMode::Unknown;
+            accepted = accepted && dataType_.has_value() && *dataType_ == dataType && !stringScan_ && mode != Types::FuzzyMode::Unknown && (candidates_ || snapshot_);
         }
         if (!accepted)
         {
@@ -2189,16 +1855,13 @@ public:
 
         if (isFirst)
         {
-            bitmap_.release();
-            values_.release();
-            regions_.clear();
-            addedList_.clear();
-            setBits_ = 0;
-            valueSize_ = 0;
+            clearStorage();
         }
         dataType_ = dataType;
         scanMode_ = mode;
         stringScan_ = false;
+        valueSize_ = sizeof(T);
+        liveCount_ = 0;
 
         progress_ = 0.0f;
         lock.unlock();
@@ -2221,7 +1884,7 @@ public:
         std::unique_lock lock(mutex_);
         if (scanning_.exchange(true)) return false;
 
-        bool accepted = isFirst || stringScan_;
+        bool accepted = isFirst || (stringScan_ && candidates_);
         if (!accepted)
         {
             scanning_ = false;
@@ -2230,16 +1893,13 @@ public:
 
         if (isFirst)
         {
-            bitmap_.release();
-            values_.release();
-            regions_.clear();
-            addedList_.clear();
-            setBits_ = 0;
-            valueSize_ = 0;
+            clearStorage();
         }
         dataType_.reset();
         scanMode_ = Types::FuzzyMode::String;
         stringScan_ = true;
+        valueSize_ = 1;
+        liveCount_ = 0;
 
         progress_ = 0.0f;
         lock.unlock();
@@ -2259,15 +1919,39 @@ public:
 // ============================================================================
 // 锁定管理器
 // ============================================================================
-class LockManager
+class SavedAddressManager
 {
+public:
+    struct Item
+    {
+        uintptr_t address;
+        Types::DataType type;
+        Types::SavedValueKind kind;
+        size_t textLength;
+        std::string note;
+    };
+
+    struct ItemState
+    {
+        Item item;
+        std::string value;
+        bool locked;
+        std::string lockValue;
+    };
+
+    using Items = std::vector<Item>;
+    using ItemStates = std::vector<ItemState>;
+
 private:
     struct LockItem
     {
         uintptr_t addr;
         Types::DataType type;
+        Types::SavedValueKind kind;
         std::string value;
     };
+
+    Items items_;
     std::list<LockItem> locks_;
     mutable std::mutex mutex_;
     std::future<void> writeTask_;
@@ -2277,6 +1961,36 @@ private:
     auto find(uintptr_t addr)
     {
         return std::ranges::find_if(locks_, [addr](auto &i) { return i.addr == addr; });
+    }
+
+    auto findSaved(uintptr_t addr)
+    {
+        return std::ranges::find_if(items_, [addr](const auto &item) { return item.address == addr; });
+    }
+
+    static std::optional<uintptr_t> offsetAddress(uintptr_t address, uintptr_t offset, bool negative)
+    {
+        if (negative)
+        {
+            if (address < offset) return std::nullopt;
+            return address - offset;
+        }
+        if (address > std::numeric_limits<uintptr_t>::max() - offset) return std::nullopt;
+        return address + offset;
+    }
+
+    static std::string readValue(const Item &item)
+    {
+        if (item.kind == Types::SavedValueKind::Pointer) return MemUtils::ReadAsPointerString(item.address);
+        if (item.kind == Types::SavedValueKind::Text) return MemUtils::ReadAsText(item.address, item.textLength);
+        return MemUtils::ReadAsString(item.address, item.type);
+    }
+
+    static bool writeValue(uintptr_t addr, Types::DataType type, Types::SavedValueKind kind, std::string_view value)
+    {
+        if (kind == Types::SavedValueKind::Pointer) return MemUtils::WritePointerFromString(addr, value);
+        if (kind == Types::SavedValueKind::Text) return MemUtils::WriteText(addr, value);
+        return MemUtils::WriteFromString(addr, type, value);
     }
 
     // 后台循环写入被锁定的内存项。
@@ -2289,18 +2003,18 @@ private:
                 std::lock_guard lock(mutex_);
                 snapshot.assign(locks_.begin(), locks_.end());
             }
-            for (const auto &item : snapshot) MemUtils::WriteFromString(item.addr, item.type, item.value);
+            for (const auto &item : snapshot) writeValue(item.addr, item.type, item.kind, item.value);
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
     }
 
 public:
-    LockManager()
+    SavedAddressManager()
     {
         writeTask_ = Config::IoThreadPool().submit_task([this] { writeLoop(); });
     }
 
-    ~LockManager()
+    ~SavedAddressManager()
     {
         writeStop_.store(true, std::memory_order_release);
         if (writeTask_.valid()) writeTask_.wait();
@@ -2313,49 +2027,178 @@ public:
         return std::ranges::any_of(locks_, [addr](const auto &i) { return i.addr == addr; });
     }
 
-    // 切换目标地址的锁定状态。
-    void toggle(uintptr_t addr, Types::DataType type)
+    bool contains(uintptr_t addr) const
     {
         std::lock_guard lock(mutex_);
-        if (auto it = find(addr); it != locks_.end()) locks_.erase(it);
-        else locks_.push_back({addr, type, MemUtils::ReadAsString(addr, type)});
+        return std::ranges::any_of(items_, [addr](const auto &item) { return item.address == addr; });
     }
 
-    // 锁定指定地址并记录目标值。
-    void lock(uintptr_t addr, Types::DataType type, const std::string &value)
+    bool add(uintptr_t addr, Types::DataType type, Types::SavedValueKind kind = Types::SavedValueKind::Numeric, size_t textLength = 64)
     {
-        std::lock_guard lk(mutex_);
-        if (find(addr) == locks_.end()) locks_.push_back({addr, type, value});
+        std::lock_guard lock(mutex_);
+        if (!addr || findSaved(addr) != items_.end()) return false;
+        items_.push_back({addr, type, kind, std::clamp<size_t>(textLength, 1, 256), {}});
+        return true;
     }
 
-    // 取消指定地址的锁定。
-    void unlock(uintptr_t addr)
+    bool setNote(uintptr_t addr, std::string note)
     {
-        std::lock_guard lk(mutex_);
-        std::erase_if(locks_, [addr](const auto &item) { return item.addr == addr; });
+        std::lock_guard lock(mutex_);
+        const auto saved = findSaved(addr);
+        if (saved == items_.end()) return false;
+        if (note.size() > 256) note.resize(256);
+        saved->note = std::move(note);
+        return true;
     }
 
-    // 批量锁定一组地址。
-    void lockBatch(std::span<const uintptr_t> addrs, Types::DataType type)
+    bool remove(uintptr_t addr)
     {
-        std::lock_guard lk(mutex_);
-        for (auto addr : addrs)
+        std::lock_guard lock(mutex_);
+        const auto item = findSaved(addr);
+        if (item == items_.end()) return false;
+        items_.erase(item);
+        if (auto locked = find(addr); locked != locks_.end()) locks_.erase(locked);
+        return true;
+    }
+
+    bool write(uintptr_t addr, std::string_view value)
+    {
+        Item item{};
         {
-            if (find(addr) == locks_.end()) locks_.emplace_back(addr, type, MemUtils::ReadAsString(addr, type));
+            std::lock_guard lock(mutex_);
+            const auto saved = findSaved(addr);
+            if (saved == items_.end()) return false;
+            item = *saved;
+        }
+        const bool written = writeValue(item.address, item.type, item.kind, value);
+        if (!written) return false;
+        std::lock_guard lock(mutex_);
+        if (auto locked = find(addr); locked != locks_.end()) locked->value = std::string(value);
+        return true;
+    }
+
+    bool toggle(uintptr_t addr)
+    {
+        std::lock_guard lock(mutex_);
+        if (auto locked = find(addr); locked != locks_.end())
+        {
+            locks_.erase(locked);
+            return false;
+        }
+        const auto saved = findSaved(addr);
+        if (saved == items_.end()) return false;
+        locks_.push_back({addr, saved->type, saved->kind, readValue(*saved)});
+        return true;
+    }
+
+    bool setLocked(uintptr_t addr, bool locked, std::string_view value = {})
+    {
+        Item item{};
+        {
+            std::lock_guard lock(mutex_);
+            const auto saved = findSaved(addr);
+            if (saved == items_.end()) return false;
+            if (!locked)
+            {
+                std::erase_if(locks_, [addr](const auto &entry) { return entry.addr == addr; });
+                return true;
+            }
+            item = *saved;
+        }
+
+        std::string lockValue = value.empty() ? readValue(item) : std::string(value);
+        if (lockValue.empty() || lockValue == "??" || !writeValue(item.address, item.type, item.kind, lockValue)) return false;
+
+        std::lock_guard lock(mutex_);
+        if (findSaved(addr) == items_.end()) return false;
+        if (auto entry = find(addr); entry != locks_.end())
+        {
+            entry->type = item.type;
+            entry->kind = item.kind;
+            entry->value = std::move(lockValue);
+        }
+        else
+        {
+            locks_.push_back({addr, item.type, item.kind, std::move(lockValue)});
+        }
+        return true;
+    }
+
+    void togglePage(std::span<const Item> items, bool lockItems)
+    {
+        std::lock_guard lk(mutex_);
+        for (const auto &item : items)
+        {
+            if (lockItems)
+            {
+                const auto saved = findSaved(item.address);
+                if (saved != items_.end() && find(item.address) == locks_.end()) locks_.push_back({saved->address, saved->type, saved->kind, readValue(*saved)});
+            }
+            else
+            {
+                std::erase_if(locks_, [&](const auto &locked) { return locked.addr == item.address; });
+            }
         }
     }
 
-    // 批量取消锁定一组地址。
-    void unlockBatch(std::span<const uintptr_t> addrs)
+    void applyOffset(uintptr_t offset, bool negative)
     {
-        std::lock_guard lk(mutex_);
-        for (auto addr : addrs) std::erase_if(locks_, [addr](const auto &item) { return item.addr == addr; });
+        std::lock_guard lock(mutex_);
+        Items shifted;
+        shifted.reserve(items_.size());
+        std::list<LockItem> shiftedLocks;
+        for (const auto &item : items_)
+        {
+            const auto address = offsetAddress(item.address, offset, negative);
+            if (!address || std::ranges::any_of(shifted, [&](const auto &saved) { return saved.address == *address; })) continue;
+            Item shiftedItem = item;
+            shiftedItem.address = *address;
+            shifted.push_back(shiftedItem);
+            if (find(item.address) != locks_.end()) shiftedLocks.push_back({*address, item.type, item.kind, readValue(shiftedItem)});
+        }
+        items_.swap(shifted);
+        locks_.swap(shiftedLocks);
+    }
+
+    Items snapshot() const
+    {
+        std::lock_guard lock(mutex_);
+        return items_;
+    }
+
+    ItemStates snapshotStates() const
+    {
+        ItemStates states;
+        {
+            std::lock_guard lock(mutex_);
+            states.reserve(items_.size());
+            for (const auto &item : items_)
+            {
+                const auto locked = std::ranges::find_if(locks_, [&](const auto &entry) { return entry.addr == item.address; });
+                states.push_back({item, {}, locked != locks_.end(), locked != locks_.end() ? locked->value : std::string{}});
+            }
+        }
+        for (auto &state : states) state.value = readValue(state.item);
+        return states;
+    }
+
+    std::string value(const Item &item) const
+    {
+        return readValue(item);
+    }
+
+    void clearSaved()
+    {
+        std::lock_guard lock(mutex_);
+        items_.clear();
+        locks_.clear();
     }
 
     // 清空当前模块维护的全部数据。
     void clear()
     {
         std::lock_guard lk(mutex_);
+        items_.clear();
         locks_.clear();
     }
 };
@@ -4430,10 +4273,10 @@ namespace MemoryTool
         return pointerManager;
     }
 
-    inline LockManager &Locks()
+    inline SavedAddressManager &Saved()
     {
-        static LockManager locks;
-        return locks;
+        static SavedAddressManager saved;
+        return saved;
     }
 
     inline std::string &HwbpMode()
@@ -4499,7 +4342,7 @@ namespace MemoryTool
         else if (mode == "stepbp") dr->RemoveProcessStepbpRef();
 
         mode.clear();
-        Locks().clear();
+        Saved().clear();
         Scanner().clear();
         Viewer().clear();
         Pointer().clear();

@@ -15,6 +15,7 @@
 #include <asm/pgtable.h>
 #include <asm/tlbflush.h>
 
+#include "arm64_decode/arm64_decode.h"
 #include "export_fun.h"
 #include "lsdriver_log.h"
 
@@ -60,13 +61,6 @@ struct arm64_dbi_ctx
     int failed;
     int intra_page_fixed;
 };
-
-// ARM64 立即数字段按指定位宽做符号扩展。
-static inline s64 arm64_dbi_sign_extend(u64 val, int bits)
-{
-    s64 mask = 1LL << (bits - 1);
-    return (s64)((val ^ mask) - mask);
-}
 
 // 下面这一组只负责编码少量 DBI 需要生成的 ARM64 指令。
 static inline u32 arm64_dbi_enc_br(u32 rn)
@@ -296,12 +290,13 @@ static inline int arm64_dbi_emit_pending_branch(struct arm64_dbi_ctx *ctx, u32 e
     return arm64_dbi_queue_branch(ctx, ghost_idx, enc_template, target_tidx, kind);
 }
 
-static inline int arm64_dbi_recomp_b(struct arm64_dbi_ctx *ctx, u32 insn, u64 orig_pc)
+static inline int arm64_dbi_recomp_b(struct arm64_dbi_ctx *ctx, const struct arm64_decoded_insn *decoded, u64 orig_pc)
 {
     // B 指令可以优先尝试重编码；距离过远才展开成绝对跳转。
-    s64 imm26 = arm64_dbi_sign_extend(insn & 0x03FFFFFFU, 26);
-    u64 target = orig_pc + ((u64)imm26 << 2);
+    u64 target;
     u32 enc;
+
+    if (!arm64_decode_direct_target(decoded, orig_pc, &target)) return -EINVAL;
 
     if (arm64_dbi_is_intra_page(ctx, target))
     {
@@ -332,11 +327,12 @@ static inline int arm64_dbi_recomp_b(struct arm64_dbi_ctx *ctx, u32 insn, u64 or
     return arm64_dbi_emit_far_jump(ctx, target);
 }
 
-static inline int arm64_dbi_recomp_bl(struct arm64_dbi_ctx *ctx, u32 insn, u64 orig_pc)
+static inline int arm64_dbi_recomp_bl(struct arm64_dbi_ctx *ctx, const struct arm64_decoded_insn *decoded, u64 orig_pc)
 {
-    s64 imm26 = arm64_dbi_sign_extend(insn & 0x03FFFFFFU, 26);
-    u64 target = orig_pc + ((u64)imm26 << 2);
+    u64 target;
     u32 enc;
+
+    if (!arm64_decode_direct_target(decoded, orig_pc, &target)) return -EINVAL;
 
     if (!arm64_dbi_enc_bl((s64)(target - arm64_dbi_ghost_cur_pc(ctx)), &enc))
     {
@@ -349,13 +345,16 @@ static inline int arm64_dbi_recomp_bl(struct arm64_dbi_ctx *ctx, u32 insn, u64 o
     return arm64_dbi_emit(ctx, 0xD63F0000U | ((u32)ARM64_DBI_SCRATCH_REG << 5));
 }
 
-static inline int arm64_dbi_recomp_bcond(struct arm64_dbi_ctx *ctx, u32 insn, u64 orig_pc)
+static inline int arm64_dbi_recomp_bcond(struct arm64_dbi_ctx *ctx, const struct arm64_decoded_insn *decoded, u64 orig_pc)
 {
     // 条件分支过远时，反转条件跳过一段远跳 stub。
-    s64 imm19 = arm64_dbi_sign_extend((insn >> 5) & 0x7FFFFU, 19);
-    u64 target = orig_pc + ((u64)imm19 << 2);
-    u32 cond = insn & 0xFU;
+    u64 target;
+    u32 cond = decoded->operands.branch.condition;
     u32 enc;
+
+    if (!arm64_decode_direct_target(decoded, orig_pc, &target)) return -EINVAL;
+
+    if (cond >= 0xE) return arm64_dbi_recomp_b(ctx, decoded, orig_pc);
 
     if (arm64_dbi_is_intra_page(ctx, target))
     {
@@ -387,14 +386,15 @@ static inline int arm64_dbi_recomp_bcond(struct arm64_dbi_ctx *ctx, u32 insn, u6
     return arm64_dbi_emit_skip_far_jump(ctx, target, 0x54000000U | ((cond ^ 1U) & 0xFU), 19);
 }
 
-static inline int arm64_dbi_recomp_cbz(struct arm64_dbi_ctx *ctx, u32 insn, u64 orig_pc)
+static inline int arm64_dbi_recomp_cbz(struct arm64_dbi_ctx *ctx, const struct arm64_decoded_insn *decoded, u64 orig_pc)
 {
-    int is_nz = !!(insn & (1U << 24));
-    u32 sf = (insn >> 31) & 1U;
-    u32 rt = insn & 0x1FU;
-    s64 imm19 = arm64_dbi_sign_extend((insn >> 5) & 0x7FFFFU, 19);
-    u64 target = orig_pc + ((u64)imm19 << 2);
+    int is_nz = decoded->opcode == ARM64_OP_CBNZ;
+    u32 sf = !!(decoded->flags & ARM64_INSN_FLAG_64BIT);
+    u32 rt = decoded->rt;
+    u64 target;
     u32 enc;
+
+    if (!arm64_decode_direct_target(decoded, orig_pc, &target)) return -EINVAL;
 
     if (arm64_dbi_is_intra_page(ctx, target))
     {
@@ -427,14 +427,15 @@ static inline int arm64_dbi_recomp_cbz(struct arm64_dbi_ctx *ctx, u32 insn, u64 
     return arm64_dbi_emit_skip_far_jump(ctx, target, (is_nz ? 0x34000000U : 0x35000000U) | ((sf & 1U) << 31) | (rt & 0x1FU), 19);
 }
 
-static inline int arm64_dbi_recomp_tbz(struct arm64_dbi_ctx *ctx, u32 insn, u64 orig_pc)
+static inline int arm64_dbi_recomp_tbz(struct arm64_dbi_ctx *ctx, const struct arm64_decoded_insn *decoded, u64 orig_pc)
 {
-    int is_nz = !!(insn & (1U << 24));
-    u32 rt = insn & 0x1FU;
-    u32 bit = (((insn >> 31) & 1U) << 5) | ((insn >> 19) & 0x1FU);
-    s64 imm14 = arm64_dbi_sign_extend((insn >> 5) & 0x3FFFU, 14);
-    u64 target = orig_pc + ((u64)imm14 << 2);
+    int is_nz = decoded->opcode == ARM64_OP_TBNZ;
+    u32 rt = decoded->rt;
+    u32 bit = decoded->operands.branch.test_bit;
+    u64 target;
     u32 enc;
+
+    if (!arm64_decode_direct_target(decoded, orig_pc, &target)) return -EINVAL;
 
     if (arm64_dbi_is_intra_page(ctx, target))
     {
@@ -467,56 +468,60 @@ static inline int arm64_dbi_recomp_tbz(struct arm64_dbi_ctx *ctx, u32 insn, u64 
     return arm64_dbi_emit_skip_far_jump(ctx, target, (is_nz ? 0x36000000U : 0x37000000U) | (((bit >> 5) & 1U) << 31) | ((bit & 0x1FU) << 19) | (rt & 0x1FU), 14);
 }
 
-static inline int arm64_dbi_recomp_adrp(struct arm64_dbi_ctx *ctx, u32 insn, u64 orig_pc)
+static inline int arm64_dbi_recomp_adrp(struct arm64_dbi_ctx *ctx, const struct arm64_decoded_insn *decoded, u64 orig_pc)
 {
     // ADRP/ADR 是 PC 相对取址，搬到 ghost 后必须改为装载原始目标绝对地址。
-    u32 rd = insn & 0x1FU;
-    u64 immlo = (insn >> 29) & 0x3U;
-    u64 immhi = (insn >> 5) & 0x7FFFFU;
-    s64 imm21 = arm64_dbi_sign_extend((immhi << 2) | immlo, 21);
-    u64 target = (orig_pc & ~0xFFFULL) + ((u64)imm21 << 12);
+    u64 target;
+
+    if (!arm64_decode_direct_target(decoded, orig_pc, &target)) return -EINVAL;
     ctx->expanded++;
-    return arm64_dbi_emit_load_addr(ctx, rd, target);
+    return arm64_dbi_emit_load_addr(ctx, decoded->rd, target);
 }
 
-static inline int arm64_dbi_recomp_adr(struct arm64_dbi_ctx *ctx, u32 insn, u64 orig_pc)
+static inline int arm64_dbi_recomp_adr(struct arm64_dbi_ctx *ctx, const struct arm64_decoded_insn *decoded, u64 orig_pc)
 {
-    u32 rd = insn & 0x1FU;
-    u64 immlo = (insn >> 29) & 0x3U;
-    u64 immhi = (insn >> 5) & 0x7FFFFU;
-    s64 imm21 = arm64_dbi_sign_extend((immhi << 2) | immlo, 21);
-    u64 target = orig_pc + (u64)imm21;
+    u64 target;
+
+    if (!arm64_decode_direct_target(decoded, orig_pc, &target)) return -EINVAL;
     ctx->expanded++;
-    return arm64_dbi_emit_load_addr(ctx, rd, target);
+    return arm64_dbi_emit_load_addr(ctx, decoded->rd, target);
 }
 
-static inline int arm64_dbi_recomp_ldr_lit(struct arm64_dbi_ctx *ctx, u32 insn, u64 orig_pc, int variant)
+static inline int arm64_dbi_recomp_ldr_lit(struct arm64_dbi_ctx *ctx, const struct arm64_decoded_insn *decoded, u64 orig_pc)
 {
     // LDR literal 的数据地址也是 PC 相对，ghost 中改成先取原地址再从 [x17] 读。
-    u32 rt = insn & 0x1FU;
-    s64 imm19 = arm64_dbi_sign_extend((insn >> 5) & 0x7FFFFU, 19);
-    u64 data_addr = orig_pc + ((u64)imm19 << 2);
+    u64 data_addr;
     u32 ldr;
+
+    if (!arm64_decode_direct_target(decoded, orig_pc, &data_addr)) return -EINVAL;
 
     ctx->expanded++;
     if (arm64_dbi_emit_load_addr(ctx, ARM64_DBI_SCRATCH_REG, data_addr)) return -ENOSPC;
-    if (variant == 2) ldr = arm64_dbi_enc_ldrsw_imm_unsigned(rt, ARM64_DBI_SCRATCH_REG);
-    else if (variant == 0) ldr = arm64_dbi_enc_ldr_imm_unsigned(rt, ARM64_DBI_SCRATCH_REG, 2);
-    else ldr = arm64_dbi_enc_ldr_imm_unsigned(rt, ARM64_DBI_SCRATCH_REG, 3);
+    if (decoded->flags & ARM64_INSN_FLAG_SIGN_EXTEND)
+        ldr = arm64_dbi_enc_ldrsw_imm_unsigned(decoded->rt, ARM64_DBI_SCRATCH_REG);
+    else if (decoded->operands.load_store.access_bytes == 4)
+        ldr = arm64_dbi_enc_ldr_imm_unsigned(decoded->rt, ARM64_DBI_SCRATCH_REG, 2);
+    else if (decoded->operands.load_store.access_bytes == 8)
+        ldr = arm64_dbi_enc_ldr_imm_unsigned(decoded->rt, ARM64_DBI_SCRATCH_REG, 3);
+    else
+        return -EINVAL;
     return arm64_dbi_emit(ctx, ldr);
 }
 
-static inline int arm64_dbi_recomp_ldr_vec_lit(struct arm64_dbi_ctx *ctx, u32 insn, u64 orig_pc)
+static inline int arm64_dbi_recomp_ldr_vec_lit(struct arm64_dbi_ctx *ctx, const struct arm64_decoded_insn *decoded, u64 orig_pc)
 {
-    u32 rt = insn & 0x1FU;
-    u32 opc = (insn >> 30) & 0x3U;
-    s64 imm19 = arm64_dbi_sign_extend((insn >> 5) & 0x7FFFFU, 19);
-    u64 data_addr = orig_pc + ((u64)imm19 << 2);
+    u64 data_addr;
+    u32 opc;
 
-    if (opc == 3) return -EINVAL;
+    if (!arm64_decode_direct_target(decoded, orig_pc, &data_addr)) return -EINVAL;
+
+    if (decoded->operands.load_store.access_bytes == 4) opc = 0;
+    else if (decoded->operands.load_store.access_bytes == 8) opc = 1;
+    else if (decoded->operands.load_store.access_bytes == 16) opc = 2;
+    else return -EINVAL;
     ctx->expanded++;
     if (arm64_dbi_emit_load_addr(ctx, ARM64_DBI_SCRATCH_REG, data_addr)) return -ENOSPC;
-    return arm64_dbi_emit(ctx, arm64_dbi_enc_ldr_vec_imm_unsigned(rt, opc));
+    return arm64_dbi_emit(ctx, arm64_dbi_enc_ldr_vec_imm_unsigned(decoded->rt, opc));
 }
 
 static inline int arm64_dbi_recompile_page(struct arm64_dbi_ctx *ctx)
@@ -536,38 +541,71 @@ static inline int arm64_dbi_recompile_page(struct arm64_dbi_ctx *ctx)
 
     for (i = 0; i < ARM64_DBI_TARGET_INSNS; i++)
     {
+        struct arm64_decoded_insn decoded;
+        enum arm64_decode_status decode_status;
         u32 insn = ctx->orig[i];
         u64 orig_pc = ctx->target_page + (u64)i * 4;
         int prev_ghost_idx = ctx->ghost_count;
         int status;
 
         ctx->offset_map[i] = (u16)prev_ghost_idx;
+        decode_status = arm64_decode_insn(insn, &decoded);
 
-        if (insn == 0xD503201FU)
+        if (decode_status == ARM64_DECODE_UNALLOCATED &&
+            decoded.opcode == ARM64_OP_LOAD_LITERAL &&
+            (decoded.flags & ARM64_INSN_FLAG_FP))
+        {
+            status = -EINVAL;
+        }
+        else if (decode_status != ARM64_DECODE_OK)
         {
             ctx->passthrough++;
             status = arm64_dbi_emit(ctx, insn);
         }
-        else if ((insn & 0xFC000000U) == 0x14000000U) status = arm64_dbi_recomp_b(ctx, insn, orig_pc);
-        else if ((insn & 0xFC000000U) == 0x94000000U) status = arm64_dbi_recomp_bl(ctx, insn, orig_pc);
-        else if ((insn & 0xFF000010U) == 0x54000000U) status = arm64_dbi_recomp_bcond(ctx, insn, orig_pc);
-        else if ((insn & 0x7E000000U) == 0x34000000U) status = arm64_dbi_recomp_cbz(ctx, insn, orig_pc);
-        else if ((insn & 0x7E000000U) == 0x36000000U) status = arm64_dbi_recomp_tbz(ctx, insn, orig_pc);
-        else if ((insn & 0x9F000000U) == 0x90000000U) status = arm64_dbi_recomp_adrp(ctx, insn, orig_pc);
-        else if ((insn & 0x9F000000U) == 0x10000000U) status = arm64_dbi_recomp_adr(ctx, insn, orig_pc);
-        else if ((insn & 0xFF000000U) == 0x18000000U) status = arm64_dbi_recomp_ldr_lit(ctx, insn, orig_pc, 0);
-        else if ((insn & 0xFF000000U) == 0x58000000U) status = arm64_dbi_recomp_ldr_lit(ctx, insn, orig_pc, 1);
-        else if ((insn & 0xFF000000U) == 0x98000000U) status = arm64_dbi_recomp_ldr_lit(ctx, insn, orig_pc, 2);
-        else if ((insn & 0xFF000000U) == 0xD8000000U)
-        {
-            ctx->expanded++;
-            status = arm64_dbi_emit(ctx, arm64_dbi_enc_nop());
-        }
-        else if ((insn & 0x3F000000U) == 0x1C000000U) status = arm64_dbi_recomp_ldr_vec_lit(ctx, insn, orig_pc);
         else
         {
-            ctx->passthrough++;
-            status = arm64_dbi_emit(ctx, insn);
+            switch (decoded.opcode)
+            {
+            case ARM64_OP_B:
+                status = arm64_dbi_recomp_b(ctx, &decoded, orig_pc);
+                break;
+            case ARM64_OP_BL:
+                status = arm64_dbi_recomp_bl(ctx, &decoded, orig_pc);
+                break;
+            case ARM64_OP_B_COND:
+                status = arm64_dbi_recomp_bcond(ctx, &decoded, orig_pc);
+                break;
+            case ARM64_OP_CBZ:
+            case ARM64_OP_CBNZ:
+                status = arm64_dbi_recomp_cbz(ctx, &decoded, orig_pc);
+                break;
+            case ARM64_OP_TBZ:
+            case ARM64_OP_TBNZ:
+                status = arm64_dbi_recomp_tbz(ctx, &decoded, orig_pc);
+                break;
+            case ARM64_OP_ADRP:
+                status = arm64_dbi_recomp_adrp(ctx, &decoded, orig_pc);
+                break;
+            case ARM64_OP_ADR:
+                status = arm64_dbi_recomp_adr(ctx, &decoded, orig_pc);
+                break;
+            case ARM64_OP_LOAD_LITERAL:
+                status = decoded.flags & ARM64_INSN_FLAG_FP ?
+                    arm64_dbi_recomp_ldr_vec_lit(ctx, &decoded, orig_pc) :
+                    arm64_dbi_recomp_ldr_lit(ctx, &decoded, orig_pc);
+                break;
+            case ARM64_OP_PREFETCH_LITERAL:
+                ctx->expanded++;
+                status = arm64_dbi_emit(ctx, arm64_dbi_enc_nop());
+                break;
+            case ARM64_OP_EXCEPTION_GENERATION:
+            case ARM64_OP_EXCEPTION_RETURN:
+                return -EOPNOTSUPP;
+            default:
+                ctx->passthrough++;
+                status = arm64_dbi_emit(ctx, insn);
+                break;
+            }
         }
 
         if (status)
