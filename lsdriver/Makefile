@@ -1,6 +1,17 @@
 
 
 obj-m += lsdriver.o
+lsdriver-y := lsdriver_main.o \
+			  arm64_decode/arm64_decode.o \
+			  arm64_decode/arm64_decode_base.o \
+			  arm64_decode/arm64_decode_ldst.o \
+			  arm64_decode/arm64_decode_branch.o \
+			  arm64_decode/arm64_decode_simd.o \
+			  arm64_decode/arm64_decode_sve.o \
+			  arm64_decode/arm64_decode_sme.o
+
+$(obj)/lsdriver_main.o: $(src)/lsdriver.c FORCE
+	$(call if_changed_dep,cc_o_c)
 
 
 # 开启debug输出，有pr_debug输出

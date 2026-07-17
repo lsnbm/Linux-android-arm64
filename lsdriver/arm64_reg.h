@@ -210,6 +210,7 @@ static void write_wb_reg(int reg, int n, uint64_t val)
 
 // Q寄存器名称拼接辅助宏：QREG(0) → q0, QREG(1) → q1, ...
 #define QREG(n) q##n
+#define VREG(n) v##n
 
 #define READ_Q_REG_CASE(N, DST)                                        \
     case N:                                                            \
@@ -222,7 +223,7 @@ static void write_wb_reg(int reg, int n, uint64_t val)
     case N:                                                            \
         asm volatile(".arch_extension fp\n.arch_extension simd\n"      \
                      "ldr " __stringify(QREG(N)) ", [%0]\n" ::"r"(SRC) \
-                     : "memory");                                      \
+                     : "memory", __stringify(VREG(N)));                \
         break
 
 #define GEN_READ_Q_REG_CASES(DST) \

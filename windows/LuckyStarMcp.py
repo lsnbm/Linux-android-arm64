@@ -31,6 +31,8 @@ bridge = AndroidHttpClient(
     port=DEFAULT_ANDROID_PORT,
     timeout_seconds=DEFAULT_ANDROID_TIMEOUT_SECONDS,
 )
+
+
 def _call_bridge_operation(operation: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
     return bridge.call_operation(operation, params).require_ok().to_dict()
 
@@ -45,63 +47,6 @@ def _strip_scan_regions(response: dict[str, Any]) -> dict[str, Any]:
     slim_response = dict(response)
     slim_response["data"] = slim_data
     return slim_response
-
-
-def _scan_params(value_type: str, mode: str, value: str, range_max: str, *, is_first: bool) -> dict[str, Any]:
-    mode_token = mode.strip().lower()
-    mode_token = {
-        "equal": "eq",
-        "greater": "gt",
-        "less": "lt",
-        "increased": "inc",
-        "decreased": "dec",
-        "chg": "changed",
-        "unchg": "unchanged",
-        "ptr": "pointer",
-        "str": "string",
-    }.get(mode_token, mode_token)
-    value_token = str(value).strip()
-    range_token = str(range_max).strip()
-    history_modes = {"inc", "dec", "changed", "unchanged"}
-    value_modes = {"eq", "gt", "lt", "range", "pointer", "string"}
-    if is_first and mode_token in history_modes:
-        raise ValueError("first scan cannot use inc, dec, changed, or unchanged")
-    if mode_token in value_modes and not value_token:
-        raise ValueError(f"value is required for mode '{mode_token}'")
-    if mode_token == "range" and not range_token:
-        raise ValueError("range_max is required for mode 'range'")
-
-    params: dict[str, Any] = {"mode": mode_token}
-    if mode_token == "pointer":
-        params["value_type"] = "i64"
-    elif mode_token != "string":
-        type_token = value_type.strip().lower()
-        if not type_token:
-            raise ValueError("value_type is required for numeric scans")
-        params["value_type"] = type_token
-    if mode_token in value_modes:
-        params["value"] = value_token
-    if mode_token == "range":
-        params["range_max"] = range_token
-    return params
-
-
-def _normalize_breakpoint_points(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    normalized: list[dict[str, Any]] = []
-    for point in points:
-        if not isinstance(point, dict):
-            raise ValueError("points must contain objects with address, bp_type, bp_scope, length")
-        normalized.append(
-            {
-                "address": format_address(point["address"]),
-                "bp_type": point["bp_type"],
-                "bp_scope": point["bp_scope"],
-                "length": max(1, min(8, int(point["length"]))),
-            }
-        )
-    if not normalized:
-        raise ValueError("points must not be empty")
-    return normalized
 
 
 mcp = FastMCP(
@@ -206,7 +151,7 @@ def android_memory_scan_start(
     range_max: str = "",
 ) -> dict[str, Any]:
     """Start a new memory scan. Example: value_type='i32', mode='eq', value='1234'."""
-    return _call_bridge_operation("scan.start", _scan_params(value_type, mode, value, range_max, is_first=True))
+    return bridge.scan_start(value_type, mode, value, range_max).require_ok().to_dict()
 
 
 @mcp.tool()
@@ -217,7 +162,7 @@ def android_memory_scan_refine(
     range_max: str = "",
 ) -> dict[str, Any]:
     """Refine the current memory scan result set."""
-    return _call_bridge_operation("scan.refine", _scan_params(value_type, mode, value, range_max, is_first=False))
+    return bridge.scan_refine(value_type, mode, value, range_max).require_ok().to_dict()
 
 
 @mcp.tool()
@@ -271,18 +216,63 @@ def android_memory_write(address: int | str, data_hex: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def android_memory_lock(address: int | str, value_type: str, value: str) -> dict[str, Any]:
-    """Continuously lock one target address to the requested typed value."""
-    return _call_bridge_operation(
-        "lock.set",
-        {"address": format_address(address), "value_type": value_type.strip().lower(), "value": str(value)},
-    )
+def android_saved_list() -> dict[str, Any]:
+    """Return the server-owned saved address list with current values and lock states."""
+    return bridge.saved_list().require_ok().to_dict()
 
 
 @mcp.tool()
-def android_memory_unlock(address: int | str) -> dict[str, Any]:
-    """Remove the continuous value lock from one target address."""
-    return _call_bridge_operation("lock.remove", {"address": format_address(address)})
+def android_saved_add(
+    address: int | str,
+    value_type: str,
+    value_kind: str = "numeric",
+    text_length: int = 64,
+    note: str = "",
+) -> dict[str, Any]:
+    """Add one address to the server-owned saved list."""
+    return bridge.saved_add(
+        address,
+        value_type,
+        value_kind=value_kind,
+        text_length=text_length,
+        note=note,
+    ).require_ok().to_dict()
+
+
+@mcp.tool()
+def android_saved_remove(address: int | str) -> dict[str, Any]:
+    """Remove one address and its associated saved lock."""
+    return bridge.saved_remove(address).require_ok().to_dict()
+
+
+@mcp.tool()
+def android_saved_write(address: int | str, value: str) -> dict[str, Any]:
+    """Write a saved address using its server-owned type and update its lock value."""
+    return bridge.saved_write(address, value).require_ok().to_dict()
+
+
+@mcp.tool()
+def android_saved_set_note(address: int | str, note: str) -> dict[str, Any]:
+    """Set or clear the note for one server-owned saved address."""
+    return bridge.saved_set_note(address, note).require_ok().to_dict()
+
+
+@mcp.tool()
+def android_saved_set_locked(address: int | str, locked: bool, value: str = "") -> dict[str, Any]:
+    """Set the authoritative lock state for one saved address."""
+    return bridge.saved_set_locked(address, locked, value).require_ok().to_dict()
+
+
+@mcp.tool()
+def android_saved_offset(offset: str) -> dict[str, Any]:
+    """Apply a signed hexadecimal byte offset to all server-owned saved addresses."""
+    return bridge.saved_offset(offset).require_ok().to_dict()
+
+
+@mcp.tool()
+def android_saved_clear() -> dict[str, Any]:
+    """Clear the server-owned saved address list and associated saved locks."""
+    return bridge.saved_clear().require_ok().to_dict()
 
 
 @mcp.tool()
@@ -351,10 +341,7 @@ def android_pointer_export() -> dict[str, Any]:
 @mcp.tool()
 def android_memory_view_open(address: int | str, view_format: str = "hexadecimal") -> dict[str, Any]:
     """Open an address and return its freshly read 100-byte snapshot."""
-    return _call_bridge_operation(
-        "viewer.open",
-        {"address": format_address(address), "view_format": normalize_view_format(view_format)},
-    )
+    return bridge.viewer_open(address, view_format).require_ok().to_dict()
 
 
 @mcp.tool()
@@ -384,13 +371,7 @@ def android_breakpoint_get() -> dict[str, Any]:
 @mcp.tool()
 def android_breakpoint_set(mode: str, points: list[dict[str, Any]]) -> dict[str, Any]:
     """Set hwbp, ptebp, or stepbp points for the current target."""
-    mode_token = str(mode).strip().lower()
-    if mode_token not in {"hwbp", "ptebp", "stepbp"}:
-        raise ValueError("mode must be one of: hwbp, ptebp, stepbp")
-    return _call_bridge_operation(
-        "breakpoint.set",
-        {"mode": mode_token, "points": _normalize_breakpoint_points(points)},
-    )
+    return bridge.breakpoint_set(mode, points).require_ok().to_dict()
 
 
 @mcp.tool()

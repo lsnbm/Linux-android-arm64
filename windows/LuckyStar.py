@@ -18,7 +18,14 @@ from http_bridge import (
     BridgeError,
     DEFAULT_ANDROID_PORT,
     DEFAULT_ANDROID_TIMEOUT_SECONDS,
+    SCAN_HISTORY_MODES,
+    SCAN_MODE_ALIASES,
+    SCAN_VALUE_MODES,
+    build_saved_add_params,
+    build_scan_params,
     discover_lan_devices,
+    normalize_breakpoint_points,
+    parse_saved_states,
 )
 
 from PySide6.QtCore import QPoint, Qt, QTimer, Signal
@@ -74,15 +81,6 @@ VALUE_TYPE_OPTIONS = (
     ("Float", "Float"),
     ("Double", "Double"),
 )
-SCAN_HISTORY_MODES = {"inc", "dec", "changed", "unchanged"}
-SCAN_VALUE_MODES = {"eq", "gt", "lt", "range", "pointer", "string"}
-SCAN_MODE_ALIASES = {
-    "equal": "eq",
-    "greater": "gt",
-    "less": "lt",
-    "increased": "inc",
-    "decreased": "dec",
-}
 HWBP_OP_LABELS = {
     "none": "未设置",
     "read": "读取",
@@ -215,7 +213,6 @@ class HttpBridgeWindow(QWidget):
         self.hwbp_point_rows: list[dict[str, object]] = []
         self.live_refresh_inflight = False
         self.live_refresh_closing = False
-        self.saved_refresh_cursor = 0
         self.target_generation = 0
         self.live_refresh_timer = QTimer(self)
         self.live_refresh_timer.setInterval(1000)
@@ -673,6 +670,9 @@ class HttpBridgeWindow(QWidget):
         if not has_baseline and mode in SCAN_HISTORY_MODES:
             self._set_scan_mode_combo("eq")
             mode = self._scan_mode_token()
+        if has_baseline and mode == "unknown":
+            self._set_scan_mode_combo("eq")
+            mode = self._scan_mode_token()
         if self.scan_session_type == "string" and mode != "string":
             self._set_scan_mode_combo("string")
             mode = "string"
@@ -686,7 +686,9 @@ class HttpBridgeWindow(QWidget):
                 continue
             item_mode = str(self.scan_mode_combo.itemData(index)).strip().lower()
             enabled = True
-            if item_mode in SCAN_HISTORY_MODES:
+            if item_mode == "unknown":
+                enabled = not has_baseline
+            elif item_mode in SCAN_HISTORY_MODES:
                 enabled = has_baseline and self.scan_session_type != "string"
             elif item_mode == "pointer":
                 enabled = not has_baseline or self.scan_session_type == "I64"
@@ -1292,7 +1294,6 @@ class HttpBridgeWindow(QWidget):
         self._reset_scan_session()
         self.scan_total_label.setText("总结果数: 0")
         self.saved_items.clear()
-        self.saved_refresh_cursor = 0
         self._refresh_saved_view()
         self.browser_current_addr = 0
         self.browser_addr_input.setText("0x0")
@@ -1322,10 +1323,11 @@ class HttpBridgeWindow(QWidget):
         host, port = endpoint
         try:
             self.http_bridge.connect(host, port)
-            ping_response = self.http_bridge.call_operation("bridge.ping", {})
+            ping_response = self.http_bridge.call_operation("bridge.ping")
             ping_response.require_ok()
-            target_response = self.http_bridge.call_operation("target.get", {})
+            target_response = self.http_bridge.call_operation("target.get")
             target_response.require_ok()
+            target_data = target_response.data if isinstance(target_response.data, dict) else {}
         except BridgeConnectionError as exc:
             self.http_bridge.disconnect()
             self._set_status(str(exc))
@@ -1342,6 +1344,9 @@ class HttpBridgeWindow(QWidget):
         if not self.live_refresh_timer.isActive():
             self.live_refresh_timer.start()
         self._set_connection_ui(True)
+        target_pid = self._safe_int(target_data.get("pid"), 0)
+        self.global_pid_label.setText(str(target_pid) if target_pid > 0 else "--")
+        self._refresh_saved_state(silent=True)
         self._set_status(f"通信成功：{self.http_bridge.url}")
 
     def _send_operation(self, operation: str, params: dict | None = None, *, log_enabled: bool = True) -> dict | None:
@@ -1503,7 +1508,7 @@ class HttpBridgeWindow(QWidget):
             raise ValueError("至少需要 1 个 point")
         if len(points) > 16:
             raise ValueError("points 最多 16 个")
-        return points
+        return normalize_breakpoint_points(points)
 
     @staticmethod
     def _format_addr(value: object) -> str:
@@ -1687,34 +1692,22 @@ class HttpBridgeWindow(QWidget):
         value = self.scan_value_input.text().strip()
         range_text = self.scan_range_input.text().strip()
 
-        if is_first and mode in SCAN_HISTORY_MODES:
-            QMessageBox.warning(self, "输入提示", "首次扫描不能使用增加、减少、已变化或未变化模式。")
-            return None
         if not is_first and self.scan_session_type is None:
             QMessageBox.warning(self, "输入提示", "请先完成首次扫描。")
             return None
 
         operation = "scan.start" if is_first else "scan.refine"
-        params: dict[str, str] = {"mode": mode}
-        if mode == "pointer":
-            params["value_type"] = "I64"
-        elif mode != "string":
-            params["value_type"] = self.scan_session_type or self._selected_scan_type_token()
-
-        if mode == "unknown":
-            return operation, params
-
-        if mode in SCAN_VALUE_MODES and not value:
-            QMessageBox.warning(self, "输入提示", "当前扫描模式需要输入“值”。")
+        try:
+            params = build_scan_params(
+                self.scan_session_type or self._selected_scan_type_token(),
+                mode,
+                value,
+                range_text,
+                is_first=is_first,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "输入提示", str(exc))
             return None
-
-        if mode in SCAN_VALUE_MODES:
-            params["value"] = value
-        if mode == "range":
-            if not range_text:
-                QMessageBox.warning(self, "输入提示", "range 模式需要输入“范围”。")
-                return None
-            params["range_max"] = range_text
         return operation, params
 
     @staticmethod
@@ -2341,150 +2334,75 @@ class HttpBridgeWindow(QWidget):
         return addr, value
 
     @staticmethod
-    def _build_read_operation_for_type(type_token: str, addr: str) -> tuple[str, dict] | None:
-        mapping = {
-            "I8": 1,
-            "I16": 2,
-            "I32": 4,
-            "I64": 8,
-            "Float": 4,
-            "Double": 8,
-        }
-        size = mapping.get(type_token)
-        if size is None:
-            return None
-        return "memory.read", {"address": addr, "size": size}
-
-    @staticmethod
-    def _extract_value_field(response: dict | None, type_token: str) -> str | None:
-        data = HttpBridgeWindow._response_data_dict(response)
-        data_hex = str(data.get("data_hex") or "")
-        try:
-            raw = bytes.fromhex(data_hex)
-            if type_token in {"I8", "I16", "I32", "I64"}:
-                return str(int.from_bytes(raw, "little", signed=True))
-            if type_token == "Float" and len(raw) == 4:
-                return str(struct.unpack("<f", raw)[0])
-            if type_token == "Double" and len(raw) == 8:
-                return str(struct.unpack("<d", raw)[0])
-        except (ValueError, struct.error):
-            pass
-        return None
-
-    @staticmethod
-    def _pack_saved_value_for_type(type_token: str, value_text: str) -> tuple[bytes | None, str]:
-        text = value_text.strip()
-        if not text:
-            return None, "值不能为空。"
-
-        integer_sizes = {
-            "I8": 1,
-            "I16": 2,
-            "I32": 4,
-            "I64": 8,
-        }
-        if type_token in integer_sizes:
-            size = integer_sizes[type_token]
-            bits = size * 8
-            min_value = -(1 << (bits - 1))
-            max_value = (1 << bits) - 1
-            try:
-                value = int(text, 0)
-            except ValueError:
-                return None, f"{type_token} 需要整数，支持十进制或 0x 十六进制。"
-            if value < min_value or value > max_value:
-                return None, f"{type_token} 范围为 {min_value} 到 {max_value}。"
-            return (value & max_value).to_bytes(size, "little", signed=False), ""
-
-        if type_token == "Float":
-            try:
-                return struct.pack("<f", float(text)), ""
-            except (OverflowError, ValueError):
-                return None, "Float 需要有效浮点数。"
-
-        if type_token == "Double":
-            try:
-                return struct.pack("<d", float(text)), ""
-            except (OverflowError, ValueError):
-                return None, "Double 需要有效浮点数。"
-
-        return None, f"不支持的类型: {type_token}"
-
-    @staticmethod
     def _normalize_saved_note(note_text: str) -> str:
         return " ".join(part.strip() for part in note_text.replace("\r", "\n").split("\n") if part.strip())
 
-    def _append_saved_item(self, addr: str, value: str, type_token: str, *, note: str = "") -> None:
-        self.saved_items.append(
-            {
-                "addr": addr,
-                "value": value,
-                "type": type_token,
-                "locked": "0",
-                "note": self._normalize_saved_note(note),
-            }
-        )
-
-    def _read_saved_item_value(self, type_token: str, addr: str) -> str:
-        if not self._is_connected():
-            return ""
-        request = self._build_read_operation_for_type(type_token, addr)
-        if request is None:
-            return ""
-        operation, params = request
-        response = self._send_operation(operation, params, log_enabled=False)
-        value = self._extract_value_field(response, type_token)
-        return value if value is not None else ""
-
-    def _ensure_saved_item_value(self, item: dict[str, str]) -> bool:
-        if item.get("value", ""):
-            return True
-        addr = item.get("addr", "")
-        type_token = item.get("type", "")
-        if not addr or not type_token:
+    def _adopt_saved_state_data(self, data: dict) -> bool:
+        try:
+            self.saved_items = [
+                {
+                    "addr": state.address_hex,
+                    "value": state.value,
+                    "type": state.value_type_label,
+                    "locked": "1" if state.locked else "0",
+                    "note": state.note,
+                }
+                for state in parse_saved_states(data)
+            ]
+        except (TypeError, ValueError):
             return False
-        value = self._read_saved_item_value(type_token, addr)
-        if not value:
-            return False
-        item["value"] = value
+        self._refresh_saved_view(force=True)
         return True
+
+    def _adopt_saved_response(self, response: dict | None, *, warn: bool = True) -> bool:
+        if not self._response_ok(response):
+            return False
+        if self._adopt_saved_state_data(self._response_data_dict(response)):
+            return True
+        if warn:
+            QMessageBox.warning(self, "保存状态失败", "服务端保存地址响应格式异常。")
+        return False
+
+    def _request_saved_update(
+        self,
+        operation: str,
+        params: dict | None = None,
+        *,
+        error_title: str,
+        error_prefix: str = "",
+        warn: bool = True,
+    ) -> bool:
+        response = self._request_ok(
+            operation,
+            params,
+            error_title=error_title,
+            error_prefix=error_prefix,
+            warn=warn,
+        )
+        return response is not None and self._adopt_saved_response(response, warn=warn)
+
+    def _refresh_saved_state(self, *, silent: bool = False) -> bool:
+        data = self._request_data_dict(
+            "saved.list",
+            error_title="保存状态失败",
+            parse_title="保存状态失败",
+            parse_error_text="服务端保存地址响应格式异常。",
+            log_enabled=not silent,
+            warn=not silent,
+        )
+        return data is not None and self._adopt_saved_state_data(data)
 
     def _set_saved_item_lock_state(self, item: dict[str, str], locked: bool, *, warn: bool) -> bool:
         addr = item.get("addr", "")
         if not addr:
             return False
-        if not locked:
-            response = self._request_ok(
-                "lock.remove",
-                {"address": addr},
-                error_title="锁定失败",
-                error_prefix="取消锁定失败: ",
-                warn=warn,
-            )
-            if response is None:
-                return False
-            item["locked"] = "0"
-            return True
-
-        type_token = item.get("type", "")
-        if not type_token:
-            return False
-        if not item.get("value", "") and not self._ensure_saved_item_value(item):
-            if warn:
-                QMessageBox.warning(self, "锁定失败", f"锁定前读取当前值失败: {addr}")
-            return False
-
-        response = self._request_ok(
-            "lock.set",
-            {"address": addr, "value_type": type_token, "value": item.get("value", "")},
+        return self._request_saved_update(
+            "saved.lock.set",
+            {"address": addr, "locked": locked, "value": item.get("value", "").strip() if locked else ""},
             error_title="锁定失败",
-            error_prefix="锁定失败: ",
+            error_prefix="锁定失败: " if locked else "取消锁定失败: ",
             warn=warn,
         )
-        if response is None:
-            return False
-        item["locked"] = "1"
-        return True
 
     def _write_saved_item_value(self, item: dict[str, str]) -> bool:
         addr = item.get("addr", "")
@@ -2502,36 +2420,20 @@ class HttpBridgeWindow(QWidget):
         if not accepted:
             return False
 
-        packed_value, error_text = self._pack_saved_value_for_type(type_token, value_text)
-        if packed_value is None:
-            QMessageBox.warning(self, "写入失败", error_text)
+        value_text = value_text.strip()
+        if not value_text:
+            QMessageBox.warning(self, "写入失败", "值不能为空。")
             return False
 
-        was_locked = item.get("locked", "0") == "1"
-        if was_locked and not self._set_saved_item_lock_state(item, False, warn=True):
-            return False
-
-        response = self._request_ok(
-            "memory.write",
-            {"address": addr, "data_hex": packed_value.hex().upper()},
+        if not self._request_saved_update(
+            "saved.write",
+            {"address": addr, "value": value_text},
             error_title="写入失败",
             error_prefix="写入失败: ",
-            warn=True,
-        )
-        if response is None:
-            if was_locked:
-                self._set_saved_item_lock_state(item, True, warn=False)
+        ):
             return False
 
-        item["value"] = value_text.strip()
-        readback_value = self._read_saved_item_value(type_token, addr)
-        if readback_value:
-            item["value"] = readback_value
-
-        if was_locked and not self._set_saved_item_lock_state(item, True, warn=True):
-            return False
-
-        self._set_status(f"已写入: {addr} = {item.get('value', '')}")
+        self._set_status(f"已写入: {addr} = {value_text}")
         return True
 
     def _apply_saved_item_lock_state(self, items: list[dict[str, str]], locked: bool) -> tuple[int, int]:
@@ -2540,7 +2442,9 @@ class HttpBridgeWindow(QWidget):
         for item in items:
             if (item.get("locked", "0") == "1") == locked:
                 continue
-            if self._set_saved_item_lock_state(item, locked, warn=False):
+            address = item.get("addr", "")
+            current_item = next((saved_item for saved_item in self.saved_items if saved_item.get("addr") == address), None)
+            if current_item is not None and self._set_saved_item_lock_state(current_item, locked, warn=False):
                 success_count += 1
             else:
                 fail_count += 1
@@ -2591,27 +2495,20 @@ class HttpBridgeWindow(QWidget):
         else:
             self._set_text_preserve_interaction(self.saved_view, text)
 
-    def on_scan_view_context_menu(self, pos) -> None:
-        cursor = self.scan_view.cursorForPosition(pos)
-
-        # 检查是否有选中文本（支持多选）
-        text_cursor = self.scan_view.textCursor()
-        if text_cursor.hasSelection():
-            # 用户已通过鼠标选中多行，使用选中的文本
-            selected_text = text_cursor.selectedText()
-            # Qt 使用 U+2029 作为段落分隔符
-            lines = selected_text.replace('\u2029', '\n').split('\n')
+    @staticmethod
+    def _selected_or_current_lines(editor: QTextEdit, pos) -> list[str]:
+        cursor = editor.textCursor()
+        if cursor.hasSelection():
+            text = cursor.selectedText().replace("\u2029", "\n")
         else:
-            # 没有选中文本，选择当前行
+            cursor = editor.cursorForPosition(pos)
             cursor.select(cursor.SelectionType.LineUnderCursor)
-            lines = [cursor.selectedText().strip()]
+            text = cursor.selectedText()
+        return [line.strip() for line in text.splitlines() if line.strip()]
 
-        # 解析所有选中的行
+    def on_scan_view_context_menu(self, pos) -> None:
         parsed_items = []
-        for line_text in lines:
-            line_text = line_text.strip()
-            if not line_text:
-                continue
+        for line_text in self._selected_or_current_lines(self.scan_view, pos):
             parsed = self._parse_scan_line(line_text)
             if parsed is not None:
                 parsed_items.append(parsed)
@@ -2626,15 +2523,22 @@ class HttpBridgeWindow(QWidget):
             return
 
         type_token = self._scan_result_type_token()
-
+        success_count = 0
         for addr, value in parsed_items:
-            self._append_saved_item(addr, value, type_token)
+            value_kind = "pointer" if self._scan_mode_token() == "pointer" else "text" if type_token == "string" else "numeric"
+            if self._request_saved_update(
+                "saved.add",
+                build_saved_add_params(addr, type_token, value_kind=value_kind),
+                error_title="保存失败",
+                error_prefix="保存地址失败: ",
+                warn=len(parsed_items) == 1,
+            ):
+                success_count += 1
 
-        self._refresh_saved_view()
-        if len(parsed_items) == 1:
+        if success_count == 1 and len(parsed_items) == 1:
             self._set_status(f"已保存: {parsed_items[0][0]} -> {parsed_items[0][1]}")
         else:
-            self._set_status(f"已保存 {len(parsed_items)} 项")
+            self._set_status(f"已保存 {success_count} 项" + (f"，失败 {len(parsed_items) - success_count} 项" if success_count < len(parsed_items) else ""))
 
     def on_add_saved_item(self) -> None:
         addr_text = self.saved_manual_addr_input.text().strip()
@@ -2655,11 +2559,14 @@ class HttpBridgeWindow(QWidget):
         type_data = self.saved_manual_type_combo.currentData()
         type_token = str(type_data).strip() if type_data is not None else self.saved_manual_type_combo.currentText().strip()
         addr = self._format_addr(addr_value)
-        value = self._read_saved_item_value(type_token, addr)
-
-        self._append_saved_item(addr, value, type_token)
+        if not self._request_saved_update(
+            "saved.add",
+            build_saved_add_params(addr, type_token),
+            error_title="添加失败",
+            error_prefix="添加保存地址失败: ",
+        ):
+            return
         self.saved_manual_addr_input.clear()
-        self._refresh_saved_view()
         self._set_status(f"已手动添加地址: {addr}")
         self.saved_manual_addr_input.setFocus()
 
@@ -2680,9 +2587,32 @@ class HttpBridgeWindow(QWidget):
         if normalized_note == self._normalize_saved_note(current_note):
             return False
 
-        item["note"] = normalized_note
+        if not self._request_saved_update(
+            "saved.note.set",
+            {"address": addr, "note": normalized_note},
+            error_title="备注失败",
+            error_prefix="更新备注失败: ",
+        ):
+            return False
         self._set_status(f"已更新备注: {addr}" if normalized_note else f"已清空备注: {addr}")
         return True
+
+    def _remove_saved_items(self, items: list[dict[str, str]]) -> tuple[int, int]:
+        success_count = 0
+        fail_count = 0
+        for item in items:
+            address = item.get("addr", "")
+            if self._request_saved_update(
+                "saved.remove",
+                {"address": address},
+                error_title="删除失败",
+                error_prefix="删除保存地址失败: ",
+                warn=len(items) == 1,
+            ):
+                success_count += 1
+            else:
+                fail_count += 1
+        return success_count, fail_count
 
     def _saved_index_from_line(self, line_text: str) -> int | None:
         match = re.match(r"^\s*(\d+)\.", line_text)
@@ -2694,25 +2624,8 @@ class HttpBridgeWindow(QWidget):
         return idx
 
     def on_saved_view_context_menu(self, pos) -> None:
-        # 检查是否有选中文本（支持多选）
-        text_cursor = self.saved_view.textCursor()
-        if text_cursor.hasSelection():
-            # 用户已通过鼠标选中多行，使用选中的文本
-            selected_text = text_cursor.selectedText()
-            # Qt 使用 U+2029 作为段落分隔符
-            lines = selected_text.replace('\u2029', '\n').split('\n')
-        else:
-            # 没有选中文本，选择当前行
-            cursor = self.saved_view.cursorForPosition(pos)
-            cursor.select(cursor.SelectionType.LineUnderCursor)
-            lines = [cursor.selectedText().strip()]
-
-        # 解析所有选中的行，获取索引
         item_indices = []
-        for line_text in lines:
-            line_text = line_text.strip()
-            if not line_text:
-                continue
+        for line_text in self._selected_or_current_lines(self.saved_view, pos):
             item_idx = self._saved_index_from_line(line_text)
             if item_idx is not None:
                 item_indices.append(item_idx)
@@ -2736,6 +2649,7 @@ class HttpBridgeWindow(QWidget):
             # 单选：显示锁定/取消锁定
             locked = items[0].get("locked", "0") == "1"
             lock_action = menu.addAction("取消锁定" if locked else "锁定此项")
+            remove_action = menu.addAction("删除此项")
         else:
             # 多选：显示批量操作选项
             note_action = None
@@ -2747,24 +2661,33 @@ class HttpBridgeWindow(QWidget):
                 actions["lock"] = menu.addAction(f"锁定 ({unlocked_count} 项)")
             if locked_count > 0:
                 actions["unlock"] = menu.addAction(f"取消锁定 ({locked_count} 项)")
+            actions["remove"] = menu.addAction(f"删除所选项 ({len(items)} 项)")
 
         action = menu.exec(self.saved_view.mapToGlobal(pos))
+        if action is None:
+            return
 
         if len(items) == 1:
             if action == note_action:
-                if self._edit_saved_item_note(items[0]):
-                    self._refresh_saved_view(force=True)
+                self._edit_saved_item_note(items[0])
                 return
             if action == clear_note_action:
-                items[0]["note"] = ""
-                self._refresh_saved_view(force=True)
-                self._set_status(f"已清空备注: {items[0].get('addr', '')}")
+                addr = items[0].get("addr", "")
+                if self._request_saved_update(
+                    "saved.note.set",
+                    {"address": addr, "note": ""},
+                    error_title="备注失败",
+                    error_prefix="清空备注失败: ",
+                ):
+                    self._set_status(f"已清空备注: {addr}")
                 return
             if action == write_action:
-                if self._write_saved_item_value(items[0]):
-                    self._refresh_saved_view(force=True)
+                self._write_saved_item_value(items[0])
                 return
             if action != lock_action:
+                if action == remove_action:
+                    success_count, fail_count = self._remove_saved_items(items)
+                    self._set_status(f"已删除 {success_count} 项" + (f"，失败 {fail_count} 项" if fail_count > 0 else ""))
                 return
             item = items[0]
             locked = item.get("locked", "0") == "1"
@@ -2787,15 +2710,17 @@ class HttpBridgeWindow(QWidget):
                 success_count, fail_count = self._apply_saved_item_lock_state(items, False)
                 self._set_status(f"已取消锁定 {success_count} 项" + (f"，失败 {fail_count} 项" if fail_count > 0 else ""))
 
-        # 清除选择后强制刷新显示
+            elif action == actions.get("remove"):
+                success_count, fail_count = self._remove_saved_items(items)
+                self._set_status(f"已删除 {success_count} 项" + (f"，失败 {fail_count} 项" if fail_count > 0 else ""))
+
         cursor = self.saved_view.textCursor()
         cursor.clearSelection()
         self.saved_view.setTextCursor(cursor)
-        self._refresh_saved_view(force=True)
 
     def on_clear_saved_items(self) -> None:
-        self.saved_items.clear()
-        self._refresh_saved_view()
+        if not self._request_saved_update("saved.clear", error_title="清空失败", error_prefix="清空保存地址失败: "):
+            return
         self._set_status("保存页已清空")
 
     def _get_scan_page_size(self, *, silent: bool = False) -> int | None:
@@ -3354,19 +3279,8 @@ class HttpBridgeWindow(QWidget):
             if page_count is not None:
                 type_token = self._scan_result_type_token()
                 task = {"kind": "scan", "start": self.scan_page_start, "count": page_count, "value_type": type_token}
-        elif self._is_save_tab_active() and self.saved_items:
-            batch_size = min(20, len(self.saved_items))
-            entries: list[dict[str, object]] = []
-            for offset in range(batch_size):
-                index = (self.saved_refresh_cursor + offset) % len(self.saved_items)
-                item = self.saved_items[index]
-                request = self._build_read_operation_for_type(item.get("type", ""), item.get("addr", ""))
-                if request is not None:
-                    operation, params = request
-                    entries.append({"index": index, "addr": item.get("addr", ""), "type": item.get("type", ""), "operation": operation, "params": params})
-            self.saved_refresh_cursor = (self.saved_refresh_cursor + batch_size) % len(self.saved_items)
-            if entries:
-                task = {"kind": "saved", "entries": entries}
+        elif self._is_save_tab_active():
+            task = {"kind": "saved"}
         elif self._is_pointer_tab_active():
             task = {"kind": "pointer"}
         elif self._is_breakpoint_tab_active():
@@ -3394,13 +3308,7 @@ class HttpBridgeWindow(QWidget):
                         {"start": task["start"], "count": task["count"], "value_type": task["value_type"]},
                     ).to_dict()
             elif kind == "saved":
-                values: list[dict[str, object]] = []
-                for entry in task.get("entries", []):
-                    if not isinstance(entry, dict):
-                        continue
-                    response = self.http_bridge.call_operation(str(entry["operation"]), entry["params"]).to_dict()
-                    values.append({**entry, "value": self._extract_value_field(response, str(entry["type"]))})
-                result["values"] = values
+                result["response"] = self.http_bridge.saved_list().to_dict()
             elif kind == "pointer":
                 result["response"] = self.http_bridge.call_operation("pointer.get").to_dict()
             elif kind == "breakpoint":
@@ -3450,22 +3358,9 @@ class HttpBridgeWindow(QWidget):
             self._apply_scan_control_state()
             self._set_status(f"扫描完成：共 {count} 项")
         elif kind == "saved":
-            changed = False
-            for entry in result_obj.get("values", []):
-                if not isinstance(entry, dict) or entry.get("value") is None:
-                    continue
-                index = self._safe_int(entry.get("index"), -1)
-                if index < 0 or index >= len(self.saved_items):
-                    continue
-                item = self.saved_items[index]
-                if item.get("addr") != entry.get("addr") or item.get("type") != entry.get("type"):
-                    continue
-                value = str(entry["value"])
-                if item.get("value") != value:
-                    item["value"] = value
-                    changed = True
-            if changed:
-                self._refresh_saved_view()
+            response = result_obj.get("response")
+            if isinstance(response, dict) and self._response_ok(response):
+                self._adopt_saved_state_data(self._response_data_dict(response))
         elif kind == "pointer":
             response = result_obj.get("response")
             if isinstance(response, dict) and self._response_ok(response):
@@ -3549,6 +3444,7 @@ class HttpBridgeWindow(QWidget):
 
         self._invalidate_target_ui_state()
         self.global_pid_label.setText(str(current_pid))
+        self._refresh_saved_state(silent=True)
         self._set_status(f"同步成功：全局PID={current_pid}")
 
     def on_get_environment_params(self) -> None:
