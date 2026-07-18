@@ -5,9 +5,10 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Literal, TypedDict
 
 from mcp.server.fastmcp import FastMCP
+from pydantic import Field
 
 PROJECT_WINDOWS_DIR = Path(__file__).resolve().parents[1] / "windows"
 if str(PROJECT_WINDOWS_DIR) not in sys.path:
@@ -31,6 +32,34 @@ bridge = AndroidHttpClient(
     port=DEFAULT_ANDROID_PORT,
     timeout_seconds=DEFAULT_ANDROID_TIMEOUT_SECONDS,
 )
+
+AndroidPid = Annotated[int, Field(gt=0, le=2_147_483_647)]
+BridgePort = Annotated[int, Field(ge=1, le=65_535)]
+PositiveTimeout = Annotated[float, Field(gt=0)]
+ScanValueType = Literal["i8", "i16", "i32", "i64", "f32", "f64"]
+ScanResultValueType = Literal["i8", "i16", "i32", "i64", "f32", "f64", "string"]
+ScanStartMode = Literal["unknown", "eq", "gt", "lt", "range", "pointer", "string"]
+ScanRefineMode = Literal["eq", "gt", "lt", "inc", "dec", "changed", "unchanged", "range", "pointer", "string"]
+SavedValueKind = Literal["numeric", "pointer", "text"]
+PointerMode = Literal["module", "manual", "array"]
+ViewerFormat = Literal["hexadecimal", "hex", "i8", "i16", "i32", "i64", "f32", "f64", "disasm"]
+BreakpointRecordField = Annotated[
+    str,
+    Field(
+        pattern=(
+            r"(?i)^(?:(?:(?:op|mask)\.)?"
+            r"(?:pc|hit_count|lr|sp|pstate|orig_x0|syscallno|fpsr|fpcr|x(?:[0-9]|[12][0-9])|[qv](?:[0-9]|[12][0-9]|3[01]))"
+            r"|mask(?:[0-9]|1[0-7]|[._](?:[0-9]|1[0-7])|\[(?:[0-9]|1[0-7])\]))$"
+        )
+    ),
+]
+
+
+class AndroidBreakpointPoint(TypedDict):
+    address: int | str
+    bp_type: Literal["read", "write", "read_write", "execute"]
+    bp_scope: Literal["main", "other", "all"]
+    length: Annotated[int, Field(ge=1, le=8)]
 
 
 def _call_bridge_operation(operation: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -66,10 +95,11 @@ def android_connection() -> dict[str, Any]:
 @mcp.tool()
 def configure_android_bridge(
     host: str = DEFAULT_ANDROID_HOST,
-    timeout_seconds: float = DEFAULT_ANDROID_TIMEOUT_SECONDS,
+    port: BridgePort = DEFAULT_ANDROID_PORT,
+    timeout_seconds: PositiveTimeout = DEFAULT_ANDROID_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
-    """Configure an Android HTTP bridge. Use host='auto' for LAN scan or pass a full HTTPS Tunnel URL."""
-    bridge.configure(host=host, timeout_seconds=timeout_seconds)
+    """Configure the bridge using host='auto', a host/IP plus port, or a full HTTP(S) Tunnel URL."""
+    bridge.configure(host=host, port=port, timeout_seconds=timeout_seconds)
     return bridge.connection_state()
 
 
@@ -86,7 +116,7 @@ def android_bridge_ping() -> dict[str, Any]:
 
 
 @mcp.tool()
-def android_target_set_pid(pid: int) -> dict[str, Any]:
+def android_target_set_pid(pid: AndroidPid) -> dict[str, Any]:
     """Bind all scan, viewer, and breakpoint operations to a known PID."""
     return _call_bridge_operation("target.select", {"pid": pid})
 
@@ -123,7 +153,11 @@ def android_memory_regions() -> dict[str, Any]:
 
 
 @mcp.tool()
-def android_module_address(module_name: str, segment_index: int = 0, which: str = "start") -> dict[str, Any]:
+def android_module_address(
+    module_name: str,
+    segment_index: int = 0,
+    which: Literal["start", "end"] = "start",
+) -> dict[str, Any]:
     """Resolve a module segment start or end address from the current target process."""
     which_token = which.strip().lower()
     if which_token not in {"start", "end"}:
@@ -145,29 +179,33 @@ def android_memory_dump(target: str) -> dict[str, Any]:
 
 @mcp.tool()
 def android_memory_scan_start(
-    value_type: str,
-    mode: str,
+    mode: ScanStartMode,
+    value_type: ScanValueType = "i32",
     value: str = "",
     range_max: str = "",
 ) -> dict[str, Any]:
-    """Start a new memory scan. Example: value_type='i32', mode='eq', value='1234'."""
+    """Start a scan. eq/gt/lt/pointer/string need value; range also needs range_max; unknown needs neither."""
     return bridge.scan_start(value_type, mode, value, range_max).require_ok().to_dict()
 
 
 @mcp.tool()
 def android_memory_scan_refine(
-    value_type: str,
-    mode: str,
+    mode: ScanRefineMode,
+    value_type: ScanValueType = "i32",
     value: str = "",
     range_max: str = "",
 ) -> dict[str, Any]:
-    """Refine the current memory scan result set."""
+    """Refine results. Value modes need value, range also needs range_max, and history modes need neither."""
     return bridge.scan_refine(value_type, mode, value, range_max).require_ok().to_dict()
 
 
 @mcp.tool()
-def android_memory_scan_results(start: int = 0, count: int = 100, value_type: str = "i32") -> dict[str, Any]:
-    """Read one page of the current memory scan results."""
+def android_memory_scan_results(
+    start: Annotated[int, Field(ge=0)] = 0,
+    count: Annotated[int, Field(ge=1, le=200)] = 100,
+    value_type: ScanResultValueType = "i32",
+) -> dict[str, Any]:
+    """Read one result page; value_type must match the active scan (string for string scans)."""
     if count <= 0 or count > 200:
         raise ValueError("count must be in 1..200")
     return _call_bridge_operation(
@@ -189,7 +227,10 @@ def android_memory_scan_clear() -> dict[str, Any]:
 
 
 @mcp.tool()
-def android_memory_read(address: int | str, size: int) -> dict[str, Any]:
+def android_memory_read(
+    address: int | str,
+    size: Annotated[int, Field(ge=1, le=1_048_576)],
+) -> dict[str, Any]:
     """Read 1 to 1048576 raw bytes from any valid target address."""
     if size <= 0 or size > 1024 * 1024:
         raise ValueError("size must be in 1..1048576")
@@ -201,7 +242,7 @@ def android_memory_read(address: int | str, size: int) -> dict[str, Any]:
 
 @mcp.tool()
 def android_memory_write(address: int | str, data_hex: str) -> dict[str, Any]:
-    """Write raw bytes and return Android-side readback verification."""
+    """Write up to 1048576 bytes as even-length hex digits (whitespace allowed, no 0x prefix)."""
     normalized = "".join(str(data_hex).split())
     if not normalized:
         raise ValueError("data_hex must not be empty")
@@ -224,12 +265,12 @@ def android_saved_list() -> dict[str, Any]:
 @mcp.tool()
 def android_saved_add(
     address: int | str,
-    value_type: str,
-    value_kind: str = "numeric",
-    text_length: int = 64,
+    value_type: ScanValueType = "i32",
+    value_kind: SavedValueKind = "numeric",
+    text_length: Annotated[int, Field(ge=1, le=256)] = 64,
     note: str = "",
 ) -> dict[str, Any]:
-    """Add one address to the server-owned saved list."""
+    """Save an address. pointer forces i64; text forces i8 and uses text_length; numeric uses value_type."""
     return bridge.saved_add(
         address,
         value_type,
@@ -259,7 +300,7 @@ def android_saved_set_note(address: int | str, note: str) -> dict[str, Any]:
 
 @mcp.tool()
 def android_saved_set_locked(address: int | str, locked: bool, value: str = "") -> dict[str, Any]:
-    """Set the authoritative lock state for one saved address."""
+    """Set lock state. An empty value locks the current value; value is ignored when unlocking."""
     return bridge.saved_set_locked(address, locked, value).require_ok().to_dict()
 
 
@@ -284,15 +325,15 @@ def android_pointer_status() -> dict[str, Any]:
 @mcp.tool()
 def android_pointer_scan(
     target: int | str,
-    depth: int,
-    max_offset: int,
-    mode: str = "module",
+    depth: Annotated[int, Field(ge=1, le=16)],
+    max_offset: Annotated[int, Field(ge=1, le=2_147_483_647)],
+    mode: PointerMode = "module",
     manual_base: int | str | None = None,
     array_base: int | str | None = None,
-    array_count: int | None = None,
+    array_count: Annotated[int, Field(ge=1, le=1_000_000)] | None = None,
     module_filter: str = "",
 ) -> dict[str, Any]:
-    """Start a pointer scan using module/manual/array base mode."""
+    """Start a pointer scan. manual requires manual_base; array requires array_base and array_count."""
     mode_token = str(mode).strip().lower() or "module"
     if mode_token not in {"module", "manual", "array"}:
         raise ValueError("mode must be one of: module, manual, array")
@@ -339,7 +380,7 @@ def android_pointer_export() -> dict[str, Any]:
 
 
 @mcp.tool()
-def android_memory_view_open(address: int | str, view_format: str = "hexadecimal") -> dict[str, Any]:
+def android_memory_view_open(address: int | str, view_format: ViewerFormat = "hexadecimal") -> dict[str, Any]:
     """Open an address and return its freshly read 100-byte snapshot."""
     return bridge.viewer_open(address, view_format).require_ok().to_dict()
 
@@ -351,7 +392,7 @@ def android_memory_view_offset(offset: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def android_memory_view_set_format(view_format: str) -> dict[str, Any]:
+def android_memory_view_set_format(view_format: ViewerFormat) -> dict[str, Any]:
     """Change the viewer format and return the freshly decoded snapshot."""
     return _call_bridge_operation("viewer.format", {"view_format": normalize_view_format(view_format)})
 
@@ -369,8 +410,11 @@ def android_breakpoint_get() -> dict[str, Any]:
 
 
 @mcp.tool()
-def android_breakpoint_set(mode: str, points: list[dict[str, Any]]) -> dict[str, Any]:
-    """Set hwbp, ptebp, or stepbp points for the current target."""
+def android_breakpoint_set(
+    mode: Literal["hwbp", "ptebp", "stepbp"],
+    points: Annotated[list[AndroidBreakpointPoint], Field(min_length=1, max_length=16)],
+) -> dict[str, Any]:
+    """Set 1..16 points. Each needs a nonzero address, bp_type, bp_scope, and length in 1..8."""
     return bridge.breakpoint_set(mode, points).require_ok().to_dict()
 
 
@@ -381,14 +425,18 @@ def android_breakpoint_clear() -> dict[str, Any]:
 
 
 @mcp.tool()
-def android_breakpoint_record_remove(index: int) -> dict[str, Any]:
-    """Remove one saved hardware breakpoint record by index."""
+def android_breakpoint_record_remove(index: Annotated[int, Field(ge=0)]) -> dict[str, Any]:
+    """Remove one record using its global flattened index across all breakpoint points."""
     return _call_bridge_operation("breakpoint_record.remove", {"index": index})
 
 
 @mcp.tool()
-def android_breakpoint_record_update(index: int, field: str, value: int | str) -> dict[str, Any]:
-    """Patch one saved hardware breakpoint register field; backend sets the write mask before writing the field."""
+def android_breakpoint_record_update(
+    index: Annotated[int, Field(ge=0)],
+    field: BreakpointRecordField,
+    value: int | str,
+) -> dict[str, Any]:
+    """Patch a flattened record field such as pc, x0..x29, q0..q31, mask0..mask17, or op.<register>."""
     normalized = f"0x{value:X}" if isinstance(value, int) else str(value).strip()
     return _call_bridge_operation("breakpoint_record.update", {"index": index, "field": field, "value": normalized})
 
@@ -421,10 +469,10 @@ def android_syscall_log() -> dict[str, Any]:
 @mcp.tool()
 def android_signature_scan_address(
     address: int | str,
-    range_size: int,
+    range_size: Annotated[int, Field(ge=1, le=1200)],
     file_name: str = "Signature.txt",
 ) -> dict[str, Any]:
-    """Generate and save a signature around one target address."""
+    """Generate an Android-side signature using range_size bytes before and after the address."""
     return _call_bridge_operation(
         "signature.create",
         {"address": format_address(address), "range": range_size, "file_name": file_name},
@@ -433,13 +481,16 @@ def android_signature_scan_address(
 
 @mcp.tool()
 def android_signature_scan_file(file_name: str = "Signature.txt") -> dict[str, Any]:
-    """Scan the target process using every signature stored in a file."""
+    """Scan using an Android-side signature file; relative names may resolve under /data/akernel/."""
     return _call_bridge_operation("signature.scan", {"file_name": file_name})
 
 
 @mcp.tool()
-def android_signature_scan_pattern(pattern: str, range_offset: int = 0) -> dict[str, Any]:
-    """Scan the target process with one signature pattern and address offset."""
+def android_signature_scan_pattern(
+    pattern: Annotated[str, Field(min_length=1)],
+    range_offset: Annotated[int, Field(ge=-2_147_483_648, le=2_147_483_647)] = 0,
+) -> dict[str, Any]:
+    """Scan a pattern such as '48 8B ?? FFh'; '?' and '??' are wildcard bytes."""
     return _call_bridge_operation(
         "signature.match",
         {"pattern": pattern, "range_offset": range_offset},
@@ -448,7 +499,7 @@ def android_signature_scan_pattern(pattern: str, range_offset: int = 0) -> dict[
 
 @mcp.tool()
 def android_signature_filter(address: int | str, file_name: str = "Signature.txt") -> dict[str, Any]:
-    """Update a signature file by filtering changed bytes at the supplied address."""
+    """Filter changed bytes in an Android-side signature file at the supplied address."""
     return _call_bridge_operation(
         "signature.filter",
         {"address": format_address(address), "file_name": file_name},
