@@ -38,8 +38,8 @@ BridgePort = Annotated[int, Field(ge=1, le=65_535)]
 PositiveTimeout = Annotated[float, Field(gt=0)]
 ScanValueType = Literal["i8", "i16", "i32", "i64", "f32", "f64"]
 ScanResultValueType = Literal["i8", "i16", "i32", "i64", "f32", "f64", "string"]
-ScanStartMode = Literal["unknown", "eq", "gt", "lt", "range", "pointer", "string"]
-ScanRefineMode = Literal["eq", "gt", "lt", "inc", "dec", "changed", "unchanged", "range", "pointer", "string"]
+ScanStartMode = Literal["unknown", "equal", "greater", "less", "range", "pointer", "string"]
+ScanRefineMode = Literal["equal", "greater", "less", "increased", "decreased", "changed", "unchanged", "range", "pointer", "string"]
 SavedValueKind = Literal["numeric", "pointer", "text"]
 PointerMode = Literal["module", "manual", "array"]
 ViewerFormat = Literal["hexadecimal", "hex", "i8", "i16", "i32", "i64", "f32", "f64", "disasm"]
@@ -56,10 +56,16 @@ BreakpointRecordField = Annotated[
 
 
 class AndroidBreakpointPoint(TypedDict):
-    address: int | str
-    bp_type: Literal["read", "write", "read_write", "execute"]
-    bp_scope: Literal["main", "other", "all"]
-    length: Annotated[int, Field(ge=1, le=8)]
+    address: Annotated[int | str, Field(description="Nonzero target address as an integer or 0x-prefixed string.")]
+    bp_type: Annotated[
+        Literal["read", "write", "read_write", "execute"],
+        Field(description="Breakpoint access type; use execute for an instruction breakpoint."),
+    ]
+    bp_scope: Annotated[
+        Literal["main", "other", "all"],
+        Field(description="Thread scope: main thread, other threads, or all threads."),
+    ]
+    length: Annotated[int, Field(ge=1, le=8, description="Breakpoint length in bytes.")]
 
 
 def _call_bridge_operation(operation: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -184,7 +190,7 @@ def android_memory_scan_start(
     value: str = "",
     range_max: str = "",
 ) -> dict[str, Any]:
-    """Start a scan. eq/gt/lt/pointer/string need value; range also needs range_max; unknown needs neither."""
+    """Start a scan. equal/greater/less/pointer/string need value; range also needs range_max; unknown needs neither."""
     return bridge.scan_start(value_type, mode, value, range_max).require_ok().to_dict()
 
 
@@ -412,9 +418,33 @@ def android_breakpoint_get() -> dict[str, Any]:
 @mcp.tool()
 def android_breakpoint_set(
     mode: Literal["hwbp", "ptebp", "stepbp"],
-    points: Annotated[list[AndroidBreakpointPoint], Field(min_length=1, max_length=16)],
+    points: Annotated[
+        list[AndroidBreakpointPoint],
+        Field(
+            min_length=1,
+            max_length=16,
+            description=(
+                "Array of 1..16 objects. Every object must contain exactly these required fields: "
+                "address (nonzero integer or 0x string), "
+                "bp_type (read|write|read_write|execute), "
+                "bp_scope (main|other|all), and length (integer 1..8). "
+                "Execution example: "
+                "[{\"address\":\"0x7A12345678\",\"bp_type\":\"execute\",\"bp_scope\":\"all\",\"length\":4}]"
+            ),
+            examples=[
+                [
+                    {
+                        "address": "0x7A12345678",
+                        "bp_type": "execute",
+                        "bp_scope": "all",
+                        "length": 4,
+                    }
+                ]
+            ],
+        ),
+    ],
 ) -> dict[str, Any]:
-    """Set 1..16 points. Each needs a nonzero address, bp_type, bp_scope, and length in 1..8."""
+    """Set breakpoints using mode hwbp/ptebp/stepbp and fully specified point objects."""
     return bridge.breakpoint_set(mode, points).require_ok().to_dict()
 
 

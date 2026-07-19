@@ -74,12 +74,12 @@ def _set_windows_app_id() -> None:
 
 
 VALUE_TYPE_OPTIONS = (
-    ("I8", "I8"),
-    ("I16", "I16"),
-    ("I32", "I32"),
-    ("I64", "I64"),
-    ("Float", "Float"),
-    ("Double", "Double"),
+    ("I8", "i8"),
+    ("I16", "i16"),
+    ("I32", "i32"),
+    ("I64", "i64"),
+    ("Float", "f32"),
+    ("Double", "f64"),
 )
 HWBP_OP_LABELS = {
     "none": "未设置",
@@ -522,17 +522,17 @@ class HttpBridgeWindow(QWidget):
         row1.addWidget(QLabel("模式"))
         self.scan_mode_combo = QComboBox()
         self.scan_mode_combo.addItem("未知", "unknown")
-        self.scan_mode_combo.addItem("等于", "eq")
-        self.scan_mode_combo.addItem("大于", "gt")
-        self.scan_mode_combo.addItem("小于", "lt")
-        self.scan_mode_combo.addItem("增加", "inc")
-        self.scan_mode_combo.addItem("减少", "dec")
+        self.scan_mode_combo.addItem("等于", "equal")
+        self.scan_mode_combo.addItem("大于", "greater")
+        self.scan_mode_combo.addItem("小于", "less")
+        self.scan_mode_combo.addItem("增加", "increased")
+        self.scan_mode_combo.addItem("减少", "decreased")
         self.scan_mode_combo.addItem("已变化", "changed")
         self.scan_mode_combo.addItem("未变化", "unchanged")
         self.scan_mode_combo.addItem("范围", "range")
         self.scan_mode_combo.addItem("指针", "pointer")
         self.scan_mode_combo.addItem("字符串", "string")
-        eq_index = self.scan_mode_combo.findData("eq")
+        eq_index = self.scan_mode_combo.findData("equal")
         self.scan_mode_combo.setCurrentIndex(eq_index if eq_index >= 0 else 0)
         row1.addWidget(self.scan_mode_combo)
         row1.addStretch(1)
@@ -611,14 +611,18 @@ class HttpBridgeWindow(QWidget):
     def _normalize_scan_type_token(value: object) -> str | None:
         token = str(value or "").strip().lower()
         return {
-            "i8": "I8",
-            "i16": "I16",
-            "i32": "I32",
-            "i64": "I64",
-            "float": "Float",
-            "f32": "Float",
-            "double": "Double",
-            "f64": "Double",
+            "i8": "i8",
+            "int8": "i8",
+            "i16": "i16",
+            "int16": "i16",
+            "i32": "i32",
+            "int32": "i32",
+            "i64": "i64",
+            "int64": "i64",
+            "float": "f32",
+            "f32": "f32",
+            "double": "f64",
+            "f64": "f64",
             "str": "string",
             "string": "string",
             "text": "string",
@@ -668,16 +672,16 @@ class HttpBridgeWindow(QWidget):
         mode = self._scan_mode_token()
 
         if not has_baseline and mode in SCAN_HISTORY_MODES:
-            self._set_scan_mode_combo("eq")
+            self._set_scan_mode_combo("equal")
             mode = self._scan_mode_token()
         if has_baseline and mode == "unknown":
-            self._set_scan_mode_combo("eq")
+            self._set_scan_mode_combo("equal")
             mode = self._scan_mode_token()
         if self.scan_session_type == "string" and mode != "string":
             self._set_scan_mode_combo("string")
             mode = "string"
         if mode == "pointer":
-            self._set_scan_type_combo("I64")
+            self._set_scan_type_combo("i64")
 
         mode_model = self.scan_mode_combo.model()
         for index in range(self.scan_mode_combo.count()):
@@ -691,7 +695,7 @@ class HttpBridgeWindow(QWidget):
             elif item_mode in SCAN_HISTORY_MODES:
                 enabled = has_baseline and self.scan_session_type != "string"
             elif item_mode == "pointer":
-                enabled = not has_baseline or self.scan_session_type == "I64"
+                enabled = not has_baseline or self.scan_session_type == "i64"
             elif item_mode == "string":
                 enabled = not has_baseline or self.scan_session_type == "string"
             item.setEnabled(enabled)
@@ -1568,7 +1572,7 @@ class HttpBridgeWindow(QWidget):
         tokens = [f"0x{start_val:x}", f"0x{end_val:x}", str(start_val), str(end_val)]
         return any(keyword in token for token in tokens)
 
-    def _populate_value_type_combo(self, combo: QComboBox, *, default_type: str = "I32") -> None:
+    def _populate_value_type_combo(self, combo: QComboBox, *, default_type: str = "i32") -> None:
         combo.clear()
         for label, data in VALUE_TYPE_OPTIONS:
             combo.addItem(label, data)
@@ -2958,12 +2962,6 @@ class HttpBridgeWindow(QWidget):
             "i64": ("<q", 8),
             "f32": ("<f", 4),
             "f64": ("<d", 8),
-            "I8": ("<b", 1),
-            "I16": ("<h", 2),
-            "I32": ("<i", 4),
-            "I64": ("<q", 8),
-            "Float": ("<f", 4),
-            "Double": ("<d", 8),
         }
         if fmt not in mapping:
             return HttpBridgeWindow._render_hex_dump(addr, data)

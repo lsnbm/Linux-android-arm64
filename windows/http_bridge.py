@@ -25,14 +25,14 @@ LAN_DISCOVERY_PING_TIMEOUT_MS = 150
 MAX_HTTP_RESPONSE_BYTES = 16 * 1024 * 1024
 AUTO_HOST_TOKENS = {"", "auto", "*"}
 VIEWER_FORMAT_TOKENS = {"hexadecimal", "hex", "i8", "i16", "i32", "i64", "f32", "f64", "disasm"}
-SCAN_HISTORY_MODES = {"inc", "dec", "changed", "unchanged"}
-SCAN_VALUE_MODES = {"eq", "gt", "lt", "range", "pointer", "string"}
+SCAN_HISTORY_MODES = {"increased", "decreased", "changed", "unchanged"}
+SCAN_VALUE_MODES = {"equal", "greater", "less", "range", "pointer", "string"}
 SCAN_MODE_ALIASES = {
-    "equal": "eq",
-    "greater": "gt",
-    "less": "lt",
-    "increased": "inc",
-    "decreased": "dec",
+    "eq": "equal",
+    "gt": "greater",
+    "lt": "less",
+    "inc": "increased",
+    "dec": "decreased",
     "chg": "changed",
     "unchg": "unchanged",
     "ptr": "pointer",
@@ -207,7 +207,7 @@ def build_scan_params(value_type: str, mode: str, value: str = "", range_max: st
     value_token = str(value).strip()
     range_token = str(range_max).strip()
     if is_first and mode_token in SCAN_HISTORY_MODES:
-        raise ValueError("first scan cannot use inc, dec, changed, or unchanged")
+        raise ValueError("first scan cannot use increased, decreased, changed, or unchanged")
     if not is_first and mode_token == "unknown":
         raise ValueError("unknown initial value can only be used for the first scan")
     if mode_token in SCAN_VALUE_MODES and not value_token:
