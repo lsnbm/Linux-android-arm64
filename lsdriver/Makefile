@@ -13,12 +13,14 @@ lsdriver-y := lsdriver_main.o \
 $(obj)/lsdriver_main.o: $(src)/lsdriver.c FORCE
 	$(call if_changed_dep,cc_o_c)
 
-
 # 开启debug输出，有pr_debug输出
 #ccflags-y += -DDEBUG
 
 #O3
 ccflags-y += -O3
+
+# FP16 by-element 模拟使用 Armv8.2-A 半精度浮点算术指令。
+ccflags-y += -march=armv8.2-a+fp16
 
 # 将所有警告降级，不再视为错误
 ccflags-y += -Wno-error

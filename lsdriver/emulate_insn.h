@@ -51,7 +51,7 @@ enum emu_insn_result
     - 有序/非特权访存：LDAR、STLR、LDAPR、LDAPUR、STLUR、LDTR、STTR。
   - 指针认证和 MTE：PACIA/AUTIA、LDRAA/LDRAB、IRG/GMI/SUBP 等。
   - SVE/SME 以及向量长度相关指令。
-  - FP16、复杂 AdvSIMD 重排/结构化访存：TBL/TBX、ZIP/UZP/TRN、INS/DUP、
+    - 未覆盖的 FP16、复杂 AdvSIMD 重排/结构化访存：TBL/TBX、ZIP/UZP/TRN、
     LD1/ST1/LD1R 等。
     - 异常和大部分系统指令：SVC、HVC、SMC、BRK、未列入白名单的系统寄存器。
   ========================================================================= */
@@ -1212,6 +1212,98 @@ static __always_inline __uint128_t emu_simd_replicate_lane(uint64_t value, uint3
     return result;
 }
 
+#define EMU_SIMD_FP_BY_ELEMENT_EXEC(DST_ARR, SRC_ARR)                                  \
+    do                                                                                 \
+    {                                                                                  \
+        switch (operation)                                                             \
+        {                                                                              \
+        case ARM64_SIMD_OP_FMLA_BY_ELEMENT:                                            \
+            EMU_VEC_ACC("fmla " DST_ARR ", " SRC_ARR, &result, &left_value, &element); \
+            break;                                                                     \
+        case ARM64_SIMD_OP_FMLS_BY_ELEMENT:                                            \
+            EMU_VEC_ACC("fmls " DST_ARR ", " SRC_ARR, &result, &left_value, &element); \
+            break;                                                                     \
+        case ARM64_SIMD_OP_FMUL_BY_ELEMENT:                                            \
+            EMU_FP_BIN("fmul " DST_ARR ", " SRC_ARR, &result, &left_value, &element);  \
+            break;                                                                     \
+        case ARM64_SIMD_OP_FMULX_BY_ELEMENT:                                           \
+            EMU_FP_BIN("fmulx " DST_ARR ", " SRC_ARR, &result, &left_value, &element); \
+            break;                                                                     \
+        default:                                                                       \
+            return false;                                                              \
+        }                                                                              \
+    } while (0)
+
+#define EMU_SIMD_FP16_BY_ELEMENT_INST(INSTRUCTION)              \
+    do                                                          \
+    {                                                           \
+        asm volatile(".arch_extension fp\n"                    \
+                     ".arch_extension simd\n"                  \
+                     "ldr q0, [%0]\n"                          \
+                     "ldr q1, [%1]\n"                          \
+                     "ldr q2, [%2]\n"                          \
+                     ".inst " __stringify(INSTRUCTION) "\n"   \
+                     "str q0, [%0]\n"                          \
+                     :                                          \
+                     : "r"(&result), "r"(&left_value), "r"(&element) \
+                     : "memory", "v0", "v1", "v2");         \
+    } while (0)
+
+#define EMU_SIMD_FP16_BY_ELEMENT_EXEC(FMLA_INST, FMLS_INST, FMUL_INST, FMULX_INST) \
+    do                                                                             \
+    {                                                                              \
+        switch (operation)                                                         \
+        {                                                                          \
+        case ARM64_SIMD_OP_FMLA_BY_ELEMENT:                                        \
+            EMU_SIMD_FP16_BY_ELEMENT_INST(FMLA_INST);                              \
+            break;                                                                 \
+        case ARM64_SIMD_OP_FMLS_BY_ELEMENT:                                        \
+            EMU_SIMD_FP16_BY_ELEMENT_INST(FMLS_INST);                              \
+            break;                                                                 \
+        case ARM64_SIMD_OP_FMUL_BY_ELEMENT:                                        \
+            EMU_SIMD_FP16_BY_ELEMENT_INST(FMUL_INST);                              \
+            break;                                                                 \
+        case ARM64_SIMD_OP_FMULX_BY_ELEMENT:                                       \
+            EMU_SIMD_FP16_BY_ELEMENT_INST(FMULX_INST);                             \
+            break;                                                                 \
+        default:                                                                   \
+            return false;                                                          \
+        }                                                                          \
+    } while (0)
+
+static __always_inline bool emu_simd_fp_by_element_hw(enum arm64_simd_operation operation, void *dst, const void *left, uint64_t lane_value, uint32_t element_width, uint32_t operand_width)
+{
+    __uint128_t result = *(__uint128_t *)dst;
+    __uint128_t left_value = *(const __uint128_t *)left;
+    __uint128_t element;
+
+    if (operand_width == element_width)
+    {
+        element = lane_value;
+        if (element_width == 16) EMU_SIMD_FP16_BY_ELEMENT_EXEC(0x5F021020, 0x5F025020, 0x5F029020, 0x7F029020);
+        else if (element_width == 32) EMU_SIMD_FP_BY_ELEMENT_EXEC("s0, s1", "v2.s[0]");
+        else if (element_width == 64) EMU_SIMD_FP_BY_ELEMENT_EXEC("d0, d1", "v2.d[0]");
+        else return false;
+    }
+    else
+    {
+        element = emu_simd_replicate_lane(lane_value, element_width, operand_width);
+        if (operand_width == 64 && element_width == 16) EMU_SIMD_FP16_BY_ELEMENT_EXEC(0x0E420C20, 0x0EC20C20, 0x2E421C20, 0x0E421C20);
+        else if (operand_width == 128 && element_width == 16) EMU_SIMD_FP16_BY_ELEMENT_EXEC(0x4E420C20, 0x4EC20C20, 0x6E421C20, 0x4E421C20);
+        else if (operand_width == 64 && element_width == 32) EMU_SIMD_FP_BY_ELEMENT_EXEC("v0.2s, v1.2s", "v2.2s");
+        else if (operand_width == 128 && element_width == 32) EMU_SIMD_FP_BY_ELEMENT_EXEC("v0.4s, v1.4s", "v2.4s");
+        else if (operand_width == 128 && element_width == 64) EMU_SIMD_FP_BY_ELEMENT_EXEC("v0.2d, v1.2d", "v2.2d");
+        else return false;
+    }
+
+    *(__uint128_t *)dst = result;
+    return true;
+}
+
+#undef EMU_SIMD_FP16_BY_ELEMENT_EXEC
+#undef EMU_SIMD_FP16_BY_ELEMENT_INST
+#undef EMU_SIMD_FP_BY_ELEMENT_EXEC
+
 #define EMU_SIMD_DUP_GENERAL_EXEC(ARR, VALUE)                     \
     do                                                            \
     {                                                             \
@@ -1529,6 +1621,13 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
     else if (operands->group == ARM64_SIMD_GROUP_VECTOR_SHIFT_IMMEDIATE)
     {
         if (!emu_simd_shift_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], operands->element_width, decoded->operand_width, operands->immediate)) return EMU_INSN_SKIP;
+        result = EMU_INSN_HANDLED;
+    }
+    else if (operands->group == ARM64_SIMD_GROUP_FP_BY_ELEMENT)
+    {
+        uint64_t lane_value = emu_simd_extract_lane(fp_regs[decoded->rm], operands->element_width, operands->lane_index);
+
+        if (!emu_simd_fp_by_element_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], lane_value, operands->element_width, decoded->operand_width)) return EMU_INSN_SKIP;
         result = EMU_INSN_HANDLED;
     }
     else if (operands->group == ARM64_SIMD_GROUP_VECTOR_3REG && operands->operation >= ARM64_SIMD_OP_ADD && operands->operation <= ARM64_SIMD_OP_CMHS)

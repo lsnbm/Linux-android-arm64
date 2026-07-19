@@ -415,17 +415,10 @@ static void test_scalar_copy(void)
         arm64_u8 element_width;
         arm64_u8 lane_index;
     } cases[] = {
-        { 0x5E010420U, 8, 0 },
-        { 0x5E1F0462U, 8, 15 },
-        { 0x5E0204A4U, 16, 0 },
-        { 0x5E1E04E6U, 16, 7 },
-        { 0x5E040528U, 32, 0 },
-        { 0x5E0C0422U, 32, 1 },
-        { 0x5E1C056AU, 32, 3 },
-        { 0x5E0805ACU, 64, 0 },
-        { 0x5E1805EEU, 64, 1 },
+        {0x5E010420U, 8, 0}, {0x5E1F0462U, 8, 15}, {0x5E0204A4U, 16, 0}, {0x5E1E04E6U, 16, 7}, {0x5E040528U, 32, 0}, {0x5E0C0422U, 32, 1}, {0x5E1C056AU, 32, 3}, {0x5E0805ACU, 64, 0}, {0x5E1805EEU, 64, 1},
     };
     struct arm64_decoded_insn decoded;
+    arm64_u32 imm5;
     size_t index;
 
     for (index = 0; index < sizeof(cases) / sizeof(cases[0]); index++)
@@ -446,8 +439,93 @@ static void test_scalar_copy(void)
     CHECK(decoded.rd == 2);
     CHECK(decoded.rn == 1);
 
-    decode_status_is(0x5E000420U, ARM64_DECODE_UNALLOCATED);
-    decode_status_is(0x5E100420U, ARM64_DECODE_UNALLOCATED);
+    for (imm5 = 0; imm5 < 32; imm5++)
+    {
+        arm64_u32 raw = 0x5E000420U | (imm5 << 16);
+        arm64_u8 size;
+
+        if (!imm5 || imm5 == 16)
+        {
+            decode_status_is(raw, ARM64_DECODE_UNALLOCATED);
+            continue;
+        }
+
+        size = (arm64_u8)__builtin_ctz(imm5);
+        decoded = decode_ok(raw);
+        CHECK(decoded.operands.simd.group == ARM64_SIMD_GROUP_SCALAR_COPY);
+        CHECK(decoded.operands.simd.element_width == (8U << size));
+        CHECK(decoded.operands.simd.lane_index == (imm5 >> (size + 1)));
+        CHECK(decoded.operand_width == decoded.operands.simd.element_width);
+    }
+}
+
+static void test_fp_by_element(void)
+{
+    static const struct
+    {
+        arm64_u32 bits;
+        enum arm64_simd_operation operation;
+    } operations[] = {
+        {0x00000000U, ARM64_SIMD_OP_FMLA_BY_ELEMENT},
+        {0x00004000U, ARM64_SIMD_OP_FMLS_BY_ELEMENT},
+        {0x00008000U, ARM64_SIMD_OP_FMUL_BY_ELEMENT},
+        {0x20008000U, ARM64_SIMD_OP_FMULX_BY_ELEMENT},
+    };
+    static const struct
+    {
+        arm64_u32 fmla;
+        arm64_u8 operand_width;
+        arm64_u8 element_width;
+        arm64_u8 lane_index;
+        arm64_u8 rm;
+    } shapes[] = {
+        {0x0F3F1883U, 64, 16, 7, 15}, {0x4F3F1883U, 128, 16, 7, 15}, {0x0FBF1883U, 64, 32, 3, 31}, {0x4FBF1883U, 128, 32, 3, 31}, {0x4FDF1883U, 128, 64, 1, 31}, {0x5F3F1883U, 16, 16, 7, 15}, {0x5FBF1883U, 32, 32, 3, 31}, {0x5FDF1883U, 64, 64, 1, 31},
+    };
+    struct arm64_decoded_insn decoded;
+    size_t operation_index;
+    size_t shape_index;
+
+    for (operation_index = 0; operation_index < sizeof(operations) / sizeof(operations[0]); operation_index++)
+    {
+        for (shape_index = 0; shape_index < sizeof(shapes) / sizeof(shapes[0]); shape_index++)
+        {
+            decoded = decode_ok(shapes[shape_index].fmla | operations[operation_index].bits);
+            CHECK(decoded.operands.simd.group == ARM64_SIMD_GROUP_FP_BY_ELEMENT);
+            CHECK(decoded.operands.simd.operation == operations[operation_index].operation);
+            CHECK(decoded.operand_width == shapes[shape_index].operand_width);
+            CHECK(decoded.operands.simd.element_width == shapes[shape_index].element_width);
+            CHECK(decoded.operands.simd.lane_index == shapes[shape_index].lane_index);
+            CHECK(decoded.rm == shapes[shape_index].rm);
+            CHECK(decoded.rd == 3);
+            CHECK(decoded.rn == 4);
+            CHECK(decoded.effects & ARM64_EFFECT_READ_FP_SIMD);
+            CHECK(decoded.effects & ARM64_EFFECT_WRITE_FP_SIMD);
+            CHECK(!(decoded.effects & ARM64_EFFECT_READ_GPR));
+            CHECK(!(decoded.effects & ARM64_EFFECT_WRITE_GPR));
+        }
+    }
+
+    decoded = decode_ok(0x0F861232U);
+    CHECK(decoded.operands.simd.group == ARM64_SIMD_GROUP_FP_BY_ELEMENT);
+    CHECK(decoded.operands.simd.operation == ARM64_SIMD_OP_FMLA_BY_ELEMENT);
+    CHECK(decoded.operand_width == 64);
+    CHECK(decoded.operands.simd.element_width == 32);
+    CHECK(decoded.operands.simd.lane_index == 0);
+    CHECK(decoded.rm == 6);
+    CHECK(decoded.rd == 18);
+    CHECK(decoded.rn == 17);
+
+    decode_status_is(0x6F821020U, ARM64_DECODE_UNSUPPORTED);
+    decode_status_is(0x6F825820U, ARM64_DECODE_UNSUPPORTED);
+    decode_status_is(0x0F421020U, ARM64_DECODE_UNALLOCATED);
+    decode_status_is(0x0FC21020U, ARM64_DECODE_UNALLOCATED);
+    decode_status_is(0x4FEE1020U, ARM64_DECODE_UNALLOCATED);
+    decode_status_is(0x1F821020U, ARM64_DECODE_UNALLOCATED);
+
+    decode_status_is(0x2F420020U, ARM64_DECODE_UNSUPPORTED);
+    decode_status_is(0x6FAB4949U, ARM64_DECODE_UNSUPPORTED);
+    decode_status_is(0x0F4E81ACU, ARM64_DECODE_UNSUPPORTED);
+    decode_status_is(0x4FA7DAD5U, ARM64_DECODE_UNSUPPORTED);
 }
 
 static void test_vector(void)
@@ -546,6 +624,7 @@ static int run_tests(void)
     test_load_store();
     test_scalar_fp();
     test_scalar_copy();
+    test_fp_by_element();
     test_fp_conversions();
     test_vector();
     return failures;
