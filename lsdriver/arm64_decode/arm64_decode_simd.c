@@ -177,6 +177,57 @@ static enum arm64_decode_status arm64_simd_decode_scalar_copy(arm64_u32 raw, str
     return ARM64_DECODE_OK;
 }
 
+static enum arm64_decode_status arm64_simd_decode_fp_by_element(arm64_u32 raw, struct arm64_decoded_insn *decoded)
+{
+    arm64_u8 size = (raw >> 22) & 0x3;
+    arm64_u8 opcode = (raw >> 12) & 0xF;
+    arm64_u8 scalar = (raw >> 28) & 1;
+    arm64_u8 q = (raw >> 30) & 1;
+    arm64_u8 u = (raw >> 29) & 1;
+    arm64_u8 h = (raw >> 11) & 1;
+    arm64_u8 l = (raw >> 21) & 1;
+    arm64_u8 m = (raw >> 20) & 1;
+
+    switch (opcode)
+    {
+    case 1:
+        if (u) return ARM64_DECODE_NO_MATCH;
+        decoded->operands.simd.operation = ARM64_SIMD_OP_FMLA_BY_ELEMENT;
+        break;
+    case 5:
+        if (u) return ARM64_DECODE_NO_MATCH;
+        decoded->operands.simd.operation = ARM64_SIMD_OP_FMLS_BY_ELEMENT;
+        break;
+    case 9:
+        decoded->operands.simd.operation = u ? ARM64_SIMD_OP_FMULX_BY_ELEMENT : ARM64_SIMD_OP_FMUL_BY_ELEMENT;
+        break;
+    default:
+        return ARM64_DECODE_NO_MATCH;
+    }
+
+    if (size == 1) return ARM64_DECODE_UNALLOCATED;
+    if (scalar && !q) return ARM64_DECODE_UNALLOCATED;
+    if (!scalar && size == 3 && !q) return ARM64_DECODE_UNALLOCATED;
+    if (size == 3 && l) return ARM64_DECODE_UNALLOCATED;
+
+    decoded->operands.simd.group = ARM64_SIMD_GROUP_FP_BY_ELEMENT;
+    decoded->operands.simd.element_width = size == 0 ? 16 : 8U << size;
+    decoded->operand_width = scalar ? decoded->operands.simd.element_width : q ? 128 : 64;
+
+    if (size == 0)
+    {
+        decoded->rm = (raw >> 16) & 0xF;
+        decoded->operands.simd.lane_index = (h << 2) | (l << 1) | m;
+    }
+    else
+    {
+        decoded->rm = (m << 4) | ((raw >> 16) & 0xF);
+        decoded->operands.simd.lane_index = size == 2 ? (h << 1) | l : h;
+    }
+
+    return ARM64_DECODE_OK;
+}
+
 static enum arm64_decode_status arm64_simd_decode_integer_3reg(arm64_u32 raw, struct arm64_decoded_insn *decoded)
 {
     arm64_u32 signature = raw & 0x9F20FC00U;
@@ -636,6 +687,13 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
     if ((raw & 0xFFE0FC00U) == 0x5E000400U) return arm64_simd_decode_scalar_copy(raw, decoded);
 
     if ((raw & 0x9FE08400U) == 0x0E000400U) return arm64_simd_decode_copy(raw, decoded);
+
+    if ((raw & 0x8F000400U) == 0x0F000000U)
+    {
+        enum arm64_decode_status element_status = arm64_simd_decode_fp_by_element(raw, decoded);
+
+        if (element_status != ARM64_DECODE_NO_MATCH) return element_status;
+    }
 
     if ((raw & 0x9F800000U) == 0x0F000000U)
     {
