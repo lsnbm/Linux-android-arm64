@@ -177,6 +177,8 @@ arm64_u64 arm64_decode_effects(const struct arm64_decoded_insn *decoded)
         case ARM64_SIMD_GROUP_SCALAR_SELECT:
             effects |= ARM64_EFFECT_READ_FLAGS | ARM64_EFFECT_CONDITIONAL;
             break;
+        case ARM64_SIMD_GROUP_SCALAR_COPY:
+            break;
         case ARM64_SIMD_GROUP_FMOV_GENERAL:
             if (decoded->operands.simd.operation == ARM64_SIMD_OP_FMOV_GENERAL_TO_FP)
             {
