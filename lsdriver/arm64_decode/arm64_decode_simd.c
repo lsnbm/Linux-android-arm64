@@ -177,6 +177,19 @@ static enum arm64_decode_status arm64_simd_decode_scalar_copy(arm64_u32 raw, str
     return ARM64_DECODE_OK;
 }
 
+static arm64_u8 arm64_simd_is_fp_by_element(arm64_u32 raw)
+{
+    switch (raw & 0xDF000400U)
+    {
+    case 0x0F000000U:
+    case 0x4F000000U:
+    case 0x5F000000U:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 static enum arm64_decode_status arm64_simd_decode_fp_by_element(arm64_u32 raw, struct arm64_decoded_insn *decoded)
 {
     arm64_u8 size = (raw >> 22) & 0x3;
@@ -206,7 +219,6 @@ static enum arm64_decode_status arm64_simd_decode_fp_by_element(arm64_u32 raw, s
     }
 
     if (size == 1) return ARM64_DECODE_UNALLOCATED;
-    if (scalar && !q) return ARM64_DECODE_UNALLOCATED;
     if (!scalar && size == 3 && !q) return ARM64_DECODE_UNALLOCATED;
     if (size == 3 && l) return ARM64_DECODE_UNALLOCATED;
 
@@ -258,6 +270,181 @@ static enum arm64_decode_status arm64_simd_decode_integer_3reg(arm64_u32 raw, st
     if (decoded->operand_width == 64 && decoded->operands.simd.element_width == 64) return ARM64_DECODE_UNALLOCATED;
     decoded->operands.simd.group = ARM64_SIMD_GROUP_VECTOR_3REG;
     return ARM64_DECODE_OK;
+}
+
+static enum arm64_decode_status arm64_simd_decode_permute(arm64_u32 raw, struct arm64_decoded_insn *decoded)
+{
+    arm64_u8 opcode = (raw >> 12) & 0x7;
+    arm64_u8 size = (raw >> 22) & 0x3;
+    arm64_u8 q = (raw >> 30) & 1;
+
+    if ((raw & 0xBF208C00U) != 0x0E000800U) return ARM64_DECODE_NO_MATCH;
+
+    switch (opcode)
+    {
+    case 1:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_UZP1;
+        break;
+    case 2:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_TRN1;
+        break;
+    case 3:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_ZIP1;
+        break;
+    case 5:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_UZP2;
+        break;
+    case 6:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_TRN2;
+        break;
+    case 7:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_ZIP2;
+        break;
+    default:
+        return ARM64_DECODE_UNALLOCATED;
+    }
+
+    if (!q && size == 3) return ARM64_DECODE_UNALLOCATED;
+    decoded->operands.simd.group = ARM64_SIMD_GROUP_VECTOR_PERMUTE;
+    decoded->operand_width = q ? 128 : 64;
+    decoded->operands.simd.element_width = 8U << size;
+    return ARM64_DECODE_OK;
+}
+
+static enum arm64_decode_status arm64_simd_decode_logical(arm64_u32 raw, struct arm64_decoded_insn *decoded)
+{
+    arm64_u8 opcode = (((raw >> 29) & 1) << 2) | ((raw >> 22) & 0x3);
+
+    if ((raw & 0x9F20FC00U) != 0x0E201C00U) return ARM64_DECODE_NO_MATCH;
+
+    switch (opcode)
+    {
+    case 0:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_AND_VECTOR;
+        break;
+    case 1:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_BIC_VECTOR;
+        break;
+    case 2:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_ORR_VECTOR;
+        break;
+    case 3:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_ORN_VECTOR;
+        break;
+    case 4:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_EOR_VECTOR;
+        break;
+    case 5:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_BSL_VECTOR;
+        break;
+    case 6:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_BIT_VECTOR;
+        break;
+    case 7:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_BIF_VECTOR;
+        break;
+    }
+
+    decoded->operands.simd.group = ARM64_SIMD_GROUP_VECTOR_LOGICAL;
+    decoded->operand_width = raw & (1U << 30) ? 128 : 64;
+    decoded->operands.simd.element_width = 8;
+    return ARM64_DECODE_OK;
+}
+
+static enum arm64_decode_status arm64_simd_decode_fp_accumulate(arm64_u32 raw, struct arm64_decoded_insn *decoded)
+{
+    arm64_u32 signature = raw & 0xBFE0FC00U;
+    arm64_u8 q = (raw >> 30) & 1;
+
+    switch (signature)
+    {
+    case 0x0E400C00U:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_FMLA_VECTOR;
+        decoded->operands.simd.element_width = 16;
+        break;
+    case 0x0EC00C00U:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_FMLS_VECTOR;
+        decoded->operands.simd.element_width = 16;
+        break;
+    default:
+        signature = raw & 0xBFA0FC00U;
+        if (signature == 0x0E20CC00U) decoded->operands.simd.operation = ARM64_SIMD_OP_FMLA_VECTOR;
+        else if (signature == 0x0EA0CC00U) decoded->operands.simd.operation = ARM64_SIMD_OP_FMLS_VECTOR;
+        else return ARM64_DECODE_NO_MATCH;
+
+        decoded->operands.simd.element_width = raw & (1U << 22) ? 64 : 32;
+        if (!q && decoded->operands.simd.element_width == 64) return ARM64_DECODE_UNALLOCATED;
+        break;
+    }
+
+    decoded->operands.simd.group = ARM64_SIMD_GROUP_VECTOR_3REG;
+    decoded->operand_width = q ? 128 : 64;
+    return ARM64_DECODE_OK;
+}
+
+static enum arm64_decode_status arm64_simd_decode_fp_compare_zero(arm64_u32 raw, struct arm64_decoded_insn *decoded)
+{
+    arm64_u32 shape = raw & 0x00FF0000U;
+    arm64_u32 relation = raw & 0x2000F000U;
+    arm64_u8 scalar = (raw >> 28) & 1;
+    arm64_u8 q = (raw >> 30) & 1;
+
+    if ((raw & 0x8F000C00U) != 0x0E000800U) return ARM64_DECODE_NO_MATCH;
+
+    switch (shape)
+    {
+    case 0x00F80000U:
+        decoded->operands.simd.element_width = 16;
+        break;
+    case 0x00A00000U:
+        decoded->operands.simd.element_width = 32;
+        break;
+    case 0x00E00000U:
+        decoded->operands.simd.element_width = 64;
+        break;
+    default:
+        return ARM64_DECODE_NO_MATCH;
+    }
+
+    switch (relation)
+    {
+    case 0x0000D000U:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_FCMEQ_ZERO;
+        break;
+    case 0x2000C000U:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_FCMGE_ZERO;
+        break;
+    case 0x0000C000U:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_FCMGT_ZERO;
+        break;
+    case 0x2000D000U:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_FCMLE_ZERO;
+        break;
+    case 0x0000E000U:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_FCMLT_ZERO;
+        break;
+    default:
+        return ARM64_DECODE_NO_MATCH;
+    }
+
+    if (scalar)
+    {
+        if (!q) return ARM64_DECODE_NO_MATCH;
+        decoded->operand_width = decoded->operands.simd.element_width;
+    }
+    else
+    {
+        if (!q && decoded->operands.simd.element_width == 64) return ARM64_DECODE_UNALLOCATED;
+        decoded->operand_width = q ? 128 : 64;
+    }
+
+    decoded->operands.simd.group = ARM64_SIMD_GROUP_FP_COMPARE_ZERO;
+    return ARM64_DECODE_OK;
+}
+
+static arm64_u8 arm64_simd_is_shift_immediate(arm64_u32 raw)
+{
+    return (raw & 0x9F800000U) == 0x0F000000U && ((raw >> 19) & 0xF) != 0;
 }
 
 static enum arm64_decode_status arm64_simd_decode_shift_immediate(arm64_u32 raw, struct arm64_decoded_insn *decoded)
@@ -451,10 +638,6 @@ static enum arm64_simd_operation arm64_simd_decode_vector_3reg(arm64_u32 signatu
         return ARM64_SIMD_OP_FDIV_V4S;
     case 0x6E60FC00U:
         return ARM64_SIMD_OP_FDIV_V2D;
-    case 0x4E20CC00U:
-        return ARM64_SIMD_OP_FMLA_V4S;
-    case 0x4EA0CC00U:
-        return ARM64_SIMD_OP_FMLS_V4S;
     case 0x0E20F400U:
         return ARM64_SIMD_OP_FMAX_V2S;
     case 0x4E20F400U:
@@ -505,12 +688,6 @@ static enum arm64_simd_operation arm64_simd_decode_vector_3reg(arm64_u32 signatu
         return ARM64_SIMD_OP_FCMGE_V4S;
     case 0x6EA0E400U:
         return ARM64_SIMD_OP_FCMGT_V4S;
-    case 0x4E201C00U:
-        return ARM64_SIMD_OP_AND_V16B;
-    case 0x4EA01C00U:
-        return ARM64_SIMD_OP_ORR_V16B;
-    case 0x6E201C00U:
-        return ARM64_SIMD_OP_EOR_V16B;
     default:
         return ARM64_SIMD_OP_NONE;
     }
@@ -538,6 +715,8 @@ static enum arm64_simd_operation arm64_simd_decode_vector_2reg(arm64_u32 signatu
         return ARM64_SIMD_OP_FSQRT_V4S;
     case 0x6EE1F800U:
         return ARM64_SIMD_OP_FSQRT_V2D;
+    case 0x0EA00800U:
+        return ARM64_SIMD_OP_REV64_V2S;
     case 0x4E200800U:
         return ARM64_SIMD_OP_REV64_V16B;
     case 0x4E600800U:
@@ -578,6 +757,7 @@ static void arm64_simd_set_operation_shape(struct arm64_decoded_insn *decoded)
     case ARM64_SIMD_OP_FABS_V2S:
     case ARM64_SIMD_OP_FNEG_V2S:
     case ARM64_SIMD_OP_FSQRT_V2S:
+    case ARM64_SIMD_OP_REV64_V2S:
         decoded->operand_width = 64;
         decoded->operands.simd.element_width = 32;
         break;
@@ -585,8 +765,6 @@ static void arm64_simd_set_operation_shape(struct arm64_decoded_insn *decoded)
     case ARM64_SIMD_OP_FSUB_V4S:
     case ARM64_SIMD_OP_FMUL_V4S:
     case ARM64_SIMD_OP_FDIV_V4S:
-    case ARM64_SIMD_OP_FMLA_V4S:
-    case ARM64_SIMD_OP_FMLS_V4S:
     case ARM64_SIMD_OP_FMAX_V4S:
     case ARM64_SIMD_OP_FMIN_V4S:
     case ARM64_SIMD_OP_FMAXNM_V4S:
@@ -623,9 +801,6 @@ static void arm64_simd_set_operation_shape(struct arm64_decoded_insn *decoded)
     case ARM64_SIMD_OP_REV64_V16B:
     case ARM64_SIMD_OP_REV32_V16B:
     case ARM64_SIMD_OP_REV16_V16B:
-    case ARM64_SIMD_OP_AND_V16B:
-    case ARM64_SIMD_OP_ORR_V16B:
-    case ARM64_SIMD_OP_EOR_V16B:
         decoded->operand_width = 128;
         decoded->operands.simd.element_width = 8;
         break;
@@ -688,18 +863,42 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
 
     if ((raw & 0x9FE08400U) == 0x0E000400U) return arm64_simd_decode_copy(raw, decoded);
 
-    if ((raw & 0x8F000400U) == 0x0F000000U)
+    {
+        enum arm64_decode_status permute_status = arm64_simd_decode_permute(raw, decoded);
+
+        if (permute_status != ARM64_DECODE_NO_MATCH) return permute_status;
+    }
+
+    {
+        enum arm64_decode_status logical_status = arm64_simd_decode_logical(raw, decoded);
+
+        if (logical_status != ARM64_DECODE_NO_MATCH) return logical_status;
+    }
+
+    {
+        enum arm64_decode_status accumulate_status = arm64_simd_decode_fp_accumulate(raw, decoded);
+
+        if (accumulate_status != ARM64_DECODE_NO_MATCH) return accumulate_status;
+    }
+
+    if (arm64_simd_is_fp_by_element(raw))
     {
         enum arm64_decode_status element_status = arm64_simd_decode_fp_by_element(raw, decoded);
 
         if (element_status != ARM64_DECODE_NO_MATCH) return element_status;
     }
 
-    if ((raw & 0x9F800000U) == 0x0F000000U)
+    if (arm64_simd_is_shift_immediate(raw))
     {
         enum arm64_decode_status shift_status = arm64_simd_decode_shift_immediate(raw, decoded);
 
         if (shift_status != ARM64_DECODE_NO_MATCH) return shift_status;
+    }
+
+    {
+        enum arm64_decode_status compare_zero_status = arm64_simd_decode_fp_compare_zero(raw, decoded);
+
+        if (compare_zero_status != ARM64_DECODE_NO_MATCH) return compare_zero_status;
     }
 
     {
@@ -817,7 +1016,8 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
 
     if ((raw & 0xFF000000U) == 0x1F000000U)
     {
-        if (type > 1) return ARM64_DECODE_UNSUPPORTED;
+        if (type == 2) return ARM64_DECODE_UNALLOCATED;
+        if (type == 3) return ARM64_DECODE_UNSUPPORTED;
         decoded->operands.simd.group = ARM64_SIMD_GROUP_SCALAR_3SOURCE;
         switch ((((raw >> 21) & 1) << 1) | ((raw >> 15) & 1))
         {

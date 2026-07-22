@@ -31,20 +31,14 @@ enum arm64_decode_status arm64_decode_branch(arm64_u32 raw, struct arm64_decoded
     arm64_u32 branch_reg;
     arm64_u32 iclass = (raw >> 25) & 0xF;
 
-    if (raw == ARM64_HINT_NOP_INSN)
-    {
-        decoded->insn_class = ARM64_INSN_CLASS_BRANCH_EXCEPTION_SYSTEM;
-        decoded->opcode = ARM64_OP_NOP;
-        decoded->flags = ARM64_INSN_FLAG_RELOCATABLE;
-        return ARM64_DECODE_OK;
-    }
-
     if ((raw & 0xFFFFF01FU) == ARM64_HINT_NOP_INSN)
     {
         decoded->insn_class = ARM64_INSN_CLASS_BRANCH_EXCEPTION_SYSTEM;
-        decoded->flags = ARM64_INSN_FLAG_RELOCATABLE;
         switch ((raw >> 5) & 0x7F)
         {
+        case 0:
+            decoded->opcode = ARM64_OP_NOP;
+            return ARM64_DECODE_OK;
         case 1:
             decoded->opcode = ARM64_OP_HINT;
             system->operation = ARM64_SYSTEM_OP_YIELD;
@@ -65,6 +59,18 @@ enum arm64_decode_status arm64_decode_branch(arm64_u32 raw, struct arm64_decoded
             decoded->opcode = ARM64_OP_HINT;
             system->operation = ARM64_SYSTEM_OP_SEVL;
             return ARM64_DECODE_OK;
+        case 0x19:
+            decoded->opcode = ARM64_OP_HINT;
+            system->operation = ARM64_SYSTEM_OP_PACIASP;
+            return ARM64_DECODE_OK;
+        case 0x20:
+        case 0x22:
+        case 0x24:
+        case 0x26:
+            decoded->opcode = ARM64_OP_HINT;
+            system->operation = ARM64_SYSTEM_OP_BTI;
+            system->option = ((raw >> 5) & 0x7F) - 0x20;
+            return ARM64_DECODE_OK;
         default:
             decoded->opcode = ARM64_OP_UNKNOWN;
             return ARM64_DECODE_UNSUPPORTED;
@@ -75,7 +81,6 @@ enum arm64_decode_status arm64_decode_branch(arm64_u32 raw, struct arm64_decoded
     {
         decoded->insn_class = ARM64_INSN_CLASS_BRANCH_EXCEPTION_SYSTEM;
         decoded->opcode = ARM64_OP_BARRIER;
-        decoded->flags = ARM64_INSN_FLAG_RELOCATABLE;
         system->option = (raw >> 8) & 0xF;
         switch (raw & 0xFF)
         {

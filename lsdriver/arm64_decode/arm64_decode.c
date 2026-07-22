@@ -8,78 +8,7 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
 enum arm64_decode_status arm64_decode_sve(arm64_u32 raw, struct arm64_decoded_insn *decoded);
 enum arm64_decode_status arm64_decode_sme(arm64_u32 raw, struct arm64_decoded_insn *decoded);
 
-static enum arm64_decode_status arm64_decode_finish(struct arm64_decoded_insn *decoded, enum arm64_decode_status status)
-{
-    decoded->status = status;
-    decoded->effects = arm64_decode_effects(decoded);
-    return status;
-}
-
-enum arm64_decode_status arm64_decode_insn(arm64_u32 raw, struct arm64_decoded_insn *decoded)
-{
-    enum arm64_decode_status status;
-    arm64_u32 op0;
-
-    if (!decoded) return ARM64_DECODE_INVALID_ARGUMENT;
-
-    /* 保证未被当前 opcode 使用的字段有稳定的零值。 */
-    __builtin_memset(decoded, 0, sizeof(*decoded));
-    decoded->raw = raw;
-
-    if ((raw & 0xFFFF0000U) == 0)
-    {
-        decoded->insn_class = ARM64_INSN_CLASS_BRANCH_EXCEPTION_SYSTEM;
-        decoded->opcode = ARM64_OP_EXCEPTION_GENERATION;
-        decoded->operands.system.immediate = raw & 0xFFFF;
-        return arm64_decode_finish(decoded, ARM64_DECODE_UNSUPPORTED);
-    }
-
-    /* A64 主编码 raw[28:25] 直接确定唯一子解码器，*/
-    op0 = (raw >> 25) & 0xF;
-    switch (op0)
-    {
-    case 0x0:
-        status = arm64_decode_sme(raw, decoded);
-        break;
-    case 0x2:
-        status = arm64_decode_sve(raw, decoded);
-        break;
-    case 0x5:
-    case 0xD:
-        status = arm64_decode_data_processing_register(raw, decoded);
-        break;
-    case 0x8:
-    case 0x9:
-        status = arm64_decode_data_processing_immediate(raw, decoded);
-        break;
-    case 0xA:
-    case 0xB:
-        status = arm64_decode_branch(raw, decoded);
-        break;
-    case 0x4:
-    case 0x6:
-    case 0xC:
-    case 0xE:
-        status = arm64_decode_ldst(raw, decoded);
-        break;
-    case 0x7:
-    case 0xF:
-        status = arm64_decode_simd(raw, decoded);
-        break;
-    default:
-        status = ARM64_DECODE_NO_MATCH;
-        break;
-    }
-
-    if (status != ARM64_DECODE_NO_MATCH) return arm64_decode_finish(decoded, status);
-
-    /* 没有任何编码空间认领该 word，按架构未分配编码处理。 */
-    decoded->insn_class = ARM64_INSN_CLASS_UNKNOWN;
-    decoded->opcode = ARM64_OP_UNKNOWN;
-    return arm64_decode_finish(decoded, ARM64_DECODE_UNALLOCATED);
-}
-
-arm64_u64 arm64_decode_effects(const struct arm64_decoded_insn *decoded)
+static arm64_u64 arm64_decode_effects(const struct arm64_decoded_insn *decoded)
 {
     arm64_u64 effects = 0;
 
@@ -109,23 +38,23 @@ arm64_u64 arm64_decode_effects(const struct arm64_decoded_insn *decoded)
     case ARM64_OP_MRS:
     case ARM64_OP_MSR_REGISTER:
         effects |= ARM64_EFFECT_SYSTEM;
-        if (decoded->opcode == ARM64_OP_HINT || decoded->opcode == ARM64_OP_BARRIER) effects |= ARM64_EFFECT_RELOCATION_REQUIRED;
+        if (decoded->opcode == ARM64_OP_HINT && decoded->operands.system.operation == ARM64_SYSTEM_OP_PACIASP) effects |= ARM64_EFFECT_READ_GPR | ARM64_EFFECT_WRITE_GPR;
         if (decoded->opcode == ARM64_OP_BARRIER) effects |= ARM64_EFFECT_BARRIER;
         if (decoded->opcode == ARM64_OP_MRS) effects |= ARM64_EFFECT_WRITE_GPR;
         if (decoded->opcode == ARM64_OP_MSR_REGISTER) effects |= ARM64_EFFECT_READ_GPR;
         break;
     case ARM64_OP_EXCEPTION_GENERATION:
     case ARM64_OP_EXCEPTION_RETURN:
-        effects |= ARM64_EFFECT_SYSTEM | ARM64_EFFECT_EXCEPTION | ARM64_EFFECT_CONTROL_FLOW | ARM64_EFFECT_RELOCATION_REQUIRED;
+        effects |= ARM64_EFFECT_SYSTEM | ARM64_EFFECT_EXCEPTION | ARM64_EFFECT_CONTROL_FLOW;
         if (decoded->opcode == ARM64_OP_EXCEPTION_RETURN) effects |= ARM64_EFFECT_RETURN | ARM64_EFFECT_INDIRECT_TARGET;
         break;
     case ARM64_OP_ADR:
     case ARM64_OP_ADRP:
-        effects |= ARM64_EFFECT_WRITE_GPR | ARM64_EFFECT_PC_RELATIVE | ARM64_EFFECT_DIRECT_TARGET | ARM64_EFFECT_RELOCATION_REQUIRED;
+        effects |= ARM64_EFFECT_WRITE_GPR | ARM64_EFFECT_PC_RELATIVE | ARM64_EFFECT_DIRECT_TARGET;
         break;
     case ARM64_OP_B:
     case ARM64_OP_BL:
-        effects |= ARM64_EFFECT_CONTROL_FLOW | ARM64_EFFECT_DIRECT_TARGET | ARM64_EFFECT_PC_RELATIVE | ARM64_EFFECT_RELOCATION_REQUIRED;
+        effects |= ARM64_EFFECT_CONTROL_FLOW | ARM64_EFFECT_DIRECT_TARGET | ARM64_EFFECT_PC_RELATIVE;
         if (decoded->opcode == ARM64_OP_BL) effects |= ARM64_EFFECT_CALL | ARM64_EFFECT_WRITE_GPR;
         break;
     case ARM64_OP_BR:
@@ -133,7 +62,6 @@ arm64_u64 arm64_decode_effects(const struct arm64_decoded_insn *decoded)
     case ARM64_OP_RET:
         effects |= ARM64_EFFECT_CONTROL_FLOW | ARM64_EFFECT_INDIRECT_TARGET | ARM64_EFFECT_READ_GPR;
         if (decoded->opcode == ARM64_OP_BLR) effects |= ARM64_EFFECT_CALL | ARM64_EFFECT_WRITE_GPR;
-        if (decoded->opcode == ARM64_OP_BLR) effects |= ARM64_EFFECT_RELOCATION_REQUIRED;
         if (decoded->opcode == ARM64_OP_RET) effects |= ARM64_EFFECT_RETURN;
         break;
     case ARM64_OP_B_COND:
@@ -141,7 +69,7 @@ arm64_u64 arm64_decode_effects(const struct arm64_decoded_insn *decoded)
     case ARM64_OP_CBNZ:
     case ARM64_OP_TBZ:
     case ARM64_OP_TBNZ:
-        effects |= ARM64_EFFECT_CONTROL_FLOW | ARM64_EFFECT_CONDITIONAL | ARM64_EFFECT_DIRECT_TARGET | ARM64_EFFECT_PC_RELATIVE | ARM64_EFFECT_RELOCATION_REQUIRED;
+        effects |= ARM64_EFFECT_CONTROL_FLOW | ARM64_EFFECT_CONDITIONAL | ARM64_EFFECT_DIRECT_TARGET | ARM64_EFFECT_PC_RELATIVE;
         if (decoded->opcode != ARM64_OP_B_COND) effects |= ARM64_EFFECT_READ_GPR;
         if (decoded->opcode == ARM64_OP_B_COND) effects |= ARM64_EFFECT_READ_FLAGS;
         break;
@@ -157,10 +85,10 @@ arm64_u64 arm64_decode_effects(const struct arm64_decoded_insn *decoded)
     case ARM64_OP_PREFETCH:
     case ARM64_OP_PREFETCH_LITERAL:
         effects |= ARM64_EFFECT_PREFETCH;
-        if (decoded->opcode == ARM64_OP_PREFETCH_LITERAL) effects |= ARM64_EFFECT_PC_RELATIVE | ARM64_EFFECT_DIRECT_TARGET | ARM64_EFFECT_RELOCATION_REQUIRED;
+        if (decoded->opcode == ARM64_OP_PREFETCH_LITERAL) effects |= ARM64_EFFECT_PC_RELATIVE | ARM64_EFFECT_DIRECT_TARGET;
         break;
     case ARM64_OP_LOAD_LITERAL:
-        effects |= ARM64_EFFECT_PC_RELATIVE | ARM64_EFFECT_DIRECT_TARGET | ARM64_EFFECT_RELOCATION_REQUIRED;
+        effects |= ARM64_EFFECT_PC_RELATIVE | ARM64_EFFECT_DIRECT_TARGET;
         break;
     case ARM64_OP_FP_SIMD:
         effects |= ARM64_EFFECT_READ_FP_SIMD | ARM64_EFFECT_WRITE_FP_SIMD;
@@ -245,6 +173,90 @@ arm64_u64 arm64_decode_effects(const struct arm64_decoded_insn *decoded)
     }
 
     return effects;
+}
+
+static void arm64_decode_finish(struct arm64_decoded_insn *decoded, enum arm64_decode_status status)
+{
+    decoded->status = status;
+    decoded->effects = arm64_decode_effects(decoded);
+}
+
+struct arm64_decoded_insn arm64_decode_insn(arm64_u32 raw)
+{
+    struct arm64_decoded_insn decoded;
+    enum arm64_decode_status status;
+    arm64_u32 op0;
+
+    /* 保证未被当前 opcode 使用的字段有稳定的零值。 */
+    __builtin_memset(&decoded, 0, sizeof(decoded));
+    decoded.raw = raw;
+
+    if ((raw & 0xFFFF0000U) == 0)
+    {
+        decoded.insn_class = ARM64_INSN_CLASS_BRANCH_EXCEPTION_SYSTEM;
+        decoded.opcode = ARM64_OP_EXCEPTION_GENERATION;
+        decoded.operands.system.immediate = raw & 0xFFFF;
+        status = ARM64_DECODE_UNSUPPORTED;
+    }
+    else
+    {
+        /* A64 主编码 raw[28:25] 直接确定唯一子解码器。 */
+        op0 = (raw >> 25) & 0xF;
+        switch (op0)
+        {
+        case 0x0:
+            status = arm64_decode_sme(raw, &decoded);
+            break;
+        case 0x2:
+            status = arm64_decode_sve(raw, &decoded);
+            break;
+        case 0x5:
+        case 0xD:
+            status = arm64_decode_data_processing_register(raw, &decoded);
+            break;
+        case 0x8:
+        case 0x9:
+            status = arm64_decode_data_processing_immediate(raw, &decoded);
+            break;
+        case 0xA:
+        case 0xB:
+            status = arm64_decode_branch(raw, &decoded);
+            break;
+        case 0x4:
+        case 0x6:
+        case 0xC:
+        case 0xE:
+            status = arm64_decode_ldst(raw, &decoded);
+            break;
+        case 0x7:
+        case 0xF:
+            status = arm64_decode_simd(raw, &decoded);
+            break;
+        default:
+            status = ARM64_DECODE_NO_MATCH;
+            break;
+        }
+    }
+
+    if (status == ARM64_DECODE_NO_MATCH)
+    {
+        /* 没有任何编码空间认领该 word，按架构未分配编码处理。 */
+        decoded.insn_class = ARM64_INSN_CLASS_UNKNOWN;
+        decoded.opcode = ARM64_OP_UNKNOWN;
+        status = ARM64_DECODE_UNALLOCATED;
+    }
+
+    arm64_decode_finish(&decoded, status);
+    return decoded;
+}
+
+int arm64_decode_insn_has_effect(arm64_u32 raw, arm64_u64 effects)
+{
+    struct arm64_decoded_insn decoded;
+
+    if (!effects) return 0;
+    decoded = arm64_decode_insn(raw);
+    return (decoded.effects & effects) == effects;
 }
 
 int arm64_decode_direct_target(const struct arm64_decoded_insn *decoded, arm64_u64 pc, arm64_u64 *target)

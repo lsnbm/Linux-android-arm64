@@ -100,34 +100,14 @@ static void hook_save_orig_insns(uint64_t addr, uint32_t *insns, int count)
 
 static int hook_validate_orig_insns(uint64_t addr, const uint32_t *insns, int count)
 {
-    struct arm64_decoded_insn decoded;
-    enum arm64_decode_status status;
     int i;
 
     for (i = 0; i < count; i++)
     {
-        status = arm64_decode_insn(insns[i], &decoded);
-        if (status == ARM64_DECODE_OK && (decoded.effects & ARM64_EFFECT_RELOCATION_REQUIRED))
-        {
-            ls_log_tag("hook", "unsupported relocated instruction addr=0x%llx insn=%08x opcode=%u\n",
-                       (unsigned long long)(addr + i * 4), insns[i], decoded.opcode);
-            return -EOPNOTSUPP;
-        }
-        if (status == ARM64_DECODE_UNSUPPORTED &&
-            (decoded.flags & ARM64_INSN_FLAG_RELOCATABLE ||
-             decoded.insn_class == ARM64_INSN_CLASS_DATA_PROCESSING_IMMEDIATE ||
-             decoded.insn_class == ARM64_INSN_CLASS_DATA_PROCESSING_REGISTER ||
-             decoded.insn_class == ARM64_INSN_CLASS_LOAD_STORE ||
-             decoded.insn_class == ARM64_INSN_CLASS_DATA_PROCESSING_SIMD_FP ||
-             decoded.insn_class == ARM64_INSN_CLASS_SVE ||
-             decoded.insn_class == ARM64_INSN_CLASS_SME))
-            continue;
-        if (status != ARM64_DECODE_OK)
-        {
-            ls_log_tag("hook", "unclassified relocated instruction addr=0x%llx insn=%08x status=%u\n",
-                       (unsigned long long)(addr + i * 4), insns[i], status);
-            return -EOPNOTSUPP;
-        }
+        if (!arm64_decode_insn_has_effect(insns[i], ARM64_EFFECT_PC_RELATIVE)) continue;
+
+        ls_log_tag("hook", "pc-relative instruction cannot be replayed addr=0x%llx insn=%08x\n", (unsigned long long)(addr + i * 4), insns[i]);
+        return -EOPNOTSUPP;
     }
 
     return 0;
