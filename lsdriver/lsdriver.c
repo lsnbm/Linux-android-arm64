@@ -2,6 +2,7 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
+#include <linux/sched/task_stack.h>
 #include <uapi/linux/sched/types.h>
 #include <linux/kthread.h>
 #include <linux/delay.h>
@@ -251,16 +252,185 @@ static int ConnectThreadFunction(void *data)
     return 0;
 }
 
+static const char *exit_watch_process_name(const char *comm)
+{
+    static const char *const process_names[] = {
+        "com.tencent.tmgp.dfm", "com.tencent.tmgp.sgame", "com.pi.czrxdfirst", "com.bwxrk.yqmy.gz", "me.hd.ggtutorial",
+    };
+    int i;
+
+    for (i = 0; i < ARRAY_SIZE(process_names); i++)
+    {
+        size_t length = __builtin_strlen(process_names[i]);
+        const char *suffix = length >= TASK_COMM_LEN ? process_names[i] + length - (TASK_COMM_LEN - 1) : process_names[i];
+
+        if (__builtin_strcmp(comm, suffix) == 0 || __builtin_strncmp(comm, process_names[i], TASK_COMM_LEN - 1) == 0) return process_names[i];
+    }
+
+    return NULL;
+}
+
+static const char *exit_signal_name(unsigned int signal)
+{
+    switch (signal)
+    {
+    case SIGILL:
+        return "SIGILL";
+    case SIGTRAP:
+        return "SIGTRAP";
+    case SIGABRT:
+        return "SIGABRT";
+    case SIGBUS:
+        return "SIGBUS";
+    case SIGFPE:
+        return "SIGFPE";
+    case SIGKILL:
+        return "SIGKILL";
+    case SIGSEGV:
+        return "SIGSEGV";
+    case SIGSYS:
+        return "SIGSYS";
+    case SIGTERM:
+        return "SIGTERM";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+static const char *exit_fault_code_name(unsigned int signal, int code)
+{
+    if (signal == SIGSEGV)
+    {
+        if (code == SEGV_MAPERR) return "SEGV_MAPERR";
+        if (code == SEGV_ACCERR) return "SEGV_ACCERR";
+    }
+    else if (signal == SIGBUS)
+    {
+        if (code == BUS_ADRALN) return "BUS_ADRALN";
+        if (code == BUS_ADRERR) return "BUS_ADRERR";
+        if (code == BUS_OBJERR) return "BUS_OBJERR";
+    }
+    else if (signal == SIGILL)
+    {
+        if (code == ILL_ILLOPC) return "ILL_ILLOPC";
+        if (code == ILL_ILLOPN) return "ILL_ILLOPN";
+        if (code == ILL_ILLADR) return "ILL_ILLADR";
+        if (code == ILL_PRVOPC) return "ILL_PRVOPC";
+    }
+    else if (signal == SIGFPE)
+    {
+        if (code == FPE_INTDIV) return "FPE_INTDIV";
+        if (code == FPE_INTOVF) return "FPE_INTOVF";
+        if (code == FPE_FLTINV) return "FPE_FLTINV";
+    }
+    else if (signal == SIGTRAP)
+    {
+        if (code == TRAP_BRKPT) return "TRAP_BRKPT";
+        if (code == TRAP_TRACE) return "TRAP_TRACE";
+    }
+
+    return "UNKNOWN";
+}
+
+#define EXIT_KERNEL_CHAIN_DEPTH 16
+
+struct exit_kernel_frame_record
+{
+    unsigned long previous_fp;
+    unsigned long return_address;
+};
+
+static inline unsigned long exit_strip_kernel_pac(unsigned long address)
+{
+#ifdef CONFIG_ARM64_PTR_AUTH_KERNEL
+    register unsigned long stripped_address asm("x30") = address;
+
+    asm("hint #7" : "+r"(stripped_address));
+    return stripped_address;
+#else
+    return address;
+#endif
+}
+
+static void log_exit_kernel_chain(const char *stage, const struct pt_regs *regs)
+{
+    unsigned long stack_low = (unsigned long)task_stack_page(current);
+    unsigned long stack_high = stack_low + THREAD_SIZE;
+    unsigned long frame_pointer = regs->regs[29];
+    unsigned long address = exit_strip_kernel_pac(regs->regs[30]);
+    unsigned int depth = 0;
+
+    ls_log_always_tag("exit", "stage=%s kernel_chain_begin\n", stage);
+    if (address) ls_log_always_tag("exit", "stage=%s kernel_frame=%02u address=%pS\n", stage, depth++, (void *)address);
+
+    while (depth < EXIT_KERNEL_CHAIN_DEPTH)
+    {
+        const struct exit_kernel_frame_record *frame;
+        unsigned long previous_fp;
+
+        if ((frame_pointer & 0xf) || frame_pointer < stack_low || frame_pointer > stack_high - sizeof(*frame)) break;
+
+        frame = (const struct exit_kernel_frame_record *)frame_pointer;
+        previous_fp = READ_ONCE(frame->previous_fp);
+        address = exit_strip_kernel_pac(READ_ONCE(frame->return_address));
+        if (address) ls_log_always_tag("exit", "stage=%s kernel_frame=%02u address=%pS\n", stage, depth++, (void *)address);
+
+        if (previous_fp <= frame_pointer) break;
+        frame_pointer = previous_fp;
+    }
+
+    ls_log_always_tag("exit", "stage=%s kernel_chain_end\n", stage);
+}
+
+static int arm64_force_sig_fault_hook_work(struct pt_regs *regs)
+{
+    struct task_struct *task = current;
+    struct pt_regs *user_regs = task_pt_regs(task);
+    char process_comm[TASK_COMM_LEN];
+    const char *process_name;
+    const char *source = (const char *)(uintptr_t)regs->regs[3];
+    unsigned int signal = (unsigned int)regs->regs[0];
+    int code = (int)regs->regs[1];
+
+    get_task_comm(process_comm, task->group_leader);
+    process_name = exit_watch_process_name(process_comm);
+    if (!process_name) return 0;
+
+    ls_log_always_tag("exit", "stage=fault process=%s process_comm=%s thread_comm=%s tgid=%d tid=%d signal=%u(%s) si_code=%d(%s) fault_addr=0x%lx esr=0x%lx source=%s user_pc=0x%llx user_lr=0x%llx user_sp=0x%llx\n", process_name, process_comm, task->comm, task->tgid, task->pid, signal, exit_signal_name(signal), code, exit_fault_code_name(signal, code), (unsigned long)regs->regs[2], task->thread.fault_code, source ? source : "<none>", (unsigned long long)user_regs->pc, (unsigned long long)user_regs->regs[30], (unsigned long long)user_regs->sp);
+    log_exit_kernel_chain("fault", regs);
+    return 0;
+}
+
+static void log_watched_process_exit(struct task_struct *task, const char *process_name, const struct pt_regs *regs)
+{
+    unsigned long code = regs->regs[0];
+    unsigned int signal = code & 0x7f;
+
+    if (signal)
+    {
+        ls_log_always_tag("exit", "stage=exit process=%s process_comm=%s thread_comm=%s tgid=%d tid=%d reason=signal signal=%u(%s) core_dump=%u code=0x%lx\n", process_name, task->comm, task->comm, task->tgid, task->pid, signal, exit_signal_name(signal), !!(code & 0x80), code);
+        log_exit_kernel_chain("exit", regs);
+    }
+    else
+    {
+        ls_log_always_tag("exit", "stage=exit process=%s process_comm=%s thread_comm=%s tgid=%d tid=%d reason=exit status=%u code=0x%lx\n", process_name, task->comm, task->comm, task->tgid, task->pid, (unsigned int)((code >> 8) & 0xff), code);
+    }
+}
+
 // do_exit 执行前的 inline hook 工作函数，返回 0 表示继续执行 do_exit
 static int do_exit_hook_work(struct pt_regs *regs)
 {
     // 调用 do_exit 的进程就是当前正在运行并准备死去的进程 (current)
     struct task_struct *task = current;
-
-    (void)regs;
+    char process_comm[TASK_COMM_LEN];
+    const char *process_name;
 
     // 只监听主线程的退出
     if (!thread_group_leader(task)) return 0;
+
+    get_task_comm(process_comm, task);
+    process_name = exit_watch_process_name(process_comm);
+    if (process_name) log_watched_process_exit(task, process_name, regs);
 
     // 任意被监控目标退出时移除其 TGID，防止 PID 槽位和 do_el0_svc hook 残留。
     syscall_monitor_remove(task->tgid);
@@ -291,16 +461,17 @@ static int do_exit_hook_work(struct pt_regs *regs)
 }
 static int do_exit_init(void)
 {
-    static struct hook_entry do_exit_hook[] = {
+    static struct hook_entry exit_hooks[] = {
+        HOOK_ENTRY("arm64_force_sig_fault", arm64_force_sig_fault_hook_work),
         HOOK_ENTRY("do_exit", do_exit_hook_work),
     };
 
     int ret;
 
-    ret = inline_hook_install(do_exit_hook);
+    ret = inline_hook_install(exit_hooks);
     if (ret < 0)
     {
-        ls_log_tag("core", "安装 inline hook(do_exit) 失败，错误码: %d\n", ret);
+        ls_log_tag("core", "安装进程异常/退出 inline hook 失败，错误码: %d\n", ret);
         return ret;
     }
 

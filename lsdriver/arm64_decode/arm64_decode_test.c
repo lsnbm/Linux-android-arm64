@@ -12,17 +12,17 @@ static int failures;
 
 static struct arm64_decoded_insn decode_ok(arm64_u32 raw)
 {
-    struct arm64_decoded_insn decoded;
+    struct arm64_decoded_insn decoded = arm64_decode_insn(raw);
 
-    CHECK(arm64_decode_insn(raw, &decoded) == ARM64_DECODE_OK);
+    CHECK(decoded.status == ARM64_DECODE_OK);
     return decoded;
 }
 
 static void decode_status_is(arm64_u32 raw, enum arm64_decode_status expected)
 {
-    struct arm64_decoded_insn decoded;
+    struct arm64_decoded_insn decoded = arm64_decode_insn(raw);
 
-    CHECK(arm64_decode_insn(raw, &decoded) == expected);
+    CHECK(decoded.status == expected);
 }
 
 static void test_fp_conversions(void)
@@ -159,13 +159,30 @@ static void test_dispatch(void)
     decode_status_is(0x04000000U, ARM64_DECODE_UNSUPPORTED);
     decode_status_is(0xC00800FFU, ARM64_DECODE_UNSUPPORTED);
     decode_status_is(0x40000000U, ARM64_DECODE_UNALLOCATED);
-    CHECK(arm64_decode_insn(0x80000000U, &decoded) == ARM64_DECODE_UNSUPPORTED);
+    decoded = arm64_decode_insn(0x80000000U);
+    CHECK(decoded.status == ARM64_DECODE_UNSUPPORTED);
     CHECK(decoded.insn_class == ARM64_INSN_CLASS_SME);
+
+    CHECK(arm64_decode_insn_has_effect(0x10000000U, ARM64_EFFECT_PC_RELATIVE));
+    CHECK(!arm64_decode_insn_has_effect(0xD503201FU, ARM64_EFFECT_PC_RELATIVE));
+    CHECK(arm64_decode_insn_has_effect(0xD503233FU, ARM64_EFFECT_SYSTEM | ARM64_EFFECT_READ_GPR | ARM64_EFFECT_WRITE_GPR));
+    CHECK(!arm64_decode_insn_has_effect(0x10000000U, 0));
 }
 
 static void test_system(void)
 {
     struct arm64_decoded_insn decoded = decode_ok(0xD5033BBFU);
+    static const struct
+    {
+        arm64_u32 raw;
+        enum arm64_bti_type type;
+    } bti_cases[] = {
+        {0xD503241FU, ARM64_BTI_TYPE_NONE},
+        {0xD503245FU, ARM64_BTI_TYPE_C},
+        {0xD503249FU, ARM64_BTI_TYPE_J},
+        {0xD50324DFU, ARM64_BTI_TYPE_JC},
+    };
+    unsigned int index;
 
     CHECK(decoded.raw == 0xD5033BBFU);
     CHECK(decoded.status == ARM64_DECODE_OK);
@@ -179,6 +196,26 @@ static void test_system(void)
     CHECK(decoded.opcode == ARM64_OP_EXCEPTION_GENERATION);
     CHECK(decoded.operands.system.operation == ARM64_SYSTEM_OP_BRK);
     CHECK(decoded.operands.system.immediate == 0x123);
+
+    decoded = decode_ok(0xD503233FU);
+    CHECK(decoded.opcode == ARM64_OP_HINT);
+    CHECK(decoded.operands.system.operation == ARM64_SYSTEM_OP_PACIASP);
+    CHECK(decoded.effects & ARM64_EFFECT_SYSTEM);
+    CHECK(decoded.effects & ARM64_EFFECT_READ_GPR);
+    CHECK(decoded.effects & ARM64_EFFECT_WRITE_GPR);
+    CHECK(!(decoded.effects & ARM64_EFFECT_PC_RELATIVE));
+
+    for (index = 0; index < sizeof(bti_cases) / sizeof(bti_cases[0]); index++)
+    {
+        decoded = decode_ok(bti_cases[index].raw);
+        CHECK(decoded.opcode == ARM64_OP_HINT);
+        CHECK(decoded.operands.system.operation == ARM64_SYSTEM_OP_BTI);
+        CHECK(decoded.operands.system.option == bti_cases[index].type);
+        CHECK(decoded.effects & ARM64_EFFECT_SYSTEM);
+        CHECK(!(decoded.effects & ARM64_EFFECT_READ_GPR));
+        CHECK(!(decoded.effects & ARM64_EFFECT_WRITE_GPR));
+        CHECK(!(decoded.effects & ARM64_EFFECT_PC_RELATIVE));
+    }
 }
 
 static void test_load_store(void)
@@ -251,6 +288,12 @@ static void test_load_store(void)
     CHECK(decoded.opcode == ARM64_OP_LOAD_STORE_PAIR);
     CHECK(decoded.flags & ARM64_INSN_FLAG_WRITEBACK);
 
+    decoded = decode_ok(0x08A07C00U);
+    CHECK(decoded.opcode == ARM64_OP_CAS);
+    CHECK(decoded.flags & ARM64_INSN_FLAG_LOAD);
+    CHECK(decoded.flags & ARM64_INSN_FLAG_STORE);
+    CHECK(decoded.operands.load_store.access_bytes == 1);
+
     decoded = decode_ok(0x08207C00U);
     CHECK(decoded.opcode == ARM64_OP_CASP);
     CHECK(decoded.operand_width == 32);
@@ -277,16 +320,37 @@ static void test_load_store(void)
     CHECK(decoded.flags & ARM64_INSN_FLAG_ACQUIRE);
     CHECK(decoded.operands.load_store.access_bytes == 2);
 
+    decoded = decode_ok(0x38200000U);
+    CHECK(decoded.opcode == ARM64_OP_ATOMIC_RMW);
+    CHECK(decoded.operation == ARM64_OPERATION_LDADD);
+    CHECK(decoded.flags & ARM64_INSN_FLAG_LOAD);
+    CHECK(decoded.flags & ARM64_INSN_FLAG_STORE);
+    CHECK(decoded.operands.load_store.address_mode == ARM64_ADDRESS_BASE);
+
+    decoded = decode_ok(0x19000000U);
+    CHECK(decoded.opcode == ARM64_OP_RCPC_UNSCALED);
+    CHECK(decoded.flags & ARM64_INSN_FLAG_STORE);
+    CHECK(decoded.flags & ARM64_INSN_FLAG_RELEASE);
+    CHECK(!(decoded.flags & ARM64_INSN_FLAG_FP));
+    CHECK(decoded.operands.load_store.address_mode == ARM64_ADDRESS_UNSCALED_OFFSET);
+
     decoded = decode_ok(0x3DC00000U);
     CHECK(decoded.flags & ARM64_INSN_FLAG_FP);
     CHECK(decoded.flags & ARM64_INSN_FLAG_LOAD);
     CHECK(decoded.operands.load_store.access_bytes == 16);
     CHECK(decoded.operand_width == 128);
 
+    decoded = decode_ok(0x58000020U);
+    CHECK(decoded.opcode == ARM64_OP_LOAD_LITERAL);
+    CHECK(decoded.flags & ARM64_INSN_FLAG_LOAD);
+    CHECK(!(decoded.flags & ARM64_INSN_FLAG_FP));
+    CHECK(decoded.operands.load_store.offset == 4);
+    CHECK(decoded.effects & ARM64_EFFECT_PC_RELATIVE);
+
     decoded = decode_ok(0xD8000020U);
     CHECK(decoded.opcode == ARM64_OP_PREFETCH_LITERAL);
     CHECK(decoded.effects & ARM64_EFFECT_PREFETCH);
-    CHECK(decoded.effects & ARM64_EFFECT_RELOCATION_REQUIRED);
+    CHECK(decoded.effects & ARM64_EFFECT_PC_RELATIVE);
 
     decode_status_is(0xFC4098E6U, ARM64_DECODE_UNALLOCATED);
     decode_status_is(0x6868F17DU, ARM64_DECODE_UNALLOCATED);
@@ -336,7 +400,6 @@ static void test_control_flow(void)
     CHECK(decoded.operands.pc_relative.offset == -4);
     CHECK(decoded.effects & ARM64_EFFECT_WRITE_GPR);
     CHECK(decoded.effects & ARM64_EFFECT_PC_RELATIVE);
-    CHECK(decoded.effects & ARM64_EFFECT_RELOCATION_REQUIRED);
     CHECK(arm64_decode_direct_target(&decoded, 0x1004, &target));
     CHECK(target == 0x1000);
 
@@ -520,7 +583,6 @@ static void test_fp_by_element(void)
     decode_status_is(0x0F421020U, ARM64_DECODE_UNALLOCATED);
     decode_status_is(0x0FC21020U, ARM64_DECODE_UNALLOCATED);
     decode_status_is(0x4FEE1020U, ARM64_DECODE_UNALLOCATED);
-    decode_status_is(0x1F821020U, ARM64_DECODE_UNALLOCATED);
 
     decode_status_is(0x2F420020U, ARM64_DECODE_UNSUPPORTED);
     decode_status_is(0x6FAB4949U, ARM64_DECODE_UNSUPPORTED);
@@ -528,9 +590,116 @@ static void test_fp_by_element(void)
     decode_status_is(0x4FA7DAD5U, ARM64_DECODE_UNSUPPORTED);
 }
 
+static void test_scalar_fp_3source(void)
+{
+    static const struct
+    {
+        arm64_u32 bits;
+        enum arm64_simd_operation operation;
+    } operations[] = {
+        {0x00000000U, ARM64_SIMD_OP_FMADD},
+        {0x00008000U, ARM64_SIMD_OP_FMSUB},
+        {0x00200000U, ARM64_SIMD_OP_FNMADD},
+        {0x00208000U, ARM64_SIMD_OP_FNMSUB},
+    };
+    static const struct
+    {
+        arm64_u32 bits;
+        arm64_u8 width;
+    } shapes[] = {
+        {0x00000000U, 32},
+        {0x00400000U, 64},
+    };
+    struct arm64_decoded_insn decoded;
+    size_t operation_index;
+    size_t shape_index;
+
+    for (operation_index = 0; operation_index < sizeof(operations) / sizeof(operations[0]); operation_index++)
+    {
+        for (shape_index = 0; shape_index < sizeof(shapes) / sizeof(shapes[0]); shape_index++)
+        {
+            decoded = decode_ok(0x1F041000U | operations[operation_index].bits | shapes[shape_index].bits);
+            CHECK(decoded.operands.simd.group == ARM64_SIMD_GROUP_SCALAR_3SOURCE);
+            CHECK(decoded.operands.simd.operation == operations[operation_index].operation);
+            CHECK(decoded.operand_width == shapes[shape_index].width);
+            CHECK(decoded.rd == 0);
+            CHECK(decoded.rn == 0);
+            CHECK(decoded.ra == 4);
+            CHECK(decoded.rm == 4);
+        }
+    }
+
+    decode_status_is(0x1F821020U, ARM64_DECODE_UNALLOCATED);
+    decode_status_is(0x1FC01000U, ARM64_DECODE_UNSUPPORTED);
+}
+
 static void test_vector(void)
 {
+    static const struct
+    {
+        arm64_u32 bits;
+        enum arm64_simd_operation operation;
+    } logical_operations[] = {
+        {0x00000000U, ARM64_SIMD_OP_AND_VECTOR}, {0x00400000U, ARM64_SIMD_OP_BIC_VECTOR}, {0x00800000U, ARM64_SIMD_OP_ORR_VECTOR}, {0x00C00000U, ARM64_SIMD_OP_ORN_VECTOR}, {0x20000000U, ARM64_SIMD_OP_EOR_VECTOR}, {0x20400000U, ARM64_SIMD_OP_BSL_VECTOR}, {0x20800000U, ARM64_SIMD_OP_BIT_VECTOR}, {0x20C00000U, ARM64_SIMD_OP_BIF_VECTOR},
+    };
+    static const struct
+    {
+        arm64_u32 bits;
+        arm64_u8 operand_width;
+    } logical_shapes[] = {
+        {0x00000000U, 64},
+        {0x40000000U, 128},
+    };
+    static const struct
+    {
+        arm64_u32 bits;
+        enum arm64_simd_operation operation;
+    } permute_operations[] = {
+        {0x00001000U, ARM64_SIMD_OP_UZP1}, {0x00002000U, ARM64_SIMD_OP_TRN1}, {0x00003000U, ARM64_SIMD_OP_ZIP1}, {0x00005000U, ARM64_SIMD_OP_UZP2}, {0x00006000U, ARM64_SIMD_OP_TRN2}, {0x00007000U, ARM64_SIMD_OP_ZIP2},
+    };
+    static const struct
+    {
+        arm64_u32 base;
+        arm64_u8 operand_width;
+        arm64_u8 element_width;
+    } permute_shapes[] = {
+        {0x0E000800U, 64, 8}, {0x4E000800U, 128, 8}, {0x0E400800U, 64, 16}, {0x4E400800U, 128, 16}, {0x0E800800U, 64, 32}, {0x4E800800U, 128, 32}, {0x4EC00800U, 128, 64},
+    };
+    static const struct
+    {
+        arm64_u32 bits;
+        enum arm64_simd_operation operation;
+    } fp_accumulate_operations[] = {
+        {0x00000000U, ARM64_SIMD_OP_FMLA_VECTOR},
+        {0x00800000U, ARM64_SIMD_OP_FMLS_VECTOR},
+    };
+    static const struct
+    {
+        arm64_u32 base;
+        arm64_u8 operand_width;
+        arm64_u8 element_width;
+    } fp_accumulate_shapes[] = {
+        {0x0E400C00U, 64, 16}, {0x4E400C00U, 128, 16}, {0x0E20CC00U, 64, 32}, {0x4E20CC00U, 128, 32}, {0x4E60CC00U, 128, 64},
+    };
+    static const struct
+    {
+        arm64_u32 bits;
+        enum arm64_simd_operation operation;
+    } compare_zero_relations[] = {
+        {0x0000D000U, ARM64_SIMD_OP_FCMEQ_ZERO}, {0x2000C000U, ARM64_SIMD_OP_FCMGE_ZERO}, {0x0000C000U, ARM64_SIMD_OP_FCMGT_ZERO}, {0x2000D000U, ARM64_SIMD_OP_FCMLE_ZERO}, {0x0000E000U, ARM64_SIMD_OP_FCMLT_ZERO},
+    };
+    static const struct
+    {
+        arm64_u32 bits;
+        arm64_u8 operand_width;
+        arm64_u8 element_width;
+    } compare_zero_shapes[] = {
+        {0x0EF80800U, 64, 16}, {0x4EF80800U, 128, 16}, {0x0EA00800U, 64, 32}, {0x4EA00800U, 128, 32}, {0x4EE00800U, 128, 64}, {0x5EF80800U, 16, 16}, {0x5EA00800U, 32, 32}, {0x5EE00800U, 64, 64},
+    };
     struct arm64_decoded_insn decoded = decode_ok(0x4F00E640U);
+    size_t operation_index;
+    size_t relation_index;
+    size_t shape_index;
 
     CHECK(decoded.operands.simd.group == ARM64_SIMD_GROUP_VECTOR_MODIFIED_IMMEDIATE);
     CHECK(decoded.operands.simd.operation == ARM64_SIMD_OP_MOVI);
@@ -591,6 +760,124 @@ static void test_vector(void)
     CHECK(decoded.operand_width == 128);
     CHECK(decoded.operands.simd.element_width == 32);
 
+    for (operation_index = 0; operation_index < sizeof(logical_operations) / sizeof(logical_operations[0]); operation_index++)
+    {
+        for (shape_index = 0; shape_index < sizeof(logical_shapes) / sizeof(logical_shapes[0]); shape_index++)
+        {
+            decoded = decode_ok(0x0E201C00U | logical_operations[operation_index].bits | logical_shapes[shape_index].bits | 0x30041U);
+            CHECK(decoded.operands.simd.group == ARM64_SIMD_GROUP_VECTOR_LOGICAL);
+            CHECK(decoded.operands.simd.operation == logical_operations[operation_index].operation);
+            CHECK(decoded.rd == 1);
+            CHECK(decoded.rn == 2);
+            CHECK(decoded.rm == 3);
+            CHECK(decoded.operand_width == logical_shapes[shape_index].operand_width);
+            CHECK(decoded.operands.simd.element_width == 8);
+            CHECK(decoded.effects & ARM64_EFFECT_READ_FP_SIMD);
+            CHECK(decoded.effects & ARM64_EFFECT_WRITE_FP_SIMD);
+        }
+    }
+
+    decoded = decode_ok(0x2E631C41U);
+    CHECK(decoded.operands.simd.group == ARM64_SIMD_GROUP_VECTOR_LOGICAL);
+    CHECK(decoded.operands.simd.operation == ARM64_SIMD_OP_BSL_VECTOR);
+    CHECK(decoded.rd == 1);
+    CHECK(decoded.rn == 2);
+    CHECK(decoded.rm == 3);
+    CHECK(decoded.operand_width == 64);
+    CHECK(decoded.operands.simd.element_width == 8);
+
+    for (operation_index = 0; operation_index < sizeof(permute_operations) / sizeof(permute_operations[0]); operation_index++)
+    {
+        for (shape_index = 0; shape_index < sizeof(permute_shapes) / sizeof(permute_shapes[0]); shape_index++)
+        {
+            decoded = decode_ok(permute_shapes[shape_index].base | permute_operations[operation_index].bits | 0x50081U);
+            CHECK(decoded.operands.simd.group == ARM64_SIMD_GROUP_VECTOR_PERMUTE);
+            CHECK(decoded.operands.simd.operation == permute_operations[operation_index].operation);
+            CHECK(decoded.rd == 1);
+            CHECK(decoded.rn == 4);
+            CHECK(decoded.rm == 5);
+            CHECK(decoded.operand_width == permute_shapes[shape_index].operand_width);
+            CHECK(decoded.operands.simd.element_width == permute_shapes[shape_index].element_width);
+            CHECK(decoded.effects & ARM64_EFFECT_READ_FP_SIMD);
+            CHECK(decoded.effects & ARM64_EFFECT_WRITE_FP_SIMD);
+        }
+    }
+
+    decoded = decode_ok(0x0E853881U);
+    CHECK(decoded.operands.simd.group == ARM64_SIMD_GROUP_VECTOR_PERMUTE);
+    CHECK(decoded.operands.simd.operation == ARM64_SIMD_OP_ZIP1);
+    CHECK(decoded.rd == 1);
+    CHECK(decoded.rn == 4);
+    CHECK(decoded.rm == 5);
+    CHECK(decoded.operand_width == 64);
+    CHECK(decoded.operands.simd.element_width == 32);
+    decode_status_is(0x0EC23820U, ARM64_DECODE_UNALLOCATED);
+
+    for (operation_index = 0; operation_index < sizeof(fp_accumulate_operations) / sizeof(fp_accumulate_operations[0]); operation_index++)
+    {
+        for (shape_index = 0; shape_index < sizeof(fp_accumulate_shapes) / sizeof(fp_accumulate_shapes[0]); shape_index++)
+        {
+            decoded = decode_ok(fp_accumulate_shapes[shape_index].base | fp_accumulate_operations[operation_index].bits | 0x20064U);
+            CHECK(decoded.operands.simd.group == ARM64_SIMD_GROUP_VECTOR_3REG);
+            CHECK(decoded.operands.simd.operation == fp_accumulate_operations[operation_index].operation);
+            CHECK(decoded.rd == 4);
+            CHECK(decoded.rn == 3);
+            CHECK(decoded.rm == 2);
+            CHECK(decoded.operand_width == fp_accumulate_shapes[shape_index].operand_width);
+            CHECK(decoded.operands.simd.element_width == fp_accumulate_shapes[shape_index].element_width);
+            CHECK(decoded.effects & ARM64_EFFECT_READ_FP_SIMD);
+            CHECK(decoded.effects & ARM64_EFFECT_WRITE_FP_SIMD);
+        }
+    }
+
+    decoded = decode_ok(0x0E22CC64U);
+    CHECK(decoded.operands.simd.operation == ARM64_SIMD_OP_FMLA_VECTOR);
+    CHECK(decoded.rd == 4);
+    CHECK(decoded.rn == 3);
+    CHECK(decoded.rm == 2);
+    CHECK(decoded.operand_width == 64);
+    CHECK(decoded.operands.simd.element_width == 32);
+    decode_status_is(0x0E62CC20U, ARM64_DECODE_UNALLOCATED);
+
+    decoded = decode_ok(0x0EA00826U);
+    CHECK(decoded.operands.simd.group == ARM64_SIMD_GROUP_VECTOR_2REG);
+    CHECK(decoded.operands.simd.operation == ARM64_SIMD_OP_REV64_V2S);
+    CHECK(decoded.rd == 6);
+    CHECK(decoded.rn == 1);
+    CHECK(decoded.operand_width == 64);
+    CHECK(decoded.operands.simd.element_width == 32);
+    CHECK(decoded.effects & ARM64_EFFECT_READ_FP_SIMD);
+    CHECK(decoded.effects & ARM64_EFFECT_WRITE_FP_SIMD);
+
+    for (relation_index = 0; relation_index < sizeof(compare_zero_relations) / sizeof(compare_zero_relations[0]); relation_index++)
+    {
+        for (shape_index = 0; shape_index < sizeof(compare_zero_shapes) / sizeof(compare_zero_shapes[0]); shape_index++)
+        {
+            decoded = decode_ok(compare_zero_shapes[shape_index].bits | compare_zero_relations[relation_index].bits | 0x61U);
+            CHECK(decoded.operands.simd.group == ARM64_SIMD_GROUP_FP_COMPARE_ZERO);
+            CHECK(decoded.operands.simd.operation == compare_zero_relations[relation_index].operation);
+            CHECK(decoded.rd == 1);
+            CHECK(decoded.rn == 3);
+            CHECK(decoded.operand_width == compare_zero_shapes[shape_index].operand_width);
+            CHECK(decoded.operands.simd.element_width == compare_zero_shapes[shape_index].element_width);
+            CHECK(decoded.effects & ARM64_EFFECT_READ_FP_SIMD);
+            CHECK(decoded.effects & ARM64_EFFECT_WRITE_FP_SIMD);
+        }
+    }
+
+    decode_status_is(0x0EE0D820U, ARM64_DECODE_UNALLOCATED);
+    decode_status_is(0x2EA0E820U, ARM64_DECODE_UNSUPPORTED);
+
+    decoded = decode_ok(0x0EA0E861U);
+    CHECK(decoded.operands.simd.group == ARM64_SIMD_GROUP_FP_COMPARE_ZERO);
+    CHECK(decoded.operands.simd.operation == ARM64_SIMD_OP_FCMLT_ZERO);
+    CHECK(decoded.rd == 1);
+    CHECK(decoded.rn == 3);
+    CHECK(decoded.operand_width == 64);
+    CHECK(decoded.operands.simd.element_width == 32);
+    CHECK(decoded.effects & ARM64_EFFECT_READ_FP_SIMD);
+    CHECK(decoded.effects & ARM64_EFFECT_WRITE_FP_SIMD);
+
     decoded = decode_ok(0x4EA0F800U);
     CHECK(decoded.operands.simd.group == ARM64_SIMD_GROUP_VECTOR_2REG);
     CHECK(decoded.operands.simd.operation == ARM64_SIMD_OP_FABS_V4S);
@@ -625,6 +912,7 @@ static int run_tests(void)
     test_scalar_fp();
     test_scalar_copy();
     test_fp_by_element();
+    test_scalar_fp_3source();
     test_fp_conversions();
     test_vector();
     return failures;

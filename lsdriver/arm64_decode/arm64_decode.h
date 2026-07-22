@@ -23,8 +23,6 @@ enum arm64_decode_status
     ARM64_DECODE_UNPREDICTABLE,
     // 编码属于保留/非法组合，或没有任何子解码器能够识别。
     ARM64_DECODE_UNALLOCATED,
-    // 调用参数无效。
-    ARM64_DECODE_INVALID_ARGUMENT,
     // 仅供子解码器内部调度：该指令不属于当前解码器。
     ARM64_DECODE_NO_MATCH,
 };
@@ -42,30 +40,29 @@ enum arm64_insn_class
     ARM64_INSN_CLASS_SME,
 };
 
-// 对 opcode/flags 的进一步语义归纳，供执行器、重定位器和审计器直接查询。
-#define ARM64_EFFECT_READ_GPR            (1ULL << 0)
-#define ARM64_EFFECT_WRITE_GPR           (1ULL << 1)
-#define ARM64_EFFECT_READ_FP_SIMD        (1ULL << 2)
-#define ARM64_EFFECT_WRITE_FP_SIMD       (1ULL << 3)
-#define ARM64_EFFECT_READ_MEMORY         (1ULL << 4)
-#define ARM64_EFFECT_WRITE_MEMORY        (1ULL << 5)
-#define ARM64_EFFECT_READ_FLAGS          (1ULL << 6)
-#define ARM64_EFFECT_WRITE_FLAGS         (1ULL << 7)
-#define ARM64_EFFECT_CONTROL_FLOW        (1ULL << 8)
-#define ARM64_EFFECT_CONDITIONAL         (1ULL << 9)
-#define ARM64_EFFECT_DIRECT_TARGET       (1ULL << 10)
-#define ARM64_EFFECT_INDIRECT_TARGET     (1ULL << 11)
-#define ARM64_EFFECT_CALL                (1ULL << 12)
-#define ARM64_EFFECT_RETURN              (1ULL << 13)
-#define ARM64_EFFECT_PC_RELATIVE         (1ULL << 14)
-#define ARM64_EFFECT_SYSTEM              (1ULL << 15)
-#define ARM64_EFFECT_EXCEPTION           (1ULL << 16)
-#define ARM64_EFFECT_BARRIER             (1ULL << 17)
-#define ARM64_EFFECT_ATOMIC              (1ULL << 18)
-#define ARM64_EFFECT_EXCLUSIVE           (1ULL << 19)
-#define ARM64_EFFECT_PREFETCH            (1ULL << 20)
-#define ARM64_EFFECT_WRITEBACK           (1ULL << 21)
-#define ARM64_EFFECT_RELOCATION_REQUIRED (1ULL << 22)
+// 对 opcode/flags 的进一步架构语义归纳，供调用方直接查询。
+#define ARM64_EFFECT_READ_GPR        (1ULL << 0)
+#define ARM64_EFFECT_WRITE_GPR       (1ULL << 1)
+#define ARM64_EFFECT_READ_FP_SIMD    (1ULL << 2)
+#define ARM64_EFFECT_WRITE_FP_SIMD   (1ULL << 3)
+#define ARM64_EFFECT_READ_MEMORY     (1ULL << 4)
+#define ARM64_EFFECT_WRITE_MEMORY    (1ULL << 5)
+#define ARM64_EFFECT_READ_FLAGS      (1ULL << 6)
+#define ARM64_EFFECT_WRITE_FLAGS     (1ULL << 7)
+#define ARM64_EFFECT_CONTROL_FLOW    (1ULL << 8)
+#define ARM64_EFFECT_CONDITIONAL     (1ULL << 9)
+#define ARM64_EFFECT_DIRECT_TARGET   (1ULL << 10)
+#define ARM64_EFFECT_INDIRECT_TARGET (1ULL << 11)
+#define ARM64_EFFECT_CALL            (1ULL << 12)
+#define ARM64_EFFECT_RETURN          (1ULL << 13)
+#define ARM64_EFFECT_PC_RELATIVE     (1ULL << 14)
+#define ARM64_EFFECT_SYSTEM          (1ULL << 15)
+#define ARM64_EFFECT_EXCEPTION       (1ULL << 16)
+#define ARM64_EFFECT_BARRIER         (1ULL << 17)
+#define ARM64_EFFECT_ATOMIC          (1ULL << 18)
+#define ARM64_EFFECT_EXCLUSIVE       (1ULL << 19)
+#define ARM64_EFFECT_PREFETCH        (1ULL << 20)
+#define ARM64_EFFECT_WRITEBACK       (1ULL << 21)
 
 /*
 指令编码族/处理路径。opcode 描述指令采用哪种格式，具体运算由 operation
@@ -151,6 +148,16 @@ enum arm64_system_operation
     ARM64_SYSTEM_OP_HLT,
     ARM64_SYSTEM_OP_ERET,
     ARM64_SYSTEM_OP_DRPS,
+    ARM64_SYSTEM_OP_PACIASP,
+    ARM64_SYSTEM_OP_BTI,
+};
+
+enum arm64_bti_type
+{
+    ARM64_BTI_TYPE_NONE = 0,
+    ARM64_BTI_TYPE_C = 2,
+    ARM64_BTI_TYPE_J = 4,
+    ARM64_BTI_TYPE_JC = 6,
 };
 
 // 整数、位运算和原子指令的具体语义操作。
@@ -256,10 +263,13 @@ enum arm64_simd_group
     ARM64_SIMD_GROUP_VECTOR_MODIFIED_IMMEDIATE,
     ARM64_SIMD_GROUP_VECTOR_COPY,
     ARM64_SIMD_GROUP_VECTOR_SHIFT_IMMEDIATE,
+    ARM64_SIMD_GROUP_VECTOR_PERMUTE,
+    ARM64_SIMD_GROUP_VECTOR_LOGICAL,
     ARM64_SIMD_GROUP_VECTOR_3REG,
     ARM64_SIMD_GROUP_VECTOR_2REG,
     ARM64_SIMD_GROUP_SCALAR_COPY,
     ARM64_SIMD_GROUP_FP_BY_ELEMENT,
+    ARM64_SIMD_GROUP_FP_COMPARE_ZERO,
 };
 
 enum arm64_simd_operation
@@ -302,6 +312,20 @@ enum arm64_simd_operation
     ARM64_SIMD_OP_INS_ELEMENT,
     ARM64_SIMD_OP_UMOV,
     ARM64_SIMD_OP_SMOV,
+    ARM64_SIMD_OP_UZP1,
+    ARM64_SIMD_OP_TRN1,
+    ARM64_SIMD_OP_ZIP1,
+    ARM64_SIMD_OP_UZP2,
+    ARM64_SIMD_OP_TRN2,
+    ARM64_SIMD_OP_ZIP2,
+    ARM64_SIMD_OP_AND_VECTOR,
+    ARM64_SIMD_OP_BIC_VECTOR,
+    ARM64_SIMD_OP_ORR_VECTOR,
+    ARM64_SIMD_OP_ORN_VECTOR,
+    ARM64_SIMD_OP_EOR_VECTOR,
+    ARM64_SIMD_OP_BSL_VECTOR,
+    ARM64_SIMD_OP_BIT_VECTOR,
+    ARM64_SIMD_OP_BIF_VECTOR,
     ARM64_SIMD_OP_ADD,
     ARM64_SIMD_OP_SUB,
     ARM64_SIMD_OP_CMEQ,
@@ -342,8 +366,8 @@ enum arm64_simd_operation
     ARM64_SIMD_OP_FDIV_V2S,
     ARM64_SIMD_OP_FDIV_V4S,
     ARM64_SIMD_OP_FDIV_V2D,
-    ARM64_SIMD_OP_FMLA_V4S,
-    ARM64_SIMD_OP_FMLS_V4S,
+    ARM64_SIMD_OP_FMLA_VECTOR,
+    ARM64_SIMD_OP_FMLS_VECTOR,
     ARM64_SIMD_OP_FMAX_V2S,
     ARM64_SIMD_OP_FMAX_V4S,
     ARM64_SIMD_OP_FMAX_V2D,
@@ -378,13 +402,11 @@ enum arm64_simd_operation
     ARM64_SIMD_OP_FSQRT_V2S,
     ARM64_SIMD_OP_FSQRT_V4S,
     ARM64_SIMD_OP_FSQRT_V2D,
+    ARM64_SIMD_OP_REV64_V2S,
     ARM64_SIMD_OP_REV64_V16B,
     ARM64_SIMD_OP_REV64_V8H,
     ARM64_SIMD_OP_REV32_V16B,
     ARM64_SIMD_OP_REV16_V16B,
-    ARM64_SIMD_OP_AND_V16B,
-    ARM64_SIMD_OP_ORR_V16B,
-    ARM64_SIMD_OP_EOR_V16B,
     ARM64_SIMD_OP_FADDP_S_V2S,
     ARM64_SIMD_OP_FADDP_D_V2D,
     ARM64_SIMD_OP_FMAXV_S_V4S,
@@ -393,6 +415,11 @@ enum arm64_simd_operation
     ARM64_SIMD_OP_FMLS_BY_ELEMENT,
     ARM64_SIMD_OP_FMUL_BY_ELEMENT,
     ARM64_SIMD_OP_FMULX_BY_ELEMENT,
+    ARM64_SIMD_OP_FCMEQ_ZERO,
+    ARM64_SIMD_OP_FCMGE_ZERO,
+    ARM64_SIMD_OP_FCMGT_ZERO,
+    ARM64_SIMD_OP_FCMLE_ZERO,
+    ARM64_SIMD_OP_FCMLT_ZERO,
 };
 
 enum arm64_fp_rounding_mode
@@ -424,7 +451,6 @@ enum arm64_fp_rounding_mode
 #define ARM64_INSN_FLAG_INVERT       (1U << 11)
 #define ARM64_INSN_FLAG_ORDERED      (1U << 12)
 #define ARM64_INSN_FLAG_IMMEDIATE    (1U << 13)
-#define ARM64_INSN_FLAG_RELOCATABLE  (1U << 14)
 #define ARM64_INSN_FLAG_NON_TEMPORAL (1U << 15)
 #define ARM64_INSN_FLAG_UNPRIVILEGED (1U << 16)
 
@@ -445,7 +471,7 @@ struct arm64_pc_relative_operands
 struct arm64_system_operands
 {
     enum arm64_system_operation operation;
-    // exception immediate 为 imm16；barrier/CLREX 使用低 4 位 option。
+    // exception immediate 为 imm16；barrier/CLREX 使用低 4 位 option，BTI 使用 arm64_bti_type。
     arm64_u16 immediate;
     arm64_u8 option;
     arm64_u8 op0;
@@ -539,14 +565,17 @@ struct arm64_decoded_insn
 /*
 解码一条 AArch64 指令。
 
-decoded 不能为空；函数会先将其全部清零。返回 OK 时可消费完整语义；返回
+返回结构始终包含 raw/status/effects。status 为 OK 时可消费完整语义；为
 UNSUPPORTED 时只保证已填写的 class/opcode/flags 等识别信息有效；其他失败
-状态下调用方不应执行该指令。
+状态下调用方不应执行该指令。大结构由 ABI 直接写入调用方返回槽，不产生额外复制。
 */
-enum arm64_decode_status arm64_decode_insn(arm64_u32 raw, struct arm64_decoded_insn *decoded);
+struct arm64_decoded_insn arm64_decode_insn(arm64_u32 raw);
 
-// 根据 insn_class/opcode/flags 以及 SIMD group/operation 重新生成 effects。
-arm64_u64 arm64_decode_effects(const struct arm64_decoded_insn *decoded);
+/*
+一次完成解码和架构 effect 查询，effects 中的位必须全部存在才返回非零。
+只关心指令属性的调用方不需要声明 decoded 或自行检查字段。
+*/
+int arm64_decode_insn_has_effect(arm64_u32 raw, arm64_u64 effects);
 
 // 解析 ADR/ADRP、直接分支和 literal load/prefetch 的绝对目标地址。
 int arm64_decode_direct_target(const struct arm64_decoded_insn *decoded, arm64_u64 pc, arm64_u64 *target);

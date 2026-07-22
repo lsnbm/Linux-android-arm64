@@ -413,11 +413,10 @@ enum arm64_decode_status arm64_decode_data_processing_register(arm64_u32 raw, st
         return ARM64_DECODE_UNSUPPORTED;
     }
 
-    if ((raw & 0x7FE00000U) == 0x5AC00000U)
+    if ((raw & 0x7FFF0000U) == 0x5AC00000U)
     {
         decoded->opcode = ARM64_OP_DATA_PROCESSING_1_SOURCE;
         arm64_decode_base_registers(raw, decoded);
-        if (((raw >> 16) & 0x1F) != 0) return ARM64_DECODE_UNALLOCATED;
         opc = (raw >> 10) & 0x3F;
         decoded->operation = arm64_decode_1source_operation(opc);
         if (decoded->operation == ARM64_OPERATION_NONE) return ARM64_DECODE_UNSUPPORTED;

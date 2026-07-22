@@ -19,7 +19,7 @@ $(obj)/lsdriver_main.o: $(src)/lsdriver.c FORCE
 #O3
 ccflags-y += -O3
 
-# FP16 by-element 模拟使用 Armv8.2-A 半精度浮点算术指令。
+# FP16 模拟使用 Armv8.2-A 半精度浮点算术指令。
 ccflags-y += -march=armv8.2-a+fp16
 
 # 将所有警告降级，不再视为错误

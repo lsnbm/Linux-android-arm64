@@ -51,7 +51,7 @@ enum emu_insn_result
     - 有序/非特权访存：LDAR、STLR、LDAPR、LDAPUR、STLUR、LDTR、STTR。
   - 指针认证和 MTE：PACIA/AUTIA、LDRAA/LDRAB、IRG/GMI/SUBP 等。
   - SVE/SME 以及向量长度相关指令。
-    - 未覆盖的 FP16、复杂 AdvSIMD 重排/结构化访存：TBL/TBX、ZIP/UZP/TRN、
+    - 其余未覆盖的 FP16，以及复杂 AdvSIMD 重排/结构化访存：TBL/TBX、
     LD1/ST1/LD1R 等。
     - 异常和大部分系统指令：SVC、HVC、SMC、BRK、未列入白名单的系统寄存器。
   ========================================================================= */
@@ -524,6 +524,28 @@ static __always_inline uint64_t emu_minmax_hw(uint64_t a, uint64_t b, bool is_mi
     return result32;
 }
 
+static __always_inline uint64_t emu_sign_extend_hw(uint64_t value, uint32_t bytes)
+{
+    uint64_t result;
+
+    switch (bytes)
+    {
+    case 1:
+        asm volatile("sxtb %0, %w1\n" : "=r"(result) : "r"((uint32_t)value));
+        return result;
+    case 2:
+        asm volatile("sxth %0, %w1\n" : "=r"(result) : "r"((uint32_t)value));
+        return result;
+    case 4:
+        asm volatile("sxtw %0, %w1\n" : "=r"(result) : "r"((uint32_t)value));
+        return result;
+    case 8:
+        return value;
+    default:
+        return value;
+    }
+}
+
 /* ---- 指令大类模拟 ---- */
 
 #define EMU_SYSTEM_OPTION_CASE(OPTION, BASE)                               \
@@ -734,7 +756,7 @@ static __always_inline enum emu_insn_result emu_simulate_branch_insn(struct pt_r
 }
 
 #define EMU_LDST_MASK(B)     (~0ULL >> (64 - (B) * 8))
-#define EMU_LDST_SX(V, B)    ((uint64_t)sign_extend64((uint64_t)(V), (B) * 8 - 1))
+#define EMU_LDST_SX(V, B)    emu_sign_extend_hw((uint64_t)(V), (B))
 #define EMU_LDST_ST(A, B, V) emu_write_mem(mem_access, (A), (B), (V))
 
 static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct pt_regs *regs, const struct arm64_decoded_insn *decoded, uint64_t pc, const struct emu_mem_access *mem_access)
@@ -1186,67 +1208,201 @@ static __always_inline bool emu_fp_select_hw(void *dst, const void *left, const 
     return false;
 }
 
-static __always_inline uint64_t emu_simd_lane_mask(uint32_t element_width)
+static __always_inline bool emu_simd_extract_lane_hw(const void *source, uint32_t element_width, uint32_t lane, uint64_t *value)
 {
-    return element_width == 64 ? ~0ULL : (1ULL << element_width) - 1;
+    uint32_t value32;
+
+    if (!value) return false;
+
+    switch (element_width)
+    {
+    case 8:
+        if (lane >= 16) return false;
+        asm volatile("ldrb %w0, [%1, %w2, uxtw]\n" : "=r"(value32) : "r"(source), "r"(lane) : "memory");
+        break;
+    case 16:
+        if (lane >= 8) return false;
+        asm volatile("ldrh %w0, [%1, %w2, uxtw #1]\n" : "=r"(value32) : "r"(source), "r"(lane) : "memory");
+        break;
+    case 32:
+        if (lane >= 4) return false;
+        asm volatile("ldr %w0, [%1, %w2, uxtw #2]\n" : "=r"(value32) : "r"(source), "r"(lane) : "memory");
+        break;
+    case 64:
+        if (lane >= 2) return false;
+        asm volatile("ldr %0, [%1, %w2, uxtw #3]\n" : "=r"(*value) : "r"(source), "r"(lane) : "memory");
+        return true;
+    default:
+        return false;
+    }
+
+    *value = value32;
+    return true;
 }
 
-static __always_inline uint64_t emu_simd_extract_lane(__uint128_t value, uint32_t element_width, uint32_t lane)
+static __always_inline bool emu_simd_extract_signed_lane_hw(const void *source, uint32_t element_width, uint32_t lane, bool sf, uint64_t *value)
 {
-    return (uint64_t)(value >> (lane * element_width)) & emu_simd_lane_mask(element_width);
+    uint32_t value32;
+    uint64_t value64;
+
+    if (!value) return false;
+
+    if (!sf)
+    {
+        switch (element_width)
+        {
+        case 8:
+            if (lane >= 16) return false;
+            asm volatile("ldrsb %w0, [%1, %w2, uxtw]\n" : "=r"(value32) : "r"(source), "r"(lane) : "memory");
+            break;
+        case 16:
+            if (lane >= 8) return false;
+            asm volatile("ldrsh %w0, [%1, %w2, uxtw #1]\n" : "=r"(value32) : "r"(source), "r"(lane) : "memory");
+            break;
+        default:
+            return false;
+        }
+
+        *value = value32;
+        return true;
+    }
+
+    switch (element_width)
+    {
+    case 8:
+        if (lane >= 16) return false;
+        asm volatile("ldrsb %0, [%1, %w2, uxtw]\n" : "=r"(value64) : "r"(source), "r"(lane) : "memory");
+        break;
+    case 16:
+        if (lane >= 8) return false;
+        asm volatile("ldrsh %0, [%1, %w2, uxtw #1]\n" : "=r"(value64) : "r"(source), "r"(lane) : "memory");
+        break;
+    case 32:
+        if (lane >= 4) return false;
+        asm volatile("ldrsw %0, [%1, %w2, uxtw #2]\n" : "=r"(value64) : "r"(source), "r"(lane) : "memory");
+        break;
+    default:
+        return false;
+    }
+
+    *value = value64;
+    return true;
 }
 
-static __always_inline __uint128_t emu_simd_insert_lane(__uint128_t vector, uint64_t value, uint32_t element_width, uint32_t lane)
+static __always_inline bool emu_simd_insert_general_hw(void *dst, uint64_t value, uint32_t element_width, uint32_t lane)
 {
-    __uint128_t mask = (__uint128_t)emu_simd_lane_mask(element_width) << (lane * element_width);
-
-    return (vector & ~mask) | (((__uint128_t)value << (lane * element_width)) & mask);
+    switch (element_width)
+    {
+    case 8:
+        if (lane >= 16) return false;
+        asm volatile("strb %w1, [%0, %w2, uxtw]\n" : : "r"(dst), "r"((uint32_t)value), "r"(lane) : "memory");
+        return true;
+    case 16:
+        if (lane >= 8) return false;
+        asm volatile("strh %w1, [%0, %w2, uxtw #1]\n" : : "r"(dst), "r"((uint32_t)value), "r"(lane) : "memory");
+        return true;
+    case 32:
+        if (lane >= 4) return false;
+        asm volatile("str %w1, [%0, %w2, uxtw #2]\n" : : "r"(dst), "r"((uint32_t)value), "r"(lane) : "memory");
+        return true;
+    case 64:
+        if (lane >= 2) return false;
+        asm volatile("str %1, [%0, %w2, uxtw #3]\n" : : "r"(dst), "r"(value), "r"(lane) : "memory");
+        return true;
+    default:
+        return false;
+    }
 }
 
-static __always_inline __uint128_t emu_simd_replicate_lane(uint64_t value, uint32_t element_width, uint32_t vector_width)
+static __always_inline bool emu_simd_write_scalar_hw(void *dst, uint64_t value, uint32_t width)
 {
-    __uint128_t result = 0;
-    uint32_t lane;
-
-    for (lane = 0; lane < vector_width / element_width; lane++) result = emu_simd_insert_lane(result, value, element_width, lane);
-    return result;
+    if (width == 8 || width == 16 || width == 32)
+    {
+        asm volatile(".arch_extension fp\n.arch_extension simd\n"
+                     "fmov s0, %w1\n"
+                     "str q0, [%0]\n"
+                     :
+                     : "r"(dst), "r"((uint32_t)value)
+                     : "memory", "v0");
+        return true;
+    }
+    if (width == 64)
+    {
+        asm volatile(".arch_extension fp\n.arch_extension simd\n"
+                     "fmov d0, %1\n"
+                     "str q0, [%0]\n"
+                     :
+                     : "r"(dst), "r"(value)
+                     : "memory", "v0");
+        return true;
+    }
+    return false;
 }
 
-#define EMU_SIMD_FP_BY_ELEMENT_EXEC(DST_ARR, SRC_ARR)                                  \
-    do                                                                                 \
-    {                                                                                  \
-        switch (operation)                                                             \
-        {                                                                              \
-        case ARM64_SIMD_OP_FMLA_BY_ELEMENT:                                            \
-            EMU_VEC_ACC("fmla " DST_ARR ", " SRC_ARR, &result, &left_value, &element); \
-            break;                                                                     \
-        case ARM64_SIMD_OP_FMLS_BY_ELEMENT:                                            \
-            EMU_VEC_ACC("fmls " DST_ARR ", " SRC_ARR, &result, &left_value, &element); \
-            break;                                                                     \
-        case ARM64_SIMD_OP_FMUL_BY_ELEMENT:                                            \
-            EMU_FP_BIN("fmul " DST_ARR ", " SRC_ARR, &result, &left_value, &element);  \
-            break;                                                                     \
-        case ARM64_SIMD_OP_FMULX_BY_ELEMENT:                                           \
-            EMU_FP_BIN("fmulx " DST_ARR ", " SRC_ARR, &result, &left_value, &element); \
-            break;                                                                     \
-        default:                                                                       \
-            return false;                                                              \
-        }                                                                              \
+static __always_inline bool emu_simd_read_scalar_hw(const void *source, uint32_t width, uint64_t *value)
+{
+    uint32_t value32;
+
+    if (!value) return false;
+    if (width == 32)
+    {
+        asm volatile(".arch_extension fp\n.arch_extension simd\n"
+                     "ldr q1, [%1]\n"
+                     "fmov %w0, s1\n"
+                     : "=r"(value32)
+                     : "r"(source)
+                     : "memory", "v1");
+        *value = value32;
+        return true;
+    }
+    if (width == 64)
+    {
+        asm volatile(".arch_extension fp\n.arch_extension simd\n"
+                     "ldr q1, [%1]\n"
+                     "fmov %0, d1\n"
+                     : "=r"(*value)
+                     : "r"(source)
+                     : "memory", "v1");
+        return true;
+    }
+    return false;
+}
+
+#define EMU_SIMD_FP_BY_ELEMENT_EXEC(DST_ARR, SRC_ARR)                       \
+    do                                                                      \
+    {                                                                       \
+        switch (operation)                                                  \
+        {                                                                   \
+        case ARM64_SIMD_OP_FMLA_BY_ELEMENT:                                 \
+            EMU_VEC_ACC("fmla " DST_ARR ", " SRC_ARR, dst, left, &element); \
+            break;                                                          \
+        case ARM64_SIMD_OP_FMLS_BY_ELEMENT:                                 \
+            EMU_VEC_ACC("fmls " DST_ARR ", " SRC_ARR, dst, left, &element); \
+            break;                                                          \
+        case ARM64_SIMD_OP_FMUL_BY_ELEMENT:                                 \
+            EMU_FP_BIN("fmul " DST_ARR ", " SRC_ARR, dst, left, &element);  \
+            break;                                                          \
+        case ARM64_SIMD_OP_FMULX_BY_ELEMENT:                                \
+            EMU_FP_BIN("fmulx " DST_ARR ", " SRC_ARR, dst, left, &element); \
+            break;                                                          \
+        default:                                                            \
+            return false;                                                   \
+        }                                                                   \
     } while (0)
 
-#define EMU_SIMD_FP16_BY_ELEMENT_INST(INSTRUCTION)              \
-    do                                                          \
-    {                                                           \
-        asm volatile(".arch_extension fp\n"                    \
-                     ".arch_extension simd\n"                  \
-                     "ldr q0, [%0]\n"                          \
-                     "ldr q1, [%1]\n"                          \
-                     "ldr q2, [%2]\n"                          \
-                     ".inst " __stringify(INSTRUCTION) "\n"   \
-                     "str q0, [%0]\n"                          \
-                     :                                          \
-                     : "r"(&result), "r"(&left_value), "r"(&element) \
-                     : "memory", "v0", "v1", "v2");         \
+#define EMU_SIMD_FP16_BY_ELEMENT_INST(INSTRUCTION)                      \
+    do                                                                  \
+    {                                                                   \
+        asm volatile(".arch_extension fp\n"                             \
+                     ".arch_extension simd\n"                           \
+                     "ldr q0, [%0]\n"                                   \
+                     "ldr q1, [%1]\n"                                   \
+                     "ldr q2, [%2]\n"                                   \
+                     ".inst " __stringify(INSTRUCTION) "\n"             \
+                                                       "str q0, [%0]\n" \
+                     :                                                  \
+                     : "r"(dst), "r"(left), "r"(&element)               \
+                     : "memory", "v0", "v1", "v2");                     \
     } while (0)
 
 #define EMU_SIMD_FP16_BY_ELEMENT_EXEC(FMLA_INST, FMLS_INST, FMUL_INST, FMULX_INST) \
@@ -1271,15 +1427,15 @@ static __always_inline __uint128_t emu_simd_replicate_lane(uint64_t value, uint3
         }                                                                          \
     } while (0)
 
+static __always_inline bool emu_simd_dup_general_hw(void *dst, uint64_t value, uint32_t element_width, uint32_t vector_width);
+
 static __always_inline bool emu_simd_fp_by_element_hw(enum arm64_simd_operation operation, void *dst, const void *left, uint64_t lane_value, uint32_t element_width, uint32_t operand_width)
 {
-    __uint128_t result = *(__uint128_t *)dst;
-    __uint128_t left_value = *(const __uint128_t *)left;
     __uint128_t element;
 
     if (operand_width == element_width)
     {
-        element = lane_value;
+        if (!emu_simd_write_scalar_hw(&element, lane_value, element_width)) return false;
         if (element_width == 16) EMU_SIMD_FP16_BY_ELEMENT_EXEC(0x5F021020, 0x5F025020, 0x5F029020, 0x7F029020);
         else if (element_width == 32) EMU_SIMD_FP_BY_ELEMENT_EXEC("s0, s1", "v2.s[0]");
         else if (element_width == 64) EMU_SIMD_FP_BY_ELEMENT_EXEC("d0, d1", "v2.d[0]");
@@ -1287,7 +1443,7 @@ static __always_inline bool emu_simd_fp_by_element_hw(enum arm64_simd_operation 
     }
     else
     {
-        element = emu_simd_replicate_lane(lane_value, element_width, operand_width);
+        if (!emu_simd_dup_general_hw(&element, lane_value, element_width, operand_width)) return false;
         if (operand_width == 64 && element_width == 16) EMU_SIMD_FP16_BY_ELEMENT_EXEC(0x0E420C20, 0x0EC20C20, 0x2E421C20, 0x0E421C20);
         else if (operand_width == 128 && element_width == 16) EMU_SIMD_FP16_BY_ELEMENT_EXEC(0x4E420C20, 0x4EC20C20, 0x6E421C20, 0x4E421C20);
         else if (operand_width == 64 && element_width == 32) EMU_SIMD_FP_BY_ELEMENT_EXEC("v0.2s, v1.2s", "v2.2s");
@@ -1296,7 +1452,6 @@ static __always_inline bool emu_simd_fp_by_element_hw(enum arm64_simd_operation 
         else return false;
     }
 
-    *(__uint128_t *)dst = result;
     return true;
 }
 
@@ -1350,16 +1505,14 @@ static __always_inline bool emu_simd_dup_general_hw(void *dst, uint64_t value, u
 
 #undef EMU_SIMD_DUP_GENERAL_EXEC
 
-static __always_inline int64_t emu_simd_sign_extend_lane(uint64_t value, uint32_t element_width)
+static __always_inline bool emu_simd_materialize_bits_hw(void *dst, uint64_t value, uint32_t vector_width)
 {
-    uint64_t sign;
-
-    if (element_width == 64) return (int64_t)value;
-    sign = 1ULL << (element_width - 1);
-    return (int64_t)((value ^ sign) - sign);
+    if (vector_width == 64) return emu_simd_write_scalar_hw(dst, value, 64);
+    if (vector_width == 128) return emu_simd_dup_general_hw(dst, value, 64, 128);
+    return false;
 }
 
-#define EMU_SIMD_INTEGER_3REG_EXEC(INST)                                   \
+#define EMU_SIMD_VECTOR_3REG_EXEC(INST)                                    \
     do                                                                     \
     {                                                                      \
         if (vector_width == 64)                                            \
@@ -1403,25 +1556,146 @@ static __always_inline bool emu_simd_integer_3reg_hw(enum arm64_simd_operation o
     switch (operation)
     {
     case ARM64_SIMD_OP_ADD:
-        EMU_SIMD_INTEGER_3REG_EXEC("add");
+        EMU_SIMD_VECTOR_3REG_EXEC("add");
     case ARM64_SIMD_OP_SUB:
-        EMU_SIMD_INTEGER_3REG_EXEC("sub");
+        EMU_SIMD_VECTOR_3REG_EXEC("sub");
     case ARM64_SIMD_OP_CMEQ:
-        EMU_SIMD_INTEGER_3REG_EXEC("cmeq");
+        EMU_SIMD_VECTOR_3REG_EXEC("cmeq");
     case ARM64_SIMD_OP_CMGT:
-        EMU_SIMD_INTEGER_3REG_EXEC("cmgt");
+        EMU_SIMD_VECTOR_3REG_EXEC("cmgt");
     case ARM64_SIMD_OP_CMGE:
-        EMU_SIMD_INTEGER_3REG_EXEC("cmge");
+        EMU_SIMD_VECTOR_3REG_EXEC("cmge");
     case ARM64_SIMD_OP_CMHI:
-        EMU_SIMD_INTEGER_3REG_EXEC("cmhi");
+        EMU_SIMD_VECTOR_3REG_EXEC("cmhi");
     case ARM64_SIMD_OP_CMHS:
-        EMU_SIMD_INTEGER_3REG_EXEC("cmhs");
+        EMU_SIMD_VECTOR_3REG_EXEC("cmhs");
     default:
         return false;
     }
 }
 
-#undef EMU_SIMD_INTEGER_3REG_EXEC
+static __always_inline bool emu_simd_permute_hw(enum arm64_simd_operation operation, void *dst, const void *left, const void *right, uint32_t element_width, uint32_t vector_width)
+{
+    switch (operation)
+    {
+    case ARM64_SIMD_OP_UZP1:
+        EMU_SIMD_VECTOR_3REG_EXEC("uzp1");
+    case ARM64_SIMD_OP_TRN1:
+        EMU_SIMD_VECTOR_3REG_EXEC("trn1");
+    case ARM64_SIMD_OP_ZIP1:
+        EMU_SIMD_VECTOR_3REG_EXEC("zip1");
+    case ARM64_SIMD_OP_UZP2:
+        EMU_SIMD_VECTOR_3REG_EXEC("uzp2");
+    case ARM64_SIMD_OP_TRN2:
+        EMU_SIMD_VECTOR_3REG_EXEC("trn2");
+    case ARM64_SIMD_OP_ZIP2:
+        EMU_SIMD_VECTOR_3REG_EXEC("zip2");
+    default:
+        return false;
+    }
+}
+
+#define EMU_SIMD_LOGICAL_BIN_EXEC(INST)                                   \
+    do                                                                    \
+    {                                                                     \
+        if (vector_width == 64)                                           \
+        {                                                                 \
+            EMU_FP_BIN(INST " v0.8b, v1.8b, v2.8b", dst, left, right);    \
+            return true;                                                  \
+        }                                                                 \
+        if (vector_width == 128)                                          \
+        {                                                                 \
+            EMU_FP_BIN(INST " v0.16b, v1.16b, v2.16b", dst, left, right); \
+            return true;                                                  \
+        }                                                                 \
+        return false;                                                     \
+    } while (0)
+
+#define EMU_SIMD_LOGICAL_MASK_EXEC(INST)                                   \
+    do                                                                     \
+    {                                                                      \
+        if (vector_width == 64)                                            \
+        {                                                                  \
+            EMU_VEC_ACC(INST " v0.8b, v1.8b, v2.8b", dst, left, right);    \
+            return true;                                                   \
+        }                                                                  \
+        if (vector_width == 128)                                           \
+        {                                                                  \
+            EMU_VEC_ACC(INST " v0.16b, v1.16b, v2.16b", dst, left, right); \
+            return true;                                                   \
+        }                                                                  \
+        return false;                                                      \
+    } while (0)
+
+static __always_inline bool emu_simd_logical_hw(enum arm64_simd_operation operation, void *dst, const void *left, const void *right, uint32_t vector_width)
+{
+    switch (operation)
+    {
+    case ARM64_SIMD_OP_AND_VECTOR:
+        EMU_SIMD_LOGICAL_BIN_EXEC("and");
+    case ARM64_SIMD_OP_BIC_VECTOR:
+        EMU_SIMD_LOGICAL_BIN_EXEC("bic");
+    case ARM64_SIMD_OP_ORR_VECTOR:
+        EMU_SIMD_LOGICAL_BIN_EXEC("orr");
+    case ARM64_SIMD_OP_ORN_VECTOR:
+        EMU_SIMD_LOGICAL_BIN_EXEC("orn");
+    case ARM64_SIMD_OP_EOR_VECTOR:
+        EMU_SIMD_LOGICAL_BIN_EXEC("eor");
+    case ARM64_SIMD_OP_BSL_VECTOR:
+        EMU_SIMD_LOGICAL_MASK_EXEC("bsl");
+    case ARM64_SIMD_OP_BIT_VECTOR:
+        EMU_SIMD_LOGICAL_MASK_EXEC("bit");
+    case ARM64_SIMD_OP_BIF_VECTOR:
+        EMU_SIMD_LOGICAL_MASK_EXEC("bif");
+    default:
+        return false;
+    }
+}
+
+#undef EMU_SIMD_LOGICAL_BIN_EXEC
+#undef EMU_SIMD_LOGICAL_MASK_EXEC
+
+#undef EMU_SIMD_VECTOR_3REG_EXEC
+
+static __always_inline bool emu_simd_fp_accumulate_hw(enum arm64_simd_operation operation, void *dst, const void *left, const void *right, uint32_t element_width, uint32_t vector_width)
+{
+    bool subtract = operation == ARM64_SIMD_OP_FMLS_VECTOR;
+
+    if (operation != ARM64_SIMD_OP_FMLA_VECTOR && !subtract) return false;
+
+    if (element_width == 16 && vector_width == 64)
+    {
+        if (subtract) EMU_VEC_ACC(".inst 0x0ec20c20", dst, left, right);
+        else EMU_VEC_ACC(".inst 0x0e420c20", dst, left, right);
+        return true;
+    }
+    if (element_width == 16 && vector_width == 128)
+    {
+        if (subtract) EMU_VEC_ACC(".inst 0x4ec20c20", dst, left, right);
+        else EMU_VEC_ACC(".inst 0x4e420c20", dst, left, right);
+        return true;
+    }
+    if (element_width == 32 && vector_width == 64)
+    {
+        if (subtract) EMU_VEC_ACC("fmls v0.2s, v1.2s, v2.2s", dst, left, right);
+        else EMU_VEC_ACC("fmla v0.2s, v1.2s, v2.2s", dst, left, right);
+        return true;
+    }
+    if (element_width == 32 && vector_width == 128)
+    {
+        if (subtract) EMU_VEC_ACC("fmls v0.4s, v1.4s, v2.4s", dst, left, right);
+        else EMU_VEC_ACC("fmla v0.4s, v1.4s, v2.4s", dst, left, right);
+        return true;
+    }
+    if (element_width == 64 && vector_width == 128)
+    {
+        if (subtract) EMU_VEC_ACC("fmls v0.2d, v1.2d, v2.2d", dst, left, right);
+        else EMU_VEC_ACC("fmla v0.2d, v1.2d, v2.2d", dst, left, right);
+        return true;
+    }
+
+    return false;
+}
 
 #define EMU_SIMD_SHIFT_EXEC(INST, ARR, AMOUNT)                                                   \
     do                                                                                           \
@@ -1533,6 +1807,57 @@ static __always_inline bool emu_simd_ext_hw(void *dst, const void *left, const v
 
 #undef EMU_SIMD_EXT_CASE
 
+#define EMU_SIMD_FP_COMPARE_ZERO_FP16_INST(INSTRUCTION)                 \
+    do                                                                  \
+    {                                                                   \
+        asm volatile(".arch_extension fp\n"                             \
+                     ".arch_extension simd\n"                           \
+                     "ldr q1, [%1]\n"                                   \
+                     ".inst " __stringify(INSTRUCTION) "\n"             \
+                                                       "str q0, [%0]\n" \
+                     :                                                  \
+                     : "r"(dst), "r"(source)                            \
+                     : "memory", "v0", "v1");                           \
+        return true;                                                    \
+    } while (0)
+
+#define EMU_SIMD_FP_COMPARE_ZERO_SHAPE(INST, H_INST, V4H_INST, V8H_INST)                                          \
+    do                                                                                                            \
+    {                                                                                                             \
+        if (operand_width == 16 && element_width == 16) EMU_SIMD_FP_COMPARE_ZERO_FP16_INST(H_INST);               \
+        else if (operand_width == 32 && element_width == 32) EMU_FP_UN(INST " s0, s1, #0.0", dst, source);        \
+        else if (operand_width == 64 && element_width == 64) EMU_FP_UN(INST " d0, d1, #0.0", dst, source);        \
+        else if (operand_width == 64 && element_width == 16) EMU_SIMD_FP_COMPARE_ZERO_FP16_INST(V4H_INST);        \
+        else if (operand_width == 64 && element_width == 32) EMU_FP_UN(INST " v0.2s, v1.2s, #0.0", dst, source);  \
+        else if (operand_width == 128 && element_width == 16) EMU_SIMD_FP_COMPARE_ZERO_FP16_INST(V8H_INST);       \
+        else if (operand_width == 128 && element_width == 32) EMU_FP_UN(INST " v0.4s, v1.4s, #0.0", dst, source); \
+        else if (operand_width == 128 && element_width == 64) EMU_FP_UN(INST " v0.2d, v1.2d, #0.0", dst, source); \
+        else return false;                                                                                        \
+        return true;                                                                                              \
+    } while (0)
+
+static __always_inline bool emu_simd_fp_compare_zero_hw(enum arm64_simd_operation operation, void *dst, const void *source, uint32_t operand_width, uint32_t element_width)
+{
+    switch (operation)
+    {
+    case ARM64_SIMD_OP_FCMEQ_ZERO:
+        EMU_SIMD_FP_COMPARE_ZERO_SHAPE("fcmeq", 0x5EF8D820, 0x0EF8D820, 0x4EF8D820);
+    case ARM64_SIMD_OP_FCMGE_ZERO:
+        EMU_SIMD_FP_COMPARE_ZERO_SHAPE("fcmge", 0x7EF8C820, 0x2EF8C820, 0x6EF8C820);
+    case ARM64_SIMD_OP_FCMGT_ZERO:
+        EMU_SIMD_FP_COMPARE_ZERO_SHAPE("fcmgt", 0x5EF8C820, 0x0EF8C820, 0x4EF8C820);
+    case ARM64_SIMD_OP_FCMLE_ZERO:
+        EMU_SIMD_FP_COMPARE_ZERO_SHAPE("fcmle", 0x7EF8D820, 0x2EF8D820, 0x6EF8D820);
+    case ARM64_SIMD_OP_FCMLT_ZERO:
+        EMU_SIMD_FP_COMPARE_ZERO_SHAPE("fcmlt", 0x5EF8E820, 0x0EF8E820, 0x4EF8E820);
+    default:
+        return false;
+    }
+}
+
+#undef EMU_SIMD_FP_COMPARE_ZERO_SHAPE
+#undef EMU_SIMD_FP_COMPARE_ZERO_FP16_INST
+
 static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_regs *regs, const struct arm64_decoded_insn *decoded, uint64_t pc)
 {
     const struct arm64_simd_operands *operands = &decoded->operands.simd;
@@ -1549,14 +1874,14 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
 
     if (operands->group == ARM64_SIMD_GROUP_VECTOR_MODIFIED_IMMEDIATE)
     {
-        __uint128_t immediate = operands->expanded_immediate;
+        __uint128_t immediate;
 
-        if (decoded->operand_width == 128) immediate |= immediate << 64;
+        if (!emu_simd_materialize_bits_hw(&immediate, operands->expanded_immediate, decoded->operand_width)) return EMU_INSN_SKIP;
         switch (operands->operation)
         {
         case ARM64_SIMD_OP_MOVI:
         case ARM64_SIMD_OP_FMOV_IMMEDIATE:
-            fp_regs[decoded->rd] = immediate;
+            if (!emu_simd_materialize_bits_hw(&fp_regs[decoded->rd], operands->expanded_immediate, decoded->operand_width)) return EMU_INSN_SKIP;
             break;
         case ARM64_SIMD_OP_MVNI:
             if (decoded->operand_width == 64) EMU_FP_UN("mvn v0.8b, v1.8b", &fp_regs[decoded->rd], &immediate);
@@ -1580,8 +1905,8 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
         uint64_t lane_value;
 
         if (operands->operation != ARM64_SIMD_OP_DUP_ELEMENT) return EMU_INSN_SKIP;
-        lane_value = emu_simd_extract_lane(fp_regs[decoded->rn], operands->element_width, operands->lane_index);
-        fp_regs[decoded->rd] = emu_simd_replicate_lane(lane_value, operands->element_width, decoded->operand_width);
+        if (!emu_simd_extract_lane_hw(&fp_regs[decoded->rn], operands->element_width, operands->lane_index, &lane_value)) return EMU_INSN_SKIP;
+        if (!emu_simd_write_scalar_hw(&fp_regs[decoded->rd], lane_value, decoded->operand_width)) return EMU_INSN_SKIP;
         result = EMU_INSN_HANDLED;
     }
     else if (operands->group == ARM64_SIMD_GROUP_VECTOR_COPY)
@@ -1595,23 +1920,23 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
             if (!emu_simd_dup_general_hw(&fp_regs[decoded->rd], reg_read(regs, decoded->rn), element_width, decoded->operand_width)) return EMU_INSN_SKIP;
             break;
         case ARM64_SIMD_OP_DUP_ELEMENT:
-            lane_value = emu_simd_extract_lane(fp_regs[decoded->rn], element_width, operands->lane_index);
-            fp_regs[decoded->rd] = emu_simd_replicate_lane(lane_value, element_width, decoded->operand_width);
+            if (!emu_simd_extract_lane_hw(&fp_regs[decoded->rn], element_width, operands->lane_index, &lane_value)) return EMU_INSN_SKIP;
+            if (!emu_simd_dup_general_hw(&fp_regs[decoded->rd], lane_value, element_width, decoded->operand_width)) return EMU_INSN_SKIP;
             break;
         case ARM64_SIMD_OP_INS_GENERAL:
-            fp_regs[decoded->rd] = emu_simd_insert_lane(fp_regs[decoded->rd], reg_read(regs, decoded->rn), element_width, operands->lane_index);
+            if (!emu_simd_insert_general_hw(&fp_regs[decoded->rd], reg_read(regs, decoded->rn), element_width, operands->lane_index)) return EMU_INSN_SKIP;
             break;
         case ARM64_SIMD_OP_INS_ELEMENT:
-            lane_value = emu_simd_extract_lane(fp_regs[decoded->rn], element_width, operands->source_lane_index);
-            fp_regs[decoded->rd] = emu_simd_insert_lane(fp_regs[decoded->rd], lane_value, element_width, operands->lane_index);
+            if (!emu_simd_extract_lane_hw(&fp_regs[decoded->rn], element_width, operands->source_lane_index, &lane_value)) return EMU_INSN_SKIP;
+            if (!emu_simd_insert_general_hw(&fp_regs[decoded->rd], lane_value, element_width, operands->lane_index)) return EMU_INSN_SKIP;
             break;
         case ARM64_SIMD_OP_UMOV:
-            lane_value = emu_simd_extract_lane(fp_regs[decoded->rn], element_width, operands->lane_index);
+            if (!emu_simd_extract_lane_hw(&fp_regs[decoded->rn], element_width, operands->lane_index, &lane_value)) return EMU_INSN_SKIP;
             reg_write(regs, decoded->rd, lane_value, decoded->operand_width == 64);
             break;
         case ARM64_SIMD_OP_SMOV:
-            lane_value = emu_simd_extract_lane(fp_regs[decoded->rn], element_width, operands->lane_index);
-            reg_write(regs, decoded->rd, (uint64_t)emu_simd_sign_extend_lane(lane_value, element_width), decoded->operand_width == 64);
+            if (!emu_simd_extract_signed_lane_hw(&fp_regs[decoded->rn], element_width, operands->lane_index, decoded->operand_width == 64, &lane_value)) return EMU_INSN_SKIP;
+            reg_write(regs, decoded->rd, lane_value, decoded->operand_width == 64);
             break;
         default:
             return EMU_INSN_SKIP;
@@ -1623,11 +1948,32 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
         if (!emu_simd_shift_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], operands->element_width, decoded->operand_width, operands->immediate)) return EMU_INSN_SKIP;
         result = EMU_INSN_HANDLED;
     }
+    else if (operands->group == ARM64_SIMD_GROUP_FP_COMPARE_ZERO)
+    {
+        if (!emu_simd_fp_compare_zero_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], decoded->operand_width, operands->element_width)) return EMU_INSN_SKIP;
+        result = EMU_INSN_HANDLED;
+    }
     else if (operands->group == ARM64_SIMD_GROUP_FP_BY_ELEMENT)
     {
-        uint64_t lane_value = emu_simd_extract_lane(fp_regs[decoded->rm], operands->element_width, operands->lane_index);
+        uint64_t lane_value;
 
+        if (!emu_simd_extract_lane_hw(&fp_regs[decoded->rm], operands->element_width, operands->lane_index, &lane_value)) return EMU_INSN_SKIP;
         if (!emu_simd_fp_by_element_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], lane_value, operands->element_width, decoded->operand_width)) return EMU_INSN_SKIP;
+        result = EMU_INSN_HANDLED;
+    }
+    else if (operands->group == ARM64_SIMD_GROUP_VECTOR_PERMUTE)
+    {
+        if (!emu_simd_permute_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], &fp_regs[decoded->rm], operands->element_width, decoded->operand_width)) return EMU_INSN_SKIP;
+        result = EMU_INSN_HANDLED;
+    }
+    else if (operands->group == ARM64_SIMD_GROUP_VECTOR_LOGICAL)
+    {
+        if (!emu_simd_logical_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], &fp_regs[decoded->rm], decoded->operand_width)) return EMU_INSN_SKIP;
+        result = EMU_INSN_HANDLED;
+    }
+    else if (operands->group == ARM64_SIMD_GROUP_VECTOR_3REG && (operands->operation == ARM64_SIMD_OP_FMLA_VECTOR || operands->operation == ARM64_SIMD_OP_FMLS_VECTOR))
+    {
+        if (!emu_simd_fp_accumulate_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], &fp_regs[decoded->rm], operands->element_width, decoded->operand_width)) return EMU_INSN_SKIP;
         result = EMU_INSN_HANDLED;
     }
     else if (operands->group == ARM64_SIMD_GROUP_VECTOR_3REG && operands->operation >= ARM64_SIMD_OP_ADD && operands->operation <= ARM64_SIMD_OP_CMHS)
@@ -1644,7 +1990,7 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
     else if (operands->group == ARM64_SIMD_GROUP_SCALAR_IMMEDIATE)
     {
         if (operands->operation != ARM64_SIMD_OP_FMOV_IMMEDIATE) return EMU_INSN_SKIP;
-        fp_regs[decoded->rd] = decoded->operand_width == 64 ? operands->expanded_immediate : (uint32_t)operands->expanded_immediate;
+        if (!emu_simd_write_scalar_hw(&fp_regs[decoded->rd], operands->expanded_immediate, decoded->operand_width)) return EMU_INSN_SKIP;
         result = EMU_INSN_HANDLED;
     }
     else if (operands->group == ARM64_SIMD_GROUP_SCALAR_2SOURCE)
@@ -1729,7 +2075,7 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
             switch (operands->operation)
             {
             case ARM64_SIMD_OP_FMOV:
-                fp_regs[decoded->rd] = (uint32_t)fp_regs[decoded->rn];
+                EMU_FP_UN("fmov s0, s1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
                 break;
             case ARM64_SIMD_OP_FABS:
                 EMU_FP_UN("fabs s0, s1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
@@ -1777,7 +2123,7 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
             switch (operands->operation)
             {
             case ARM64_SIMD_OP_FMOV:
-                fp_regs[decoded->rd] = (uint64_t)fp_regs[decoded->rn];
+                EMU_FP_UN("fmov d0, d1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
                 break;
             case ARM64_SIMD_OP_FABS:
                 EMU_FP_UN("fabs d0, d1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
@@ -2007,16 +2353,16 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
     {
         bool sf = decoded->operand_width == 64;
         bool gp_to_fp = operands->operation == ARM64_SIMD_OP_FMOV_GENERAL_TO_FP;
+        uint64_t value;
 
         if (gp_to_fp)
         {
-            if (sf) fp_regs[decoded->rd] = reg_read(regs, decoded->rn);
-            else fp_regs[decoded->rd] = (uint32_t)reg_read(regs, decoded->rn);
+            if (!emu_simd_write_scalar_hw(&fp_regs[decoded->rd], reg_read(regs, decoded->rn), decoded->operand_width)) return EMU_INSN_SKIP;
         }
         else
         {
-            if (sf) reg_write(regs, decoded->rd, (uint64_t)fp_regs[decoded->rn], true);
-            else reg_write(regs, decoded->rd, (uint32_t)fp_regs[decoded->rn], false);
+            if (!emu_simd_read_scalar_hw(&fp_regs[decoded->rn], decoded->operand_width, &value)) return EMU_INSN_SKIP;
+            reg_write(regs, decoded->rd, value, sf);
         }
 
         result = EMU_INSN_HANDLED;
@@ -2255,12 +2601,6 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
         case ARM64_SIMD_OP_FDIV_V2D:
             EMU_FP_BIN("fdiv v0.2d, v1.2d, v2.2d", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
             break;
-        case ARM64_SIMD_OP_FMLA_V4S:
-            EMU_VEC_ACC("fmla v0.4s, v1.4s, v2.4s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FMLS_V4S:
-            EMU_VEC_ACC("fmls v0.4s, v1.4s, v2.4s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
         case ARM64_SIMD_OP_FMAX_V2S:
             EMU_FP_BIN("fmax v0.2s, v1.2s, v2.2s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
             break;
@@ -2363,6 +2703,9 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
         case ARM64_SIMD_OP_FSQRT_V2D:
             EMU_FP_UN("fsqrt v0.2d, v1.2d", &fp_regs[rd], &fp_regs[rn]);
             break;
+        case ARM64_SIMD_OP_REV64_V2S:
+            EMU_FP_UN("rev64 v0.2s, v1.2s", &fp_regs[rd], &fp_regs[rn]);
+            break;
         case ARM64_SIMD_OP_REV64_V16B:
             EMU_FP_UN("rev64 v0.16b, v1.16b", &fp_regs[rd], &fp_regs[rn]);
             break;
@@ -2375,36 +2718,20 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
         case ARM64_SIMD_OP_REV16_V16B:
             EMU_FP_UN("rev16 v0.16b, v1.16b", &fp_regs[rd], &fp_regs[rn]);
             break;
-        case ARM64_SIMD_OP_AND_V16B:
-            EMU_FP_BIN("and v0.16b, v1.16b, v2.16b", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
+        case ARM64_SIMD_OP_FADDP_S_V2S:
+            EMU_FP_UN("faddp s0, v1.2s", &fp_regs[rd], &fp_regs[rn]);
             break;
-        case ARM64_SIMD_OP_ORR_V16B:
-            EMU_FP_BIN("orr v0.16b, v1.16b, v2.16b", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
+        case ARM64_SIMD_OP_FADDP_D_V2D:
+            EMU_FP_UN("faddp d0, v1.2d", &fp_regs[rd], &fp_regs[rn]);
             break;
-        case ARM64_SIMD_OP_EOR_V16B:
-            EMU_FP_BIN("eor v0.16b, v1.16b, v2.16b", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
+        case ARM64_SIMD_OP_FMAXV_S_V4S:
+            EMU_FP_UN("fmaxv s0, v1.4s", &fp_regs[rd], &fp_regs[rn]);
+            break;
+        case ARM64_SIMD_OP_FMINV_S_V4S:
+            EMU_FP_UN("fminv s0, v1.4s", &fp_regs[rd], &fp_regs[rn]);
             break;
         default:
-        {
-            switch (operation)
-            {
-            case ARM64_SIMD_OP_FADDP_S_V2S:
-                EMU_FP_UN("faddp s0, v1.2s", &fp_regs[rd], &fp_regs[rn]);
-                break;
-            case ARM64_SIMD_OP_FADDP_D_V2D:
-                EMU_FP_UN("faddp d0, v1.2d", &fp_regs[rd], &fp_regs[rn]);
-                break;
-            case ARM64_SIMD_OP_FMAXV_S_V4S:
-                EMU_FP_UN("fmaxv s0, v1.4s", &fp_regs[rd], &fp_regs[rn]);
-                break;
-            case ARM64_SIMD_OP_FMINV_S_V4S:
-                EMU_FP_UN("fminv s0, v1.4s", &fp_regs[rd], &fp_regs[rn]);
-                break;
-            default:
-                return EMU_INSN_SKIP;
-            }
-            break;
-        }
+            return EMU_INSN_SKIP;
         }
 
         result = EMU_INSN_HANDLED;
@@ -2427,122 +2754,413 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
 #undef EMU_FP_UN
 #undef EMU_FP_BIN
 
-/* 数据处理局部缩写：C 解码编码字段，运算结果尽量由同语义 ARM64 指令产生。 */
-#define EMU_DP_MASK(SF) ((SF) ? ~0ULL : 0xFFFFFFFFULL)
+static __always_inline uint64_t emu_dp_mask(bool sf)
+{
+    return sf ? ~0ULL : 0xFFFFFFFFULL;
+}
 
 static __always_inline uint64_t emu_extract_bits(uint64_t high, uint64_t low, uint32_t shift, bool sf)
 {
-    uint32_t width = sf ? 64 : 32;
-    uint64_t mask = EMU_DP_MASK(sf);
+    uint64_t result, left, inverse;
+    uint32_t result32, left32, inverse32;
 
-    high &= mask;
-    low &= mask;
-    if (!shift) return low;
-    return ((low >> shift) | (high << (width - shift))) & mask;
+    if (sf)
+    {
+        asm volatile("neg %2, %5\n"
+                     "lslv %1, %3, %2\n"
+                     "lsrv %0, %4, %5\n"
+                     "cmp %5, #0\n"
+                     "csel %1, xzr, %1, eq\n"
+                     "orr %0, %0, %1\n"
+                     : "=&r"(result), "=&r"(left), "=&r"(inverse)
+                     : "r"(high), "r"(low), "r"((uint64_t)shift)
+                     : "cc");
+        return result;
+    }
+
+    asm volatile("neg %w2, %w5\n"
+                 "lslv %w1, %w3, %w2\n"
+                 "lsrv %w0, %w4, %w5\n"
+                 "cmp %w5, #0\n"
+                 "csel %w1, wzr, %w1, eq\n"
+                 "orr %w0, %w0, %w1\n"
+                 : "=&r"(result32), "=&r"(left32), "=&r"(inverse32)
+                 : "r"((uint32_t)high), "r"((uint32_t)low), "r"(shift)
+                 : "cc");
+    return result32;
 }
 
-#define EMU_DP_SHIFT(V, T, A, SF)                                                                                     \
-    ({                                                                                                                \
-        uint64_t __v = (V), __a = (A), __ret;                                                                         \
-        uint32_t __ret32;                                                                                             \
-        if (SF)                                                                                                       \
-        {                                                                                                             \
-            switch (T)                                                                                                \
-            {                                                                                                         \
-            case 0:                                                                                                   \
-                asm volatile("lslv %0, %1, %2\n" : "=r"(__ret) : "r"(__v), "r"(__a) : "cc");                          \
-                break;                                                                                                \
-            case 1:                                                                                                   \
-                asm volatile("lsrv %0, %1, %2\n" : "=r"(__ret) : "r"(__v), "r"(__a) : "cc");                          \
-                break;                                                                                                \
-            case 2:                                                                                                   \
-                asm volatile("asrv %0, %1, %2\n" : "=r"(__ret) : "r"(__v), "r"(__a) : "cc");                          \
-                break;                                                                                                \
-            default:                                                                                                  \
-                asm volatile("rorv %0, %1, %2\n" : "=r"(__ret) : "r"(__v), "r"(__a) : "cc");                          \
-                break;                                                                                                \
-            }                                                                                                         \
-        }                                                                                                             \
-        else                                                                                                          \
-        {                                                                                                             \
-            switch (T)                                                                                                \
-            {                                                                                                         \
-            case 0:                                                                                                   \
-                asm volatile("lslv %w0, %w1, %w2\n" : "=r"(__ret32) : "r"((uint32_t)__v), "r"((uint32_t)__a) : "cc"); \
-                break;                                                                                                \
-            case 1:                                                                                                   \
-                asm volatile("lsrv %w0, %w1, %w2\n" : "=r"(__ret32) : "r"((uint32_t)__v), "r"((uint32_t)__a) : "cc"); \
-                break;                                                                                                \
-            case 2:                                                                                                   \
-                asm volatile("asrv %w0, %w1, %w2\n" : "=r"(__ret32) : "r"((uint32_t)__v), "r"((uint32_t)__a) : "cc"); \
-                break;                                                                                                \
-            default:                                                                                                  \
-                asm volatile("rorv %w0, %w1, %w2\n" : "=r"(__ret32) : "r"((uint32_t)__v), "r"((uint32_t)__a) : "cc"); \
-                break;                                                                                                \
-            }                                                                                                         \
-            __ret = __ret32;                                                                                          \
-        }                                                                                                             \
-        __ret;                                                                                                        \
-    })
+static __always_inline bool emu_bitfield_hw(enum arm64_operation operation, uint64_t src, uint64_t dst, uint32_t immr, uint64_t wmask, uint64_t tmask, bool sf, uint64_t *result)
+{
+    uint64_t bot = emu_extract_bits(src, src, immr, sf);
+    uint64_t result64, temporary64, auxiliary64;
+    uint32_t result32, temporary32, auxiliary32;
 
-#define EMU_DP_UN64(INST, A)                                                      \
-    ({                                                                            \
-        uint64_t __ret;                                                           \
-        asm volatile(INST " %0, %1\n" : "=r"(__ret) : "r"((uint64_t)(A)) : "cc"); \
-        __ret;                                                                    \
-    })
+    if (!result) return false;
 
-#define EMU_DP_UN32(INST, A)                                                        \
-    ({                                                                              \
-        uint32_t __ret;                                                             \
-        asm volatile(INST " %w0, %w1\n" : "=r"(__ret) : "r"((uint32_t)(A)) : "cc"); \
-        __ret;                                                                      \
-    })
+    if (sf)
+    {
+        asm volatile("and %0, %1, %2\n" : "=r"(bot) : "r"(bot), "r"(wmask));
+        switch (operation)
+        {
+        case ARM64_OPERATION_SBFM:
+            asm volatile("add %1, %5, #1\n"
+                         "lsr %1, %1, #1\n"
+                         "cmp %1, #0\n"
+                         "csel %1, %6, %1, eq\n"
+                         "and %0, %4, %5\n"
+                         "mvn %2, %5\n"
+                         "orr %2, %0, %2\n"
+                         "tst %4, %1\n"
+                         "csel %0, %2, %0, ne\n"
+                         : "=&r"(result64), "=&r"(temporary64), "=&r"(auxiliary64)
+                         : "0"(0ULL), "r"(bot), "r"(tmask), "r"(1ULL << 63)
+                         : "cc");
+            break;
+        case ARM64_OPERATION_BFM:
+            asm volatile("and %2, %4, %5\n"
+                         "bic %0, %3, %2\n"
+                         "and %1, %6, %2\n"
+                         "orr %0, %0, %1\n"
+                         : "=&r"(result64), "=&r"(temporary64), "=&r"(auxiliary64)
+                         : "r"(dst), "r"(wmask), "r"(tmask), "r"(bot));
+            break;
+        case ARM64_OPERATION_UBFM:
+            asm volatile("and %0, %1, %2\n" : "=r"(result64) : "r"(bot), "r"(tmask));
+            break;
+        default:
+            return false;
+        }
+        *result = result64;
+        return true;
+    }
 
-#define EMU_DP_CNT(V, SF)                                             \
-    ({                                                                \
-        __uint128_t __saved_q0;                                       \
-        uint32_t __ret;                                               \
-        if (SF)                                                       \
-            asm volatile(".arch_extension fp\n.arch_extension simd\n" \
-                         "str q0, [%2]\n"                             \
-                         "movi v0.2d, #0\n"                           \
-                         "fmov d0, %1\n"                              \
-                         "cnt v0.8b, v0.8b\n"                         \
-                         "addv b0, v0.8b\n"                           \
-                         "umov %w0, v0.b[0]\n"                        \
-                         "ldr q0, [%2]\n"                             \
-                         : "=&r"(__ret)                               \
-                         : "r"((uint64_t)(V)), "r"(&__saved_q0)       \
-                         : "memory", "cc");                           \
-        else                                                          \
-            asm volatile(".arch_extension fp\n.arch_extension simd\n" \
-                         "str q0, [%2]\n"                             \
-                         "movi v0.2d, #0\n"                           \
-                         "fmov s0, %w1\n"                             \
-                         "cnt v0.8b, v0.8b\n"                         \
-                         "addv b0, v0.8b\n"                           \
-                         "umov %w0, v0.b[0]\n"                        \
-                         "ldr q0, [%2]\n"                             \
-                         : "=&r"(__ret)                               \
-                         : "r"((uint32_t)(V)), "r"(&__saved_q0)       \
-                         : "memory", "cc");                           \
-        __ret;                                                        \
-    })
+    asm volatile("and %w0, %w1, %w2\n" : "=r"(bot) : "r"((uint32_t)bot), "r"((uint32_t)wmask));
+    switch (operation)
+    {
+    case ARM64_OPERATION_SBFM:
+        asm volatile("add %w1, %w5, #1\n"
+                     "lsr %w1, %w1, #1\n"
+                     "cmp %w1, #0\n"
+                     "csel %w1, %w6, %w1, eq\n"
+                     "and %w0, %w4, %w5\n"
+                     "mvn %w2, %w5\n"
+                     "orr %w2, %w0, %w2\n"
+                     "tst %w4, %w1\n"
+                     "csel %w0, %w2, %w0, ne\n"
+                     : "=&r"(result32), "=&r"(temporary32), "=&r"(auxiliary32)
+                     : "0"(0U), "r"((uint32_t)bot), "r"((uint32_t)tmask), "r"(1U << 31)
+                     : "cc");
+        break;
+    case ARM64_OPERATION_BFM:
+        asm volatile("and %w2, %w4, %w5\n"
+                     "bic %w0, %w3, %w2\n"
+                     "and %w1, %w6, %w2\n"
+                     "orr %w0, %w0, %w1\n"
+                     : "=&r"(result32), "=&r"(temporary32), "=&r"(auxiliary32)
+                     : "r"((uint32_t)dst), "r"((uint32_t)wmask), "r"((uint32_t)tmask), "r"((uint32_t)bot));
+        break;
+    case ARM64_OPERATION_UBFM:
+        asm volatile("and %w0, %w1, %w2\n" : "=r"(result32) : "r"((uint32_t)bot), "r"((uint32_t)tmask));
+        break;
+    default:
+        return false;
+    }
+    *result = result32;
+    return true;
+}
 
-#define EMU_DP_CRC32(INST, A, B)                                                                                              \
-    ({                                                                                                                        \
-        uint32_t __ret;                                                                                                       \
-        asm volatile(".arch_extension crc\n" INST " %w0, %w1, %w2\n" : "=r"(__ret) : "r"((uint32_t)(A)), "r"((uint32_t)(B))); \
-        __ret;                                                                                                                \
-    })
+static __always_inline bool emu_move_wide_hw(enum arm64_operation operation, uint64_t dst, uint64_t immediate, uint32_t shift, bool sf, uint64_t *result)
+{
+    uint64_t result64, shifted64, mask64;
+    uint32_t result32, shifted32, mask32;
 
-#define EMU_DP_CRC64(INST, A, B)                                                                                             \
-    ({                                                                                                                       \
-        uint32_t __ret;                                                                                                      \
-        asm volatile(".arch_extension crc\n" INST " %w0, %w1, %2\n" : "=r"(__ret) : "r"((uint32_t)(A)), "r"((uint64_t)(B))); \
-        __ret;                                                                                                               \
-    })
+    if (!result) return false;
+
+    if (sf)
+    {
+        switch (operation)
+        {
+        case ARM64_OPERATION_MOVN:
+            asm volatile("lslv %0, %1, %2\n"
+                         "mvn %0, %0\n"
+                         : "=&r"(result64)
+                         : "r"(immediate), "r"((uint64_t)shift));
+            break;
+        case ARM64_OPERATION_MOVZ:
+            asm volatile("lslv %0, %1, %2\n" : "=r"(result64) : "r"(immediate), "r"((uint64_t)shift));
+            break;
+        case ARM64_OPERATION_MOVK:
+            asm volatile("lslv %1, %4, %5\n"
+                         "lslv %2, %6, %5\n"
+                         "bic %0, %3, %2\n"
+                         "orr %0, %0, %1\n"
+                         : "=&r"(result64), "=&r"(shifted64), "=&r"(mask64)
+                         : "r"(dst), "r"(immediate), "r"((uint64_t)shift), "r"(0xFFFFULL));
+            break;
+        default:
+            return false;
+        }
+        *result = result64;
+        return true;
+    }
+
+    switch (operation)
+    {
+    case ARM64_OPERATION_MOVN:
+        asm volatile("lslv %w0, %w1, %w2\n"
+                     "mvn %w0, %w0\n"
+                     : "=&r"(result32)
+                     : "r"((uint32_t)immediate), "r"(shift));
+        break;
+    case ARM64_OPERATION_MOVZ:
+        asm volatile("lslv %w0, %w1, %w2\n" : "=r"(result32) : "r"((uint32_t)immediate), "r"(shift));
+        break;
+    case ARM64_OPERATION_MOVK:
+        asm volatile("lslv %w1, %w4, %w5\n"
+                     "lslv %w2, %w6, %w5\n"
+                     "bic %w0, %w3, %w2\n"
+                     "orr %w0, %w0, %w1\n"
+                     : "=&r"(result32), "=&r"(shifted32), "=&r"(mask32)
+                     : "r"((uint32_t)dst), "r"((uint32_t)immediate), "r"(shift), "r"(0xFFFFU));
+        break;
+    default:
+        return false;
+    }
+    *result = result32;
+    return true;
+}
+
+static __always_inline uint64_t emu_dp_shift_hw(uint64_t value, uint32_t type, uint32_t amount, bool sf)
+{
+    uint64_t result;
+
+    if (sf)
+    {
+        switch (type)
+        {
+        case 0:
+            asm volatile("lslv %0, %1, %2\n" : "=r"(result) : "r"(value), "r"((uint64_t)amount) : "cc");
+            break;
+        case 1:
+            asm volatile("lsrv %0, %1, %2\n" : "=r"(result) : "r"(value), "r"((uint64_t)amount) : "cc");
+            break;
+        case 2:
+            asm volatile("asrv %0, %1, %2\n" : "=r"(result) : "r"(value), "r"((uint64_t)amount) : "cc");
+            break;
+        default:
+            asm volatile("rorv %0, %1, %2\n" : "=r"(result) : "r"(value), "r"((uint64_t)amount) : "cc");
+            break;
+        }
+    }
+    else
+    {
+        uint32_t result32;
+
+        switch (type)
+        {
+        case 0:
+            asm volatile("lslv %w0, %w1, %w2\n" : "=r"(result32) : "r"((uint32_t)value), "r"(amount) : "cc");
+            break;
+        case 1:
+            asm volatile("lsrv %w0, %w1, %w2\n" : "=r"(result32) : "r"((uint32_t)value), "r"(amount) : "cc");
+            break;
+        case 2:
+            asm volatile("asrv %w0, %w1, %w2\n" : "=r"(result32) : "r"((uint32_t)value), "r"(amount) : "cc");
+            break;
+        default:
+            asm volatile("rorv %w0, %w1, %w2\n" : "=r"(result32) : "r"((uint32_t)value), "r"(amount) : "cc");
+            break;
+        }
+        result = result32;
+    }
+
+    return result;
+}
+
+static __always_inline uint64_t emu_dp_rbit_hw(uint64_t value, bool sf)
+{
+    uint64_t result;
+
+    if (sf) asm volatile("rbit %0, %1\n" : "=r"(result) : "r"(value) : "cc");
+    else
+    {
+        uint32_t result32;
+
+        asm volatile("rbit %w0, %w1\n" : "=r"(result32) : "r"((uint32_t)value) : "cc");
+        result = result32;
+    }
+    return result;
+}
+
+static __always_inline uint64_t emu_dp_rev16_hw(uint64_t value, bool sf)
+{
+    uint64_t result;
+
+    if (sf) asm volatile("rev16 %0, %1\n" : "=r"(result) : "r"(value) : "cc");
+    else
+    {
+        uint32_t result32;
+
+        asm volatile("rev16 %w0, %w1\n" : "=r"(result32) : "r"((uint32_t)value) : "cc");
+        result = result32;
+    }
+    return result;
+}
+
+static __always_inline uint64_t emu_dp_rev32_hw(uint64_t value, bool sf)
+{
+    uint64_t result;
+
+    if (sf) asm volatile("rev32 %0, %1\n" : "=r"(result) : "r"(value) : "cc");
+    else
+    {
+        uint32_t result32;
+
+        asm volatile("rev %w0, %w1\n" : "=r"(result32) : "r"((uint32_t)value) : "cc");
+        result = result32;
+    }
+    return result;
+}
+
+static __always_inline uint64_t emu_dp_rev64_hw(uint64_t value)
+{
+    uint64_t result;
+
+    asm volatile("rev %0, %1\n" : "=r"(result) : "r"(value) : "cc");
+    return result;
+}
+
+static __always_inline uint64_t emu_dp_clz_hw(uint64_t value, bool sf)
+{
+    uint64_t result;
+
+    if (sf) asm volatile("clz %0, %1\n" : "=r"(result) : "r"(value) : "cc");
+    else
+    {
+        uint32_t result32;
+
+        asm volatile("clz %w0, %w1\n" : "=r"(result32) : "r"((uint32_t)value) : "cc");
+        result = result32;
+    }
+    return result;
+}
+
+static __always_inline uint64_t emu_dp_cls_hw(uint64_t value, bool sf)
+{
+    uint64_t result;
+
+    if (sf) asm volatile("cls %0, %1\n" : "=r"(result) : "r"(value) : "cc");
+    else
+    {
+        uint32_t result32;
+
+        asm volatile("cls %w0, %w1\n" : "=r"(result32) : "r"((uint32_t)value) : "cc");
+        result = result32;
+    }
+    return result;
+}
+
+static __always_inline uint64_t emu_dp_ctz_hw(uint64_t value, bool sf)
+{
+    return emu_dp_clz_hw(emu_dp_rbit_hw(value, sf), sf);
+}
+
+static __always_inline uint32_t emu_dp_count_bits_hw(uint64_t value, bool sf)
+{
+    __uint128_t saved_q0;
+    uint32_t result;
+
+    if (sf)
+        asm volatile(".arch_extension fp\n.arch_extension simd\n"
+                     "str q0, [%2]\n"
+                     "movi v0.2d, #0\n"
+                     "fmov d0, %1\n"
+                     "cnt v0.8b, v0.8b\n"
+                     "addv b0, v0.8b\n"
+                     "umov %w0, v0.b[0]\n"
+                     "ldr q0, [%2]\n"
+                     : "=&r"(result)
+                     : "r"(value), "r"(&saved_q0)
+                     : "memory", "cc");
+    else
+        asm volatile(".arch_extension fp\n.arch_extension simd\n"
+                     "str q0, [%2]\n"
+                     "movi v0.2d, #0\n"
+                     "fmov s0, %w1\n"
+                     "cnt v0.8b, v0.8b\n"
+                     "addv b0, v0.8b\n"
+                     "umov %w0, v0.b[0]\n"
+                     "ldr q0, [%2]\n"
+                     : "=&r"(result)
+                     : "r"((uint32_t)value), "r"(&saved_q0)
+                     : "memory", "cc");
+    return result;
+}
+
+static __always_inline uint32_t emu_dp_crc32b_hw(uint32_t accumulator, uint32_t value)
+{
+    uint32_t result;
+
+    asm volatile(".arch_extension crc\ncrc32b %w0, %w1, %w2\n" : "=r"(result) : "r"(accumulator), "r"(value));
+    return result;
+}
+
+static __always_inline uint32_t emu_dp_crc32h_hw(uint32_t accumulator, uint32_t value)
+{
+    uint32_t result;
+
+    asm volatile(".arch_extension crc\ncrc32h %w0, %w1, %w2\n" : "=r"(result) : "r"(accumulator), "r"(value));
+    return result;
+}
+
+static __always_inline uint32_t emu_dp_crc32w_hw(uint32_t accumulator, uint32_t value)
+{
+    uint32_t result;
+
+    asm volatile(".arch_extension crc\ncrc32w %w0, %w1, %w2\n" : "=r"(result) : "r"(accumulator), "r"(value));
+    return result;
+}
+
+static __always_inline uint32_t emu_dp_crc32x_hw(uint32_t accumulator, uint64_t value)
+{
+    uint32_t result;
+
+    asm volatile(".arch_extension crc\ncrc32x %w0, %w1, %2\n" : "=r"(result) : "r"(accumulator), "r"(value));
+    return result;
+}
+
+static __always_inline uint32_t emu_dp_crc32cb_hw(uint32_t accumulator, uint32_t value)
+{
+    uint32_t result;
+
+    asm volatile(".arch_extension crc\ncrc32cb %w0, %w1, %w2\n" : "=r"(result) : "r"(accumulator), "r"(value));
+    return result;
+}
+
+static __always_inline uint32_t emu_dp_crc32ch_hw(uint32_t accumulator, uint32_t value)
+{
+    uint32_t result;
+
+    asm volatile(".arch_extension crc\ncrc32ch %w0, %w1, %w2\n" : "=r"(result) : "r"(accumulator), "r"(value));
+    return result;
+}
+
+static __always_inline uint32_t emu_dp_crc32cw_hw(uint32_t accumulator, uint32_t value)
+{
+    uint32_t result;
+
+    asm volatile(".arch_extension crc\ncrc32cw %w0, %w1, %w2\n" : "=r"(result) : "r"(accumulator), "r"(value));
+    return result;
+}
+
+static __always_inline uint32_t emu_dp_crc32cx_hw(uint32_t accumulator, uint64_t value)
+{
+    uint32_t result;
+
+    asm volatile(".arch_extension crc\ncrc32cx %w0, %w1, %2\n" : "=r"(result) : "r"(accumulator), "r"(value));
+    return result;
+}
 
 static __always_inline enum emu_insn_result emu_simulate_data_processing_insn(struct pt_regs *regs, const struct arm64_decoded_insn *decoded)
 {
@@ -2583,11 +3201,11 @@ static __always_inline enum emu_insn_result emu_simulate_data_processing_insn(st
     {
         bool is_min = decoded->operation == ARM64_OPERATION_SMIN || decoded->operation == ARM64_OPERATION_UMIN;
         bool is_unsigned = decoded->operation == ARM64_OPERATION_UMAX || decoded->operation == ARM64_OPERATION_UMIN;
-        uint64_t a = reg_read(regs, decoded->rn) & EMU_DP_MASK(sf);
+        uint64_t a = reg_read(regs, decoded->rn) & emu_dp_mask(sf);
         uint64_t b, result;
 
         if (is_unsigned) b = operands->immediate;
-        else b = sign_extend64(operands->immediate, 7) & EMU_DP_MASK(sf);
+        else b = emu_sign_extend_hw(operands->immediate, 1) & emu_dp_mask(sf);
 
         result = emu_minmax_hw(a, b, is_min, is_unsigned, sf);
 
@@ -2600,7 +3218,7 @@ static __always_inline enum emu_insn_result emu_simulate_data_processing_insn(st
         uint32_t opc = decoded->operation == ARM64_OPERATION_AND ? 0 : decoded->operation == ARM64_OPERATION_ORR ? 1 : decoded->operation == ARM64_OPERATION_EOR ? 2 : 3;
         uint64_t a, result, nzcv = 0;
 
-        a = reg_read(regs, decoded->rn) & EMU_DP_MASK(sf);
+        a = reg_read(regs, decoded->rn) & emu_dp_mask(sf);
         result = emu_logic_hw(a, operands->immediate, opc, false, sf, &nzcv);
 
         if (decoded->flags & ARM64_INSN_FLAG_SETFLAGS) emu_write_nzcv(regs, nzcv);
@@ -2611,32 +3229,11 @@ static __always_inline enum emu_insn_result emu_simulate_data_processing_insn(st
     }
     if (decoded->opcode == ARM64_OP_BITFIELD)
     {
-        uint32_t width = sf ? 64 : 32;
-        uint64_t src, dst, bot, result;
+        uint64_t src, dst, result;
 
-        src = reg_read(regs, decoded->rn) & EMU_DP_MASK(sf);
-        dst = reg_read(regs, decoded->rd) & EMU_DP_MASK(sf);
-        bot = emu_extract_bits(src, src, operands->immr, sf) & operands->wmask;
-
-        switch (decoded->operation)
-        {
-        case ARM64_OPERATION_SBFM:
-        {
-            uint64_t sign_bit = (operands->tmask == EMU_DP_MASK(sf)) ? (1ULL << (width - 1)) : ((operands->tmask + 1) >> 1);
-
-            result = bot & operands->tmask;
-            if (bot & sign_bit) result |= ~operands->tmask;
-            break;
-        }
-        case ARM64_OPERATION_BFM:
-            result = (dst & ~operands->wmask) | (bot & operands->wmask);
-            break;
-        case ARM64_OPERATION_UBFM:
-            result = bot & operands->tmask;
-            break;
-        default:
-            return EMU_INSN_SKIP;
-        }
+        src = reg_read(regs, decoded->rn) & emu_dp_mask(sf);
+        dst = reg_read(regs, decoded->rd) & emu_dp_mask(sf);
+        if (!emu_bitfield_hw(decoded->operation, src, dst, operands->immr, operands->wmask, operands->tmask, sf, &result)) return EMU_INSN_SKIP;
 
         reg_write(regs, decoded->rd, result, sf);
         regs->pc += 4;
@@ -2656,9 +3253,7 @@ static __always_inline enum emu_insn_result emu_simulate_data_processing_insn(st
     {
         uint64_t result;
 
-        if (decoded->operation == ARM64_OPERATION_MOVN) result = ~(operands->immediate << operands->shift_amount);
-        else if (decoded->operation == ARM64_OPERATION_MOVZ) result = operands->immediate << operands->shift_amount;
-        else result = (reg_read(regs, decoded->rd) & ~(0xFFFFULL << operands->shift_amount)) | (operands->immediate << operands->shift_amount);
+        if (!emu_move_wide_hw(decoded->operation, reg_read(regs, decoded->rd), operands->immediate, operands->shift_amount, sf, &result)) return EMU_INSN_SKIP;
 
         reg_write(regs, decoded->rd, result, sf);
         regs->pc += 4;
@@ -2670,7 +3265,7 @@ static __always_inline enum emu_insn_result emu_simulate_data_processing_insn(st
         bool setflags = (decoded->flags & ARM64_INSN_FLAG_SETFLAGS) != 0;
 
         a = reg_read(regs, decoded->rn);
-        b = EMU_DP_SHIFT(reg_read(regs, decoded->rm), operands->shift_type, operands->shift_amount, sf);
+        b = emu_dp_shift_hw(reg_read(regs, decoded->rm), operands->shift_type, operands->shift_amount, sf);
         result = emu_addsub_hw(a, b, decoded->operation == ARM64_OPERATION_SUB, setflags, sf, &nzcv);
 
         if (setflags) emu_write_nzcv(regs, nzcv);
@@ -2705,7 +3300,7 @@ static __always_inline enum emu_insn_result emu_simulate_data_processing_insn(st
         uint64_t a, b, result, nzcv = 0;
 
         a = reg_read(regs, decoded->rn);
-        b = EMU_DP_SHIFT(reg_read(regs, decoded->rm), operands->shift_type, operands->shift_amount, sf);
+        b = emu_dp_shift_hw(reg_read(regs, decoded->rm), operands->shift_type, operands->shift_amount, sf);
         result = emu_logic_hw(a, b, opc, (decoded->flags & ARM64_INSN_FLAG_INVERT) != 0, sf, &nzcv);
 
         if (decoded->flags & ARM64_INSN_FLAG_SETFLAGS) emu_write_nzcv(regs, nzcv);
@@ -2727,8 +3322,8 @@ static __always_inline enum emu_insn_result emu_simulate_data_processing_insn(st
     }
     if (decoded->opcode == ARM64_OP_DATA_PROCESSING_2_SOURCE)
     {
-        uint64_t a = reg_read(regs, decoded->rn) & EMU_DP_MASK(sf);
-        uint64_t b = reg_read(regs, decoded->rm) & EMU_DP_MASK(sf);
+        uint64_t a = reg_read(regs, decoded->rn) & emu_dp_mask(sf);
+        uint64_t b = reg_read(regs, decoded->rm) & emu_dp_mask(sf);
         uint64_t result;
 
         switch (decoded->operation)
@@ -2752,28 +3347,28 @@ static __always_inline enum emu_insn_result emu_simulate_data_processing_insn(st
             result = sf ? EMU_INT_BIN64("rorv", a, b) : EMU_INT_BIN32("rorv", a, b);
             break;
         case ARM64_OPERATION_CRC32B:
-            result = EMU_DP_CRC32("crc32b", a, b);
+            result = emu_dp_crc32b_hw((uint32_t)a, (uint32_t)b);
             break;
         case ARM64_OPERATION_CRC32H:
-            result = EMU_DP_CRC32("crc32h", a, b);
+            result = emu_dp_crc32h_hw((uint32_t)a, (uint32_t)b);
             break;
         case ARM64_OPERATION_CRC32W:
-            result = EMU_DP_CRC32("crc32w", a, b);
+            result = emu_dp_crc32w_hw((uint32_t)a, (uint32_t)b);
             break;
         case ARM64_OPERATION_CRC32X:
-            result = EMU_DP_CRC64("crc32x", a, b);
+            result = emu_dp_crc32x_hw((uint32_t)a, b);
             break;
         case ARM64_OPERATION_CRC32CB:
-            result = EMU_DP_CRC32("crc32cb", a, b);
+            result = emu_dp_crc32cb_hw((uint32_t)a, (uint32_t)b);
             break;
         case ARM64_OPERATION_CRC32CH:
-            result = EMU_DP_CRC32("crc32ch", a, b);
+            result = emu_dp_crc32ch_hw((uint32_t)a, (uint32_t)b);
             break;
         case ARM64_OPERATION_CRC32CW:
-            result = EMU_DP_CRC32("crc32cw", a, b);
+            result = emu_dp_crc32cw_hw((uint32_t)a, (uint32_t)b);
             break;
         case ARM64_OPERATION_CRC32CX:
-            result = EMU_DP_CRC64("crc32cx", a, b);
+            result = emu_dp_crc32cx_hw((uint32_t)a, b);
             break;
         case ARM64_OPERATION_SMAX:
             result = emu_minmax_hw(a, b, false, false, sf);
@@ -2804,9 +3399,9 @@ static __always_inline enum emu_insn_result emu_simulate_data_processing_insn(st
         case ARM64_OPERATION_MADD:
         case ARM64_OPERATION_MSUB:
         {
-            uint64_t n = reg_read(regs, decoded->rn) & EMU_DP_MASK(sf);
-            uint64_t m = reg_read(regs, decoded->rm) & EMU_DP_MASK(sf);
-            uint64_t a = reg_read(regs, decoded->ra) & EMU_DP_MASK(sf);
+            uint64_t n = reg_read(regs, decoded->rn) & emu_dp_mask(sf);
+            uint64_t m = reg_read(regs, decoded->rm) & emu_dp_mask(sf);
+            uint64_t a = reg_read(regs, decoded->ra) & emu_dp_mask(sf);
 
             if (sf)
             {
@@ -2930,28 +3525,28 @@ static __always_inline enum emu_insn_result emu_simulate_data_processing_insn(st
         switch (decoded->operation)
         {
         case ARM64_OPERATION_RBIT:
-            result = sf ? EMU_DP_UN64("rbit", src) : EMU_DP_UN32("rbit", src);
+            result = emu_dp_rbit_hw(src, sf);
             break;
         case ARM64_OPERATION_REV16:
-            result = sf ? EMU_DP_UN64("rev16", src) : EMU_DP_UN32("rev16", src);
+            result = emu_dp_rev16_hw(src, sf);
             break;
         case ARM64_OPERATION_REV32:
-            result = sf ? EMU_DP_UN64("rev32", src) : EMU_DP_UN32("rev", src);
+            result = emu_dp_rev32_hw(src, sf);
             break;
         case ARM64_OPERATION_REV64:
-            result = EMU_DP_UN64("rev", src);
+            result = emu_dp_rev64_hw(src);
             break;
         case ARM64_OPERATION_CLZ:
-            result = sf ? EMU_DP_UN64("clz", src) : EMU_DP_UN32("clz", src);
+            result = emu_dp_clz_hw(src, sf);
             break;
         case ARM64_OPERATION_CLS:
-            result = sf ? EMU_DP_UN64("cls", src) : EMU_DP_UN32("cls", src);
+            result = emu_dp_cls_hw(src, sf);
             break;
         case ARM64_OPERATION_CTZ:
-            result = sf ? EMU_DP_UN64("clz", EMU_DP_UN64("rbit", src)) : EMU_DP_UN32("clz", EMU_DP_UN32("rbit", src));
+            result = emu_dp_ctz_hw(src, sf);
             break;
         case ARM64_OPERATION_CNT:
-            result = EMU_DP_CNT(src, sf);
+            result = emu_dp_count_bits_hw(src, sf);
             break;
         case ARM64_OPERATION_ABS:
             if (sf)
@@ -2984,21 +3579,12 @@ static __always_inline enum emu_insn_result emu_simulate_data_processing_insn(st
     return EMU_INSN_SKIP;
 }
 
-#undef EMU_DP_CRC64
-#undef EMU_DP_CRC32
-#undef EMU_DP_CNT
-#undef EMU_DP_UN32
-#undef EMU_DP_UN64
-#undef EMU_DP_SHIFT
-#undef EMU_DP_MASK
-
 static __always_inline bool emulate_insn(struct pt_regs *regs, const uint32_t *specified_insn, const struct emu_mem_access *mem_access)
 {
     uint32_t insn;
     uint64_t pc = regs->pc;
     __uint128_t fetched_insn;
     struct arm64_decoded_insn decoded;
-    enum arm64_decode_status decode_status;
     enum emu_insn_result result = EMU_INSN_SKIP;
 
     if (specified_insn) insn = *specified_insn;
@@ -3012,8 +3598,8 @@ static __always_inline bool emulate_insn(struct pt_regs *regs, const uint32_t *s
         insn = (uint32_t)fetched_insn;
     }
 
-    decode_status = arm64_decode_insn(insn, &decoded);
-    if (decode_status == ARM64_DECODE_OK)
+    decoded = arm64_decode_insn(insn);
+    if (decoded.status == ARM64_DECODE_OK)
     {
         switch (decoded.insn_class)
         {

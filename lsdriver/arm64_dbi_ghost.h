@@ -542,22 +542,21 @@ static inline int arm64_dbi_recompile_page(struct arm64_dbi_ctx *ctx)
     for (i = 0; i < ARM64_DBI_TARGET_INSNS; i++)
     {
         struct arm64_decoded_insn decoded;
-        enum arm64_decode_status decode_status;
         u32 insn = ctx->orig[i];
         u64 orig_pc = ctx->target_page + (u64)i * 4;
         int prev_ghost_idx = ctx->ghost_count;
         int status;
 
         ctx->offset_map[i] = (u16)prev_ghost_idx;
-        decode_status = arm64_decode_insn(insn, &decoded);
+        decoded = arm64_decode_insn(insn);
 
-        if (decode_status == ARM64_DECODE_UNALLOCATED &&
+        if (decoded.status == ARM64_DECODE_UNALLOCATED &&
             decoded.opcode == ARM64_OP_LOAD_LITERAL &&
             (decoded.flags & ARM64_INSN_FLAG_FP))
         {
             status = -EINVAL;
         }
-        else if (decode_status != ARM64_DECODE_OK)
+        else if (decoded.status != ARM64_DECODE_OK)
         {
             ctx->passthrough++;
             status = arm64_dbi_emit(ctx, insn);
