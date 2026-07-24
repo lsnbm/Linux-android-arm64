@@ -92,22 +92,22 @@ static arm64_u64 arm64_decode_effects(const struct arm64_decoded_insn *decoded)
         break;
     case ARM64_OP_FP_SIMD:
         effects |= ARM64_EFFECT_READ_FP_SIMD | ARM64_EFFECT_WRITE_FP_SIMD;
-        switch (decoded->operands.simd.group)
+        switch (decoded->operands.simd.form)
         {
-        case ARM64_SIMD_GROUP_SCALAR_COMPARE:
+        case ARM64_SIMD_FORM_SCALAR_COMPARE:
             effects &= ~ARM64_EFFECT_WRITE_FP_SIMD;
             effects |= ARM64_EFFECT_WRITE_FLAGS;
             break;
-        case ARM64_SIMD_GROUP_SCALAR_CONDITIONAL_COMPARE:
+        case ARM64_SIMD_FORM_SCALAR_CONDITIONAL_COMPARE:
             effects &= ~ARM64_EFFECT_WRITE_FP_SIMD;
             effects |= ARM64_EFFECT_READ_FLAGS | ARM64_EFFECT_WRITE_FLAGS | ARM64_EFFECT_CONDITIONAL;
             break;
-        case ARM64_SIMD_GROUP_SCALAR_SELECT:
+        case ARM64_SIMD_FORM_SCALAR_SELECT:
             effects |= ARM64_EFFECT_READ_FLAGS | ARM64_EFFECT_CONDITIONAL;
             break;
-        case ARM64_SIMD_GROUP_SCALAR_COPY:
+        case ARM64_SIMD_FORM_SCALAR_COPY:
             break;
-        case ARM64_SIMD_GROUP_FMOV_GENERAL:
+        case ARM64_SIMD_FORM_FP_GPR_TRANSFER:
             if (decoded->operands.simd.operation == ARM64_SIMD_OP_FMOV_GENERAL_TO_FP)
             {
                 effects &= ~ARM64_EFFECT_READ_FP_SIMD;
@@ -119,7 +119,7 @@ static arm64_u64 arm64_decode_effects(const struct arm64_decoded_insn *decoded)
                 effects |= ARM64_EFFECT_WRITE_GPR;
             }
             break;
-        case ARM64_SIMD_GROUP_VECTOR_COPY:
+        case ARM64_SIMD_FORM_VECTOR_COPY:
             switch (decoded->operands.simd.operation)
             {
             case ARM64_SIMD_OP_DUP_GENERAL:
@@ -135,7 +135,7 @@ static arm64_u64 arm64_decode_effects(const struct arm64_decoded_insn *decoded)
                 break;
             }
             break;
-        case ARM64_SIMD_GROUP_CONVERT:
+        case ARM64_SIMD_FORM_CONVERT:
             switch (decoded->operands.simd.operation)
             {
             case ARM64_SIMD_OP_SCVTF_S_W:
