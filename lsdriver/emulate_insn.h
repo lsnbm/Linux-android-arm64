@@ -1111,11 +1111,34 @@ done_ldst:
                      : "memory", "v0", "v1");                     \
     } while (0)
 
+#define EMU_FP_UN_MERGE(INST, DST, A)                             \
+    do                                                            \
+    {                                                             \
+        asm volatile(".arch_extension fp\n.arch_extension simd\n" \
+                     "ldr q0, [%0]\n"                             \
+                     "ldr q1, [%1]\n" INST "\n"                   \
+                     "str q0, [%0]\n"                             \
+                     :                                            \
+                     : "r"(DST), "r"(A)                           \
+                     : "memory", "v0", "v1");                     \
+    } while (0)
+
+#define EMU_GPR_TO_FP_MERGE(INST, DST, VALUE)                     \
+    do                                                            \
+    {                                                             \
+        asm volatile(".arch_extension fp\n.arch_extension simd\n" \
+                     "ldr q0, [%0]\n" INST "\n"                   \
+                     "str q0, [%0]\n"                             \
+                     :                                            \
+                     : "r"(DST), "r"(VALUE)                       \
+                     : "memory", "v0");                           \
+    } while (0)
+
 #define EMU_FP_CONVERT_SIMD(INST, DST, A, WIDTH, ELEMENT_WIDTH)                                    \
     do                                                                                             \
     {                                                                                              \
-        if ((WIDTH) == 32 && (ELEMENT_WIDTH) == 32) EMU_FP_UN(INST " s0, s1", DST, A);             \
-        else if ((WIDTH) == 64 && (ELEMENT_WIDTH) == 64) EMU_FP_UN(INST " d0, d1", DST, A);        \
+        if ((WIDTH) == 32 && (ELEMENT_WIDTH) == 32) EMU_FP_UN_MERGE(INST " s0, s1", DST, A);       \
+        else if ((WIDTH) == 64 && (ELEMENT_WIDTH) == 64) EMU_FP_UN_MERGE(INST " d0, d1", DST, A);  \
         else if ((WIDTH) == 64 && (ELEMENT_WIDTH) == 32) EMU_FP_UN(INST " v0.2s, v1.2s", DST, A);  \
         else if ((WIDTH) == 128 && (ELEMENT_WIDTH) == 32) EMU_FP_UN(INST " v0.4s, v1.4s", DST, A); \
         else if ((WIDTH) == 128 && (ELEMENT_WIDTH) == 64) EMU_FP_UN(INST " v0.2d, v1.2d", DST, A); \
@@ -1178,6 +1201,19 @@ static __always_inline bool emu_fp_select_hw(void *dst, const void *left, const 
 {
     uint32_t take = emu_cond_holds_hw(pstate, condition);
 
+    if (width == 16)
+    {
+        asm volatile(".arch_extension fp\n.arch_extension simd\n"
+                     "ldr q1, [%1]\n"
+                     "ldr q2, [%2]\n"
+                     "cmp %w3, #0\n"
+                     ".inst " __stringify(0x1EE21C20) "\n"
+                                                      "str q0, [%0]\n"
+                     :
+                     : "r"(dst), "r"(left), "r"(right), "r"(take)
+                     : "memory", "cc", "v0", "v1", "v2");
+        return true;
+    }
     if (width == 32)
     {
         asm volatile(".arch_extension fp\n.arch_extension simd\n"
@@ -1373,16 +1409,16 @@ static __always_inline bool emu_simd_read_scalar_hw(const void *source, uint32_t
     {                                                                       \
         switch (operation)                                                  \
         {                                                                   \
-        case ARM64_SIMD_OP_FMLA_BY_ELEMENT:                                 \
+        case ARM64_SIMD_OP_FMLA:                                            \
             EMU_VEC_ACC("fmla " DST_ARR ", " SRC_ARR, dst, left, &element); \
             break;                                                          \
-        case ARM64_SIMD_OP_FMLS_BY_ELEMENT:                                 \
+        case ARM64_SIMD_OP_FMLS:                                            \
             EMU_VEC_ACC("fmls " DST_ARR ", " SRC_ARR, dst, left, &element); \
             break;                                                          \
-        case ARM64_SIMD_OP_FMUL_BY_ELEMENT:                                 \
+        case ARM64_SIMD_OP_FMUL:                                            \
             EMU_FP_BIN("fmul " DST_ARR ", " SRC_ARR, dst, left, &element);  \
             break;                                                          \
-        case ARM64_SIMD_OP_FMULX_BY_ELEMENT:                                \
+        case ARM64_SIMD_OP_FMULX:                                           \
             EMU_FP_BIN("fmulx " DST_ARR ", " SRC_ARR, dst, left, &element); \
             break;                                                          \
         default:                                                            \
@@ -1410,16 +1446,16 @@ static __always_inline bool emu_simd_read_scalar_hw(const void *source, uint32_t
     {                                                                              \
         switch (operation)                                                         \
         {                                                                          \
-        case ARM64_SIMD_OP_FMLA_BY_ELEMENT:                                        \
+        case ARM64_SIMD_OP_FMLA:                                                   \
             EMU_SIMD_FP16_BY_ELEMENT_INST(FMLA_INST);                              \
             break;                                                                 \
-        case ARM64_SIMD_OP_FMLS_BY_ELEMENT:                                        \
+        case ARM64_SIMD_OP_FMLS:                                                   \
             EMU_SIMD_FP16_BY_ELEMENT_INST(FMLS_INST);                              \
             break;                                                                 \
-        case ARM64_SIMD_OP_FMUL_BY_ELEMENT:                                        \
+        case ARM64_SIMD_OP_FMUL:                                                   \
             EMU_SIMD_FP16_BY_ELEMENT_INST(FMUL_INST);                              \
             break;                                                                 \
-        case ARM64_SIMD_OP_FMULX_BY_ELEMENT:                                       \
+        case ARM64_SIMD_OP_FMULX:                                                  \
             EMU_SIMD_FP16_BY_ELEMENT_INST(FMULX_INST);                             \
             break;                                                                 \
         default:                                                                   \
@@ -1512,6 +1548,210 @@ static __always_inline bool emu_simd_materialize_bits_hw(void *dst, uint64_t val
     return false;
 }
 
+enum emu_simd_cpu_feature
+{
+    EMU_SIMD_CPU_FEATURE_RDM,
+    EMU_SIMD_CPU_FEATURE_DOTPROD,
+    EMU_SIMD_CPU_FEATURE_FHM,
+    EMU_SIMD_CPU_FEATURE_FCMA,
+    EMU_SIMD_CPU_FEATURE_BF16,
+    EMU_SIMD_CPU_FEATURE_I8MM,
+};
+
+static __always_inline bool emu_simd_current_cpu_has_feature(enum emu_simd_cpu_feature feature)
+{
+    uint64_t value;
+    uint32_t shift;
+
+    switch (feature)
+    {
+    case EMU_SIMD_CPU_FEATURE_RDM:
+        value = read_sysreg(id_aa64isar0_el1);
+        shift = 28;
+        break;
+    case EMU_SIMD_CPU_FEATURE_DOTPROD:
+        value = read_sysreg(id_aa64isar0_el1);
+        shift = 44;
+        break;
+    case EMU_SIMD_CPU_FEATURE_FHM:
+        value = read_sysreg(id_aa64isar0_el1);
+        shift = 48;
+        break;
+    case EMU_SIMD_CPU_FEATURE_FCMA:
+        value = read_sysreg(id_aa64isar1_el1);
+        shift = 16;
+        break;
+    case EMU_SIMD_CPU_FEATURE_BF16:
+        value = read_sysreg(id_aa64isar1_el1);
+        shift = 44;
+        break;
+    case EMU_SIMD_CPU_FEATURE_I8MM:
+        value = read_sysreg(id_aa64isar1_el1);
+        shift = 52;
+        break;
+    default:
+        return false;
+    }
+
+    return ((value >> shift) & 0xFULL) >= 1;
+}
+
+static __always_inline bool emu_simd_current_cpu_has_fp16(void)
+{
+    return ((read_sysreg(id_aa64pfr0_el1) >> 20) & 0xFULL) == 1;
+}
+
+static __always_inline bool emu_simd_current_cpu_has_faminmax(void)
+{
+    uint64_t value;
+
+    asm volatile("mrs %0, S3_0_C0_C6_3" : "=r"(value));
+    return ((value >> 4) & 0xFULL) >= 1;
+}
+
+static __always_inline bool emu_simd_current_cpu_has_f8cvt(void)
+{
+    uint64_t value;
+
+    asm volatile("mrs %0, S3_0_C0_C4_7" : "=r"(value));
+    return value & (1ULL << 31);
+}
+
+static __always_inline bool emu_fp16_scalar_2source_hw(enum arm64_simd_operation operation, void *dst, const void *left, const void *right)
+{
+    switch (operation)
+    {
+    case ARM64_SIMD_OP_FMUL:
+        EMU_FP_BIN(".inst " __stringify(0x1EE20820), dst, left, right);
+        return true;
+    case ARM64_SIMD_OP_FDIV:
+        EMU_FP_BIN(".inst " __stringify(0x1EE21820), dst, left, right);
+        return true;
+    case ARM64_SIMD_OP_FADD:
+        EMU_FP_BIN(".inst " __stringify(0x1EE22820), dst, left, right);
+        return true;
+    case ARM64_SIMD_OP_FSUB:
+        EMU_FP_BIN(".inst " __stringify(0x1EE23820), dst, left, right);
+        return true;
+    case ARM64_SIMD_OP_FMAX:
+        EMU_FP_BIN(".inst " __stringify(0x1EE24820), dst, left, right);
+        return true;
+    case ARM64_SIMD_OP_FMIN:
+        EMU_FP_BIN(".inst " __stringify(0x1EE25820), dst, left, right);
+        return true;
+    case ARM64_SIMD_OP_FMAXNM:
+        EMU_FP_BIN(".inst " __stringify(0x1EE26820), dst, left, right);
+        return true;
+    case ARM64_SIMD_OP_FMINNM:
+        EMU_FP_BIN(".inst " __stringify(0x1EE27820), dst, left, right);
+        return true;
+    case ARM64_SIMD_OP_FNMUL:
+        EMU_FP_BIN(".inst " __stringify(0x1EE28820), dst, left, right);
+        return true;
+    default:
+        return false;
+    }
+}
+
+static __always_inline bool emu_fp16_scalar_1source_hw(enum arm64_simd_operation operation, enum arm64_fp_rounding_mode rounding_mode, void *dst, const void *source)
+{
+    if (operation != ARM64_SIMD_OP_FRINT)
+    {
+        switch (operation)
+        {
+        case ARM64_SIMD_OP_FMOV:
+            EMU_FP_UN(".inst " __stringify(0x1EE04020), dst, source);
+            return true;
+        case ARM64_SIMD_OP_FABS:
+            EMU_FP_UN_MERGE(".inst " __stringify(0x1EE0C020), dst, source);
+            return true;
+        case ARM64_SIMD_OP_FNEG:
+            EMU_FP_UN_MERGE(".inst " __stringify(0x1EE14020), dst, source);
+            return true;
+        case ARM64_SIMD_OP_FSQRT:
+            EMU_FP_UN_MERGE(".inst " __stringify(0x1EE1C020), dst, source);
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    switch (rounding_mode)
+    {
+    case ARM64_FP_ROUND_NEAREST_EVEN:
+        EMU_FP_UN_MERGE(".inst " __stringify(0x1EE44020), dst, source);
+        return true;
+    case ARM64_FP_ROUND_PLUS_INFINITY:
+        EMU_FP_UN_MERGE(".inst " __stringify(0x1EE4C020), dst, source);
+        return true;
+    case ARM64_FP_ROUND_MINUS_INFINITY:
+        EMU_FP_UN_MERGE(".inst " __stringify(0x1EE54020), dst, source);
+        return true;
+    case ARM64_FP_ROUND_ZERO:
+        EMU_FP_UN_MERGE(".inst " __stringify(0x1EE5C020), dst, source);
+        return true;
+    case ARM64_FP_ROUND_NEAREST_AWAY:
+        EMU_FP_UN_MERGE(".inst " __stringify(0x1EE64020), dst, source);
+        return true;
+    case ARM64_FP_ROUND_CURRENT_EXACT:
+        EMU_FP_UN_MERGE(".inst " __stringify(0x1EE74020), dst, source);
+        return true;
+    case ARM64_FP_ROUND_CURRENT:
+        EMU_FP_UN_MERGE(".inst " __stringify(0x1EE7C020), dst, source);
+        return true;
+    default:
+        return false;
+    }
+}
+
+static __always_inline bool emu_fp16_scalar_3source_hw(enum arm64_simd_operation operation, void *dst, const void *left, const void *right, const void *addend)
+{
+    switch (operation)
+    {
+    case ARM64_SIMD_OP_FMADD:
+        EMU_FP_TERN(".inst " __stringify(0x1FC20C20), dst, left, right, addend);
+        return true;
+    case ARM64_SIMD_OP_FMSUB:
+        EMU_FP_TERN(".inst " __stringify(0x1FC28C20), dst, left, right, addend);
+        return true;
+    case ARM64_SIMD_OP_FNMADD:
+        EMU_FP_TERN(".inst " __stringify(0x1FE20C20), dst, left, right, addend);
+        return true;
+    case ARM64_SIMD_OP_FNMSUB:
+        EMU_FP_TERN(".inst " __stringify(0x1FE28C20), dst, left, right, addend);
+        return true;
+    default:
+        return false;
+    }
+}
+
+static __always_inline bool emu_fp16_compare_hw(bool signal, bool zero, const void *left, const void *right, uint64_t *nzcv)
+{
+    if (!nzcv) return false;
+
+    if (zero)
+    {
+        if (signal) asm volatile(".arch_extension fp\n.arch_extension simd\nldr q1, [%1]\n.inst " __stringify(0x1EE02038) "\nmrs %0, nzcv\n" : "=r"(*nzcv) : "r"(left) : "memory", "cc", "v1");
+        else asm volatile(".arch_extension fp\n.arch_extension simd\nldr q1, [%1]\n.inst " __stringify(0x1EE02028) "\nmrs %0, nzcv\n" : "=r"(*nzcv) : "r"(left) : "memory", "cc", "v1");
+        return true;
+    }
+
+    if (signal) asm volatile(".arch_extension fp\n.arch_extension simd\nldr q1, [%1]\nldr q2, [%2]\n.inst " __stringify(0x1EE22030) "\nmrs %0, nzcv\n" : "=r"(*nzcv) : "r"(left), "r"(right) : "memory", "cc", "v1", "v2");
+    else asm volatile(".arch_extension fp\n.arch_extension simd\nldr q1, [%1]\nldr q2, [%2]\n.inst " __stringify(0x1EE22020) "\nmrs %0, nzcv\n" : "=r"(*nzcv) : "r"(left), "r"(right) : "memory", "cc", "v1", "v2");
+    return true;
+}
+
+#define EMU_SIMD_RDM_VECTOR_EXEC(V4H_INST, V8H_INST, V2S_INST, V4S_INST)                                                    \
+    do                                                                                                                      \
+    {                                                                                                                       \
+        if (vector_width == 64 && element_width == 16) EMU_VEC_ACC(".inst " __stringify(V4H_INST), dst, left, right);       \
+        else if (vector_width == 128 && element_width == 16) EMU_VEC_ACC(".inst " __stringify(V8H_INST), dst, left, right); \
+        else if (vector_width == 64 && element_width == 32) EMU_VEC_ACC(".inst " __stringify(V2S_INST), dst, left, right);  \
+        else if (vector_width == 128 && element_width == 32) EMU_VEC_ACC(".inst " __stringify(V4S_INST), dst, left, right); \
+        else return false;                                                                                                  \
+        return true;                                                                                                        \
+    } while (0)
+
 #define EMU_SIMD_VECTOR_3REG_EXEC(INST)                                    \
     do                                                                     \
     {                                                                      \
@@ -1551,14 +1791,182 @@ static __always_inline bool emu_simd_materialize_bits_hw(void *dst, uint64_t val
         }                                                                  \
     } while (0)
 
+#define EMU_SIMD_VECTOR_3REG_BHS_EXEC(INST)                                \
+    do                                                                     \
+    {                                                                      \
+        if (vector_width == 64)                                            \
+        {                                                                  \
+            switch (element_width)                                         \
+            {                                                              \
+            case 8:                                                        \
+                EMU_FP_BIN(INST " v0.8b, v1.8b, v2.8b", dst, left, right); \
+                return true;                                               \
+            case 16:                                                       \
+                EMU_FP_BIN(INST " v0.4h, v1.4h, v2.4h", dst, left, right); \
+                return true;                                               \
+            case 32:                                                       \
+                EMU_FP_BIN(INST " v0.2s, v1.2s, v2.2s", dst, left, right); \
+                return true;                                               \
+            default:                                                       \
+                return false;                                              \
+            }                                                              \
+        }                                                                  \
+        switch (element_width)                                             \
+        {                                                                  \
+        case 8:                                                            \
+            EMU_FP_BIN(INST " v0.16b, v1.16b, v2.16b", dst, left, right);  \
+            return true;                                                   \
+        case 16:                                                           \
+            EMU_FP_BIN(INST " v0.8h, v1.8h, v2.8h", dst, left, right);     \
+            return true;                                                   \
+        case 32:                                                           \
+            EMU_FP_BIN(INST " v0.4s, v1.4s, v2.4s", dst, left, right);     \
+            return true;                                                   \
+        default:                                                           \
+            return false;                                                  \
+        }                                                                  \
+    } while (0)
+
+#define EMU_SIMD_VECTOR_3REG_HS_EXEC(INST)                                                                              \
+    do                                                                                                                  \
+    {                                                                                                                   \
+        if (vector_width == 64 && element_width == 16) EMU_FP_BIN(INST " v0.4h, v1.4h, v2.4h", dst, left, right);       \
+        else if (vector_width == 128 && element_width == 16) EMU_FP_BIN(INST " v0.8h, v1.8h, v2.8h", dst, left, right); \
+        else if (vector_width == 64 && element_width == 32) EMU_FP_BIN(INST " v0.2s, v1.2s, v2.2s", dst, left, right);  \
+        else if (vector_width == 128 && element_width == 32) EMU_FP_BIN(INST " v0.4s, v1.4s, v2.4s", dst, left, right); \
+        else return false;                                                                                              \
+        return true;                                                                                                    \
+    } while (0)
+
+#define EMU_SIMD_VECTOR_3REG_B_EXEC(INST)                                                                                 \
+    do                                                                                                                    \
+    {                                                                                                                     \
+        if (vector_width == 64 && element_width == 8) EMU_FP_BIN(INST " v0.8b, v1.8b, v2.8b", dst, left, right);          \
+        else if (vector_width == 128 && element_width == 8) EMU_FP_BIN(INST " v0.16b, v1.16b, v2.16b", dst, left, right); \
+        else return false;                                                                                                \
+        return true;                                                                                                      \
+    } while (0)
+
+#define EMU_SIMD_VECTOR_3REG_ACC_EXEC(INST)                                 \
+    do                                                                      \
+    {                                                                       \
+        if (vector_width == 64)                                             \
+        {                                                                   \
+            switch (element_width)                                          \
+            {                                                               \
+            case 8:                                                         \
+                EMU_VEC_ACC(INST " v0.8b, v1.8b, v2.8b", dst, left, right); \
+                return true;                                                \
+            case 16:                                                        \
+                EMU_VEC_ACC(INST " v0.4h, v1.4h, v2.4h", dst, left, right); \
+                return true;                                                \
+            case 32:                                                        \
+                EMU_VEC_ACC(INST " v0.2s, v1.2s, v2.2s", dst, left, right); \
+                return true;                                                \
+            default:                                                        \
+                return false;                                               \
+            }                                                               \
+        }                                                                   \
+        switch (element_width)                                              \
+        {                                                                   \
+        case 8:                                                             \
+            EMU_VEC_ACC(INST " v0.16b, v1.16b, v2.16b", dst, left, right);  \
+            return true;                                                    \
+        case 16:                                                            \
+            EMU_VEC_ACC(INST " v0.8h, v1.8h, v2.8h", dst, left, right);     \
+            return true;                                                    \
+        case 32:                                                            \
+            EMU_VEC_ACC(INST " v0.4s, v1.4s, v2.4s", dst, left, right);     \
+            return true;                                                    \
+        default:                                                            \
+            return false;                                                   \
+        }                                                                   \
+    } while (0)
+
 static __always_inline bool emu_simd_integer_3reg_hw(enum arm64_simd_operation operation, void *dst, const void *left, const void *right, uint32_t element_width, uint32_t vector_width)
 {
     switch (operation)
     {
+    case ARM64_SIMD_OP_SHADD:
+        EMU_SIMD_VECTOR_3REG_BHS_EXEC("shadd");
+    case ARM64_SIMD_OP_SQADD:
+        EMU_SIMD_VECTOR_3REG_EXEC("sqadd");
+    case ARM64_SIMD_OP_SRHADD:
+        EMU_SIMD_VECTOR_3REG_BHS_EXEC("srhadd");
+    case ARM64_SIMD_OP_SHSUB:
+        EMU_SIMD_VECTOR_3REG_BHS_EXEC("shsub");
+    case ARM64_SIMD_OP_SQSUB:
+        EMU_SIMD_VECTOR_3REG_EXEC("sqsub");
+    case ARM64_SIMD_OP_SSHL:
+        EMU_SIMD_VECTOR_3REG_EXEC("sshl");
+    case ARM64_SIMD_OP_SQSHL:
+        EMU_SIMD_VECTOR_3REG_EXEC("sqshl");
+    case ARM64_SIMD_OP_SRSHL:
+        EMU_SIMD_VECTOR_3REG_EXEC("srshl");
+    case ARM64_SIMD_OP_SQRSHL:
+        EMU_SIMD_VECTOR_3REG_EXEC("sqrshl");
+    case ARM64_SIMD_OP_SMAX:
+        EMU_SIMD_VECTOR_3REG_BHS_EXEC("smax");
+    case ARM64_SIMD_OP_SMIN:
+        EMU_SIMD_VECTOR_3REG_BHS_EXEC("smin");
+    case ARM64_SIMD_OP_SABD:
+        EMU_SIMD_VECTOR_3REG_BHS_EXEC("sabd");
+    case ARM64_SIMD_OP_SABA:
+        EMU_SIMD_VECTOR_3REG_ACC_EXEC("saba");
     case ARM64_SIMD_OP_ADD:
         EMU_SIMD_VECTOR_3REG_EXEC("add");
     case ARM64_SIMD_OP_SUB:
         EMU_SIMD_VECTOR_3REG_EXEC("sub");
+    case ARM64_SIMD_OP_CMTST:
+        EMU_SIMD_VECTOR_3REG_EXEC("cmtst");
+    case ARM64_SIMD_OP_MLA:
+        EMU_SIMD_VECTOR_3REG_ACC_EXEC("mla");
+    case ARM64_SIMD_OP_MUL:
+        EMU_SIMD_VECTOR_3REG_BHS_EXEC("mul");
+    case ARM64_SIMD_OP_SMAXP:
+        EMU_SIMD_VECTOR_3REG_BHS_EXEC("smaxp");
+    case ARM64_SIMD_OP_SMINP:
+        EMU_SIMD_VECTOR_3REG_BHS_EXEC("sminp");
+    case ARM64_SIMD_OP_SQDMULH:
+        EMU_SIMD_VECTOR_3REG_HS_EXEC("sqdmulh");
+    case ARM64_SIMD_OP_ADDP:
+        EMU_SIMD_VECTOR_3REG_EXEC("addp");
+    case ARM64_SIMD_OP_UHADD:
+        EMU_SIMD_VECTOR_3REG_BHS_EXEC("uhadd");
+    case ARM64_SIMD_OP_UQADD:
+        EMU_SIMD_VECTOR_3REG_EXEC("uqadd");
+    case ARM64_SIMD_OP_URHADD:
+        EMU_SIMD_VECTOR_3REG_BHS_EXEC("urhadd");
+    case ARM64_SIMD_OP_UHSUB:
+        EMU_SIMD_VECTOR_3REG_BHS_EXEC("uhsub");
+    case ARM64_SIMD_OP_UQSUB:
+        EMU_SIMD_VECTOR_3REG_EXEC("uqsub");
+    case ARM64_SIMD_OP_USHL:
+        EMU_SIMD_VECTOR_3REG_EXEC("ushl");
+    case ARM64_SIMD_OP_UQSHL:
+        EMU_SIMD_VECTOR_3REG_EXEC("uqshl");
+    case ARM64_SIMD_OP_URSHL:
+        EMU_SIMD_VECTOR_3REG_EXEC("urshl");
+    case ARM64_SIMD_OP_UQRSHL:
+        EMU_SIMD_VECTOR_3REG_EXEC("uqrshl");
+    case ARM64_SIMD_OP_UMAX:
+        EMU_SIMD_VECTOR_3REG_BHS_EXEC("umax");
+    case ARM64_SIMD_OP_UMIN:
+        EMU_SIMD_VECTOR_3REG_BHS_EXEC("umin");
+    case ARM64_SIMD_OP_UABD:
+        EMU_SIMD_VECTOR_3REG_BHS_EXEC("uabd");
+    case ARM64_SIMD_OP_UABA:
+        EMU_SIMD_VECTOR_3REG_ACC_EXEC("uaba");
+    case ARM64_SIMD_OP_MLS:
+        EMU_SIMD_VECTOR_3REG_ACC_EXEC("mls");
+    case ARM64_SIMD_OP_PMUL:
+        EMU_SIMD_VECTOR_3REG_B_EXEC("pmul");
+    case ARM64_SIMD_OP_UMAXP:
+        EMU_SIMD_VECTOR_3REG_BHS_EXEC("umaxp");
+    case ARM64_SIMD_OP_UMINP:
+        EMU_SIMD_VECTOR_3REG_BHS_EXEC("uminp");
+    case ARM64_SIMD_OP_SQRDMULH:
+        EMU_SIMD_VECTOR_3REG_HS_EXEC("sqrdmulh");
     case ARM64_SIMD_OP_CMEQ:
         EMU_SIMD_VECTOR_3REG_EXEC("cmeq");
     case ARM64_SIMD_OP_CMGT:
@@ -1573,6 +1981,426 @@ static __always_inline bool emu_simd_integer_3reg_hw(enum arm64_simd_operation o
         return false;
     }
 }
+
+#undef EMU_SIMD_VECTOR_3REG_B_EXEC
+#undef EMU_SIMD_VECTOR_3REG_HS_EXEC
+#undef EMU_SIMD_VECTOR_3REG_BHS_EXEC
+#undef EMU_SIMD_VECTOR_3REG_ACC_EXEC
+
+#define EMU_SIMD_EXTRA_ACC_WIDTH_EXEC(V64_INST, V128_INST)                                            \
+    do                                                                                                \
+    {                                                                                                 \
+        if (vector_width == 64) EMU_VEC_ACC(".inst " __stringify(V64_INST), dst, left, right);        \
+        else if (vector_width == 128) EMU_VEC_ACC(".inst " __stringify(V128_INST), dst, left, right); \
+        else return false;                                                                            \
+        return true;                                                                                  \
+    } while (0)
+
+#define EMU_SIMD_EXTRA_ACC_128_EXEC(INST)                          \
+    do                                                             \
+    {                                                              \
+        if (vector_width != 128) return false;                     \
+        EMU_VEC_ACC(".inst " __stringify(INST), dst, left, right); \
+        return true;                                               \
+    } while (0)
+
+static __always_inline bool emu_simd_vector_3same_extra_hw(enum arm64_simd_operation operation, void *dst, const void *left, const void *right, uint32_t element_width, uint32_t result_element_width, uint32_t vector_width, uint32_t flags)
+{
+    switch (operation)
+    {
+    case ARM64_SIMD_OP_SQRDMLAH:
+        if (!emu_simd_current_cpu_has_feature(EMU_SIMD_CPU_FEATURE_RDM)) return false;
+        EMU_SIMD_RDM_VECTOR_EXEC(0x2E428420, 0x6E428420, 0x2E828420, 0x6E828420);
+    case ARM64_SIMD_OP_SQRDMLSH:
+        if (!emu_simd_current_cpu_has_feature(EMU_SIMD_CPU_FEATURE_RDM)) return false;
+        EMU_SIMD_RDM_VECTOR_EXEC(0x2E428C20, 0x6E428C20, 0x2E828C20, 0x6E828C20);
+    case ARM64_SIMD_OP_SDOT:
+        if (element_width != 8 || result_element_width != 32 || !emu_simd_current_cpu_has_feature(EMU_SIMD_CPU_FEATURE_DOTPROD)) return false;
+        EMU_SIMD_EXTRA_ACC_WIDTH_EXEC(0x0E829420, 0x4E829420);
+    case ARM64_SIMD_OP_UDOT:
+        if (element_width != 8 || result_element_width != 32 || !emu_simd_current_cpu_has_feature(EMU_SIMD_CPU_FEATURE_DOTPROD)) return false;
+        EMU_SIMD_EXTRA_ACC_WIDTH_EXEC(0x2E829420, 0x6E829420);
+    case ARM64_SIMD_OP_USDOT:
+        if (element_width != 8 || result_element_width != 32 || !emu_simd_current_cpu_has_feature(EMU_SIMD_CPU_FEATURE_I8MM)) return false;
+        EMU_SIMD_EXTRA_ACC_WIDTH_EXEC(0x0E829C20, 0x4E829C20);
+    case ARM64_SIMD_OP_BFDOT:
+        if (element_width != 16 || result_element_width != 32 || !emu_simd_current_cpu_has_feature(EMU_SIMD_CPU_FEATURE_BF16)) return false;
+        EMU_SIMD_EXTRA_ACC_WIDTH_EXEC(0x2E42FC20, 0x6E42FC20);
+    case ARM64_SIMD_OP_BFMLAL:
+        if (element_width != 16 || result_element_width != 32 || vector_width != 128 || !emu_simd_current_cpu_has_feature(EMU_SIMD_CPU_FEATURE_BF16)) return false;
+        if (flags & ARM64_SIMD_FLAG_SOURCE_ODD_ELEMENTS) EMU_VEC_ACC(".inst " __stringify(0x6EC2FC20), dst, left, right);
+        else EMU_VEC_ACC(".inst " __stringify(0x2EC2FC20), dst, left, right);
+        return true;
+    case ARM64_SIMD_OP_BFMMLA:
+        if (element_width != 16 || result_element_width != 32 || !emu_simd_current_cpu_has_feature(EMU_SIMD_CPU_FEATURE_BF16)) return false;
+        EMU_SIMD_EXTRA_ACC_128_EXEC(0x6E42EC20);
+    case ARM64_SIMD_OP_SMMLA:
+        if (element_width != 8 || result_element_width != 32 || !emu_simd_current_cpu_has_feature(EMU_SIMD_CPU_FEATURE_I8MM)) return false;
+        EMU_SIMD_EXTRA_ACC_128_EXEC(0x4E82A420);
+    case ARM64_SIMD_OP_UMMLA:
+        if (element_width != 8 || result_element_width != 32 || !emu_simd_current_cpu_has_feature(EMU_SIMD_CPU_FEATURE_I8MM)) return false;
+        EMU_SIMD_EXTRA_ACC_128_EXEC(0x6E82A420);
+    case ARM64_SIMD_OP_USMMLA:
+        if (element_width != 8 || result_element_width != 32 || !emu_simd_current_cpu_has_feature(EMU_SIMD_CPU_FEATURE_I8MM)) return false;
+        EMU_SIMD_EXTRA_ACC_128_EXEC(0x4E82AC20);
+    default:
+        return false;
+    }
+}
+
+#undef EMU_SIMD_RDM_VECTOR_EXEC
+#undef EMU_SIMD_EXTRA_ACC_128_EXEC
+#undef EMU_SIMD_EXTRA_ACC_WIDTH_EXEC
+
+static __always_inline bool emu_simd_scalar_rdm_hw(enum arm64_simd_operation operation, void *dst, const void *left, const void *right, uint32_t element_width)
+{
+    uint32_t instruction;
+
+    if (!emu_simd_current_cpu_has_feature(EMU_SIMD_CPU_FEATURE_RDM)) return false;
+
+    switch (operation)
+    {
+    case ARM64_SIMD_OP_SQRDMLAH:
+        instruction = element_width == 16 ? 0x7E428420 : 0x7E828420;
+        break;
+    case ARM64_SIMD_OP_SQRDMLSH:
+        instruction = element_width == 16 ? 0x7E428C20 : 0x7E828C20;
+        break;
+    default:
+        return false;
+    }
+
+    if (element_width != 16 && element_width != 32) return false;
+    switch (instruction)
+    {
+    case 0x7E428420:
+        EMU_VEC_ACC(".inst " __stringify(0x7E428420), dst, left, right);
+        break;
+    case 0x7E828420:
+        EMU_VEC_ACC(".inst " __stringify(0x7E828420), dst, left, right);
+        break;
+    case 0x7E428C20:
+        EMU_VEC_ACC(".inst " __stringify(0x7E428C20), dst, left, right);
+        break;
+    case 0x7E828C20:
+        EMU_VEC_ACC(".inst " __stringify(0x7E828C20), dst, left, right);
+        break;
+    }
+    return true;
+}
+
+#define EMU_SIMD_SCALAR_BHSD_EXEC(INST)                                                 \
+    do                                                                                  \
+    {                                                                                   \
+        if (element_width == 8) EMU_FP_BIN(INST " b0, b1, b2", dst, left, right);       \
+        else if (element_width == 16) EMU_FP_BIN(INST " h0, h1, h2", dst, left, right); \
+        else if (element_width == 32) EMU_FP_BIN(INST " s0, s1, s2", dst, left, right); \
+        else if (element_width == 64) EMU_FP_BIN(INST " d0, d1, d2", dst, left, right); \
+        else return false;                                                              \
+        return true;                                                                    \
+    } while (0)
+
+#define EMU_SIMD_SCALAR_HS_EXEC(INST)                                                   \
+    do                                                                                  \
+    {                                                                                   \
+        if (element_width == 16) EMU_FP_BIN(INST " h0, h1, h2", dst, left, right);      \
+        else if (element_width == 32) EMU_FP_BIN(INST " s0, s1, s2", dst, left, right); \
+        else return false;                                                              \
+        return true;                                                                    \
+    } while (0)
+
+#define EMU_SIMD_SCALAR_D_EXEC(INST)                      \
+    do                                                    \
+    {                                                     \
+        if (element_width != 64) return false;            \
+        EMU_FP_BIN(INST " d0, d1, d2", dst, left, right); \
+        return true;                                      \
+    } while (0)
+
+#define EMU_SIMD_SCALAR_FP_EXEC(INST, H_INST)                                                \
+    do                                                                                       \
+    {                                                                                        \
+        if (element_width == 16) EMU_FP_BIN(".inst " __stringify(H_INST), dst, left, right); \
+        else if (element_width == 32) EMU_FP_BIN(INST " s0, s1, s2", dst, left, right);      \
+        else if (element_width == 64) EMU_FP_BIN(INST " d0, d1, d2", dst, left, right);      \
+        else return false;                                                                   \
+        return true;                                                                         \
+    } while (0)
+
+static __always_inline bool emu_simd_scalar_3same_hw(enum arm64_simd_operation operation, void *dst, const void *left, const void *right, uint32_t element_width)
+{
+    switch (operation)
+    {
+    case ARM64_SIMD_OP_SQADD:
+        EMU_SIMD_SCALAR_BHSD_EXEC("sqadd");
+    case ARM64_SIMD_OP_SQSUB:
+        EMU_SIMD_SCALAR_BHSD_EXEC("sqsub");
+    case ARM64_SIMD_OP_SQSHL:
+        EMU_SIMD_SCALAR_BHSD_EXEC("sqshl");
+    case ARM64_SIMD_OP_SQRSHL:
+        EMU_SIMD_SCALAR_BHSD_EXEC("sqrshl");
+    case ARM64_SIMD_OP_SQDMULH:
+        EMU_SIMD_SCALAR_HS_EXEC("sqdmulh");
+    case ARM64_SIMD_OP_UQADD:
+        EMU_SIMD_SCALAR_BHSD_EXEC("uqadd");
+    case ARM64_SIMD_OP_UQSUB:
+        EMU_SIMD_SCALAR_BHSD_EXEC("uqsub");
+    case ARM64_SIMD_OP_UQSHL:
+        EMU_SIMD_SCALAR_BHSD_EXEC("uqshl");
+    case ARM64_SIMD_OP_UQRSHL:
+        EMU_SIMD_SCALAR_BHSD_EXEC("uqrshl");
+    case ARM64_SIMD_OP_SQRDMULH:
+        EMU_SIMD_SCALAR_HS_EXEC("sqrdmulh");
+    case ARM64_SIMD_OP_CMGT:
+        EMU_SIMD_SCALAR_D_EXEC("cmgt");
+    case ARM64_SIMD_OP_CMGE:
+        EMU_SIMD_SCALAR_D_EXEC("cmge");
+    case ARM64_SIMD_OP_SSHL:
+        EMU_SIMD_SCALAR_D_EXEC("sshl");
+    case ARM64_SIMD_OP_SRSHL:
+        EMU_SIMD_SCALAR_D_EXEC("srshl");
+    case ARM64_SIMD_OP_ADD:
+        EMU_SIMD_SCALAR_D_EXEC("add");
+    case ARM64_SIMD_OP_CMTST:
+        EMU_SIMD_SCALAR_D_EXEC("cmtst");
+    case ARM64_SIMD_OP_CMHI:
+        EMU_SIMD_SCALAR_D_EXEC("cmhi");
+    case ARM64_SIMD_OP_CMHS:
+        EMU_SIMD_SCALAR_D_EXEC("cmhs");
+    case ARM64_SIMD_OP_USHL:
+        EMU_SIMD_SCALAR_D_EXEC("ushl");
+    case ARM64_SIMD_OP_URSHL:
+        EMU_SIMD_SCALAR_D_EXEC("urshl");
+    case ARM64_SIMD_OP_SUB:
+        EMU_SIMD_SCALAR_D_EXEC("sub");
+    case ARM64_SIMD_OP_CMEQ:
+        EMU_SIMD_SCALAR_D_EXEC("cmeq");
+    case ARM64_SIMD_OP_SQRDMLAH:
+    case ARM64_SIMD_OP_SQRDMLSH:
+        return emu_simd_scalar_rdm_hw(operation, dst, left, right, element_width);
+    case ARM64_SIMD_OP_FMULX:
+        if (element_width == 16 && !emu_simd_current_cpu_has_fp16()) return false;
+        EMU_SIMD_SCALAR_FP_EXEC("fmulx", 0x5E421C20);
+    case ARM64_SIMD_OP_FCMEQ:
+        if (element_width == 16 && !emu_simd_current_cpu_has_fp16()) return false;
+        EMU_SIMD_SCALAR_FP_EXEC("fcmeq", 0x5E422420);
+    case ARM64_SIMD_OP_FRECPS:
+        if (element_width == 16 && !emu_simd_current_cpu_has_fp16()) return false;
+        EMU_SIMD_SCALAR_FP_EXEC("frecps", 0x5E423C20);
+    case ARM64_SIMD_OP_FRSQRTS:
+        if (element_width == 16 && !emu_simd_current_cpu_has_fp16()) return false;
+        EMU_SIMD_SCALAR_FP_EXEC("frsqrts", 0x5EC23C20);
+    case ARM64_SIMD_OP_FCMGE:
+        if (element_width == 16 && !emu_simd_current_cpu_has_fp16()) return false;
+        EMU_SIMD_SCALAR_FP_EXEC("fcmge", 0x7E422420);
+    case ARM64_SIMD_OP_FACGE:
+        if (element_width == 16 && !emu_simd_current_cpu_has_fp16()) return false;
+        EMU_SIMD_SCALAR_FP_EXEC("facge", 0x7E422C20);
+    case ARM64_SIMD_OP_FABD:
+        if (element_width == 16 && !emu_simd_current_cpu_has_fp16()) return false;
+        EMU_SIMD_SCALAR_FP_EXEC("fabd", 0x7EC21420);
+    case ARM64_SIMD_OP_FCMGT:
+        if (element_width == 16 && !emu_simd_current_cpu_has_fp16()) return false;
+        EMU_SIMD_SCALAR_FP_EXEC("fcmgt", 0x7EC22420);
+    case ARM64_SIMD_OP_FACGT:
+        if (element_width == 16 && !emu_simd_current_cpu_has_fp16()) return false;
+        EMU_SIMD_SCALAR_FP_EXEC("facgt", 0x7EC22C20);
+    default:
+        return false;
+    }
+}
+
+#undef EMU_SIMD_SCALAR_FP_EXEC
+#undef EMU_SIMD_SCALAR_D_EXEC
+#undef EMU_SIMD_SCALAR_HS_EXEC
+#undef EMU_SIMD_SCALAR_BHSD_EXEC
+
+#define EMU_SIMD_INDEXED_ACC_WIDTH_EXEC(V64_INST, V128_INST)                                              \
+    do                                                                                                    \
+    {                                                                                                     \
+        if (operand_width == 64) EMU_VEC_ACC(".inst " __stringify(V64_INST), dst, left, &element);        \
+        else if (operand_width == 128) EMU_VEC_ACC(".inst " __stringify(V128_INST), dst, left, &element); \
+        else return false;                                                                                \
+        return true;                                                                                      \
+    } while (0)
+
+static __always_inline bool emu_simd_extra_by_element_hw(enum arm64_simd_operation operation, void *dst, const void *left, const void *right, uint32_t element_width, uint32_t result_element_width, uint32_t operand_width, uint32_t lane_index, uint32_t flags, bool scalar)
+{
+    __uint128_t element;
+    uint64_t lane_value;
+
+    switch (operation)
+    {
+    case ARM64_SIMD_OP_SQRDMLAH:
+    case ARM64_SIMD_OP_SQRDMLSH:
+        if (!emu_simd_extract_lane_hw(right, element_width, lane_index, &lane_value)) return false;
+        if (scalar)
+        {
+            if (operand_width != element_width || !emu_simd_write_scalar_hw(&element, lane_value, element_width)) return false;
+            return emu_simd_scalar_rdm_hw(operation, dst, left, &element, element_width);
+        }
+        if (!emu_simd_dup_general_hw(&element, lane_value, element_width, operand_width)) return false;
+        return emu_simd_integer_3reg_hw(operation, dst, left, &element, element_width, operand_width);
+    case ARM64_SIMD_OP_SDOT:
+        if (scalar || element_width != 8 || result_element_width != 32 || !emu_simd_current_cpu_has_feature(EMU_SIMD_CPU_FEATURE_DOTPROD)) return false;
+        if (!emu_simd_extract_lane_hw(right, 32, lane_index, &lane_value) || !emu_simd_write_scalar_hw(&element, lane_value, 32)) return false;
+        EMU_SIMD_INDEXED_ACC_WIDTH_EXEC(0x0F82E020, 0x4F82E020);
+    case ARM64_SIMD_OP_UDOT:
+        if (scalar || element_width != 8 || result_element_width != 32 || !emu_simd_current_cpu_has_feature(EMU_SIMD_CPU_FEATURE_DOTPROD)) return false;
+        if (!emu_simd_extract_lane_hw(right, 32, lane_index, &lane_value) || !emu_simd_write_scalar_hw(&element, lane_value, 32)) return false;
+        EMU_SIMD_INDEXED_ACC_WIDTH_EXEC(0x2F82E020, 0x6F82E020);
+    case ARM64_SIMD_OP_USDOT:
+        if (scalar || element_width != 8 || result_element_width != 32 || !emu_simd_current_cpu_has_feature(EMU_SIMD_CPU_FEATURE_I8MM)) return false;
+        if (!emu_simd_extract_lane_hw(right, 32, lane_index, &lane_value) || !emu_simd_write_scalar_hw(&element, lane_value, 32)) return false;
+        EMU_SIMD_INDEXED_ACC_WIDTH_EXEC(0x0F82F020, 0x4F82F020);
+    case ARM64_SIMD_OP_SUDOT:
+        if (scalar || element_width != 8 || result_element_width != 32 || !emu_simd_current_cpu_has_feature(EMU_SIMD_CPU_FEATURE_I8MM)) return false;
+        if (!emu_simd_extract_lane_hw(right, 32, lane_index, &lane_value) || !emu_simd_write_scalar_hw(&element, lane_value, 32)) return false;
+        EMU_SIMD_INDEXED_ACC_WIDTH_EXEC(0x0F02F020, 0x4F02F020);
+    case ARM64_SIMD_OP_BFDOT:
+        if (scalar || element_width != 16 || result_element_width != 32 || !emu_simd_current_cpu_has_feature(EMU_SIMD_CPU_FEATURE_BF16)) return false;
+        if (!emu_simd_extract_lane_hw(right, 32, lane_index, &lane_value) || !emu_simd_write_scalar_hw(&element, lane_value, 32)) return false;
+        EMU_SIMD_INDEXED_ACC_WIDTH_EXEC(0x0F42F020, 0x4F42F020);
+    case ARM64_SIMD_OP_BFMLAL:
+        if (scalar || operand_width != 128 || element_width != 16 || result_element_width != 32 || !emu_simd_current_cpu_has_feature(EMU_SIMD_CPU_FEATURE_BF16)) return false;
+        if (!emu_simd_extract_lane_hw(right, 16, lane_index, &lane_value) || !emu_simd_write_scalar_hw(&element, lane_value, 16)) return false;
+        if (flags & ARM64_SIMD_FLAG_SOURCE_ODD_ELEMENTS) EMU_VEC_ACC(".inst " __stringify(0x4FC2F020), dst, left, &element);
+        else EMU_VEC_ACC(".inst " __stringify(0x0FC2F020), dst, left, &element);
+        return true;
+    default:
+        return false;
+    }
+}
+
+#undef EMU_SIMD_INDEXED_ACC_WIDTH_EXEC
+
+#define EMU_SIMD_FHM_WIDTH_EXEC(V64_INST, V128_INST, RIGHT)                                            \
+    do                                                                                                 \
+    {                                                                                                  \
+        if (operand_width == 64) EMU_VEC_ACC(".inst " __stringify(V64_INST), dst, left, RIGHT);        \
+        else if (operand_width == 128) EMU_VEC_ACC(".inst " __stringify(V128_INST), dst, left, RIGHT); \
+        else return false;                                                                             \
+        return true;                                                                                   \
+    } while (0)
+
+static __always_inline bool emu_simd_fhm_vector_hw(enum arm64_simd_operation operation, void *dst, const void *left, const void *right, uint32_t element_width, uint32_t result_element_width, uint32_t operand_width, uint32_t flags)
+{
+    bool high_half = flags & ARM64_SIMD_FLAG_SOURCE_HIGH_HALF;
+
+    if (element_width != 16 || result_element_width != 32 || !emu_simd_current_cpu_has_feature(EMU_SIMD_CPU_FEATURE_FHM)) return false;
+
+    switch (operation)
+    {
+    case ARM64_SIMD_OP_FMLAL:
+        if (high_half) EMU_SIMD_FHM_WIDTH_EXEC(0x2E22CC20, 0x6E22CC20, right);
+        EMU_SIMD_FHM_WIDTH_EXEC(0x0E22EC20, 0x4E22EC20, right);
+    case ARM64_SIMD_OP_FMLSL:
+        if (high_half) EMU_SIMD_FHM_WIDTH_EXEC(0x2EA2CC20, 0x6EA2CC20, right);
+        EMU_SIMD_FHM_WIDTH_EXEC(0x0EA2EC20, 0x4EA2EC20, right);
+    default:
+        return false;
+    }
+}
+
+static __always_inline bool emu_simd_fhm_by_element_hw(enum arm64_simd_operation operation, void *dst, const void *left, const void *right, uint32_t element_width, uint32_t result_element_width, uint32_t operand_width, uint32_t lane_index, uint32_t flags)
+{
+    __uint128_t element;
+    uint64_t lane_value;
+    bool high_half = flags & ARM64_SIMD_FLAG_SOURCE_HIGH_HALF;
+
+    if (element_width != 16 || result_element_width != 32 || !emu_simd_current_cpu_has_feature(EMU_SIMD_CPU_FEATURE_FHM)) return false;
+    if (!emu_simd_extract_lane_hw(right, 16, lane_index, &lane_value) || !emu_simd_write_scalar_hw(&element, lane_value, 16)) return false;
+
+    switch (operation)
+    {
+    case ARM64_SIMD_OP_FMLAL:
+        if (high_half) EMU_SIMD_FHM_WIDTH_EXEC(0x2F828020, 0x6F828020, &element);
+        EMU_SIMD_FHM_WIDTH_EXEC(0x0F820020, 0x4F820020, &element);
+    case ARM64_SIMD_OP_FMLSL:
+        if (high_half) EMU_SIMD_FHM_WIDTH_EXEC(0x2F82C020, 0x6F82C020, &element);
+        EMU_SIMD_FHM_WIDTH_EXEC(0x0F824020, 0x4F824020, &element);
+    default:
+        return false;
+    }
+}
+
+#undef EMU_SIMD_FHM_WIDTH_EXEC
+
+#define EMU_SIMD_FCMLA_ROTATION_EXEC(INST0, INST90, INST180, INST270, RIGHT) \
+    do                                                                       \
+    {                                                                        \
+        switch (rotation)                                                    \
+        {                                                                    \
+        case ARM64_SIMD_ROTATION_0:                                          \
+            EMU_VEC_ACC(".inst " __stringify(INST0), dst, left, RIGHT);      \
+            break;                                                           \
+        case ARM64_SIMD_ROTATION_90:                                         \
+            EMU_VEC_ACC(".inst " __stringify(INST90), dst, left, RIGHT);     \
+            break;                                                           \
+        case ARM64_SIMD_ROTATION_180:                                        \
+            EMU_VEC_ACC(".inst " __stringify(INST180), dst, left, RIGHT);    \
+            break;                                                           \
+        case ARM64_SIMD_ROTATION_270:                                        \
+            EMU_VEC_ACC(".inst " __stringify(INST270), dst, left, RIGHT);    \
+            break;                                                           \
+        default:                                                             \
+            return false;                                                    \
+        }                                                                    \
+        return true;                                                         \
+    } while (0)
+
+#define EMU_SIMD_FCADD_ROTATION_EXEC(INST90, INST270)                                                              \
+    do                                                                                                             \
+    {                                                                                                              \
+        if (rotation == ARM64_SIMD_ROTATION_90) EMU_FP_BIN(".inst " __stringify(INST90), dst, left, right);        \
+        else if (rotation == ARM64_SIMD_ROTATION_270) EMU_FP_BIN(".inst " __stringify(INST270), dst, left, right); \
+        else return false;                                                                                         \
+        return true;                                                                                               \
+    } while (0)
+
+static __always_inline bool emu_simd_fcma_vector_hw(enum arm64_simd_operation operation, void *dst, const void *left, const void *right, uint32_t element_width, uint32_t operand_width, uint32_t rotation)
+{
+    if (!emu_simd_current_cpu_has_feature(EMU_SIMD_CPU_FEATURE_FCMA)) return false;
+    if (element_width == 16 && !emu_simd_current_cpu_has_fp16()) return false;
+
+    if (operation == ARM64_SIMD_OP_FCMLA)
+    {
+        if (operand_width == 64 && element_width == 16) EMU_SIMD_FCMLA_ROTATION_EXEC(0x2E42C420, 0x2E42CC20, 0x2E42D420, 0x2E42DC20, right);
+        if (operand_width == 128 && element_width == 16) EMU_SIMD_FCMLA_ROTATION_EXEC(0x6E42C420, 0x6E42CC20, 0x6E42D420, 0x6E42DC20, right);
+        if (operand_width == 64 && element_width == 32) EMU_SIMD_FCMLA_ROTATION_EXEC(0x2E82C420, 0x2E82CC20, 0x2E82D420, 0x2E82DC20, right);
+        if (operand_width == 128 && element_width == 32) EMU_SIMD_FCMLA_ROTATION_EXEC(0x6E82C420, 0x6E82CC20, 0x6E82D420, 0x6E82DC20, right);
+        if (operand_width == 128 && element_width == 64) EMU_SIMD_FCMLA_ROTATION_EXEC(0x6EC2C420, 0x6EC2CC20, 0x6EC2D420, 0x6EC2DC20, right);
+        return false;
+    }
+
+    if (operation != ARM64_SIMD_OP_FCADD) return false;
+    if (operand_width == 64 && element_width == 16) EMU_SIMD_FCADD_ROTATION_EXEC(0x2E42E420, 0x2E42F420);
+    if (operand_width == 128 && element_width == 16) EMU_SIMD_FCADD_ROTATION_EXEC(0x6E42E420, 0x6E42F420);
+    if (operand_width == 64 && element_width == 32) EMU_SIMD_FCADD_ROTATION_EXEC(0x2E82E420, 0x2E82F420);
+    if (operand_width == 128 && element_width == 32) EMU_SIMD_FCADD_ROTATION_EXEC(0x6E82E420, 0x6E82F420);
+    if (operand_width == 128 && element_width == 64) EMU_SIMD_FCADD_ROTATION_EXEC(0x6EC2E420, 0x6EC2F420);
+    return false;
+}
+
+#undef EMU_SIMD_FCADD_ROTATION_EXEC
+
+static __always_inline bool emu_simd_fcma_by_element_hw(void *dst, const void *left, const void *right, uint32_t element_width, uint32_t operand_width, uint32_t lane_index, uint32_t rotation)
+{
+    __uint128_t element;
+    uint64_t lane_value;
+    uint32_t complex_width = element_width * 2;
+
+    if (!emu_simd_current_cpu_has_feature(EMU_SIMD_CPU_FEATURE_FCMA)) return false;
+    if (element_width == 16 && !emu_simd_current_cpu_has_fp16()) return false;
+    if ((element_width != 16 && element_width != 32) || !emu_simd_extract_lane_hw(right, complex_width, lane_index, &lane_value) || !emu_simd_write_scalar_hw(&element, lane_value, complex_width)) return false;
+
+    if (operand_width == 64 && element_width == 16) EMU_SIMD_FCMLA_ROTATION_EXEC(0x2F421020, 0x2F423020, 0x2F425020, 0x2F427020, &element);
+    if (operand_width == 128 && element_width == 16) EMU_SIMD_FCMLA_ROTATION_EXEC(0x6F421020, 0x6F423020, 0x6F425020, 0x6F427020, &element);
+    if (operand_width == 128 && element_width == 32) EMU_SIMD_FCMLA_ROTATION_EXEC(0x6F821020, 0x6F823020, 0x6F825020, 0x6F827020, &element);
+    return false;
+}
+
+#undef EMU_SIMD_FCMLA_ROTATION_EXEC
 
 static __always_inline bool emu_simd_permute_hw(enum arm64_simd_operation operation, void *dst, const void *left, const void *right, uint32_t element_width, uint32_t vector_width)
 {
@@ -1631,21 +2459,21 @@ static __always_inline bool emu_simd_logical_hw(enum arm64_simd_operation operat
 {
     switch (operation)
     {
-    case ARM64_SIMD_OP_AND_VECTOR:
+    case ARM64_SIMD_OP_AND:
         EMU_SIMD_LOGICAL_BIN_EXEC("and");
-    case ARM64_SIMD_OP_BIC_VECTOR:
+    case ARM64_SIMD_OP_BIC:
         EMU_SIMD_LOGICAL_BIN_EXEC("bic");
-    case ARM64_SIMD_OP_ORR_VECTOR:
+    case ARM64_SIMD_OP_ORR:
         EMU_SIMD_LOGICAL_BIN_EXEC("orr");
-    case ARM64_SIMD_OP_ORN_VECTOR:
+    case ARM64_SIMD_OP_ORN:
         EMU_SIMD_LOGICAL_BIN_EXEC("orn");
-    case ARM64_SIMD_OP_EOR_VECTOR:
+    case ARM64_SIMD_OP_EOR:
         EMU_SIMD_LOGICAL_BIN_EXEC("eor");
-    case ARM64_SIMD_OP_BSL_VECTOR:
+    case ARM64_SIMD_OP_BSL:
         EMU_SIMD_LOGICAL_MASK_EXEC("bsl");
-    case ARM64_SIMD_OP_BIT_VECTOR:
+    case ARM64_SIMD_OP_BIT:
         EMU_SIMD_LOGICAL_MASK_EXEC("bit");
-    case ARM64_SIMD_OP_BIF_VECTOR:
+    case ARM64_SIMD_OP_BIF:
         EMU_SIMD_LOGICAL_MASK_EXEC("bif");
     default:
         return false;
@@ -1657,44 +2485,225 @@ static __always_inline bool emu_simd_logical_hw(enum arm64_simd_operation operat
 
 #undef EMU_SIMD_VECTOR_3REG_EXEC
 
-static __always_inline bool emu_simd_fp_accumulate_hw(enum arm64_simd_operation operation, void *dst, const void *left, const void *right, uint32_t element_width, uint32_t vector_width)
+#define EMU_SIMD_FP_VECTOR_BIN_SHAPE(INST, V4H_INST, V8H_INST)                                                             \
+    do                                                                                                                     \
+    {                                                                                                                      \
+        if (vector_width == 64 && element_width == 16) EMU_FP_BIN(".inst " __stringify(V4H_INST), dst, left, right);       \
+        else if (vector_width == 128 && element_width == 16) EMU_FP_BIN(".inst " __stringify(V8H_INST), dst, left, right); \
+        else if (vector_width == 64 && element_width == 32) EMU_FP_BIN(INST " v0.2s, v1.2s, v2.2s", dst, left, right);     \
+        else if (vector_width == 128 && element_width == 32) EMU_FP_BIN(INST " v0.4s, v1.4s, v2.4s", dst, left, right);    \
+        else if (vector_width == 128 && element_width == 64) EMU_FP_BIN(INST " v0.2d, v1.2d, v2.2d", dst, left, right);    \
+        else return false;                                                                                                 \
+        return true;                                                                                                       \
+    } while (0)
+
+#define EMU_SIMD_FP_VECTOR_ACC_SHAPE(INST, V4H_INST, V8H_INST)                                                              \
+    do                                                                                                                      \
+    {                                                                                                                       \
+        if (vector_width == 64 && element_width == 16) EMU_VEC_ACC(".inst " __stringify(V4H_INST), dst, left, right);       \
+        else if (vector_width == 128 && element_width == 16) EMU_VEC_ACC(".inst " __stringify(V8H_INST), dst, left, right); \
+        else if (vector_width == 64 && element_width == 32) EMU_VEC_ACC(INST " v0.2s, v1.2s, v2.2s", dst, left, right);     \
+        else if (vector_width == 128 && element_width == 32) EMU_VEC_ACC(INST " v0.4s, v1.4s, v2.4s", dst, left, right);    \
+        else if (vector_width == 128 && element_width == 64) EMU_VEC_ACC(INST " v0.2d, v1.2d, v2.2d", dst, left, right);    \
+        else return false;                                                                                                  \
+        return true;                                                                                                        \
+    } while (0)
+
+#define EMU_SIMD_FP_VECTOR_INST_SHAPE(V4H_INST, V8H_INST, V2S_INST, V4S_INST, V2D_INST)                                    \
+    do                                                                                                                     \
+    {                                                                                                                      \
+        if (vector_width == 64 && element_width == 16) EMU_FP_BIN(".inst " __stringify(V4H_INST), dst, left, right);       \
+        else if (vector_width == 128 && element_width == 16) EMU_FP_BIN(".inst " __stringify(V8H_INST), dst, left, right); \
+        else if (vector_width == 64 && element_width == 32) EMU_FP_BIN(".inst " __stringify(V2S_INST), dst, left, right);  \
+        else if (vector_width == 128 && element_width == 32) EMU_FP_BIN(".inst " __stringify(V4S_INST), dst, left, right); \
+        else if (vector_width == 128 && element_width == 64) EMU_FP_BIN(".inst " __stringify(V2D_INST), dst, left, right); \
+        else return false;                                                                                                 \
+        return true;                                                                                                       \
+    } while (0)
+
+static __always_inline bool emu_simd_fp_vector_3reg_feature_available(enum arm64_simd_operation operation, uint32_t element_width)
 {
-    bool subtract = operation == ARM64_SIMD_OP_FMLS_VECTOR;
+    switch (operation)
+    {
+    case ARM64_SIMD_OP_FAMAX:
+    case ARM64_SIMD_OP_FAMIN:
+        return emu_simd_current_cpu_has_faminmax();
+    case ARM64_SIMD_OP_FSCALE:
+        return emu_simd_current_cpu_has_f8cvt();
+    default:
+        return element_width != 16 || emu_simd_current_cpu_has_fp16();
+    }
+}
 
-    if (operation != ARM64_SIMD_OP_FMLA_VECTOR && !subtract) return false;
+static __always_inline bool emu_simd_fp_vector_3reg_hw(enum arm64_simd_operation operation, void *dst, const void *left, const void *right, uint32_t element_width, uint32_t vector_width)
+{
+    if (!emu_simd_fp_vector_3reg_feature_available(operation, element_width)) return false;
 
-    if (element_width == 16 && vector_width == 64)
+    switch (operation)
     {
-        if (subtract) EMU_VEC_ACC(".inst 0x0ec20c20", dst, left, right);
-        else EMU_VEC_ACC(".inst 0x0e420c20", dst, left, right);
-        return true;
+    case ARM64_SIMD_OP_FADD:
+        EMU_SIMD_FP_VECTOR_BIN_SHAPE("fadd", 0x0E421420, 0x4E421420);
+    case ARM64_SIMD_OP_FSUB:
+        EMU_SIMD_FP_VECTOR_BIN_SHAPE("fsub", 0x0EC21420, 0x4EC21420);
+    case ARM64_SIMD_OP_FMUL:
+        EMU_SIMD_FP_VECTOR_BIN_SHAPE("fmul", 0x2E421C20, 0x6E421C20);
+    case ARM64_SIMD_OP_FMULX:
+        EMU_SIMD_FP_VECTOR_BIN_SHAPE("fmulx", 0x0E421C20, 0x4E421C20);
+    case ARM64_SIMD_OP_FDIV:
+        EMU_SIMD_FP_VECTOR_BIN_SHAPE("fdiv", 0x2E423C20, 0x6E423C20);
+    case ARM64_SIMD_OP_FMLA:
+        EMU_SIMD_FP_VECTOR_ACC_SHAPE("fmla", 0x0E420C20, 0x4E420C20);
+    case ARM64_SIMD_OP_FMLS:
+        EMU_SIMD_FP_VECTOR_ACC_SHAPE("fmls", 0x0EC20C20, 0x4EC20C20);
+    case ARM64_SIMD_OP_FMAX:
+        EMU_SIMD_FP_VECTOR_BIN_SHAPE("fmax", 0x0E423420, 0x4E423420);
+    case ARM64_SIMD_OP_FMIN:
+        EMU_SIMD_FP_VECTOR_BIN_SHAPE("fmin", 0x0EC23420, 0x4EC23420);
+    case ARM64_SIMD_OP_FMAXNM:
+        EMU_SIMD_FP_VECTOR_BIN_SHAPE("fmaxnm", 0x0E420420, 0x4E420420);
+    case ARM64_SIMD_OP_FMINNM:
+        EMU_SIMD_FP_VECTOR_BIN_SHAPE("fminnm", 0x0EC20420, 0x4EC20420);
+    case ARM64_SIMD_OP_FADDP:
+        EMU_SIMD_FP_VECTOR_BIN_SHAPE("faddp", 0x2E421420, 0x6E421420);
+    case ARM64_SIMD_OP_FMAXP:
+        EMU_SIMD_FP_VECTOR_BIN_SHAPE("fmaxp", 0x2E423420, 0x6E423420);
+    case ARM64_SIMD_OP_FMINP:
+        EMU_SIMD_FP_VECTOR_BIN_SHAPE("fminp", 0x2EC23420, 0x6EC23420);
+    case ARM64_SIMD_OP_FMAXNMP:
+        EMU_SIMD_FP_VECTOR_BIN_SHAPE("fmaxnmp", 0x2E420420, 0x6E420420);
+    case ARM64_SIMD_OP_FMINNMP:
+        EMU_SIMD_FP_VECTOR_BIN_SHAPE("fminnmp", 0x2EC20420, 0x6EC20420);
+    case ARM64_SIMD_OP_FABD:
+        EMU_SIMD_FP_VECTOR_BIN_SHAPE("fabd", 0x2EC21420, 0x6EC21420);
+    case ARM64_SIMD_OP_FRECPS:
+        EMU_SIMD_FP_VECTOR_BIN_SHAPE("frecps", 0x0E423C20, 0x4E423C20);
+    case ARM64_SIMD_OP_FRSQRTS:
+        EMU_SIMD_FP_VECTOR_BIN_SHAPE("frsqrts", 0x0EC23C20, 0x4EC23C20);
+    case ARM64_SIMD_OP_FCMEQ:
+        EMU_SIMD_FP_VECTOR_BIN_SHAPE("fcmeq", 0x0E422420, 0x4E422420);
+    case ARM64_SIMD_OP_FCMGE:
+        EMU_SIMD_FP_VECTOR_BIN_SHAPE("fcmge", 0x2E422420, 0x6E422420);
+    case ARM64_SIMD_OP_FCMGT:
+        EMU_SIMD_FP_VECTOR_BIN_SHAPE("fcmgt", 0x2EC22420, 0x6EC22420);
+    case ARM64_SIMD_OP_FACGE:
+        EMU_SIMD_FP_VECTOR_BIN_SHAPE("facge", 0x2E422C20, 0x6E422C20);
+    case ARM64_SIMD_OP_FACGT:
+        EMU_SIMD_FP_VECTOR_BIN_SHAPE("facgt", 0x2EC22C20, 0x6EC22C20);
+    case ARM64_SIMD_OP_FAMAX:
+        EMU_SIMD_FP_VECTOR_INST_SHAPE(0x0EC21C20, 0x4EC21C20, 0x0EA2DC20, 0x4EA2DC20, 0x4EE2DC20);
+    case ARM64_SIMD_OP_FAMIN:
+        EMU_SIMD_FP_VECTOR_INST_SHAPE(0x2EC21C20, 0x6EC21C20, 0x2EA2DC20, 0x6EA2DC20, 0x6EE2DC20);
+    case ARM64_SIMD_OP_FSCALE:
+        EMU_SIMD_FP_VECTOR_INST_SHAPE(0x2EC23C20, 0x6EC23C20, 0x2EA2FC20, 0x6EA2FC20, 0x6EE2FC20);
+    default:
+        return false;
     }
-    if (element_width == 16 && vector_width == 128)
-    {
-        if (subtract) EMU_VEC_ACC(".inst 0x4ec20c20", dst, left, right);
-        else EMU_VEC_ACC(".inst 0x4e420c20", dst, left, right);
-        return true;
-    }
-    if (element_width == 32 && vector_width == 64)
-    {
-        if (subtract) EMU_VEC_ACC("fmls v0.2s, v1.2s, v2.2s", dst, left, right);
-        else EMU_VEC_ACC("fmla v0.2s, v1.2s, v2.2s", dst, left, right);
-        return true;
-    }
-    if (element_width == 32 && vector_width == 128)
-    {
-        if (subtract) EMU_VEC_ACC("fmls v0.4s, v1.4s, v2.4s", dst, left, right);
-        else EMU_VEC_ACC("fmla v0.4s, v1.4s, v2.4s", dst, left, right);
-        return true;
-    }
-    if (element_width == 64 && vector_width == 128)
-    {
-        if (subtract) EMU_VEC_ACC("fmls v0.2d, v1.2d, v2.2d", dst, left, right);
-        else EMU_VEC_ACC("fmla v0.2d, v1.2d, v2.2d", dst, left, right);
-        return true;
-    }
+}
 
-    return false;
+#undef EMU_SIMD_FP_VECTOR_INST_SHAPE
+#undef EMU_SIMD_FP_VECTOR_ACC_SHAPE
+#undef EMU_SIMD_FP_VECTOR_BIN_SHAPE
+
+#define EMU_SIMD_FP_VECTOR_UN_SHAPE(INST, V4H_INST, V8H_INST)                                                        \
+    do                                                                                                               \
+    {                                                                                                                \
+        if (vector_width == 64 && element_width == 16) EMU_FP_UN(".inst " __stringify(V4H_INST), dst, source);       \
+        else if (vector_width == 128 && element_width == 16) EMU_FP_UN(".inst " __stringify(V8H_INST), dst, source); \
+        else if (vector_width == 64 && element_width == 32) EMU_FP_UN(INST " v0.2s, v1.2s", dst, source);            \
+        else if (vector_width == 128 && element_width == 32) EMU_FP_UN(INST " v0.4s, v1.4s", dst, source);           \
+        else if (vector_width == 128 && element_width == 64) EMU_FP_UN(INST " v0.2d, v1.2d", dst, source);           \
+        else return false;                                                                                           \
+        return true;                                                                                                 \
+    } while (0)
+
+static __always_inline bool emu_simd_fp_vector_2reg_hw(enum arm64_simd_operation operation, void *dst, const void *source, uint32_t element_width, uint32_t vector_width)
+{
+    if (element_width == 16 && !emu_simd_current_cpu_has_fp16()) return false;
+
+    switch (operation)
+    {
+    case ARM64_SIMD_OP_FABS:
+        EMU_SIMD_FP_VECTOR_UN_SHAPE("fabs", 0x0EF8F820, 0x4EF8F820);
+    case ARM64_SIMD_OP_FNEG:
+        EMU_SIMD_FP_VECTOR_UN_SHAPE("fneg", 0x2EF8F820, 0x6EF8F820);
+    case ARM64_SIMD_OP_FSQRT:
+        EMU_SIMD_FP_VECTOR_UN_SHAPE("fsqrt", 0x2EF9F820, 0x6EF9F820);
+    default:
+        return false;
+    }
+}
+
+#undef EMU_SIMD_FP_VECTOR_UN_SHAPE
+
+static __always_inline bool emu_simd_rev_hw(enum arm64_simd_operation operation, void *dst, const void *source, uint32_t element_width, uint32_t vector_width)
+{
+    switch (operation)
+    {
+    case ARM64_SIMD_OP_REV64:
+        if (element_width == 8 && vector_width == 64) EMU_FP_UN("rev64 v0.8b, v1.8b", dst, source);
+        else if (element_width == 8 && vector_width == 128) EMU_FP_UN("rev64 v0.16b, v1.16b", dst, source);
+        else if (element_width == 16 && vector_width == 64) EMU_FP_UN("rev64 v0.4h, v1.4h", dst, source);
+        else if (element_width == 16 && vector_width == 128) EMU_FP_UN("rev64 v0.8h, v1.8h", dst, source);
+        else if (element_width == 32 && vector_width == 64) EMU_FP_UN("rev64 v0.2s, v1.2s", dst, source);
+        else if (element_width == 32 && vector_width == 128) EMU_FP_UN("rev64 v0.4s, v1.4s", dst, source);
+        else return false;
+        return true;
+    case ARM64_SIMD_OP_REV32:
+        if (element_width == 8 && vector_width == 64) EMU_FP_UN("rev32 v0.8b, v1.8b", dst, source);
+        else if (element_width == 8 && vector_width == 128) EMU_FP_UN("rev32 v0.16b, v1.16b", dst, source);
+        else if (element_width == 16 && vector_width == 64) EMU_FP_UN("rev32 v0.4h, v1.4h", dst, source);
+        else if (element_width == 16 && vector_width == 128) EMU_FP_UN("rev32 v0.8h, v1.8h", dst, source);
+        else return false;
+        return true;
+    case ARM64_SIMD_OP_REV16:
+        if (element_width == 8 && vector_width == 64) EMU_FP_UN("rev16 v0.8b, v1.8b", dst, source);
+        else if (element_width == 8 && vector_width == 128) EMU_FP_UN("rev16 v0.16b, v1.16b", dst, source);
+        else return false;
+        return true;
+    default:
+        return false;
+    }
+}
+
+static __always_inline bool emu_simd_fp_reduce_hw(enum arm64_simd_operation operation, void *dst, const void *source, uint32_t element_width, uint32_t vector_width)
+{
+    if (element_width == 16 && !emu_simd_current_cpu_has_fp16()) return false;
+
+    switch (operation)
+    {
+    case ARM64_SIMD_OP_FADDP:
+        if (element_width == 16 && vector_width == 32) EMU_FP_UN(".inst 0x5E30D820", dst, source);
+        else if (element_width == 32 && vector_width == 64) EMU_FP_UN("faddp s0, v1.2s", dst, source);
+        else if (element_width == 64 && vector_width == 128) EMU_FP_UN("faddp d0, v1.2d", dst, source);
+        else return false;
+        return true;
+    case ARM64_SIMD_OP_FMAXNMV:
+        if (element_width == 16 && vector_width == 64) EMU_FP_UN(".inst 0x0E30C820", dst, source);
+        else if (element_width == 16 && vector_width == 128) EMU_FP_UN(".inst 0x4E30C820", dst, source);
+        else if (element_width == 32 && vector_width == 128) EMU_FP_UN("fmaxnmv s0, v1.4s", dst, source);
+        else return false;
+        return true;
+    case ARM64_SIMD_OP_FMINNMV:
+        if (element_width == 16 && vector_width == 64) EMU_FP_UN(".inst 0x0EB0C820", dst, source);
+        else if (element_width == 16 && vector_width == 128) EMU_FP_UN(".inst 0x4EB0C820", dst, source);
+        else if (element_width == 32 && vector_width == 128) EMU_FP_UN("fminnmv s0, v1.4s", dst, source);
+        else return false;
+        return true;
+    case ARM64_SIMD_OP_FMAXV:
+        if (element_width == 16 && vector_width == 64) EMU_FP_UN(".inst 0x0E30F820", dst, source);
+        else if (element_width == 16 && vector_width == 128) EMU_FP_UN(".inst 0x4E30F820", dst, source);
+        else if (element_width == 32 && vector_width == 128) EMU_FP_UN("fmaxv s0, v1.4s", dst, source);
+        else return false;
+        return true;
+    case ARM64_SIMD_OP_FMINV:
+        if (element_width == 16 && vector_width == 64) EMU_FP_UN(".inst 0x0EB0F820", dst, source);
+        else if (element_width == 16 && vector_width == 128) EMU_FP_UN(".inst 0x4EB0F820", dst, source);
+        else if (element_width == 32 && vector_width == 128) EMU_FP_UN("fminv s0, v1.4s", dst, source);
+        else return false;
+        return true;
+    default:
+        return false;
+    }
 }
 
 #define EMU_SIMD_SHIFT_EXEC(INST, ARR, AMOUNT)                                                   \
@@ -1838,17 +2847,19 @@ static __always_inline bool emu_simd_ext_hw(void *dst, const void *left, const v
 
 static __always_inline bool emu_simd_fp_compare_zero_hw(enum arm64_simd_operation operation, void *dst, const void *source, uint32_t operand_width, uint32_t element_width)
 {
+    if (element_width == 16 && !emu_simd_current_cpu_has_fp16()) return false;
+
     switch (operation)
     {
-    case ARM64_SIMD_OP_FCMEQ_ZERO:
+    case ARM64_SIMD_OP_FCMEQ:
         EMU_SIMD_FP_COMPARE_ZERO_SHAPE("fcmeq", 0x5EF8D820, 0x0EF8D820, 0x4EF8D820);
-    case ARM64_SIMD_OP_FCMGE_ZERO:
+    case ARM64_SIMD_OP_FCMGE:
         EMU_SIMD_FP_COMPARE_ZERO_SHAPE("fcmge", 0x7EF8C820, 0x2EF8C820, 0x6EF8C820);
-    case ARM64_SIMD_OP_FCMGT_ZERO:
+    case ARM64_SIMD_OP_FCMGT:
         EMU_SIMD_FP_COMPARE_ZERO_SHAPE("fcmgt", 0x5EF8C820, 0x0EF8C820, 0x4EF8C820);
-    case ARM64_SIMD_OP_FCMLE_ZERO:
+    case ARM64_SIMD_OP_FCMLE:
         EMU_SIMD_FP_COMPARE_ZERO_SHAPE("fcmle", 0x7EF8D820, 0x2EF8D820, 0x6EF8D820);
-    case ARM64_SIMD_OP_FCMLT_ZERO:
+    case ARM64_SIMD_OP_FCMLT:
         EMU_SIMD_FP_COMPARE_ZERO_SHAPE("fcmlt", 0x5EF8E820, 0x0EF8E820, 0x4EF8E820);
     default:
         return false;
@@ -1872,7 +2883,7 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
     write_fpsr(fpsr);
     write_fpcr(fpcr);
 
-    if (operands->group == ARM64_SIMD_GROUP_VECTOR_MODIFIED_IMMEDIATE)
+    if (operands->form == ARM64_SIMD_FORM_VECTOR_IMMEDIATE)
     {
         __uint128_t immediate;
 
@@ -1880,18 +2891,18 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
         switch (operands->operation)
         {
         case ARM64_SIMD_OP_MOVI:
-        case ARM64_SIMD_OP_FMOV_IMMEDIATE:
+        case ARM64_SIMD_OP_FMOV:
             if (!emu_simd_materialize_bits_hw(&fp_regs[decoded->rd], operands->expanded_immediate, decoded->operand_width)) return EMU_INSN_SKIP;
             break;
         case ARM64_SIMD_OP_MVNI:
             if (decoded->operand_width == 64) EMU_FP_UN("mvn v0.8b, v1.8b", &fp_regs[decoded->rd], &immediate);
             else EMU_FP_UN("mvn v0.16b, v1.16b", &fp_regs[decoded->rd], &immediate);
             break;
-        case ARM64_SIMD_OP_ORR_IMMEDIATE:
+        case ARM64_SIMD_OP_ORR:
             if (decoded->operand_width == 64) EMU_FP_BIN("orr v0.8b, v1.8b, v2.8b", &fp_regs[decoded->rd], &fp_regs[decoded->rd], &immediate);
             else EMU_FP_BIN("orr v0.16b, v1.16b, v2.16b", &fp_regs[decoded->rd], &fp_regs[decoded->rd], &immediate);
             break;
-        case ARM64_SIMD_OP_BIC_IMMEDIATE:
+        case ARM64_SIMD_OP_BIC:
             if (decoded->operand_width == 64) EMU_FP_BIN("bic v0.8b, v1.8b, v2.8b", &fp_regs[decoded->rd], &fp_regs[decoded->rd], &immediate);
             else EMU_FP_BIN("bic v0.16b, v1.16b, v2.16b", &fp_regs[decoded->rd], &fp_regs[decoded->rd], &immediate);
             break;
@@ -1900,7 +2911,7 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
         }
         result = EMU_INSN_HANDLED;
     }
-    else if (operands->group == ARM64_SIMD_GROUP_SCALAR_COPY)
+    else if (operands->form == ARM64_SIMD_FORM_SCALAR_COPY)
     {
         uint64_t lane_value;
 
@@ -1909,7 +2920,7 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
         if (!emu_simd_write_scalar_hw(&fp_regs[decoded->rd], lane_value, decoded->operand_width)) return EMU_INSN_SKIP;
         result = EMU_INSN_HANDLED;
     }
-    else if (operands->group == ARM64_SIMD_GROUP_VECTOR_COPY)
+    else if (operands->form == ARM64_SIMD_FORM_VECTOR_COPY)
     {
         uint32_t element_width = operands->element_width;
         uint64_t lane_value;
@@ -1943,59 +2954,119 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
         }
         result = EMU_INSN_HANDLED;
     }
-    else if (operands->group == ARM64_SIMD_GROUP_VECTOR_SHIFT_IMMEDIATE)
+    else if (operands->form == ARM64_SIMD_FORM_VECTOR_SHIFT)
     {
         if (!emu_simd_shift_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], operands->element_width, decoded->operand_width, operands->immediate)) return EMU_INSN_SKIP;
         result = EMU_INSN_HANDLED;
     }
-    else if (operands->group == ARM64_SIMD_GROUP_FP_COMPARE_ZERO)
+    else if (operands->form == ARM64_SIMD_FORM_FP_COMPARE_ZERO)
     {
         if (!emu_simd_fp_compare_zero_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], decoded->operand_width, operands->element_width)) return EMU_INSN_SKIP;
         result = EMU_INSN_HANDLED;
     }
-    else if (operands->group == ARM64_SIMD_GROUP_FP_BY_ELEMENT)
+    else if (operands->form == ARM64_SIMD_FORM_FP_BY_ELEMENT)
     {
-        uint64_t lane_value;
+        switch (operands->operation)
+        {
+        case ARM64_SIMD_OP_FMLAL:
+        case ARM64_SIMD_OP_FMLSL:
+            if (!emu_simd_fhm_by_element_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], &fp_regs[decoded->rm], operands->element_width, operands->result_element_width, decoded->operand_width, operands->lane_index, operands->flags)) return EMU_INSN_SKIP;
+            break;
+        case ARM64_SIMD_OP_FCMLA:
+            if (!emu_simd_fcma_by_element_hw(&fp_regs[decoded->rd], &fp_regs[decoded->rn], &fp_regs[decoded->rm], operands->element_width, decoded->operand_width, operands->lane_index, operands->immediate)) return EMU_INSN_SKIP;
+            break;
+        default:
+        {
+            uint64_t lane_value;
 
-        if (!emu_simd_extract_lane_hw(&fp_regs[decoded->rm], operands->element_width, operands->lane_index, &lane_value)) return EMU_INSN_SKIP;
-        if (!emu_simd_fp_by_element_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], lane_value, operands->element_width, decoded->operand_width)) return EMU_INSN_SKIP;
+            if (operands->element_width == 16 && !emu_simd_current_cpu_has_fp16()) return EMU_INSN_SKIP;
+            if (!emu_simd_extract_lane_hw(&fp_regs[decoded->rm], operands->element_width, operands->lane_index, &lane_value)) return EMU_INSN_SKIP;
+            if (!emu_simd_fp_by_element_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], lane_value, operands->element_width, decoded->operand_width)) return EMU_INSN_SKIP;
+            break;
+        }
+        }
         result = EMU_INSN_HANDLED;
     }
-    else if (operands->group == ARM64_SIMD_GROUP_VECTOR_PERMUTE)
+    else if (operands->form == ARM64_SIMD_FORM_VECTOR_BY_ELEMENT || operands->form == ARM64_SIMD_FORM_SCALAR_BY_ELEMENT)
+    {
+        if (!emu_simd_extra_by_element_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], &fp_regs[decoded->rm], operands->element_width, operands->result_element_width, decoded->operand_width, operands->lane_index, operands->flags, operands->form == ARM64_SIMD_FORM_SCALAR_BY_ELEMENT)) return EMU_INSN_SKIP;
+        result = EMU_INSN_HANDLED;
+    }
+    else if (operands->form == ARM64_SIMD_FORM_SCALAR_SIMD_3REG)
+    {
+        if (!emu_simd_scalar_3same_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], &fp_regs[decoded->rm], operands->element_width)) return EMU_INSN_SKIP;
+        result = EMU_INSN_HANDLED;
+    }
+    else if (operands->form == ARM64_SIMD_FORM_VECTOR_PERMUTE)
     {
         if (!emu_simd_permute_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], &fp_regs[decoded->rm], operands->element_width, decoded->operand_width)) return EMU_INSN_SKIP;
         result = EMU_INSN_HANDLED;
     }
-    else if (operands->group == ARM64_SIMD_GROUP_VECTOR_LOGICAL)
+    else if (operands->form == ARM64_SIMD_FORM_VECTOR_LOGICAL)
     {
         if (!emu_simd_logical_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], &fp_regs[decoded->rm], decoded->operand_width)) return EMU_INSN_SKIP;
         result = EMU_INSN_HANDLED;
     }
-    else if (operands->group == ARM64_SIMD_GROUP_VECTOR_3REG && (operands->operation == ARM64_SIMD_OP_FMLA_VECTOR || operands->operation == ARM64_SIMD_OP_FMLS_VECTOR))
-    {
-        if (!emu_simd_fp_accumulate_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], &fp_regs[decoded->rm], operands->element_width, decoded->operand_width)) return EMU_INSN_SKIP;
-        result = EMU_INSN_HANDLED;
-    }
-    else if (operands->group == ARM64_SIMD_GROUP_VECTOR_3REG && operands->operation >= ARM64_SIMD_OP_ADD && operands->operation <= ARM64_SIMD_OP_CMHS)
+    else if (operands->form == ARM64_SIMD_FORM_VECTOR_INTEGER_3REG)
     {
         if (!emu_simd_integer_3reg_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], &fp_regs[decoded->rm], operands->element_width, decoded->operand_width)) return EMU_INSN_SKIP;
         result = EMU_INSN_HANDLED;
     }
-    else if (operands->group == ARM64_SIMD_GROUP_EXT)
+    else if (operands->form == ARM64_SIMD_FORM_VECTOR_EXTENDED_3REG)
+    {
+        if (!emu_simd_vector_3same_extra_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], &fp_regs[decoded->rm], operands->element_width, operands->result_element_width, decoded->operand_width, operands->flags)) return EMU_INSN_SKIP;
+        result = EMU_INSN_HANDLED;
+    }
+    else if (operands->form == ARM64_SIMD_FORM_VECTOR_FP_3REG)
+    {
+        if (!emu_simd_fp_vector_3reg_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], &fp_regs[decoded->rm], operands->element_width, decoded->operand_width)) return EMU_INSN_SKIP;
+        result = EMU_INSN_HANDLED;
+    }
+    else if (operands->form == ARM64_SIMD_FORM_VECTOR_FP_WIDENING_3REG)
+    {
+        if (!emu_simd_fhm_vector_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], &fp_regs[decoded->rm], operands->element_width, operands->result_element_width, decoded->operand_width, operands->flags)) return EMU_INSN_SKIP;
+        result = EMU_INSN_HANDLED;
+    }
+    else if (operands->form == ARM64_SIMD_FORM_VECTOR_COMPLEX_3REG)
+    {
+        if (!emu_simd_fcma_vector_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], &fp_regs[decoded->rm], operands->element_width, decoded->operand_width, operands->immediate)) return EMU_INSN_SKIP;
+        result = EMU_INSN_HANDLED;
+    }
+    else if (operands->form == ARM64_SIMD_FORM_VECTOR_FP_UNARY)
+    {
+        if (!emu_simd_fp_vector_2reg_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], operands->element_width, decoded->operand_width)) return EMU_INSN_SKIP;
+        result = EMU_INSN_HANDLED;
+    }
+    else if (operands->form == ARM64_SIMD_FORM_VECTOR_REVERSE)
+    {
+        if (!emu_simd_rev_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], operands->element_width, decoded->operand_width)) return EMU_INSN_SKIP;
+        result = EMU_INSN_HANDLED;
+    }
+    else if (operands->form == ARM64_SIMD_FORM_FP_REDUCE)
+    {
+        if (!emu_simd_fp_reduce_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], operands->element_width, decoded->operand_width)) return EMU_INSN_SKIP;
+        result = EMU_INSN_HANDLED;
+    }
+    else if (operands->form == ARM64_SIMD_FORM_VECTOR_EXTRACT)
     {
         if (operands->immediate >= decoded->operand_width / 8) return EMU_INSN_SKIP;
         if (!emu_simd_ext_hw(&fp_regs[decoded->rd], &fp_regs[decoded->rn], &fp_regs[decoded->rm], decoded->operand_width, operands->immediate)) return EMU_INSN_SKIP;
         result = EMU_INSN_HANDLED;
     }
-    else if (operands->group == ARM64_SIMD_GROUP_SCALAR_IMMEDIATE)
+    else if (operands->form == ARM64_SIMD_FORM_SCALAR_FP_IMMEDIATE)
     {
-        if (operands->operation != ARM64_SIMD_OP_FMOV_IMMEDIATE) return EMU_INSN_SKIP;
+        if (operands->operation != ARM64_SIMD_OP_FMOV) return EMU_INSN_SKIP;
+        if (decoded->operand_width == 16 && !emu_simd_current_cpu_has_fp16()) return EMU_INSN_SKIP;
         if (!emu_simd_write_scalar_hw(&fp_regs[decoded->rd], operands->expanded_immediate, decoded->operand_width)) return EMU_INSN_SKIP;
         result = EMU_INSN_HANDLED;
     }
-    else if (operands->group == ARM64_SIMD_GROUP_SCALAR_2SOURCE)
+    else if (operands->form == ARM64_SIMD_FORM_SCALAR_FP_BINARY)
     {
-        if (decoded->operand_width == 32)
+        if (decoded->operand_width == 16)
+        {
+            if (!emu_simd_current_cpu_has_fp16() || !emu_fp16_scalar_2source_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], &fp_regs[decoded->rm])) return EMU_INSN_SKIP;
+        }
+        else if (decoded->operand_width == 32)
         {
             switch (operands->operation)
             {
@@ -2030,7 +3101,7 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
                 return EMU_INSN_SKIP;
             }
         }
-        else
+        else if (decoded->operand_width == 64)
         {
             switch (operands->operation)
             {
@@ -2065,12 +3136,17 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
                 return EMU_INSN_SKIP;
             }
         }
+        else return EMU_INSN_SKIP;
 
         result = EMU_INSN_HANDLED;
     }
-    else if (operands->group == ARM64_SIMD_GROUP_SCALAR_1SOURCE)
+    else if (operands->form == ARM64_SIMD_FORM_SCALAR_FP_UNARY)
     {
-        if (decoded->operand_width == 32)
+        if (decoded->operand_width == 16)
+        {
+            if (!emu_simd_current_cpu_has_fp16() || !emu_fp16_scalar_1source_hw(operands->operation, operands->rounding_mode, &fp_regs[decoded->rd], &fp_regs[decoded->rn])) return EMU_INSN_SKIP;
+        }
+        else if (decoded->operand_width == 32)
         {
             switch (operands->operation)
             {
@@ -2078,37 +3154,37 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
                 EMU_FP_UN("fmov s0, s1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
                 break;
             case ARM64_SIMD_OP_FABS:
-                EMU_FP_UN("fabs s0, s1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
+                EMU_FP_UN_MERGE("fabs s0, s1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
                 break;
             case ARM64_SIMD_OP_FNEG:
-                EMU_FP_UN("fneg s0, s1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
+                EMU_FP_UN_MERGE("fneg s0, s1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
                 break;
             case ARM64_SIMD_OP_FSQRT:
-                EMU_FP_UN("fsqrt s0, s1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
+                EMU_FP_UN_MERGE("fsqrt s0, s1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
                 break;
             case ARM64_SIMD_OP_FRINT:
                 switch (operands->rounding_mode)
                 {
                 case ARM64_FP_ROUND_NEAREST_EVEN:
-                    EMU_FP_UN("frintn s0, s1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
+                    EMU_FP_UN_MERGE("frintn s0, s1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
                     break;
                 case ARM64_FP_ROUND_PLUS_INFINITY:
-                    EMU_FP_UN("frintp s0, s1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
+                    EMU_FP_UN_MERGE("frintp s0, s1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
                     break;
                 case ARM64_FP_ROUND_MINUS_INFINITY:
-                    EMU_FP_UN("frintm s0, s1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
+                    EMU_FP_UN_MERGE("frintm s0, s1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
                     break;
                 case ARM64_FP_ROUND_ZERO:
-                    EMU_FP_UN("frintz s0, s1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
+                    EMU_FP_UN_MERGE("frintz s0, s1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
                     break;
                 case ARM64_FP_ROUND_NEAREST_AWAY:
-                    EMU_FP_UN("frinta s0, s1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
+                    EMU_FP_UN_MERGE("frinta s0, s1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
                     break;
                 case ARM64_FP_ROUND_CURRENT_EXACT:
-                    EMU_FP_UN("frintx s0, s1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
+                    EMU_FP_UN_MERGE("frintx s0, s1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
                     break;
                 case ARM64_FP_ROUND_CURRENT:
-                    EMU_FP_UN("frinti s0, s1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
+                    EMU_FP_UN_MERGE("frinti s0, s1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
                     break;
                 default:
                     return EMU_INSN_SKIP;
@@ -2118,7 +3194,7 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
                 return EMU_INSN_SKIP;
             }
         }
-        else
+        else if (decoded->operand_width == 64)
         {
             switch (operands->operation)
             {
@@ -2126,37 +3202,37 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
                 EMU_FP_UN("fmov d0, d1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
                 break;
             case ARM64_SIMD_OP_FABS:
-                EMU_FP_UN("fabs d0, d1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
+                EMU_FP_UN_MERGE("fabs d0, d1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
                 break;
             case ARM64_SIMD_OP_FNEG:
-                EMU_FP_UN("fneg d0, d1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
+                EMU_FP_UN_MERGE("fneg d0, d1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
                 break;
             case ARM64_SIMD_OP_FSQRT:
-                EMU_FP_UN("fsqrt d0, d1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
+                EMU_FP_UN_MERGE("fsqrt d0, d1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
                 break;
             case ARM64_SIMD_OP_FRINT:
                 switch (operands->rounding_mode)
                 {
                 case ARM64_FP_ROUND_NEAREST_EVEN:
-                    EMU_FP_UN("frintn d0, d1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
+                    EMU_FP_UN_MERGE("frintn d0, d1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
                     break;
                 case ARM64_FP_ROUND_PLUS_INFINITY:
-                    EMU_FP_UN("frintp d0, d1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
+                    EMU_FP_UN_MERGE("frintp d0, d1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
                     break;
                 case ARM64_FP_ROUND_MINUS_INFINITY:
-                    EMU_FP_UN("frintm d0, d1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
+                    EMU_FP_UN_MERGE("frintm d0, d1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
                     break;
                 case ARM64_FP_ROUND_ZERO:
-                    EMU_FP_UN("frintz d0, d1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
+                    EMU_FP_UN_MERGE("frintz d0, d1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
                     break;
                 case ARM64_FP_ROUND_NEAREST_AWAY:
-                    EMU_FP_UN("frinta d0, d1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
+                    EMU_FP_UN_MERGE("frinta d0, d1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
                     break;
                 case ARM64_FP_ROUND_CURRENT_EXACT:
-                    EMU_FP_UN("frintx d0, d1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
+                    EMU_FP_UN_MERGE("frintx d0, d1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
                     break;
                 case ARM64_FP_ROUND_CURRENT:
-                    EMU_FP_UN("frinti d0, d1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
+                    EMU_FP_UN_MERGE("frinti d0, d1", &fp_regs[decoded->rd], &fp_regs[decoded->rn]);
                     break;
                 default:
                     return EMU_INSN_SKIP;
@@ -2166,12 +3242,17 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
                 return EMU_INSN_SKIP;
             }
         }
+        else return EMU_INSN_SKIP;
 
         result = EMU_INSN_HANDLED;
     }
-    else if (operands->group == ARM64_SIMD_GROUP_SCALAR_3SOURCE)
+    else if (operands->form == ARM64_SIMD_FORM_SCALAR_FP_TERNARY)
     {
-        if (decoded->operand_width == 32)
+        if (decoded->operand_width == 16)
+        {
+            if (!emu_simd_current_cpu_has_fp16() || !emu_fp16_scalar_3source_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], &fp_regs[decoded->rm], &fp_regs[decoded->ra])) return EMU_INSN_SKIP;
+        }
+        else if (decoded->operand_width == 32)
         {
             if (operands->operation == ARM64_SIMD_OP_FMADD) EMU_FP_TERN("fmadd s0, s1, s2, s3", &fp_regs[decoded->rd], &fp_regs[decoded->rn], &fp_regs[decoded->rm], &fp_regs[decoded->ra]);
             else if (operands->operation == ARM64_SIMD_OP_FMSUB) EMU_FP_TERN("fmsub s0, s1, s2, s3", &fp_regs[decoded->rd], &fp_regs[decoded->rn], &fp_regs[decoded->rm], &fp_regs[decoded->ra]);
@@ -2179,7 +3260,7 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
             else if (operands->operation == ARM64_SIMD_OP_FNMSUB) EMU_FP_TERN("fnmsub s0, s1, s2, s3", &fp_regs[decoded->rd], &fp_regs[decoded->rn], &fp_regs[decoded->rm], &fp_regs[decoded->ra]);
             else return EMU_INSN_SKIP;
         }
-        else
+        else if (decoded->operand_width == 64)
         {
             if (operands->operation == ARM64_SIMD_OP_FMADD) EMU_FP_TERN("fmadd d0, d1, d2, d3", &fp_regs[decoded->rd], &fp_regs[decoded->rn], &fp_regs[decoded->rm], &fp_regs[decoded->ra]);
             else if (operands->operation == ARM64_SIMD_OP_FMSUB) EMU_FP_TERN("fmsub d0, d1, d2, d3", &fp_regs[decoded->rd], &fp_regs[decoded->rn], &fp_regs[decoded->rm], &fp_regs[decoded->ra]);
@@ -2187,16 +3268,21 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
             else if (operands->operation == ARM64_SIMD_OP_FNMSUB) EMU_FP_TERN("fnmsub d0, d1, d2, d3", &fp_regs[decoded->rd], &fp_regs[decoded->rn], &fp_regs[decoded->rm], &fp_regs[decoded->ra]);
             else return EMU_INSN_SKIP;
         }
+        else return EMU_INSN_SKIP;
 
         result = EMU_INSN_HANDLED;
     }
-    else if (operands->group == ARM64_SIMD_GROUP_SCALAR_COMPARE)
+    else if (operands->form == ARM64_SIMD_FORM_SCALAR_COMPARE)
     {
         bool zero = (operands->flags & ARM64_SIMD_FLAG_COMPARE_ZERO) != 0;
         bool signal = operands->operation == ARM64_SIMD_OP_FCMPE;
         uint64_t nzcv;
 
-        if (decoded->operand_width == 32)
+        if (decoded->operand_width == 16)
+        {
+            if (!emu_simd_current_cpu_has_fp16() || !emu_fp16_compare_hw(signal, zero, &fp_regs[decoded->rn], &fp_regs[decoded->rm], &nzcv)) return EMU_INSN_SKIP;
+        }
+        else if (decoded->operand_width == 32)
         {
             if (zero)
             {
@@ -2239,7 +3325,7 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
                                  : "memory", "cc", "v1", "v2");
             }
         }
-        else
+        else if (decoded->operand_width == 64)
         {
             if (zero)
             {
@@ -2282,18 +3368,26 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
                                  : "memory", "cc", "v1", "v2");
             }
         }
+        else return EMU_INSN_SKIP;
 
         emu_write_nzcv(regs, nzcv);
         result = EMU_INSN_HANDLED;
     }
-    else if (operands->group == ARM64_SIMD_GROUP_SCALAR_CONDITIONAL_COMPARE)
+    else if (operands->form == ARM64_SIMD_FORM_SCALAR_CONDITIONAL_COMPARE)
     {
         bool signal = operands->operation == ARM64_SIMD_OP_FCCMPE;
         uint64_t nzcv;
 
+        if (decoded->operand_width == 16 && !emu_simd_current_cpu_has_fp16()) return EMU_INSN_SKIP;
         if (!emu_cond_holds_hw(regs->pstate, operands->condition))
         {
             emu_write_nzcv(regs, (uint64_t)operands->immediate << 28);
+            result = EMU_INSN_HANDLED;
+        }
+        else if (decoded->operand_width == 16)
+        {
+            if (!emu_fp16_compare_hw(signal, false, &fp_regs[decoded->rn], &fp_regs[decoded->rm], &nzcv)) return EMU_INSN_SKIP;
+            emu_write_nzcv(regs, nzcv);
             result = EMU_INSN_HANDLED;
         }
         else if (decoded->operand_width == 32)
@@ -2319,7 +3413,7 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
             emu_write_nzcv(regs, nzcv);
             result = EMU_INSN_HANDLED;
         }
-        else
+        else if (decoded->operand_width == 64)
         {
             if (signal)
                 asm volatile(".arch_extension fp\n.arch_extension simd\n"
@@ -2342,14 +3436,16 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
             emu_write_nzcv(regs, nzcv);
             result = EMU_INSN_HANDLED;
         }
+        else return EMU_INSN_SKIP;
     }
-    else if (operands->group == ARM64_SIMD_GROUP_SCALAR_SELECT)
+    else if (operands->form == ARM64_SIMD_FORM_SCALAR_SELECT)
     {
+        if (decoded->operand_width == 16 && !emu_simd_current_cpu_has_fp16()) return EMU_INSN_SKIP;
         if (!emu_fp_select_hw(&fp_regs[decoded->rd], &fp_regs[decoded->rn], &fp_regs[decoded->rm], regs->pstate, operands->condition, decoded->operand_width)) return EMU_INSN_SKIP;
 
         result = EMU_INSN_HANDLED;
     }
-    else if (operands->group == ARM64_SIMD_GROUP_FMOV_GENERAL)
+    else if (operands->form == ARM64_SIMD_FORM_FP_GPR_TRANSFER)
     {
         bool sf = decoded->operand_width == 64;
         bool gp_to_fp = operands->operation == ARM64_SIMD_OP_FMOV_GENERAL_TO_FP;
@@ -2367,7 +3463,7 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
 
         result = EMU_INSN_HANDLED;
     }
-    else if (operands->group == ARM64_SIMD_GROUP_CONVERT)
+    else if (operands->form == ARM64_SIMD_FORM_CONVERT)
     {
         enum arm64_simd_operation operation = operands->operation;
         uint32_t rd = decoded->rd;
@@ -2378,68 +3474,28 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
         switch (operation)
         {
         case ARM64_SIMD_OP_SCVTF_S_W:
-            asm volatile(".arch_extension fp\n"
-                         "scvtf s0, %w1\n"
-                         "str q0, [%0]\n"
-                         :
-                         : "r"(&fp_regs[rd]), "r"((uint32_t)reg_read(regs, rn))
-                         : "memory", "v0");
+            EMU_GPR_TO_FP_MERGE("scvtf s0, %w1", &fp_regs[rd], (uint32_t)reg_read(regs, rn));
             break;
         case ARM64_SIMD_OP_SCVTF_S_X:
-            asm volatile(".arch_extension fp\n"
-                         "scvtf s0, %1\n"
-                         "str q0, [%0]\n"
-                         :
-                         : "r"(&fp_regs[rd]), "r"(reg_read(regs, rn))
-                         : "memory", "v0");
+            EMU_GPR_TO_FP_MERGE("scvtf s0, %1", &fp_regs[rd], reg_read(regs, rn));
             break;
         case ARM64_SIMD_OP_SCVTF_D_W:
-            asm volatile(".arch_extension fp\n"
-                         "scvtf d0, %w1\n"
-                         "str q0, [%0]\n"
-                         :
-                         : "r"(&fp_regs[rd]), "r"((uint32_t)reg_read(regs, rn))
-                         : "memory", "v0");
+            EMU_GPR_TO_FP_MERGE("scvtf d0, %w1", &fp_regs[rd], (uint32_t)reg_read(regs, rn));
             break;
         case ARM64_SIMD_OP_SCVTF_D_X:
-            asm volatile(".arch_extension fp\n"
-                         "scvtf d0, %1\n"
-                         "str q0, [%0]\n"
-                         :
-                         : "r"(&fp_regs[rd]), "r"(reg_read(regs, rn))
-                         : "memory", "v0");
+            EMU_GPR_TO_FP_MERGE("scvtf d0, %1", &fp_regs[rd], reg_read(regs, rn));
             break;
         case ARM64_SIMD_OP_UCVTF_S_W:
-            asm volatile(".arch_extension fp\n"
-                         "ucvtf s0, %w1\n"
-                         "str q0, [%0]\n"
-                         :
-                         : "r"(&fp_regs[rd]), "r"((uint32_t)reg_read(regs, rn))
-                         : "memory", "v0");
+            EMU_GPR_TO_FP_MERGE("ucvtf s0, %w1", &fp_regs[rd], (uint32_t)reg_read(regs, rn));
             break;
         case ARM64_SIMD_OP_UCVTF_S_X:
-            asm volatile(".arch_extension fp\n"
-                         "ucvtf s0, %1\n"
-                         "str q0, [%0]\n"
-                         :
-                         : "r"(&fp_regs[rd]), "r"(reg_read(regs, rn))
-                         : "memory", "v0");
+            EMU_GPR_TO_FP_MERGE("ucvtf s0, %1", &fp_regs[rd], reg_read(regs, rn));
             break;
         case ARM64_SIMD_OP_UCVTF_D_W:
-            asm volatile(".arch_extension fp\n"
-                         "ucvtf d0, %w1\n"
-                         "str q0, [%0]\n"
-                         :
-                         : "r"(&fp_regs[rd]), "r"((uint32_t)reg_read(regs, rn))
-                         : "memory", "v0");
+            EMU_GPR_TO_FP_MERGE("ucvtf d0, %w1", &fp_regs[rd], (uint32_t)reg_read(regs, rn));
             break;
         case ARM64_SIMD_OP_UCVTF_D_X:
-            asm volatile(".arch_extension fp\n"
-                         "ucvtf d0, %1\n"
-                         "str q0, [%0]\n"
-                         :
-                         : "r"(&fp_regs[rd]), "r"(reg_read(regs, rn))
-                         : "memory", "v0");
+            EMU_GPR_TO_FP_MERGE("ucvtf d0, %1", &fp_regs[rd], reg_read(regs, rn));
             break;
         case ARM64_SIMD_OP_FCVT_TO_SIGNED:
         case ARM64_SIMD_OP_FCVT_TO_UNSIGNED:
@@ -2495,10 +3551,10 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
             break;
         }
         case ARM64_SIMD_OP_FCVT_S_D:
-            EMU_FP_UN("fcvt s0, d1", &fp_regs[rd], &fp_regs[rn]);
+            EMU_FP_UN_MERGE("fcvt s0, d1", &fp_regs[rd], &fp_regs[rn]);
             break;
         case ARM64_SIMD_OP_FCVT_D_S:
-            EMU_FP_UN("fcvt d0, s1", &fp_regs[rd], &fp_regs[rn]);
+            EMU_FP_UN_MERGE("fcvt d0, s1", &fp_regs[rd], &fp_regs[rn]);
             break;
         case ARM64_SIMD_OP_FCVT_TO_SIGNED_SIMD:
             switch (operands->rounding_mode)
@@ -2556,187 +3612,6 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
 
         result = EMU_INSN_HANDLED;
     }
-    else if (operands->group == ARM64_SIMD_GROUP_VECTOR_2REG || operands->group == ARM64_SIMD_GROUP_VECTOR_3REG)
-    {
-        enum arm64_simd_operation operation = operands->operation;
-        uint32_t rd = decoded->rd;
-        uint32_t rn = decoded->rn;
-        uint32_t rm = decoded->rm;
-
-        switch (operation)
-        {
-        case ARM64_SIMD_OP_FADD_V2S:
-            EMU_FP_BIN("fadd v0.2s, v1.2s, v2.2s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FADD_V4S:
-            EMU_FP_BIN("fadd v0.4s, v1.4s, v2.4s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FADD_V2D:
-            EMU_FP_BIN("fadd v0.2d, v1.2d, v2.2d", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FSUB_V2S:
-            EMU_FP_BIN("fsub v0.2s, v1.2s, v2.2s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FSUB_V4S:
-            EMU_FP_BIN("fsub v0.4s, v1.4s, v2.4s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FSUB_V2D:
-            EMU_FP_BIN("fsub v0.2d, v1.2d, v2.2d", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FMUL_V2S:
-            EMU_FP_BIN("fmul v0.2s, v1.2s, v2.2s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FMUL_V4S:
-            EMU_FP_BIN("fmul v0.4s, v1.4s, v2.4s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FMUL_V2D:
-            EMU_FP_BIN("fmul v0.2d, v1.2d, v2.2d", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FDIV_V2S:
-            EMU_FP_BIN("fdiv v0.2s, v1.2s, v2.2s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FDIV_V4S:
-            EMU_FP_BIN("fdiv v0.4s, v1.4s, v2.4s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FDIV_V2D:
-            EMU_FP_BIN("fdiv v0.2d, v1.2d, v2.2d", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FMAX_V2S:
-            EMU_FP_BIN("fmax v0.2s, v1.2s, v2.2s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FMAX_V4S:
-            EMU_FP_BIN("fmax v0.4s, v1.4s, v2.4s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FMAX_V2D:
-            EMU_FP_BIN("fmax v0.2d, v1.2d, v2.2d", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FMIN_V2S:
-            EMU_FP_BIN("fmin v0.2s, v1.2s, v2.2s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FMIN_V4S:
-            EMU_FP_BIN("fmin v0.4s, v1.4s, v2.4s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FMIN_V2D:
-            EMU_FP_BIN("fmin v0.2d, v1.2d, v2.2d", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FMAXNM_V2S:
-            EMU_FP_BIN("fmaxnm v0.2s, v1.2s, v2.2s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FMAXNM_V4S:
-            EMU_FP_BIN("fmaxnm v0.4s, v1.4s, v2.4s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FMAXNM_V2D:
-            EMU_FP_BIN("fmaxnm v0.2d, v1.2d, v2.2d", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FMINNM_V2S:
-            EMU_FP_BIN("fminnm v0.2s, v1.2s, v2.2s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FMINNM_V4S:
-            EMU_FP_BIN("fminnm v0.4s, v1.4s, v2.4s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FMINNM_V2D:
-            EMU_FP_BIN("fminnm v0.2d, v1.2d, v2.2d", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FADDP_V2S:
-            EMU_FP_BIN("faddp v0.2s, v1.2s, v2.2s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FADDP_V4S:
-            EMU_FP_BIN("faddp v0.4s, v1.4s, v2.4s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FADDP_V2D:
-            EMU_FP_BIN("faddp v0.2d, v1.2d, v2.2d", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FMAXP_V2S:
-            EMU_FP_BIN("fmaxp v0.2s, v1.2s, v2.2s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FMAXP_V4S:
-            EMU_FP_BIN("fmaxp v0.4s, v1.4s, v2.4s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FMAXP_V2D:
-            EMU_FP_BIN("fmaxp v0.2d, v1.2d, v2.2d", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FMINP_V2S:
-            EMU_FP_BIN("fminp v0.2s, v1.2s, v2.2s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FMINP_V4S:
-            EMU_FP_BIN("fminp v0.4s, v1.4s, v2.4s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FMINP_V2D:
-            EMU_FP_BIN("fminp v0.2d, v1.2d, v2.2d", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FCMEQ_V2S:
-            EMU_FP_BIN("fcmeq v0.2s, v1.2s, v2.2s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FCMEQ_V4S:
-            EMU_FP_BIN("fcmeq v0.4s, v1.4s, v2.4s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FCMGE_V4S:
-            EMU_FP_BIN("fcmge v0.4s, v1.4s, v2.4s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FCMGT_V4S:
-            EMU_FP_BIN("fcmgt v0.4s, v1.4s, v2.4s", &fp_regs[rd], &fp_regs[rn], &fp_regs[rm]);
-            break;
-        case ARM64_SIMD_OP_FABS_V2S:
-            EMU_FP_UN("fabs v0.2s, v1.2s", &fp_regs[rd], &fp_regs[rn]);
-            break;
-        case ARM64_SIMD_OP_FABS_V4S:
-            EMU_FP_UN("fabs v0.4s, v1.4s", &fp_regs[rd], &fp_regs[rn]);
-            break;
-        case ARM64_SIMD_OP_FABS_V2D:
-            EMU_FP_UN("fabs v0.2d, v1.2d", &fp_regs[rd], &fp_regs[rn]);
-            break;
-        case ARM64_SIMD_OP_FNEG_V2S:
-            EMU_FP_UN("fneg v0.2s, v1.2s", &fp_regs[rd], &fp_regs[rn]);
-            break;
-        case ARM64_SIMD_OP_FNEG_V4S:
-            EMU_FP_UN("fneg v0.4s, v1.4s", &fp_regs[rd], &fp_regs[rn]);
-            break;
-        case ARM64_SIMD_OP_FNEG_V2D:
-            EMU_FP_UN("fneg v0.2d, v1.2d", &fp_regs[rd], &fp_regs[rn]);
-            break;
-        case ARM64_SIMD_OP_FSQRT_V2S:
-            EMU_FP_UN("fsqrt v0.2s, v1.2s", &fp_regs[rd], &fp_regs[rn]);
-            break;
-        case ARM64_SIMD_OP_FSQRT_V4S:
-            EMU_FP_UN("fsqrt v0.4s, v1.4s", &fp_regs[rd], &fp_regs[rn]);
-            break;
-        case ARM64_SIMD_OP_FSQRT_V2D:
-            EMU_FP_UN("fsqrt v0.2d, v1.2d", &fp_regs[rd], &fp_regs[rn]);
-            break;
-        case ARM64_SIMD_OP_REV64_V2S:
-            EMU_FP_UN("rev64 v0.2s, v1.2s", &fp_regs[rd], &fp_regs[rn]);
-            break;
-        case ARM64_SIMD_OP_REV64_V16B:
-            EMU_FP_UN("rev64 v0.16b, v1.16b", &fp_regs[rd], &fp_regs[rn]);
-            break;
-        case ARM64_SIMD_OP_REV64_V8H:
-            EMU_FP_UN("rev64 v0.8h, v1.8h", &fp_regs[rd], &fp_regs[rn]);
-            break;
-        case ARM64_SIMD_OP_REV32_V16B:
-            EMU_FP_UN("rev32 v0.16b, v1.16b", &fp_regs[rd], &fp_regs[rn]);
-            break;
-        case ARM64_SIMD_OP_REV16_V16B:
-            EMU_FP_UN("rev16 v0.16b, v1.16b", &fp_regs[rd], &fp_regs[rn]);
-            break;
-        case ARM64_SIMD_OP_FADDP_S_V2S:
-            EMU_FP_UN("faddp s0, v1.2s", &fp_regs[rd], &fp_regs[rn]);
-            break;
-        case ARM64_SIMD_OP_FADDP_D_V2D:
-            EMU_FP_UN("faddp d0, v1.2d", &fp_regs[rd], &fp_regs[rn]);
-            break;
-        case ARM64_SIMD_OP_FMAXV_S_V4S:
-            EMU_FP_UN("fmaxv s0, v1.4s", &fp_regs[rd], &fp_regs[rn]);
-            break;
-        case ARM64_SIMD_OP_FMINV_S_V4S:
-            EMU_FP_UN("fminv s0, v1.4s", &fp_regs[rd], &fp_regs[rn]);
-            break;
-        default:
-            return EMU_INSN_SKIP;
-        }
-
-        result = EMU_INSN_HANDLED;
-    }
-
     if (result != EMU_INSN_HANDLED) return result;
 
     fpsr = read_fpsr();
@@ -2751,6 +3626,8 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
 #undef EMU_FP_TERN
 #undef EMU_FP_CONVERT_GPR
 #undef EMU_FP_CONVERT_SIMD
+#undef EMU_GPR_TO_FP_MERGE
+#undef EMU_FP_UN_MERGE
 #undef EMU_FP_UN
 #undef EMU_FP_BIN
 

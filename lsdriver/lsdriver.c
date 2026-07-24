@@ -29,6 +29,7 @@
 #include "virtual_memory_rw.h"
 #include "virtual_memory_enum.h"
 #include "break_point.h"
+#include "arm64_ghost_region.h"
 
 static struct request_obj *req = NULL;
 
@@ -332,7 +333,7 @@ static const char *exit_fault_code_name(unsigned int signal, int code)
     return "UNKNOWN";
 }
 
-#define EXIT_KERNEL_CHAIN_DEPTH 16
+#define EXIT_KERNEL_CHAIN_DEPTH 8
 
 struct exit_kernel_frame_record
 {
@@ -352,7 +353,7 @@ static inline unsigned long exit_strip_kernel_pac(unsigned long address)
 #endif
 }
 
-static void log_exit_kernel_chain(const char *stage, const struct pt_regs *regs)
+static void log_exit_kernel_chain(const char *tag, const struct pt_regs *regs)
 {
     unsigned long stack_low = (unsigned long)task_stack_page(current);
     unsigned long stack_high = stack_low + THREAD_SIZE;
@@ -360,8 +361,7 @@ static void log_exit_kernel_chain(const char *stage, const struct pt_regs *regs)
     unsigned long address = exit_strip_kernel_pac(regs->regs[30]);
     unsigned int depth = 0;
 
-    ls_log_always_tag("exit", "stage=%s kernel_chain_begin\n", stage);
-    if (address) ls_log_always_tag("exit", "stage=%s kernel_frame=%02u address=%pS\n", stage, depth++, (void *)address);
+    if (address) ls_log_always_tag(tag, "frame=%02u address=%pS\n", depth++, (void *)address);
 
     while (depth < EXIT_KERNEL_CHAIN_DEPTH)
     {
@@ -373,13 +373,11 @@ static void log_exit_kernel_chain(const char *stage, const struct pt_regs *regs)
         frame = (const struct exit_kernel_frame_record *)frame_pointer;
         previous_fp = READ_ONCE(frame->previous_fp);
         address = exit_strip_kernel_pac(READ_ONCE(frame->return_address));
-        if (address) ls_log_always_tag("exit", "stage=%s kernel_frame=%02u address=%pS\n", stage, depth++, (void *)address);
+        if (address) ls_log_always_tag(tag, "frame=%02u address=%pS\n", depth++, (void *)address);
 
         if (previous_fp <= frame_pointer) break;
         frame_pointer = previous_fp;
     }
-
-    ls_log_always_tag("exit", "stage=%s kernel_chain_end\n", stage);
 }
 
 static int arm64_force_sig_fault_hook_work(struct pt_regs *regs)
@@ -396,7 +394,7 @@ static int arm64_force_sig_fault_hook_work(struct pt_regs *regs)
     process_name = exit_watch_process_name(process_comm);
     if (!process_name) return 0;
 
-    ls_log_always_tag("exit", "stage=fault process=%s process_comm=%s thread_comm=%s tgid=%d tid=%d signal=%u(%s) si_code=%d(%s) fault_addr=0x%lx esr=0x%lx source=%s user_pc=0x%llx user_lr=0x%llx user_sp=0x%llx\n", process_name, process_comm, task->comm, task->tgid, task->pid, signal, exit_signal_name(signal), code, exit_fault_code_name(signal, code), (unsigned long)regs->regs[2], task->thread.fault_code, source ? source : "<none>", (unsigned long long)user_regs->pc, (unsigned long long)user_regs->regs[30], (unsigned long long)user_regs->sp);
+    ls_log_always_tag("fault", "process=%s thread=%s tgid=%d tid=%d signal=%s(%u) si_code=%s(%d) addr=0x%lx esr=0x%lx source=%s pc=0x%llx lr=0x%llx sp=0x%llx\n", process_name, task->comm, task->tgid, task->pid, exit_signal_name(signal), signal, exit_fault_code_name(signal, code), code, (unsigned long)regs->regs[2], task->thread.fault_code, source ? source : "<none>", (unsigned long long)user_regs->pc, (unsigned long long)user_regs->regs[30], (unsigned long long)user_regs->sp);
     log_exit_kernel_chain("fault", regs);
     return 0;
 }
@@ -408,12 +406,12 @@ static void log_watched_process_exit(struct task_struct *task, const char *proce
 
     if (signal)
     {
-        ls_log_always_tag("exit", "stage=exit process=%s process_comm=%s thread_comm=%s tgid=%d tid=%d reason=signal signal=%u(%s) core_dump=%u code=0x%lx\n", process_name, task->comm, task->comm, task->tgid, task->pid, signal, exit_signal_name(signal), !!(code & 0x80), code);
+        ls_log_always_tag("exit", "process=%s pid=%d signal=%s(%u) core_dump=%u\n", process_name, task->pid, exit_signal_name(signal), signal, !!(code & 0x80));
         log_exit_kernel_chain("exit", regs);
     }
     else
     {
-        ls_log_always_tag("exit", "stage=exit process=%s process_comm=%s thread_comm=%s tgid=%d tid=%d reason=exit status=%u code=0x%lx\n", process_name, task->comm, task->comm, task->tgid, task->pid, (unsigned int)((code >> 8) & 0xff), code);
+        ls_log_always_tag("exit", "process=%s pid=%d status=%u\n", process_name, task->pid, (unsigned int)((code >> 8) & 0xff));
     }
 }
 
