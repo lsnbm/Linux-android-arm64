@@ -74,9 +74,6 @@ static void test_fp_conversions(void)
     CHECK(decoded.operands.simd.element_width == 32);
     CHECK(decoded.rd == 2);
     CHECK(decoded.rn == 2);
-    CHECK(decoded.effects & ARM64_EFFECT_READ_FP_SIMD);
-    CHECK(decoded.effects & ARM64_EFFECT_WRITE_FP_SIMD);
-    CHECK(!(decoded.effects & ARM64_EFFECT_WRITE_GPR));
 
     for (operation_index = 0; operation_index < sizeof(simd_operations) / sizeof(simd_operations[0]); operation_index++)
     {
@@ -90,10 +87,6 @@ static void test_fp_conversions(void)
             CHECK(decoded.operands.simd.element_width == simd_shapes[shape_index].element_width);
             CHECK(decoded.rd == 2);
             CHECK(decoded.rn == 3);
-            CHECK(decoded.effects & ARM64_EFFECT_READ_FP_SIMD);
-            CHECK(decoded.effects & ARM64_EFFECT_WRITE_FP_SIMD);
-            CHECK(!(decoded.effects & ARM64_EFFECT_READ_GPR));
-            CHECK(!(decoded.effects & ARM64_EFFECT_WRITE_GPR));
         }
     }
 
@@ -109,10 +102,6 @@ static void test_fp_conversions(void)
             CHECK(decoded.operands.simd.element_width == gpr_shapes[shape_index].element_width);
             CHECK(decoded.rd == 2);
             CHECK(decoded.rn == 3);
-            CHECK(decoded.effects & ARM64_EFFECT_READ_FP_SIMD);
-            CHECK(!(decoded.effects & ARM64_EFFECT_WRITE_FP_SIMD));
-            CHECK(!(decoded.effects & ARM64_EFFECT_READ_GPR));
-            CHECK(decoded.effects & ARM64_EFFECT_WRITE_GPR);
         }
     }
 
@@ -162,11 +151,6 @@ static void test_dispatch(void)
     decoded = arm64_decode_insn(0x80000000U);
     CHECK(decoded.status == ARM64_DECODE_UNSUPPORTED);
     CHECK(decoded.insn_class == ARM64_INSN_CLASS_SME);
-
-    CHECK(arm64_decode_insn_has_effect(0x10000000U, ARM64_EFFECT_PC_RELATIVE));
-    CHECK(!arm64_decode_insn_has_effect(0xD503201FU, ARM64_EFFECT_PC_RELATIVE));
-    CHECK(arm64_decode_insn_has_effect(0xD503233FU, ARM64_EFFECT_SYSTEM | ARM64_EFFECT_READ_GPR | ARM64_EFFECT_WRITE_GPR));
-    CHECK(!arm64_decode_insn_has_effect(0x10000000U, 0));
 }
 
 static void test_system(void)
@@ -186,8 +170,6 @@ static void test_system(void)
 
     CHECK(decoded.raw == 0xD5033BBFU);
     CHECK(decoded.status == ARM64_DECODE_OK);
-    CHECK(decoded.effects & ARM64_EFFECT_SYSTEM);
-    CHECK(decoded.effects & ARM64_EFFECT_BARRIER);
     CHECK(decoded.opcode == ARM64_OP_BARRIER);
     CHECK(decoded.operands.system.operation == ARM64_SYSTEM_OP_DMB);
     CHECK(decoded.operands.system.option == 0xB);
@@ -200,10 +182,6 @@ static void test_system(void)
     decoded = decode_ok(0xD503233FU);
     CHECK(decoded.opcode == ARM64_OP_HINT);
     CHECK(decoded.operands.system.operation == ARM64_SYSTEM_OP_PACIASP);
-    CHECK(decoded.effects & ARM64_EFFECT_SYSTEM);
-    CHECK(decoded.effects & ARM64_EFFECT_READ_GPR);
-    CHECK(decoded.effects & ARM64_EFFECT_WRITE_GPR);
-    CHECK(!(decoded.effects & ARM64_EFFECT_PC_RELATIVE));
 
     for (index = 0; index < sizeof(bti_cases) / sizeof(bti_cases[0]); index++)
     {
@@ -211,10 +189,6 @@ static void test_system(void)
         CHECK(decoded.opcode == ARM64_OP_HINT);
         CHECK(decoded.operands.system.operation == ARM64_SYSTEM_OP_BTI);
         CHECK(decoded.operands.system.option == bti_cases[index].type);
-        CHECK(decoded.effects & ARM64_EFFECT_SYSTEM);
-        CHECK(!(decoded.effects & ARM64_EFFECT_READ_GPR));
-        CHECK(!(decoded.effects & ARM64_EFFECT_WRITE_GPR));
-        CHECK(!(decoded.effects & ARM64_EFFECT_PC_RELATIVE));
     }
 }
 
@@ -227,8 +201,6 @@ static void test_load_store(void)
     CHECK(decoded.flags & ARM64_INSN_FLAG_NON_TEMPORAL);
     CHECK(decoded.flags & ARM64_INSN_FLAG_LOAD);
     CHECK(decoded.operands.load_store.offset == 16);
-    CHECK(decoded.effects & ARM64_EFFECT_READ_MEMORY);
-    CHECK(!(decoded.effects & ARM64_EFFECT_WRITE_MEMORY));
     CHECK(arm64_decode_memory_address(&decoded, 0, 0x1000, 0, &address));
     CHECK(address.address == 0x1010);
     CHECK(!address.writeback);
@@ -256,7 +228,6 @@ static void test_load_store(void)
 
     decoded = decode_ok(0xF9802020U);
     CHECK(decoded.opcode == ARM64_OP_PREFETCH);
-    CHECK(decoded.effects == ARM64_EFFECT_PREFETCH);
     CHECK(arm64_decode_memory_address(&decoded, 0, 0x1000, 0, &address));
     CHECK(address.address == 0x1040);
 
@@ -345,12 +316,9 @@ static void test_load_store(void)
     CHECK(decoded.flags & ARM64_INSN_FLAG_LOAD);
     CHECK(!(decoded.flags & ARM64_INSN_FLAG_FP));
     CHECK(decoded.operands.load_store.offset == 4);
-    CHECK(decoded.effects & ARM64_EFFECT_PC_RELATIVE);
 
     decoded = decode_ok(0xD8000020U);
     CHECK(decoded.opcode == ARM64_OP_PREFETCH_LITERAL);
-    CHECK(decoded.effects & ARM64_EFFECT_PREFETCH);
-    CHECK(decoded.effects & ARM64_EFFECT_PC_RELATIVE);
 
     decode_status_is(0xFC4098E6U, ARM64_DECODE_UNALLOCATED);
     decode_status_is(0x6868F17DU, ARM64_DECODE_UNALLOCATED);
@@ -386,8 +354,6 @@ static void test_control_flow(void)
     struct arm64_decoded_insn decoded = decode_ok(0x14000004U);
     arm64_u64 target = 0;
 
-    CHECK(decoded.effects & ARM64_EFFECT_CONTROL_FLOW);
-    CHECK(decoded.effects & ARM64_EFFECT_DIRECT_TARGET);
     CHECK(arm64_decode_direct_target(&decoded, 0x1000, &target));
     CHECK(target == 0x1010);
 
@@ -398,8 +364,6 @@ static void test_control_flow(void)
     decoded = decode_ok(0x10FFFFE0U);
     CHECK(decoded.opcode == ARM64_OP_ADR);
     CHECK(decoded.operands.pc_relative.offset == -4);
-    CHECK(decoded.effects & ARM64_EFFECT_WRITE_GPR);
-    CHECK(decoded.effects & ARM64_EFFECT_PC_RELATIVE);
     CHECK(arm64_decode_direct_target(&decoded, 0x1004, &target));
     CHECK(target == 0x1000);
 
@@ -433,15 +397,7 @@ static void test_control_flow(void)
 static void test_scalar_fp(void)
 {
     static const enum arm64_simd_operation two_source_operations[] = {
-        ARM64_SIMD_OP_FMUL,
-        ARM64_SIMD_OP_FDIV,
-        ARM64_SIMD_OP_FADD,
-        ARM64_SIMD_OP_FSUB,
-        ARM64_SIMD_OP_FMAX,
-        ARM64_SIMD_OP_FMIN,
-        ARM64_SIMD_OP_FMAXNM,
-        ARM64_SIMD_OP_FMINNM,
-        ARM64_SIMD_OP_FNMUL,
+        ARM64_SIMD_OP_FMUL, ARM64_SIMD_OP_FDIV, ARM64_SIMD_OP_FADD, ARM64_SIMD_OP_FSUB, ARM64_SIMD_OP_FMAX, ARM64_SIMD_OP_FMIN, ARM64_SIMD_OP_FMAXNM, ARM64_SIMD_OP_FMINNM, ARM64_SIMD_OP_FNMUL,
     };
     struct arm64_decoded_insn decoded = decode_ok(0x1E2E1000U);
     size_t operation_index;
@@ -469,9 +425,6 @@ static void test_scalar_fp(void)
     CHECK(decoded.operands.simd.operation == ARM64_SIMD_OP_FCCMPE);
     CHECK(decoded.operands.simd.condition == 1);
     CHECK(decoded.operands.simd.immediate == 0xA);
-    CHECK(decoded.effects & ARM64_EFFECT_READ_FLAGS);
-    CHECK(decoded.effects & ARM64_EFFECT_WRITE_FLAGS);
-    CHECK(!(decoded.effects & ARM64_EFFECT_WRITE_FP_SIMD));
 
     decoded = decode_ok(0x1E2F21F8U);
     CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_SCALAR_COMPARE);
@@ -547,10 +500,6 @@ static void test_scalar_copy(void)
         CHECK(decoded.operands.simd.element_width == cases[index].element_width);
         CHECK(decoded.operands.simd.lane_index == cases[index].lane_index);
         CHECK(decoded.operand_width == cases[index].element_width);
-        CHECK(decoded.effects & ARM64_EFFECT_READ_FP_SIMD);
-        CHECK(decoded.effects & ARM64_EFFECT_WRITE_FP_SIMD);
-        CHECK(!(decoded.effects & ARM64_EFFECT_READ_GPR));
-        CHECK(!(decoded.effects & ARM64_EFFECT_WRITE_GPR));
     }
 
     decoded = decode_ok(0x5E0C0422U);
@@ -616,10 +565,6 @@ static void test_fp_by_element(void)
             CHECK(decoded.rm == shapes[shape_index].rm);
             CHECK(decoded.rd == 3);
             CHECK(decoded.rn == 4);
-            CHECK(decoded.effects & ARM64_EFFECT_READ_FP_SIMD);
-            CHECK(decoded.effects & ARM64_EFFECT_WRITE_FP_SIMD);
-            CHECK(!(decoded.effects & ARM64_EFFECT_READ_GPR));
-            CHECK(!(decoded.effects & ARM64_EFFECT_WRITE_GPR));
         }
     }
 
@@ -675,10 +620,7 @@ static void test_fhm_by_element(void)
         {
             for (q = 0; q < 2; q++)
             {
-                arm64_u32 raw = operations[operation_index].base |
-                                  lanes[lane_index].bits |
-                                  ((arm64_u32)q << 30) |
-                                  0x20064U;
+                arm64_u32 raw = operations[operation_index].base | lanes[lane_index].bits | ((arm64_u32)q << 30) | 0x20064U;
 
                 decoded = decode_ok(raw);
                 CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_FP_BY_ELEMENT);
@@ -802,8 +744,7 @@ static void test_fcma(void)
         arm64_u8 operand_width;
         arm64_u8 element_width;
     } vector_shapes[] = {
-        {0, 1, 64, 16}, {1, 1, 128, 16}, {0, 2, 64, 32},
-        {1, 2, 128, 32}, {1, 3, 128, 64},
+        {0, 1, 64, 16}, {1, 1, 128, 16}, {0, 2, 64, 32}, {1, 2, 128, 32}, {1, 3, 128, 64},
     };
     static const struct
     {
@@ -815,10 +756,7 @@ static void test_fcma(void)
         arm64_u8 element_width;
         arm64_u8 lane_index;
     } element_shapes[] = {
-        {0, 1, 0, 0, 64, 16, 0}, {0, 1, 0, 1, 64, 16, 1},
-        {1, 1, 0, 0, 128, 16, 0}, {1, 1, 0, 1, 128, 16, 1},
-        {1, 1, 1, 0, 128, 16, 2}, {1, 1, 1, 1, 128, 16, 3},
-        {1, 2, 0, 0, 128, 32, 0}, {1, 2, 1, 0, 128, 32, 1},
+        {0, 1, 0, 0, 64, 16, 0}, {0, 1, 0, 1, 64, 16, 1}, {1, 1, 0, 0, 128, 16, 0}, {1, 1, 0, 1, 128, 16, 1}, {1, 1, 1, 0, 128, 16, 2}, {1, 1, 1, 1, 128, 16, 3}, {1, 2, 0, 0, 128, 32, 0}, {1, 2, 1, 0, 128, 32, 1},
     };
     struct arm64_decoded_insn decoded;
     size_t shape_index;
@@ -828,11 +766,7 @@ static void test_fcma(void)
     {
         for (rotation = 0; rotation < 4; rotation++)
         {
-            arm64_u32 raw = 0x2E00C400U |
-                              ((arm64_u32)vector_shapes[shape_index].q << 30) |
-                              ((arm64_u32)vector_shapes[shape_index].size << 22) |
-                              ((arm64_u32)rotation << 11) |
-                              0x20064U;
+            arm64_u32 raw = 0x2E00C400U | ((arm64_u32)vector_shapes[shape_index].q << 30) | ((arm64_u32)vector_shapes[shape_index].size << 22) | ((arm64_u32)rotation << 11) | 0x20064U;
 
             decoded = decode_ok(raw);
             CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_VECTOR_COMPLEX_3REG);
@@ -847,11 +781,7 @@ static void test_fcma(void)
 
         for (rotation = 0; rotation < 2; rotation++)
         {
-            arm64_u32 raw = 0x2E00E400U |
-                              ((arm64_u32)vector_shapes[shape_index].q << 30) |
-                              ((arm64_u32)vector_shapes[shape_index].size << 22) |
-                              ((arm64_u32)rotation << 12) |
-                              0x20064U;
+            arm64_u32 raw = 0x2E00E400U | ((arm64_u32)vector_shapes[shape_index].q << 30) | ((arm64_u32)vector_shapes[shape_index].size << 22) | ((arm64_u32)rotation << 12) | 0x20064U;
 
             decoded = decode_ok(raw);
             CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_VECTOR_COMPLEX_3REG);
@@ -866,15 +796,7 @@ static void test_fcma(void)
     {
         for (rotation = 0; rotation < 4; rotation++)
         {
-            arm64_u32 raw = 0x2F001000U |
-                              ((arm64_u32)element_shapes[shape_index].q << 30) |
-                              ((arm64_u32)element_shapes[shape_index].size << 22) |
-                              ((arm64_u32)element_shapes[shape_index].l << 21) |
-                              (1U << 20) |
-                              (2U << 16) |
-                              ((arm64_u32)rotation << 13) |
-                              ((arm64_u32)element_shapes[shape_index].h << 11) |
-                              0x64U;
+            arm64_u32 raw = 0x2F001000U | ((arm64_u32)element_shapes[shape_index].q << 30) | ((arm64_u32)element_shapes[shape_index].size << 22) | ((arm64_u32)element_shapes[shape_index].l << 21) | (1U << 20) | (2U << 16) | ((arm64_u32)rotation << 13) | ((arm64_u32)element_shapes[shape_index].h << 11) | 0x64U;
 
             decoded = decode_ok(raw);
             CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_FP_BY_ELEMENT);
@@ -907,11 +829,7 @@ static void test_vector_3same_extra(void)
         arm64_u8 result_element_width;
         enum arm64_simd_operation operation;
     } operations[] = {
-        {1, 16, 0x6, 0, 0, ARM64_SIMD_OP_SQRDMLAH},
-        {1, 17, 0x6, 0, 0, ARM64_SIMD_OP_SQRDMLSH},
-        {0, 18, 0x4, 8, 32, ARM64_SIMD_OP_SDOT},
-        {1, 18, 0x4, 8, 32, ARM64_SIMD_OP_UDOT},
-        {0, 19, 0x4, 8, 32, ARM64_SIMD_OP_USDOT},
+        {1, 16, 0x6, 0, 0, ARM64_SIMD_OP_SQRDMLAH}, {1, 17, 0x6, 0, 0, ARM64_SIMD_OP_SQRDMLSH}, {0, 18, 0x4, 8, 32, ARM64_SIMD_OP_SDOT}, {1, 18, 0x4, 8, 32, ARM64_SIMD_OP_UDOT}, {0, 19, 0x4, 8, 32, ARM64_SIMD_OP_USDOT},
     };
     struct arm64_decoded_insn decoded;
     size_t operation_index;
@@ -924,12 +842,7 @@ static void test_vector_3same_extra(void)
         {
             for (size = 0; size < 4; size++)
             {
-                arm64_u32 raw = 0x0E008400U |
-                                  ((arm64_u32)q << 30) |
-                                  ((arm64_u32)operations[operation_index].u << 29) |
-                                  ((arm64_u32)size << 22) |
-                                  ((arm64_u32)operations[operation_index].opcode << 11) |
-                                  0x20064U;
+                arm64_u32 raw = 0x0E008400U | ((arm64_u32)q << 30) | ((arm64_u32)operations[operation_index].u << 29) | ((arm64_u32)size << 22) | ((arm64_u32)operations[operation_index].opcode << 11) | 0x20064U;
 
                 if (!(operations[operation_index].valid_sizes & (1U << size)))
                 {
@@ -941,8 +854,7 @@ static void test_vector_3same_extra(void)
                 CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_VECTOR_EXTENDED_3REG);
                 CHECK(decoded.operands.simd.operation == operations[operation_index].operation);
                 CHECK(decoded.operand_width == (q ? 128 : 64));
-                CHECK(decoded.operands.simd.element_width ==
-                      (operations[operation_index].element_width ? operations[operation_index].element_width : (8U << size)));
+                CHECK(decoded.operands.simd.element_width == (operations[operation_index].element_width ? operations[operation_index].element_width : (8U << size)));
                 CHECK(decoded.operands.simd.result_element_width == operations[operation_index].result_element_width);
                 CHECK(decoded.rd == 4);
                 CHECK(decoded.rn == 3);
@@ -1026,17 +938,7 @@ static void test_scalar_3same(void)
         arm64_u8 valid_sizes;
         enum arm64_simd_operation operation;
     } integer_operations[] = {
-        {0, 1, 0xF, ARM64_SIMD_OP_SQADD}, {0, 5, 0xF, ARM64_SIMD_OP_SQSUB},
-        {0, 9, 0xF, ARM64_SIMD_OP_SQSHL}, {0, 11, 0xF, ARM64_SIMD_OP_SQRSHL},
-        {0, 22, 0x6, ARM64_SIMD_OP_SQDMULH}, {1, 1, 0xF, ARM64_SIMD_OP_UQADD},
-        {1, 5, 0xF, ARM64_SIMD_OP_UQSUB}, {1, 9, 0xF, ARM64_SIMD_OP_UQSHL},
-        {1, 11, 0xF, ARM64_SIMD_OP_UQRSHL}, {1, 22, 0x6, ARM64_SIMD_OP_SQRDMULH},
-        {0, 6, 0x8, ARM64_SIMD_OP_CMGT}, {0, 7, 0x8, ARM64_SIMD_OP_CMGE},
-        {0, 8, 0x8, ARM64_SIMD_OP_SSHL}, {0, 10, 0x8, ARM64_SIMD_OP_SRSHL},
-        {0, 16, 0x8, ARM64_SIMD_OP_ADD}, {0, 17, 0x8, ARM64_SIMD_OP_CMTST},
-        {1, 6, 0x8, ARM64_SIMD_OP_CMHI}, {1, 7, 0x8, ARM64_SIMD_OP_CMHS},
-        {1, 8, 0x8, ARM64_SIMD_OP_USHL}, {1, 10, 0x8, ARM64_SIMD_OP_URSHL},
-        {1, 16, 0x8, ARM64_SIMD_OP_SUB}, {1, 17, 0x8, ARM64_SIMD_OP_CMEQ},
+        {0, 1, 0xF, ARM64_SIMD_OP_SQADD}, {0, 5, 0xF, ARM64_SIMD_OP_SQSUB}, {0, 9, 0xF, ARM64_SIMD_OP_SQSHL}, {0, 11, 0xF, ARM64_SIMD_OP_SQRSHL}, {0, 22, 0x6, ARM64_SIMD_OP_SQDMULH}, {1, 1, 0xF, ARM64_SIMD_OP_UQADD}, {1, 5, 0xF, ARM64_SIMD_OP_UQSUB}, {1, 9, 0xF, ARM64_SIMD_OP_UQSHL}, {1, 11, 0xF, ARM64_SIMD_OP_UQRSHL}, {1, 22, 0x6, ARM64_SIMD_OP_SQRDMULH}, {0, 6, 0x8, ARM64_SIMD_OP_CMGT}, {0, 7, 0x8, ARM64_SIMD_OP_CMGE}, {0, 8, 0x8, ARM64_SIMD_OP_SSHL}, {0, 10, 0x8, ARM64_SIMD_OP_SRSHL}, {0, 16, 0x8, ARM64_SIMD_OP_ADD}, {0, 17, 0x8, ARM64_SIMD_OP_CMTST}, {1, 6, 0x8, ARM64_SIMD_OP_CMHI}, {1, 7, 0x8, ARM64_SIMD_OP_CMHS}, {1, 8, 0x8, ARM64_SIMD_OP_USHL}, {1, 10, 0x8, ARM64_SIMD_OP_URSHL}, {1, 16, 0x8, ARM64_SIMD_OP_SUB}, {1, 17, 0x8, ARM64_SIMD_OP_CMEQ},
     };
     static const struct
     {
@@ -1045,11 +947,7 @@ static void test_scalar_3same(void)
         arm64_u8 opcode;
         enum arm64_simd_operation operation;
     } fp_operations[] = {
-        {0, 0, 27, ARM64_SIMD_OP_FMULX}, {0, 0, 28, ARM64_SIMD_OP_FCMEQ},
-        {0, 0, 31, ARM64_SIMD_OP_FRECPS}, {0, 1, 31, ARM64_SIMD_OP_FRSQRTS},
-        {1, 0, 28, ARM64_SIMD_OP_FCMGE}, {1, 0, 29, ARM64_SIMD_OP_FACGE},
-        {1, 1, 26, ARM64_SIMD_OP_FABD}, {1, 1, 28, ARM64_SIMD_OP_FCMGT},
-        {1, 1, 29, ARM64_SIMD_OP_FACGT},
+        {0, 0, 27, ARM64_SIMD_OP_FMULX}, {0, 0, 28, ARM64_SIMD_OP_FCMEQ}, {0, 0, 31, ARM64_SIMD_OP_FRECPS}, {0, 1, 31, ARM64_SIMD_OP_FRSQRTS}, {1, 0, 28, ARM64_SIMD_OP_FCMGE}, {1, 0, 29, ARM64_SIMD_OP_FACGE}, {1, 1, 26, ARM64_SIMD_OP_FABD}, {1, 1, 28, ARM64_SIMD_OP_FCMGT}, {1, 1, 29, ARM64_SIMD_OP_FACGT},
     };
     static const struct
     {
@@ -1058,11 +956,7 @@ static void test_scalar_3same(void)
         arm64_u8 opcode;
         enum arm64_simd_operation operation;
     } fp16_operations[] = {
-        {0, 0, 3, ARM64_SIMD_OP_FMULX}, {0, 0, 4, ARM64_SIMD_OP_FCMEQ},
-        {0, 0, 7, ARM64_SIMD_OP_FRECPS}, {0, 1, 7, ARM64_SIMD_OP_FRSQRTS},
-        {1, 0, 4, ARM64_SIMD_OP_FCMGE}, {1, 0, 5, ARM64_SIMD_OP_FACGE},
-        {1, 1, 2, ARM64_SIMD_OP_FABD}, {1, 1, 4, ARM64_SIMD_OP_FCMGT},
-        {1, 1, 5, ARM64_SIMD_OP_FACGT},
+        {0, 0, 3, ARM64_SIMD_OP_FMULX}, {0, 0, 4, ARM64_SIMD_OP_FCMEQ}, {0, 0, 7, ARM64_SIMD_OP_FRECPS}, {0, 1, 7, ARM64_SIMD_OP_FRSQRTS}, {1, 0, 4, ARM64_SIMD_OP_FCMGE}, {1, 0, 5, ARM64_SIMD_OP_FACGE}, {1, 1, 2, ARM64_SIMD_OP_FABD}, {1, 1, 4, ARM64_SIMD_OP_FCMGT}, {1, 1, 5, ARM64_SIMD_OP_FACGT},
     };
     struct arm64_decoded_insn decoded;
     size_t index;
@@ -1072,11 +966,7 @@ static void test_scalar_3same(void)
     {
         for (size = 0; size < 4; size++)
         {
-            arm64_u32 raw = 0x5E200400U |
-                              ((arm64_u32)integer_operations[index].u << 29) |
-                              ((arm64_u32)size << 22) |
-                              ((arm64_u32)integer_operations[index].opcode << 11) |
-                              0x20064U;
+            arm64_u32 raw = 0x5E200400U | ((arm64_u32)integer_operations[index].u << 29) | ((arm64_u32)size << 22) | ((arm64_u32)integer_operations[index].opcode << 11) | 0x20064U;
 
             if (!(integer_operations[index].valid_sizes & (1U << size)))
             {
@@ -1099,11 +989,7 @@ static void test_scalar_3same(void)
     {
         for (size = 0; size < 2; size++)
         {
-            arm64_u32 raw = 0x5E200400U |
-                              ((arm64_u32)fp_operations[index].u << 29) |
-                              ((arm64_u32)((fp_operations[index].alternate << 1) | size) << 22) |
-                              ((arm64_u32)fp_operations[index].opcode << 11) |
-                              0x20064U;
+            arm64_u32 raw = 0x5E200400U | ((arm64_u32)fp_operations[index].u << 29) | ((arm64_u32)((fp_operations[index].alternate << 1) | size) << 22) | ((arm64_u32)fp_operations[index].opcode << 11) | 0x20064U;
 
             decoded = decode_ok(raw);
             CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_SCALAR_SIMD_3REG);
@@ -1115,11 +1001,7 @@ static void test_scalar_3same(void)
 
     for (index = 0; index < sizeof(fp16_operations) / sizeof(fp16_operations[0]); index++)
     {
-        arm64_u32 raw = 0x5E400400U |
-                          ((arm64_u32)fp16_operations[index].u << 29) |
-                          ((arm64_u32)fp16_operations[index].alternate << 23) |
-                          ((arm64_u32)fp16_operations[index].opcode << 11) |
-                          0x20064U;
+        arm64_u32 raw = 0x5E400400U | ((arm64_u32)fp16_operations[index].u << 29) | ((arm64_u32)fp16_operations[index].alternate << 23) | ((arm64_u32)fp16_operations[index].opcode << 11) | 0x20064U;
 
         decoded = decode_ok(raw);
         CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_SCALAR_SIMD_3REG);
@@ -1130,21 +1012,26 @@ static void test_scalar_3same(void)
 
     for (index = 0; index < 2; index++)
     {
-        for (size = 0; size < 4; size++)
+        size_t opcode;
+
+        for (opcode = 16; opcode < 32; opcode++)
         {
-            arm64_u32 raw = 0x7E008400U | ((arm64_u32)size << 22) | ((arm64_u32)index << 11) | 0x20064U;
-
-            if (size == 0 || size == 3)
+            for (size = 0; size < 4; size++)
             {
-                decode_status_is(raw, ARM64_DECODE_UNALLOCATED);
-                continue;
-            }
+                arm64_u32 raw = 0x5E000400U | ((arm64_u32)index << 29) | ((arm64_u32)size << 22) | ((arm64_u32)opcode << 11) | 0x20064U;
 
-            decoded = decode_ok(raw);
-            CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_SCALAR_SIMD_3REG);
-            CHECK(decoded.operands.simd.operation == (index ? ARM64_SIMD_OP_SQRDMLSH : ARM64_SIMD_OP_SQRDMLAH));
-            CHECK(decoded.operand_width == (8U << size));
-            CHECK(decoded.operands.simd.element_width == (8U << size));
+                if (!index || (opcode != 16 && opcode != 17) || size == 0 || size == 3)
+                {
+                    decode_status_is(raw, ARM64_DECODE_UNALLOCATED);
+                    continue;
+                }
+
+                decoded = decode_ok(raw);
+                CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_SCALAR_SIMD_3REG);
+                CHECK(decoded.operands.simd.operation == (opcode == 17 ? ARM64_SIMD_OP_SQRDMLSH : ARM64_SIMD_OP_SQRDMLAH));
+                CHECK(decoded.operand_width == (8U << size));
+                CHECK(decoded.operands.simd.element_width == (8U << size));
+            }
         }
     }
 
@@ -1223,22 +1110,8 @@ static void test_vector(void)
         arm64_u8 valid_sizes;
         enum arm64_simd_operation operation;
     } integer_3same_operations[] = {
-        {0, 0, 0x7, ARM64_SIMD_OP_SHADD}, {0, 1, 0xF, ARM64_SIMD_OP_SQADD}, {0, 2, 0x7, ARM64_SIMD_OP_SRHADD},
-        {0, 4, 0x7, ARM64_SIMD_OP_SHSUB}, {0, 5, 0xF, ARM64_SIMD_OP_SQSUB}, {0, 6, 0xF, ARM64_SIMD_OP_CMGT},
-        {0, 7, 0xF, ARM64_SIMD_OP_CMGE}, {0, 8, 0xF, ARM64_SIMD_OP_SSHL}, {0, 9, 0xF, ARM64_SIMD_OP_SQSHL},
-        {0, 10, 0xF, ARM64_SIMD_OP_SRSHL}, {0, 11, 0xF, ARM64_SIMD_OP_SQRSHL}, {0, 12, 0x7, ARM64_SIMD_OP_SMAX},
-        {0, 13, 0x7, ARM64_SIMD_OP_SMIN}, {0, 14, 0x7, ARM64_SIMD_OP_SABD}, {0, 15, 0x7, ARM64_SIMD_OP_SABA},
-        {0, 16, 0xF, ARM64_SIMD_OP_ADD}, {0, 17, 0xF, ARM64_SIMD_OP_CMTST}, {0, 18, 0x7, ARM64_SIMD_OP_MLA},
-        {0, 19, 0x7, ARM64_SIMD_OP_MUL}, {0, 20, 0x7, ARM64_SIMD_OP_SMAXP}, {0, 21, 0x7, ARM64_SIMD_OP_SMINP},
-        {0, 22, 0x6, ARM64_SIMD_OP_SQDMULH}, {0, 23, 0xF, ARM64_SIMD_OP_ADDP},
-        {1, 0, 0x7, ARM64_SIMD_OP_UHADD}, {1, 1, 0xF, ARM64_SIMD_OP_UQADD}, {1, 2, 0x7, ARM64_SIMD_OP_URHADD},
-        {1, 4, 0x7, ARM64_SIMD_OP_UHSUB}, {1, 5, 0xF, ARM64_SIMD_OP_UQSUB}, {1, 6, 0xF, ARM64_SIMD_OP_CMHI},
-        {1, 7, 0xF, ARM64_SIMD_OP_CMHS}, {1, 8, 0xF, ARM64_SIMD_OP_USHL}, {1, 9, 0xF, ARM64_SIMD_OP_UQSHL},
-        {1, 10, 0xF, ARM64_SIMD_OP_URSHL}, {1, 11, 0xF, ARM64_SIMD_OP_UQRSHL}, {1, 12, 0x7, ARM64_SIMD_OP_UMAX},
-        {1, 13, 0x7, ARM64_SIMD_OP_UMIN}, {1, 14, 0x7, ARM64_SIMD_OP_UABD}, {1, 15, 0x7, ARM64_SIMD_OP_UABA},
-        {1, 16, 0xF, ARM64_SIMD_OP_SUB}, {1, 17, 0xF, ARM64_SIMD_OP_CMEQ}, {1, 18, 0x7, ARM64_SIMD_OP_MLS},
-        {1, 19, 0x1, ARM64_SIMD_OP_PMUL}, {1, 20, 0x7, ARM64_SIMD_OP_UMAXP}, {1, 21, 0x7, ARM64_SIMD_OP_UMINP},
-        {1, 22, 0x6, ARM64_SIMD_OP_SQRDMULH},
+        {0, 0, 0x7, ARM64_SIMD_OP_SHADD}, {0, 1, 0xF, ARM64_SIMD_OP_SQADD}, {0, 2, 0x7, ARM64_SIMD_OP_SRHADD}, {0, 4, 0x7, ARM64_SIMD_OP_SHSUB}, {0, 5, 0xF, ARM64_SIMD_OP_SQSUB}, {0, 6, 0xF, ARM64_SIMD_OP_CMGT}, {0, 7, 0xF, ARM64_SIMD_OP_CMGE}, {0, 8, 0xF, ARM64_SIMD_OP_SSHL}, {0, 9, 0xF, ARM64_SIMD_OP_SQSHL}, {0, 10, 0xF, ARM64_SIMD_OP_SRSHL}, {0, 11, 0xF, ARM64_SIMD_OP_SQRSHL}, {0, 12, 0x7, ARM64_SIMD_OP_SMAX}, {0, 13, 0x7, ARM64_SIMD_OP_SMIN}, {0, 14, 0x7, ARM64_SIMD_OP_SABD}, {0, 15, 0x7, ARM64_SIMD_OP_SABA}, {0, 16, 0xF, ARM64_SIMD_OP_ADD}, {0, 17, 0xF, ARM64_SIMD_OP_CMTST}, {0, 18, 0x7, ARM64_SIMD_OP_MLA}, {0, 19, 0x7, ARM64_SIMD_OP_MUL},  {0, 20, 0x7, ARM64_SIMD_OP_SMAXP}, {0, 21, 0x7, ARM64_SIMD_OP_SMINP}, {0, 22, 0x6, ARM64_SIMD_OP_SQDMULH},  {0, 23, 0xF, ARM64_SIMD_OP_ADDP},
+        {1, 0, 0x7, ARM64_SIMD_OP_UHADD}, {1, 1, 0xF, ARM64_SIMD_OP_UQADD}, {1, 2, 0x7, ARM64_SIMD_OP_URHADD}, {1, 4, 0x7, ARM64_SIMD_OP_UHSUB}, {1, 5, 0xF, ARM64_SIMD_OP_UQSUB}, {1, 6, 0xF, ARM64_SIMD_OP_CMHI}, {1, 7, 0xF, ARM64_SIMD_OP_CMHS}, {1, 8, 0xF, ARM64_SIMD_OP_USHL}, {1, 9, 0xF, ARM64_SIMD_OP_UQSHL}, {1, 10, 0xF, ARM64_SIMD_OP_URSHL}, {1, 11, 0xF, ARM64_SIMD_OP_UQRSHL}, {1, 12, 0x7, ARM64_SIMD_OP_UMAX}, {1, 13, 0x7, ARM64_SIMD_OP_UMIN}, {1, 14, 0x7, ARM64_SIMD_OP_UABD}, {1, 15, 0x7, ARM64_SIMD_OP_UABA}, {1, 16, 0xF, ARM64_SIMD_OP_SUB}, {1, 17, 0xF, ARM64_SIMD_OP_CMEQ},  {1, 18, 0x7, ARM64_SIMD_OP_MLS}, {1, 19, 0x1, ARM64_SIMD_OP_PMUL}, {1, 20, 0x7, ARM64_SIMD_OP_UMAXP}, {1, 21, 0x7, ARM64_SIMD_OP_UMINP}, {1, 22, 0x6, ARM64_SIMD_OP_SQRDMULH},
     };
     static const struct
     {
@@ -1272,8 +1145,8 @@ static void test_vector(void)
         arm64_u32 fp32_base;
         enum arm64_simd_operation operation;
     } fp_vector_3reg_operations[] = {
-        {0x0E401400U, 0x0E20D400U, ARM64_SIMD_OP_FADD},  {0x0EC01400U, 0x0EA0D400U, ARM64_SIMD_OP_FSUB},  {0x2E401C00U, 0x2E20DC00U, ARM64_SIMD_OP_FMUL},    {0x0E401C00U, 0x0E20DC00U, ARM64_SIMD_OP_FMULX},   {0x2E403C00U, 0x2E20FC00U, ARM64_SIMD_OP_FDIV}, {0x0E400C00U, 0x0E20CC00U, ARM64_SIMD_OP_FMLA},   {0x0EC00C00U, 0x0EA0CC00U, ARM64_SIMD_OP_FMLS},    {0x0E403400U, 0x0E20F400U, ARM64_SIMD_OP_FMAX},  {0x0EC03400U, 0x0EA0F400U, ARM64_SIMD_OP_FMIN},  {0x0E400400U, 0x0E20C400U, ARM64_SIMD_OP_FMAXNM}, {0x0EC00400U, 0x0EA0C400U, ARM64_SIMD_OP_FMINNM}, {0x2E401400U, 0x2E20D400U, ARM64_SIMD_OP_FADDP},
-        {0x2E403400U, 0x2E20F400U, ARM64_SIMD_OP_FMAXP}, {0x2EC03400U, 0x2EA0F400U, ARM64_SIMD_OP_FMINP}, {0x2E400400U, 0x2E20C400U, ARM64_SIMD_OP_FMAXNMP}, {0x2EC00400U, 0x2EA0C400U, ARM64_SIMD_OP_FMINNMP}, {0x2EC01400U, 0x2EA0D400U, ARM64_SIMD_OP_FABD}, {0x0E403C00U, 0x0E20FC00U, ARM64_SIMD_OP_FRECPS}, {0x0EC03C00U, 0x0EA0FC00U, ARM64_SIMD_OP_FRSQRTS}, {0x0E402400U, 0x0E20E400U, ARM64_SIMD_OP_FCMEQ}, {0x2E402400U, 0x2E20E400U, ARM64_SIMD_OP_FCMGE}, {0x2EC02400U, 0x2EA0E400U, ARM64_SIMD_OP_FCMGT},  {0x2E402C00U, 0x2E20EC00U, ARM64_SIMD_OP_FACGE},  {0x2EC02C00U, 0x2EA0EC00U, ARM64_SIMD_OP_FACGT}, {0x0EC01C00U, 0x0EA0DC00U, ARM64_SIMD_OP_FAMAX}, {0x2EC01C00U, 0x2EA0DC00U, ARM64_SIMD_OP_FAMIN}, {0x2EC03C00U, 0x2EA0FC00U, ARM64_SIMD_OP_FSCALE},
+        {0x0E401400U, 0x0E20D400U, ARM64_SIMD_OP_FADD},    {0x0EC01400U, 0x0EA0D400U, ARM64_SIMD_OP_FSUB},    {0x2E401C00U, 0x2E20DC00U, ARM64_SIMD_OP_FMUL}, {0x0E401C00U, 0x0E20DC00U, ARM64_SIMD_OP_FMULX},  {0x2E403C00U, 0x2E20FC00U, ARM64_SIMD_OP_FDIV},    {0x0E400C00U, 0x0E20CC00U, ARM64_SIMD_OP_FMLA},  {0x0EC00C00U, 0x0EA0CC00U, ARM64_SIMD_OP_FMLS},  {0x0E403400U, 0x0E20F400U, ARM64_SIMD_OP_FMAX},  {0x0EC03400U, 0x0EA0F400U, ARM64_SIMD_OP_FMIN},  {0x0E400400U, 0x0E20C400U, ARM64_SIMD_OP_FMAXNM}, {0x0EC00400U, 0x0EA0C400U, ARM64_SIMD_OP_FMINNM}, {0x2E401400U, 0x2E20D400U, ARM64_SIMD_OP_FADDP}, {0x2E403400U, 0x2E20F400U, ARM64_SIMD_OP_FMAXP},  {0x2EC03400U, 0x2EA0F400U, ARM64_SIMD_OP_FMINP},
+        {0x2E400400U, 0x2E20C400U, ARM64_SIMD_OP_FMAXNMP}, {0x2EC00400U, 0x2EA0C400U, ARM64_SIMD_OP_FMINNMP}, {0x2EC01400U, 0x2EA0D400U, ARM64_SIMD_OP_FABD}, {0x0E403C00U, 0x0E20FC00U, ARM64_SIMD_OP_FRECPS}, {0x0EC03C00U, 0x0EA0FC00U, ARM64_SIMD_OP_FRSQRTS}, {0x0E402400U, 0x0E20E400U, ARM64_SIMD_OP_FCMEQ}, {0x2E402400U, 0x2E20E400U, ARM64_SIMD_OP_FCMGE}, {0x2EC02400U, 0x2EA0E400U, ARM64_SIMD_OP_FCMGT}, {0x2E402C00U, 0x2E20EC00U, ARM64_SIMD_OP_FACGE}, {0x2EC02C00U, 0x2EA0EC00U, ARM64_SIMD_OP_FACGT},  {0x0EC01C00U, 0x0EA0DC00U, ARM64_SIMD_OP_FAMAX},  {0x2EC01C00U, 0x2EA0DC00U, ARM64_SIMD_OP_FAMIN}, {0x2EC03C00U, 0x2EA0FC00U, ARM64_SIMD_OP_FSCALE},
     };
     static const struct
     {
@@ -1371,8 +1244,6 @@ static void test_vector(void)
     CHECK(decoded.operands.simd.element_width == 32);
     CHECK(decoded.operands.simd.lane_index == 3);
     CHECK(decoded.operand_width == 64);
-    CHECK(decoded.effects & ARM64_EFFECT_WRITE_GPR);
-    CHECK(!(decoded.effects & ARM64_EFFECT_WRITE_FP_SIMD));
 
     decoded = decode_ok(0x0E228420U);
     CHECK(decoded.operands.simd.operation == ARM64_SIMD_OP_ADD);
@@ -1394,12 +1265,7 @@ static void test_vector(void)
         {
             for (size_index = 0; size_index < 4; size_index++)
             {
-                arm64_u32 raw = 0x0E200400U |
-                                  ((arm64_u32)q_index << 30) |
-                                  ((arm64_u32)integer_3same_operations[operation_index].u << 29) |
-                                  ((arm64_u32)size_index << 22) |
-                                  ((arm64_u32)integer_3same_operations[operation_index].opcode << 11) |
-                                  0x20064U;
+                arm64_u32 raw = 0x0E200400U | ((arm64_u32)q_index << 30) | ((arm64_u32)integer_3same_operations[operation_index].u << 29) | ((arm64_u32)size_index << 22) | ((arm64_u32)integer_3same_operations[operation_index].opcode << 11) | 0x20064U;
 
                 if (!(integer_3same_operations[operation_index].valid_sizes & (1U << size_index)) || (!q_index && size_index == 3))
                 {
@@ -1415,8 +1281,6 @@ static void test_vector(void)
                 CHECK(decoded.rm == 2);
                 CHECK(decoded.operand_width == (q_index ? 128 : 64));
                 CHECK(decoded.operands.simd.element_width == (8U << size_index));
-                CHECK(decoded.effects & ARM64_EFFECT_READ_FP_SIMD);
-                CHECK(decoded.effects & ARM64_EFFECT_WRITE_FP_SIMD);
             }
         }
     }
@@ -1441,8 +1305,6 @@ static void test_vector(void)
             CHECK(decoded.rm == 3);
             CHECK(decoded.operand_width == logical_shapes[shape_index].operand_width);
             CHECK(decoded.operands.simd.element_width == 8);
-            CHECK(decoded.effects & ARM64_EFFECT_READ_FP_SIMD);
-            CHECK(decoded.effects & ARM64_EFFECT_WRITE_FP_SIMD);
         }
     }
 
@@ -1467,8 +1329,6 @@ static void test_vector(void)
             CHECK(decoded.rm == 5);
             CHECK(decoded.operand_width == permute_shapes[shape_index].operand_width);
             CHECK(decoded.operands.simd.element_width == permute_shapes[shape_index].element_width);
-            CHECK(decoded.effects & ARM64_EFFECT_READ_FP_SIMD);
-            CHECK(decoded.effects & ARM64_EFFECT_WRITE_FP_SIMD);
         }
     }
 
@@ -1496,8 +1356,6 @@ static void test_vector(void)
             CHECK(decoded.rm == 2);
             CHECK(decoded.operand_width == fp_vector_shapes[shape_index].operand_width);
             CHECK(decoded.operands.simd.element_width == fp_vector_shapes[shape_index].element_width);
-            CHECK(decoded.effects & ARM64_EFFECT_READ_FP_SIMD);
-            CHECK(decoded.effects & ARM64_EFFECT_WRITE_FP_SIMD);
         }
     }
 
@@ -1544,8 +1402,6 @@ static void test_vector(void)
             CHECK(decoded.rn == 3);
             CHECK(decoded.operand_width == fp_vector_shapes[shape_index].operand_width);
             CHECK(decoded.operands.simd.element_width == fp_vector_shapes[shape_index].element_width);
-            CHECK(decoded.effects & ARM64_EFFECT_READ_FP_SIMD);
-            CHECK(decoded.effects & ARM64_EFFECT_WRITE_FP_SIMD);
         }
     }
 
@@ -1572,8 +1428,6 @@ static void test_vector(void)
                 CHECK(decoded.rn == 3);
                 CHECK(decoded.operand_width == (q_index ? 128 : 64));
                 CHECK(decoded.operands.simd.element_width == (8U << shape_index));
-                CHECK(decoded.effects & ARM64_EFFECT_READ_FP_SIMD);
-                CHECK(decoded.effects & ARM64_EFFECT_WRITE_FP_SIMD);
             }
         }
     }
@@ -1591,8 +1445,6 @@ static void test_vector(void)
         CHECK(decoded.rn == 3);
         CHECK(decoded.operand_width == fp_reduce_cases[operation_index].operand_width);
         CHECK(decoded.operands.simd.element_width == fp_reduce_cases[operation_index].element_width);
-        CHECK(decoded.effects & ARM64_EFFECT_READ_FP_SIMD);
-        CHECK(decoded.effects & ARM64_EFFECT_WRITE_FP_SIMD);
     }
 
     decode_status_is(0x5E70D820U, ARM64_DECODE_UNALLOCATED);
@@ -1609,8 +1461,6 @@ static void test_vector(void)
             CHECK(decoded.rn == 3);
             CHECK(decoded.operand_width == compare_zero_shapes[shape_index].operand_width);
             CHECK(decoded.operands.simd.element_width == compare_zero_shapes[shape_index].element_width);
-            CHECK(decoded.effects & ARM64_EFFECT_READ_FP_SIMD);
-            CHECK(decoded.effects & ARM64_EFFECT_WRITE_FP_SIMD);
         }
     }
 
@@ -1624,8 +1474,6 @@ static void test_vector(void)
     CHECK(decoded.rn == 3);
     CHECK(decoded.operand_width == 64);
     CHECK(decoded.operands.simd.element_width == 32);
-    CHECK(decoded.effects & ARM64_EFFECT_READ_FP_SIMD);
-    CHECK(decoded.effects & ARM64_EFFECT_WRITE_FP_SIMD);
 
     decoded = decode_ok(0x4EA0F800U);
     CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_VECTOR_FP_UNARY);

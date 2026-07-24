@@ -40,30 +40,6 @@ enum arm64_insn_class
     ARM64_INSN_CLASS_SME,
 };
 
-// 对 opcode/flags 的进一步架构语义归纳，供调用方直接查询。
-#define ARM64_EFFECT_READ_GPR        (1ULL << 0)
-#define ARM64_EFFECT_WRITE_GPR       (1ULL << 1)
-#define ARM64_EFFECT_READ_FP_SIMD    (1ULL << 2)
-#define ARM64_EFFECT_WRITE_FP_SIMD   (1ULL << 3)
-#define ARM64_EFFECT_READ_MEMORY     (1ULL << 4)
-#define ARM64_EFFECT_WRITE_MEMORY    (1ULL << 5)
-#define ARM64_EFFECT_READ_FLAGS      (1ULL << 6)
-#define ARM64_EFFECT_WRITE_FLAGS     (1ULL << 7)
-#define ARM64_EFFECT_CONTROL_FLOW    (1ULL << 8)
-#define ARM64_EFFECT_CONDITIONAL     (1ULL << 9)
-#define ARM64_EFFECT_DIRECT_TARGET   (1ULL << 10)
-#define ARM64_EFFECT_INDIRECT_TARGET (1ULL << 11)
-#define ARM64_EFFECT_CALL            (1ULL << 12)
-#define ARM64_EFFECT_RETURN          (1ULL << 13)
-#define ARM64_EFFECT_PC_RELATIVE     (1ULL << 14)
-#define ARM64_EFFECT_SYSTEM          (1ULL << 15)
-#define ARM64_EFFECT_EXCEPTION       (1ULL << 16)
-#define ARM64_EFFECT_BARRIER         (1ULL << 17)
-#define ARM64_EFFECT_ATOMIC          (1ULL << 18)
-#define ARM64_EFFECT_EXCLUSIVE       (1ULL << 19)
-#define ARM64_EFFECT_PREFETCH        (1ULL << 20)
-#define ARM64_EFFECT_WRITEBACK       (1ULL << 21)
-
 /*
 指令编码族/处理路径。opcode 描述指令采用哪种格式，具体运算由 operation
 或 operands.simd.operation 表示，例如 ADD/SUB 共用 ADD_SUB 编码族。
@@ -463,8 +439,8 @@ enum arm64_simd_rotation
     ARM64_SIMD_ROTATION_270,
 };
 
-#define ARM64_SIMD_FLAG_COMPARE_ZERO     (1U << 0)
-#define ARM64_SIMD_FLAG_SOURCE_HIGH_HALF (1U << 1)
+#define ARM64_SIMD_FLAG_COMPARE_ZERO        (1U << 0)
+#define ARM64_SIMD_FLAG_SOURCE_HIGH_HALF    (1U << 1)
 #define ARM64_SIMD_FLAG_SOURCE_ODD_ELEMENTS (1U << 2)
 
 // 跨指令族共享的语义修饰位，调用方无需再检查原始机器码。
@@ -563,7 +539,6 @@ struct arm64_decoded_insn
     // raw/status 使调用方可以缓存单个结构，不必另外保存输入和返回状态。
     arm64_u32 raw;
     enum arm64_decode_status status;
-    arm64_u64 effects;
 
     // 先按 class 分发，再结合 opcode/operation 解释 union 中的对应成员。
     enum arm64_insn_class insn_class;
@@ -597,17 +572,11 @@ struct arm64_decoded_insn
 /*
 解码一条 AArch64 指令。
 
-返回结构始终包含 raw/status/effects。status 为 OK 时可消费完整语义；为
+返回结构始终包含 raw/status。status 为 OK 时可消费完整语义；为
 UNSUPPORTED 时只保证已填写的 class/opcode/flags 等识别信息有效；其他失败
 状态下调用方不应执行该指令。大结构由 ABI 直接写入调用方返回槽，不产生额外复制。
 */
 struct arm64_decoded_insn arm64_decode_insn(arm64_u32 raw);
-
-/*
-一次完成解码和架构 effect 查询，effects 中的位必须全部存在才返回非零。
-只关心指令属性的调用方不需要声明 decoded 或自行检查字段。
-*/
-int arm64_decode_insn_has_effect(arm64_u32 raw, arm64_u64 effects);
 
 // 解析 ADR/ADRP、直接分支和 literal load/prefetch 的绝对目标地址。
 int arm64_decode_direct_target(const struct arm64_decoded_insn *decoded, arm64_u64 pc, arm64_u64 *target);

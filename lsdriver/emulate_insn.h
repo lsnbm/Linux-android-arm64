@@ -1,13 +1,16 @@
 #ifndef EMULATE_INSN_H
 #define EMULATE_INSN_H
 
-#include <linux/uaccess.h>
 #include <linux/errno.h>
+#include <linux/mm.h>
 #include <asm/ptrace.h>
 #include <asm/barrier.h>
+#include <asm/memory.h>
+#include <asm/pgtable.h>
 #include <asm/sysreg.h>
 #include "arm64_reg.h"
 #include "arm64_decode/arm64_decode.h"
+#include "virtual_memory_rw.h"
 
 enum emu_insn_result
 {
@@ -20,17 +23,11 @@ enum emu_insn_result
 /* =========================================================================
   ARM64 指令模拟器 (emulate_insn)
 
-  作用：断点命中后，在内核里模拟当前用户态指令并推进 pt_regs->pc，避免
-  依赖硬件单步。当前主要服务于 HWBP/PTEBP 的命中后步过场景。
+    作用：
+    - 断点命中后，在内核里模拟当前用户态指令并推进 pt_regs->pc，避免依赖硬件单步。
+    - 当前主要服务于 HWBP/PTEBP 的命中后步过场景。
 
-    处理结构：emulate_insn() 取指后调用 arm64_decode/ 的纯逻辑解析器完成
-    分类、字段提取和语义规范化，再把 struct arm64_decoded_insn 分发给各大类 handler。
-    handler 只读取解析结果并执行，不再解释原始指令编码。
-
-    执行原则：C 只负责指令解码、地址/立即数展开和现场搬运；复杂 ALU、条件、
-    FP/SIMD 语义直接执行同语义 ARM64 指令片段，再把结果同步回 pt_regs/Q/FPSR。
-
-  已支持的大类：
+    已支持指令：
   - 分支类：emu_simulate_branch_insn() 处理 B、BL、BR、BLR、RET、B.cond、
     CBZ、CBNZ、TBZ、TBNZ。
   - 访存类：emu_simulate_load_store_insn() 处理整数/FP/SIMD 访存、literal load、
@@ -44,7 +41,7 @@ enum emu_insn_result
     除法、移位、乘加/乘减、ADC/SBC、CCMP/CCMN、REV/RBIT、CLZ/CLS、长乘、
     CRC32/CRC32C、CTZ/CNT/ABS、SMAX/SMIN/UMAX/UMIN。
 
-  暂不支持：
+    不支持指令：
   - 数据处理：RMIF、SETF8、SETF16、CFINV、AXFLAG、XAFLAG。
     - 独占指令按普通访存模拟：LDXR、STXR、LDAXR、STLXR、LDXP、STXP、
         LDAXP、STLXP；STXR/STXP 固定返回成功，不保留硬件独占语义。
@@ -88,10 +85,12 @@ struct emu_mem_access
     void *ctx;
 };
 
-/* 自定义读取器返回 -EOPNOTSUPP 表示该地址不归它处理，继续使用 __get_user。 */
+/* 自定义读取器返回 -EOPNOTSUPP 表示该地址不归它处理，继续走当前进程物理页直访。 */
 static __always_inline int emu_read_mem(const struct emu_mem_access *access, uint64_t addr, int bytes, __uint128_t *out)
 {
-    __uint128_t v = 0;
+    phys_addr_t first_physical;
+    phys_addr_t second_physical;
+    size_t first_bytes;
     int status;
 
     if (access && access->read)
@@ -100,54 +99,31 @@ static __always_inline int emu_read_mem(const struct emu_mem_access *access, uin
         if (status != -EOPNOTSUPP) return status;
     }
 
-    switch (bytes)
+    if (!out || (bytes != 1 && bytes != 2 && bytes != 4 && bytes != 8 && bytes != 16)) return -EFAULT;
+    addr = untagged_addr(addr);
+    status = walk_translate_va_to_pa(current->mm, addr, &first_physical);
+    if (status) return -EFAULT;
+
+    first_bytes = min_t(size_t, bytes, PAGE_SIZE - (addr & ~PAGE_MASK));
+    if (first_bytes == bytes)
     {
-    case 1:
-    {
-        u8 t;
-        if (__get_user(t, (u8 __user *)addr)) return -EFAULT;
-        v = t;
-        break;
-    }
-    case 2:
-    {
-        u16 t;
-        if (__get_user(t, (u16 __user *)addr)) return -EFAULT;
-        v = t;
-        break;
-    }
-    case 4:
-    {
-        u32 t;
-        if (__get_user(t, (u32 __user *)addr)) return -EFAULT;
-        v = t;
-        break;
-    }
-    case 8:
-    {
-        u64 t;
-        if (__get_user(t, (u64 __user *)addr)) return -EFAULT;
-        v = t;
-        break;
-    }
-    case 16:
-    {
-        u64 lo, hi;
-        if (__get_user(lo, (u64 __user *)addr) || __get_user(hi, (u64 __user *)(addr + 8))) return -EFAULT;
-        v = ((__uint128_t)hi << 64) | lo;
-        break;
-    }
-    default:
-        return -EFAULT;
+        return linear_read_physical(first_physical, out, bytes);
     }
 
-    *out = v;
-    return 0;
+    status = walk_translate_va_to_pa(current->mm, addr + first_bytes, &second_physical);
+    if (status) return -EFAULT;
+    *out = 0;
+    status = linear_read_physical(first_physical, out, first_bytes);
+    if (status) return status;
+    return linear_read_physical(second_physical, (uint8_t *)out + first_bytes, bytes - first_bytes);
 }
 
-/* 自定义写入器返回 -EOPNOTSUPP 表示该地址不归它处理，继续使用 __put_user。 */
+/* 自定义写入器返回 -EOPNOTSUPP 表示该地址不归它处理，继续走当前进程物理页直访。 */
 static __always_inline int emu_write_mem(const struct emu_mem_access *access, uint64_t addr, int bytes, __uint128_t value)
 {
+    phys_addr_t first_physical;
+    phys_addr_t second_physical;
+    size_t first_bytes;
     int status;
 
     if (access && access->write)
@@ -156,22 +132,22 @@ static __always_inline int emu_write_mem(const struct emu_mem_access *access, ui
         if (status != -EOPNOTSUPP) return status;
     }
 
-    switch (bytes)
+    if (bytes != 1 && bytes != 2 && bytes != 4 && bytes != 8 && bytes != 16) return -EFAULT;
+    addr = untagged_addr(addr);
+    status = walk_translate_va_to_pa(current->mm, addr, &first_physical);
+    if (status) return -EFAULT;
+
+    first_bytes = min_t(size_t, bytes, PAGE_SIZE - (addr & ~PAGE_MASK));
+    if (first_bytes == bytes)
     {
-    case 1:
-        return __put_user((u8)value, (u8 __user *)addr) ? -EFAULT : 0;
-    case 2:
-        return __put_user((u16)value, (u16 __user *)addr) ? -EFAULT : 0;
-    case 4:
-        return __put_user((u32)value, (u32 __user *)addr) ? -EFAULT : 0;
-    case 8:
-        return __put_user((u64)value, (u64 __user *)addr) ? -EFAULT : 0;
-    case 16:
-        if (__put_user((u64)value, (u64 __user *)addr)) return -EFAULT;
-        return __put_user((u64)(value >> 64), (u64 __user *)(addr + 8)) ? -EFAULT : 0;
-    default:
-        return -EFAULT;
+        return linear_write_physical(first_physical, &value, bytes);
     }
+
+    status = walk_translate_va_to_pa(current->mm, addr + first_bytes, &second_physical);
+    if (status) return -EFAULT;
+    status = linear_write_physical(first_physical, &value, first_bytes);
+    if (status) return status;
+    return linear_write_physical(second_physical, (uint8_t *)&value + first_bytes, bytes - first_bytes);
 }
 
 /* ---- 跨大类通用逻辑：系统/分支/访存/FP/数据处理按需复用 ---- */
@@ -181,42 +157,59 @@ static __always_inline void emu_write_nzcv(struct pt_regs *regs, uint64_t nzcv)
     regs->pstate = (regs->pstate & ~((1ULL << 31) | (1ULL << 30) | (1ULL << 29) | (1ULL << 28))) | (nzcv & ((1ULL << 31) | (1ULL << 30) | (1ULL << 29) | (1ULL << 28)));
 }
 
-#define EMU_COND_HW_CASE(NUM, COND)                 \
-    case NUM:                                       \
-        asm volatile("msr nzcv, %1\n"               \
-                     "cset %w0, " COND "\n"         \
-                     : "=r"(take)                   \
-                     : "r"(pstate & (0xFULL << 28)) \
-                     : "cc");                       \
-        break
-
 static __always_inline bool emu_cond_holds_hw(uint64_t pstate, uint32_t cond)
 {
     uint32_t take;
 
     switch (cond)
     {
-        EMU_COND_HW_CASE(0x0, "eq");
-        EMU_COND_HW_CASE(0x1, "ne");
-        EMU_COND_HW_CASE(0x2, "cs");
-        EMU_COND_HW_CASE(0x3, "cc");
-        EMU_COND_HW_CASE(0x4, "mi");
-        EMU_COND_HW_CASE(0x5, "pl");
-        EMU_COND_HW_CASE(0x6, "vs");
-        EMU_COND_HW_CASE(0x7, "vc");
-        EMU_COND_HW_CASE(0x8, "hi");
-        EMU_COND_HW_CASE(0x9, "ls");
-        EMU_COND_HW_CASE(0xA, "ge");
-        EMU_COND_HW_CASE(0xB, "lt");
-        EMU_COND_HW_CASE(0xC, "gt");
-        EMU_COND_HW_CASE(0xD, "le");
+    case 0x0:
+        asm volatile("msr nzcv, %1\ncset %w0, eq\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        break;
+    case 0x1:
+        asm volatile("msr nzcv, %1\ncset %w0, ne\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        break;
+    case 0x2:
+        asm volatile("msr nzcv, %1\ncset %w0, cs\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        break;
+    case 0x3:
+        asm volatile("msr nzcv, %1\ncset %w0, cc\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        break;
+    case 0x4:
+        asm volatile("msr nzcv, %1\ncset %w0, mi\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        break;
+    case 0x5:
+        asm volatile("msr nzcv, %1\ncset %w0, pl\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        break;
+    case 0x6:
+        asm volatile("msr nzcv, %1\ncset %w0, vs\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        break;
+    case 0x7:
+        asm volatile("msr nzcv, %1\ncset %w0, vc\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        break;
+    case 0x8:
+        asm volatile("msr nzcv, %1\ncset %w0, hi\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        break;
+    case 0x9:
+        asm volatile("msr nzcv, %1\ncset %w0, ls\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        break;
+    case 0xA:
+        asm volatile("msr nzcv, %1\ncset %w0, ge\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        break;
+    case 0xB:
+        asm volatile("msr nzcv, %1\ncset %w0, lt\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        break;
+    case 0xC:
+        asm volatile("msr nzcv, %1\ncset %w0, gt\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        break;
+    case 0xD:
+        asm volatile("msr nzcv, %1\ncset %w0, le\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        break;
     default:
         return true;
     }
     return take != 0;
 }
-
-#undef EMU_COND_HW_CASE
 
 static __always_inline bool emu_cond_select_hw(enum arm64_operation operation, uint64_t a, uint64_t b, uint64_t pstate, uint32_t condition, bool sf, uint64_t *result)
 {
@@ -699,9 +692,6 @@ static __always_inline enum emu_insn_result emu_simulate_system_insn(struct pt_r
     return EMU_INSN_SKIP;
 }
 
-#undef EMU_SYSTEM_OPTION_CASES
-#undef EMU_SYSTEM_OPTION_CASE
-
 static __always_inline enum emu_insn_result emu_simulate_branch_insn(struct pt_regs *regs, const struct arm64_decoded_insn *decoded, uint64_t pc)
 {
     switch (decoded->opcode)
@@ -1082,10 +1072,6 @@ done_ldst:
     regs->pc = pc + 4;
     return EMU_INSN_HANDLED;
 }
-
-#undef EMU_LDST_ST
-#undef EMU_LDST_SX
-#undef EMU_LDST_MASK
 
 /* FP / AdvSIMD 只保留装载现场、执行同语义指令、写回结果的局部缩写。 */
 #define EMU_FP_BIN(INST, DST, A, B)                               \
@@ -1491,10 +1477,6 @@ static __always_inline bool emu_simd_fp_by_element_hw(enum arm64_simd_operation 
     return true;
 }
 
-#undef EMU_SIMD_FP16_BY_ELEMENT_EXEC
-#undef EMU_SIMD_FP16_BY_ELEMENT_INST
-#undef EMU_SIMD_FP_BY_ELEMENT_EXEC
-
 #define EMU_SIMD_DUP_GENERAL_EXEC(ARR, VALUE)                     \
     do                                                            \
     {                                                             \
@@ -1538,8 +1520,6 @@ static __always_inline bool emu_simd_dup_general_hw(void *dst, uint64_t value, u
         return false;
     }
 }
-
-#undef EMU_SIMD_DUP_GENERAL_EXEC
 
 static __always_inline bool emu_simd_materialize_bits_hw(void *dst, uint64_t value, uint32_t vector_width)
 {
@@ -1982,11 +1962,6 @@ static __always_inline bool emu_simd_integer_3reg_hw(enum arm64_simd_operation o
     }
 }
 
-#undef EMU_SIMD_VECTOR_3REG_B_EXEC
-#undef EMU_SIMD_VECTOR_3REG_HS_EXEC
-#undef EMU_SIMD_VECTOR_3REG_BHS_EXEC
-#undef EMU_SIMD_VECTOR_3REG_ACC_EXEC
-
 #define EMU_SIMD_EXTRA_ACC_WIDTH_EXEC(V64_INST, V128_INST)                                            \
     do                                                                                                \
     {                                                                                                 \
@@ -2047,10 +2022,6 @@ static __always_inline bool emu_simd_vector_3same_extra_hw(enum arm64_simd_opera
         return false;
     }
 }
-
-#undef EMU_SIMD_RDM_VECTOR_EXEC
-#undef EMU_SIMD_EXTRA_ACC_128_EXEC
-#undef EMU_SIMD_EXTRA_ACC_WIDTH_EXEC
 
 static __always_inline bool emu_simd_scalar_rdm_hw(enum arm64_simd_operation operation, void *dst, const void *left, const void *right, uint32_t element_width)
 {
@@ -2210,11 +2181,6 @@ static __always_inline bool emu_simd_scalar_3same_hw(enum arm64_simd_operation o
     }
 }
 
-#undef EMU_SIMD_SCALAR_FP_EXEC
-#undef EMU_SIMD_SCALAR_D_EXEC
-#undef EMU_SIMD_SCALAR_HS_EXEC
-#undef EMU_SIMD_SCALAR_BHSD_EXEC
-
 #define EMU_SIMD_INDEXED_ACC_WIDTH_EXEC(V64_INST, V128_INST)                                              \
     do                                                                                                    \
     {                                                                                                     \
@@ -2233,14 +2199,15 @@ static __always_inline bool emu_simd_extra_by_element_hw(enum arm64_simd_operati
     {
     case ARM64_SIMD_OP_SQRDMLAH:
     case ARM64_SIMD_OP_SQRDMLSH:
+        if ((element_width != 16 && element_width != 32) || (scalar ? operand_width != element_width : (operand_width != 64 && operand_width != 128)) || !emu_simd_current_cpu_has_feature(EMU_SIMD_CPU_FEATURE_RDM)) return false;
         if (!emu_simd_extract_lane_hw(right, element_width, lane_index, &lane_value)) return false;
         if (scalar)
         {
-            if (operand_width != element_width || !emu_simd_write_scalar_hw(&element, lane_value, element_width)) return false;
+            if (!emu_simd_write_scalar_hw(&element, lane_value, element_width)) return false;
             return emu_simd_scalar_rdm_hw(operation, dst, left, &element, element_width);
         }
         if (!emu_simd_dup_general_hw(&element, lane_value, element_width, operand_width)) return false;
-        return emu_simd_integer_3reg_hw(operation, dst, left, &element, element_width, operand_width);
+        return emu_simd_vector_3same_extra_hw(operation, dst, left, &element, element_width, result_element_width, operand_width, flags);
     case ARM64_SIMD_OP_SDOT:
         if (scalar || element_width != 8 || result_element_width != 32 || !emu_simd_current_cpu_has_feature(EMU_SIMD_CPU_FEATURE_DOTPROD)) return false;
         if (!emu_simd_extract_lane_hw(right, 32, lane_index, &lane_value) || !emu_simd_write_scalar_hw(&element, lane_value, 32)) return false;
@@ -2271,8 +2238,6 @@ static __always_inline bool emu_simd_extra_by_element_hw(enum arm64_simd_operati
         return false;
     }
 }
-
-#undef EMU_SIMD_INDEXED_ACC_WIDTH_EXEC
 
 #define EMU_SIMD_FHM_WIDTH_EXEC(V64_INST, V128_INST, RIGHT)                                            \
     do                                                                                                 \
@@ -2323,8 +2288,6 @@ static __always_inline bool emu_simd_fhm_by_element_hw(enum arm64_simd_operation
         return false;
     }
 }
-
-#undef EMU_SIMD_FHM_WIDTH_EXEC
 
 #define EMU_SIMD_FCMLA_ROTATION_EXEC(INST0, INST90, INST180, INST270, RIGHT) \
     do                                                                       \
@@ -2382,8 +2345,6 @@ static __always_inline bool emu_simd_fcma_vector_hw(enum arm64_simd_operation op
     return false;
 }
 
-#undef EMU_SIMD_FCADD_ROTATION_EXEC
-
 static __always_inline bool emu_simd_fcma_by_element_hw(void *dst, const void *left, const void *right, uint32_t element_width, uint32_t operand_width, uint32_t lane_index, uint32_t rotation)
 {
     __uint128_t element;
@@ -2399,8 +2360,6 @@ static __always_inline bool emu_simd_fcma_by_element_hw(void *dst, const void *l
     if (operand_width == 128 && element_width == 32) EMU_SIMD_FCMLA_ROTATION_EXEC(0x6F821020, 0x6F823020, 0x6F825020, 0x6F827020, &element);
     return false;
 }
-
-#undef EMU_SIMD_FCMLA_ROTATION_EXEC
 
 static __always_inline bool emu_simd_permute_hw(enum arm64_simd_operation operation, void *dst, const void *left, const void *right, uint32_t element_width, uint32_t vector_width)
 {
@@ -2479,11 +2438,6 @@ static __always_inline bool emu_simd_logical_hw(enum arm64_simd_operation operat
         return false;
     }
 }
-
-#undef EMU_SIMD_LOGICAL_BIN_EXEC
-#undef EMU_SIMD_LOGICAL_MASK_EXEC
-
-#undef EMU_SIMD_VECTOR_3REG_EXEC
 
 #define EMU_SIMD_FP_VECTOR_BIN_SHAPE(INST, V4H_INST, V8H_INST)                                                             \
     do                                                                                                                     \
@@ -2600,10 +2554,6 @@ static __always_inline bool emu_simd_fp_vector_3reg_hw(enum arm64_simd_operation
     }
 }
 
-#undef EMU_SIMD_FP_VECTOR_INST_SHAPE
-#undef EMU_SIMD_FP_VECTOR_ACC_SHAPE
-#undef EMU_SIMD_FP_VECTOR_BIN_SHAPE
-
 #define EMU_SIMD_FP_VECTOR_UN_SHAPE(INST, V4H_INST, V8H_INST)                                                        \
     do                                                                                                               \
     {                                                                                                                \
@@ -2632,8 +2582,6 @@ static __always_inline bool emu_simd_fp_vector_2reg_hw(enum arm64_simd_operation
         return false;
     }
 }
-
-#undef EMU_SIMD_FP_VECTOR_UN_SHAPE
 
 static __always_inline bool emu_simd_rev_hw(enum arm64_simd_operation operation, void *dst, const void *source, uint32_t element_width, uint32_t vector_width)
 {
@@ -2765,8 +2713,6 @@ static __always_inline bool emu_simd_shift_hw(enum arm64_simd_operation operatio
     }
 }
 
-#undef EMU_SIMD_SHIFT_EXEC
-
 #define EMU_SIMD_EXT_CASE(N, ARR)                                                     \
     case N:                                                                           \
         EMU_FP_BIN("ext v0." ARR ", v1." ARR ", v2." ARR ", #" #N, dst, left, right); \
@@ -2813,8 +2759,6 @@ static __always_inline bool emu_simd_ext_hw(void *dst, const void *left, const v
         return false;
     }
 }
-
-#undef EMU_SIMD_EXT_CASE
 
 #define EMU_SIMD_FP_COMPARE_ZERO_FP16_INST(INSTRUCTION)                 \
     do                                                                  \
@@ -2866,22 +2810,14 @@ static __always_inline bool emu_simd_fp_compare_zero_hw(enum arm64_simd_operatio
     }
 }
 
-#undef EMU_SIMD_FP_COMPARE_ZERO_SHAPE
-#undef EMU_SIMD_FP_COMPARE_ZERO_FP16_INST
-
 static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_regs *regs, const struct arm64_decoded_insn *decoded, uint64_t pc)
 {
     const struct arm64_simd_operands *operands = &decoded->operands.simd;
     __uint128_t fp_regs[32];
-    uint32_t fpsr, fpcr;
     enum emu_insn_result result = EMU_INSN_SKIP;
     int i;
 
     for (i = 0; i < 32; i++) read_q_reg(i, &fp_regs[i]);
-    fpsr = read_fpsr();
-    fpcr = read_fpcr();
-    write_fpsr(fpsr);
-    write_fpcr(fpcr);
 
     if (operands->form == ARM64_SIMD_FORM_VECTOR_IMMEDIATE)
     {
@@ -3614,22 +3550,10 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
     }
     if (result != EMU_INSN_HANDLED) return result;
 
-    fpsr = read_fpsr();
     for (i = 0; i < 32; i++) write_q_reg(i, &fp_regs[i]);
-    write_fpsr(fpsr);
-    write_fpcr(fpcr);
     regs->pc = pc + 4;
     return EMU_INSN_HANDLED;
 }
-
-#undef EMU_VEC_ACC
-#undef EMU_FP_TERN
-#undef EMU_FP_CONVERT_GPR
-#undef EMU_FP_CONVERT_SIMD
-#undef EMU_GPR_TO_FP_MERGE
-#undef EMU_FP_UN_MERGE
-#undef EMU_FP_UN
-#undef EMU_FP_BIN
 
 static __always_inline uint64_t emu_dp_mask(bool sf)
 {

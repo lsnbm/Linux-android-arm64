@@ -179,6 +179,9 @@ static inline int pte_read_physical(phys_addr_t paddr, void *buffer, size_t size
     case 8:
         __builtin_memcpy(buffer, mapped, 8);
         break;
+    case 16:
+        __builtin_memcpy(buffer, mapped, 16);
+        break;
     default:
         __builtin_memcpy(buffer, mapped, size);
         break;
@@ -209,6 +212,9 @@ static inline int pte_write_physical(phys_addr_t paddr, const void *buffer, size
         break;
     case 8:
         __builtin_memcpy(mapped, buffer, 8);
+        break;
+    case 16:
+        __builtin_memcpy(mapped, buffer, 16);
         break;
     default:
         __builtin_memcpy(mapped, buffer, size);
@@ -368,6 +374,9 @@ static inline int linear_read_physical(phys_addr_t paddr, void *buffer, size_t s
     case 8:
         __builtin_memcpy(buffer, kernel_vaddr, 8);
         break;
+    case 16:
+        __builtin_memcpy(buffer, kernel_vaddr, 16);
+        break;
     default:
         __builtin_memcpy(buffer, kernel_vaddr, size);
         break;
@@ -377,7 +386,7 @@ static inline int linear_read_physical(phys_addr_t paddr, void *buffer, size_t s
 }
 
 // 写入
-static inline int linear_write_physical(phys_addr_t paddr, void *buffer, size_t size)
+static inline int linear_write_physical(phys_addr_t paddr, const void *buffer, size_t size)
 {
     void *kernel_vaddr = phys_to_virt(paddr);
 
@@ -401,6 +410,9 @@ static inline int linear_write_physical(phys_addr_t paddr, void *buffer, size_t 
     case 8:
         __builtin_memcpy(kernel_vaddr, buffer, 8);
         break;
+    case 16:
+        __builtin_memcpy(kernel_vaddr, buffer, 16);
+        break;
     default:
         __builtin_memcpy(kernel_vaddr, buffer, size);
         break;
@@ -419,52 +431,52 @@ static inline int walk_translate_va_to_pa(struct mm_struct *mm, uint64_t vaddr, 
     pte_t *ptep, pte;
     unsigned long pfn;
 
-    if (!mm || !paddr) return -1;
+    if (!mm || !paddr) return -EINVAL;
 
     // PGD Level
     pgd = pgd_offset(mm, vaddr);
-    if (pgd_none(*pgd) || pgd_bad(*pgd)) return -1;
+    if (pgd_none(*pgd) || pgd_bad(*pgd)) return -EFAULT;
 
     // P4D Level
     p4d = p4d_offset(pgd, vaddr);
-    if (p4d_none(*p4d) || p4d_bad(*p4d)) return -1;
+    if (p4d_none(*p4d) || p4d_bad(*p4d)) return -EFAULT;
 
     // PUD Level (可能遇到 1GB 大页)
     pud = pud_offset(p4d, vaddr);
-    if (pud_none(*pud)) return -1;
+    if (pud_none(*pud)) return -EFAULT;
 
     // 检查是否是 1G 大页
     if (pud_leaf(*pud))
     {
         // 检查pfn
         pfn = pud_pfn(*pud);
-        if (!pfn_valid(pfn)) return -1;
+        if (!pfn_valid(pfn)) return -EFAULT;
 
         *paddr = (pud_pfn(*pud) << PAGE_SHIFT) + (vaddr & ~PUD_MASK);
         return 0;
     }
-    if (pud_bad(*pud)) return -1;
+    if (pud_bad(*pud)) return -EFAULT;
 
     //  PMD Level (可能遇到 2MB 大页)
     pmd = pmd_offset(pud, vaddr);
-    if (pmd_none(*pmd)) return -1;
+    if (pmd_none(*pmd)) return -EFAULT;
 
     // 检查是否是 2M 大页
     if (pmd_leaf(*pmd))
     {
         // 检查pfn
         pfn = pmd_pfn(*pmd);
-        if (!pfn_valid(pfn)) return -1;
+        if (!pfn_valid(pfn)) return -EFAULT;
 
         *paddr = (pmd_pfn(*pmd) << PAGE_SHIFT) + (vaddr & ~PMD_MASK);
         return 0;
     }
-    if (pmd_bad(*pmd)) return -1;
+    if (pmd_bad(*pmd)) return -EFAULT;
 
     //  PTE Level (普通的 4KB 页)
     // 较新内核中 __pte_offset_map 不导出，对于 64位 系统直接使用 pte_offset_kernel 即可
     ptep = pte_offset_kernel(pmd, vaddr);
-    if (!ptep) return -1;
+    if (!ptep) return -EFAULT;
 
     pte = *ptep;
 
@@ -474,13 +486,13 @@ static inline int walk_translate_va_to_pa(struct mm_struct *mm, uint64_t vaddr, 
     {
         // 检查pfn
         pfn = pte_pfn(pte);
-        if (!pfn_valid(pfn)) return -1;
+        if (!pfn_valid(pfn)) return -EFAULT;
 
         *paddr = (pte_pfn(pte) << PAGE_SHIFT) + (vaddr & ~PAGE_MASK);
         return 0;
     }
 
-    return -1;
+    return -EFAULT;
 }
 
 // 进程读写

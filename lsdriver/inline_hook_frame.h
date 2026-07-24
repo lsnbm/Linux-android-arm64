@@ -100,11 +100,30 @@ static void hook_save_orig_insns(uint64_t addr, uint32_t *insns, int count)
 
 static int hook_validate_orig_insns(uint64_t addr, const uint32_t *insns, int count)
 {
+    struct arm64_decoded_insn decoded;
     int i;
 
     for (i = 0; i < count; i++)
     {
-        if (!arm64_decode_insn_has_effect(insns[i], ARM64_EFFECT_PC_RELATIVE)) continue;
+        decoded = arm64_decode_insn(insns[i]);
+
+        switch (decoded.opcode)
+        {
+        case ARM64_OP_ADR:
+        case ARM64_OP_ADRP:
+        case ARM64_OP_B:
+        case ARM64_OP_BL:
+        case ARM64_OP_B_COND:
+        case ARM64_OP_CBZ:
+        case ARM64_OP_CBNZ:
+        case ARM64_OP_TBZ:
+        case ARM64_OP_TBNZ:
+        case ARM64_OP_LOAD_LITERAL:
+        case ARM64_OP_PREFETCH_LITERAL:
+            break;
+        default:
+            continue;
+        }
 
         ls_log_tag("hook", "pc-relative instruction cannot be replayed addr=0x%llx insn=%08x\n", (unsigned long long)(addr + i * 4), insns[i]);
         return -EOPNOTSUPP;

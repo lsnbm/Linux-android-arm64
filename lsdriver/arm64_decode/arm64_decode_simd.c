@@ -34,10 +34,14 @@ static arm64_u8 arm64_simd_scalar_fp_width(arm64_u32 type)
 {
     switch (type)
     {
-    case 0: return 32;
-    case 1: return 64;
-    case 3: return 16;
-    default: return 0;
+    case 0:
+        return 32;
+    case 1:
+        return 64;
+    case 3:
+        return 16;
+    default:
+        return 0;
     }
 }
 
@@ -437,52 +441,143 @@ static enum arm64_simd_operation arm64_simd_decode_integer_3same_operation(arm64
     *valid_sizes = 0;
     switch ((u << 5) | opcode)
     {
-    case 0x00: *valid_sizes = 0x7; return ARM64_SIMD_OP_SHADD;
-    case 0x01: *valid_sizes = 0xF; return ARM64_SIMD_OP_SQADD;
-    case 0x02: *valid_sizes = 0x7; return ARM64_SIMD_OP_SRHADD;
-    case 0x04: *valid_sizes = 0x7; return ARM64_SIMD_OP_SHSUB;
-    case 0x05: *valid_sizes = 0xF; return ARM64_SIMD_OP_SQSUB;
-    case 0x06: *valid_sizes = 0xF; return ARM64_SIMD_OP_CMGT;
-    case 0x07: *valid_sizes = 0xF; return ARM64_SIMD_OP_CMGE;
-    case 0x08: *valid_sizes = 0xF; return ARM64_SIMD_OP_SSHL;
-    case 0x09: *valid_sizes = 0xF; return ARM64_SIMD_OP_SQSHL;
-    case 0x0A: *valid_sizes = 0xF; return ARM64_SIMD_OP_SRSHL;
-    case 0x0B: *valid_sizes = 0xF; return ARM64_SIMD_OP_SQRSHL;
-    case 0x0C: *valid_sizes = 0x7; return ARM64_SIMD_OP_SMAX;
-    case 0x0D: *valid_sizes = 0x7; return ARM64_SIMD_OP_SMIN;
-    case 0x0E: *valid_sizes = 0x7; return ARM64_SIMD_OP_SABD;
-    case 0x0F: *valid_sizes = 0x7; return ARM64_SIMD_OP_SABA;
-    case 0x10: *valid_sizes = 0xF; return ARM64_SIMD_OP_ADD;
-    case 0x11: *valid_sizes = 0xF; return ARM64_SIMD_OP_CMTST;
-    case 0x12: *valid_sizes = 0x7; return ARM64_SIMD_OP_MLA;
-    case 0x13: *valid_sizes = 0x7; return ARM64_SIMD_OP_MUL;
-    case 0x14: *valid_sizes = 0x7; return ARM64_SIMD_OP_SMAXP;
-    case 0x15: *valid_sizes = 0x7; return ARM64_SIMD_OP_SMINP;
-    case 0x16: *valid_sizes = 0x6; return ARM64_SIMD_OP_SQDMULH;
-    case 0x17: *valid_sizes = 0xF; return ARM64_SIMD_OP_ADDP;
-    case 0x20: *valid_sizes = 0x7; return ARM64_SIMD_OP_UHADD;
-    case 0x21: *valid_sizes = 0xF; return ARM64_SIMD_OP_UQADD;
-    case 0x22: *valid_sizes = 0x7; return ARM64_SIMD_OP_URHADD;
-    case 0x24: *valid_sizes = 0x7; return ARM64_SIMD_OP_UHSUB;
-    case 0x25: *valid_sizes = 0xF; return ARM64_SIMD_OP_UQSUB;
-    case 0x26: *valid_sizes = 0xF; return ARM64_SIMD_OP_CMHI;
-    case 0x27: *valid_sizes = 0xF; return ARM64_SIMD_OP_CMHS;
-    case 0x28: *valid_sizes = 0xF; return ARM64_SIMD_OP_USHL;
-    case 0x29: *valid_sizes = 0xF; return ARM64_SIMD_OP_UQSHL;
-    case 0x2A: *valid_sizes = 0xF; return ARM64_SIMD_OP_URSHL;
-    case 0x2B: *valid_sizes = 0xF; return ARM64_SIMD_OP_UQRSHL;
-    case 0x2C: *valid_sizes = 0x7; return ARM64_SIMD_OP_UMAX;
-    case 0x2D: *valid_sizes = 0x7; return ARM64_SIMD_OP_UMIN;
-    case 0x2E: *valid_sizes = 0x7; return ARM64_SIMD_OP_UABD;
-    case 0x2F: *valid_sizes = 0x7; return ARM64_SIMD_OP_UABA;
-    case 0x30: *valid_sizes = 0xF; return ARM64_SIMD_OP_SUB;
-    case 0x31: *valid_sizes = 0xF; return ARM64_SIMD_OP_CMEQ;
-    case 0x32: *valid_sizes = 0x7; return ARM64_SIMD_OP_MLS;
-    case 0x33: *valid_sizes = 0x1; return ARM64_SIMD_OP_PMUL;
-    case 0x34: *valid_sizes = 0x7; return ARM64_SIMD_OP_UMAXP;
-    case 0x35: *valid_sizes = 0x7; return ARM64_SIMD_OP_UMINP;
-    case 0x36: *valid_sizes = 0x6; return ARM64_SIMD_OP_SQRDMULH;
-    default: return ARM64_SIMD_OP_NONE;
+    case 0x00:
+        *valid_sizes = 0x7;
+        return ARM64_SIMD_OP_SHADD;
+    case 0x01:
+        *valid_sizes = 0xF;
+        return ARM64_SIMD_OP_SQADD;
+    case 0x02:
+        *valid_sizes = 0x7;
+        return ARM64_SIMD_OP_SRHADD;
+    case 0x04:
+        *valid_sizes = 0x7;
+        return ARM64_SIMD_OP_SHSUB;
+    case 0x05:
+        *valid_sizes = 0xF;
+        return ARM64_SIMD_OP_SQSUB;
+    case 0x06:
+        *valid_sizes = 0xF;
+        return ARM64_SIMD_OP_CMGT;
+    case 0x07:
+        *valid_sizes = 0xF;
+        return ARM64_SIMD_OP_CMGE;
+    case 0x08:
+        *valid_sizes = 0xF;
+        return ARM64_SIMD_OP_SSHL;
+    case 0x09:
+        *valid_sizes = 0xF;
+        return ARM64_SIMD_OP_SQSHL;
+    case 0x0A:
+        *valid_sizes = 0xF;
+        return ARM64_SIMD_OP_SRSHL;
+    case 0x0B:
+        *valid_sizes = 0xF;
+        return ARM64_SIMD_OP_SQRSHL;
+    case 0x0C:
+        *valid_sizes = 0x7;
+        return ARM64_SIMD_OP_SMAX;
+    case 0x0D:
+        *valid_sizes = 0x7;
+        return ARM64_SIMD_OP_SMIN;
+    case 0x0E:
+        *valid_sizes = 0x7;
+        return ARM64_SIMD_OP_SABD;
+    case 0x0F:
+        *valid_sizes = 0x7;
+        return ARM64_SIMD_OP_SABA;
+    case 0x10:
+        *valid_sizes = 0xF;
+        return ARM64_SIMD_OP_ADD;
+    case 0x11:
+        *valid_sizes = 0xF;
+        return ARM64_SIMD_OP_CMTST;
+    case 0x12:
+        *valid_sizes = 0x7;
+        return ARM64_SIMD_OP_MLA;
+    case 0x13:
+        *valid_sizes = 0x7;
+        return ARM64_SIMD_OP_MUL;
+    case 0x14:
+        *valid_sizes = 0x7;
+        return ARM64_SIMD_OP_SMAXP;
+    case 0x15:
+        *valid_sizes = 0x7;
+        return ARM64_SIMD_OP_SMINP;
+    case 0x16:
+        *valid_sizes = 0x6;
+        return ARM64_SIMD_OP_SQDMULH;
+    case 0x17:
+        *valid_sizes = 0xF;
+        return ARM64_SIMD_OP_ADDP;
+    case 0x20:
+        *valid_sizes = 0x7;
+        return ARM64_SIMD_OP_UHADD;
+    case 0x21:
+        *valid_sizes = 0xF;
+        return ARM64_SIMD_OP_UQADD;
+    case 0x22:
+        *valid_sizes = 0x7;
+        return ARM64_SIMD_OP_URHADD;
+    case 0x24:
+        *valid_sizes = 0x7;
+        return ARM64_SIMD_OP_UHSUB;
+    case 0x25:
+        *valid_sizes = 0xF;
+        return ARM64_SIMD_OP_UQSUB;
+    case 0x26:
+        *valid_sizes = 0xF;
+        return ARM64_SIMD_OP_CMHI;
+    case 0x27:
+        *valid_sizes = 0xF;
+        return ARM64_SIMD_OP_CMHS;
+    case 0x28:
+        *valid_sizes = 0xF;
+        return ARM64_SIMD_OP_USHL;
+    case 0x29:
+        *valid_sizes = 0xF;
+        return ARM64_SIMD_OP_UQSHL;
+    case 0x2A:
+        *valid_sizes = 0xF;
+        return ARM64_SIMD_OP_URSHL;
+    case 0x2B:
+        *valid_sizes = 0xF;
+        return ARM64_SIMD_OP_UQRSHL;
+    case 0x2C:
+        *valid_sizes = 0x7;
+        return ARM64_SIMD_OP_UMAX;
+    case 0x2D:
+        *valid_sizes = 0x7;
+        return ARM64_SIMD_OP_UMIN;
+    case 0x2E:
+        *valid_sizes = 0x7;
+        return ARM64_SIMD_OP_UABD;
+    case 0x2F:
+        *valid_sizes = 0x7;
+        return ARM64_SIMD_OP_UABA;
+    case 0x30:
+        *valid_sizes = 0xF;
+        return ARM64_SIMD_OP_SUB;
+    case 0x31:
+        *valid_sizes = 0xF;
+        return ARM64_SIMD_OP_CMEQ;
+    case 0x32:
+        *valid_sizes = 0x7;
+        return ARM64_SIMD_OP_MLS;
+    case 0x33:
+        *valid_sizes = 0x1;
+        return ARM64_SIMD_OP_PMUL;
+    case 0x34:
+        *valid_sizes = 0x7;
+        return ARM64_SIMD_OP_UMAXP;
+    case 0x35:
+        *valid_sizes = 0x7;
+        return ARM64_SIMD_OP_UMINP;
+    case 0x36:
+        *valid_sizes = 0x6;
+        return ARM64_SIMD_OP_SQRDMULH;
+    default:
+        return ARM64_SIMD_OP_NONE;
     }
 }
 
@@ -490,34 +585,62 @@ static enum arm64_simd_operation arm64_simd_decode_fp_3same_operation(arm64_u8 u
 {
     switch ((u << 6) | (alternate << 5) | opcode)
     {
-    case 0x18: return ARM64_SIMD_OP_FMAXNM;
-    case 0x19: return ARM64_SIMD_OP_FMLA;
-    case 0x1A: return ARM64_SIMD_OP_FADD;
-    case 0x1B: return ARM64_SIMD_OP_FMULX;
-    case 0x1C: return ARM64_SIMD_OP_FCMEQ;
-    case 0x1E: return ARM64_SIMD_OP_FMAX;
-    case 0x1F: return ARM64_SIMD_OP_FRECPS;
-    case 0x38: return ARM64_SIMD_OP_FMINNM;
-    case 0x39: return ARM64_SIMD_OP_FMLS;
-    case 0x3A: return ARM64_SIMD_OP_FSUB;
-    case 0x3B: return ARM64_SIMD_OP_FAMAX;
-    case 0x3E: return ARM64_SIMD_OP_FMIN;
-    case 0x3F: return ARM64_SIMD_OP_FRSQRTS;
-    case 0x58: return ARM64_SIMD_OP_FMAXNMP;
-    case 0x5A: return ARM64_SIMD_OP_FADDP;
-    case 0x5B: return ARM64_SIMD_OP_FMUL;
-    case 0x5C: return ARM64_SIMD_OP_FCMGE;
-    case 0x5D: return ARM64_SIMD_OP_FACGE;
-    case 0x5E: return ARM64_SIMD_OP_FMAXP;
-    case 0x5F: return ARM64_SIMD_OP_FDIV;
-    case 0x78: return ARM64_SIMD_OP_FMINNMP;
-    case 0x7A: return ARM64_SIMD_OP_FABD;
-    case 0x7B: return ARM64_SIMD_OP_FAMIN;
-    case 0x7C: return ARM64_SIMD_OP_FCMGT;
-    case 0x7D: return ARM64_SIMD_OP_FACGT;
-    case 0x7E: return ARM64_SIMD_OP_FMINP;
-    case 0x7F: return ARM64_SIMD_OP_FSCALE;
-    default: return ARM64_SIMD_OP_NONE;
+    case 0x18:
+        return ARM64_SIMD_OP_FMAXNM;
+    case 0x19:
+        return ARM64_SIMD_OP_FMLA;
+    case 0x1A:
+        return ARM64_SIMD_OP_FADD;
+    case 0x1B:
+        return ARM64_SIMD_OP_FMULX;
+    case 0x1C:
+        return ARM64_SIMD_OP_FCMEQ;
+    case 0x1E:
+        return ARM64_SIMD_OP_FMAX;
+    case 0x1F:
+        return ARM64_SIMD_OP_FRECPS;
+    case 0x38:
+        return ARM64_SIMD_OP_FMINNM;
+    case 0x39:
+        return ARM64_SIMD_OP_FMLS;
+    case 0x3A:
+        return ARM64_SIMD_OP_FSUB;
+    case 0x3B:
+        return ARM64_SIMD_OP_FAMAX;
+    case 0x3E:
+        return ARM64_SIMD_OP_FMIN;
+    case 0x3F:
+        return ARM64_SIMD_OP_FRSQRTS;
+    case 0x58:
+        return ARM64_SIMD_OP_FMAXNMP;
+    case 0x5A:
+        return ARM64_SIMD_OP_FADDP;
+    case 0x5B:
+        return ARM64_SIMD_OP_FMUL;
+    case 0x5C:
+        return ARM64_SIMD_OP_FCMGE;
+    case 0x5D:
+        return ARM64_SIMD_OP_FACGE;
+    case 0x5E:
+        return ARM64_SIMD_OP_FMAXP;
+    case 0x5F:
+        return ARM64_SIMD_OP_FDIV;
+    case 0x78:
+        return ARM64_SIMD_OP_FMINNMP;
+    case 0x7A:
+        return ARM64_SIMD_OP_FABD;
+    case 0x7B:
+        return ARM64_SIMD_OP_FAMIN;
+    case 0x7C:
+        return ARM64_SIMD_OP_FCMGT;
+    case 0x7D:
+        return ARM64_SIMD_OP_FACGT;
+    case 0x7E:
+        return ARM64_SIMD_OP_FMINP;
+    case 0x7F:
+        return ARM64_SIMD_OP_FSCALE;
+    default:
+        return ARM64_SIMD_OP_NONE;
     }
 }
 
@@ -648,14 +771,30 @@ static enum arm64_decode_status arm64_simd_decode_vector_3same(arm64_u32 raw, st
         decoded->operands.simd.form = ARM64_SIMD_FORM_VECTOR_LOGICAL;
         switch ((u << 2) | size)
         {
-        case 0: decoded->operands.simd.operation = ARM64_SIMD_OP_AND; break;
-        case 1: decoded->operands.simd.operation = ARM64_SIMD_OP_BIC; break;
-        case 2: decoded->operands.simd.operation = ARM64_SIMD_OP_ORR; break;
-        case 3: decoded->operands.simd.operation = ARM64_SIMD_OP_ORN; break;
-        case 4: decoded->operands.simd.operation = ARM64_SIMD_OP_EOR; break;
-        case 5: decoded->operands.simd.operation = ARM64_SIMD_OP_BSL; break;
-        case 6: decoded->operands.simd.operation = ARM64_SIMD_OP_BIT; break;
-        case 7: decoded->operands.simd.operation = ARM64_SIMD_OP_BIF; break;
+        case 0:
+            decoded->operands.simd.operation = ARM64_SIMD_OP_AND;
+            break;
+        case 1:
+            decoded->operands.simd.operation = ARM64_SIMD_OP_BIC;
+            break;
+        case 2:
+            decoded->operands.simd.operation = ARM64_SIMD_OP_ORR;
+            break;
+        case 3:
+            decoded->operands.simd.operation = ARM64_SIMD_OP_ORN;
+            break;
+        case 4:
+            decoded->operands.simd.operation = ARM64_SIMD_OP_EOR;
+            break;
+        case 5:
+            decoded->operands.simd.operation = ARM64_SIMD_OP_BSL;
+            break;
+        case 6:
+            decoded->operands.simd.operation = ARM64_SIMD_OP_BIT;
+            break;
+        case 7:
+            decoded->operands.simd.operation = ARM64_SIMD_OP_BIF;
+            break;
         }
         decoded->operands.simd.element_width = 8;
         return ARM64_DECODE_OK;
@@ -723,7 +862,7 @@ static enum arm64_decode_status arm64_simd_decode_scalar_3same(arm64_u32 raw, st
 
     if (extra)
     {
-        if (!u || size == 0 || size == 3) return ARM64_DECODE_UNALLOCATED;
+        if (!u || size == 0 || size == 3 || (opcode & 0x1E) != 0x10) return ARM64_DECODE_UNALLOCATED;
 
         decoded->operands.simd.form = ARM64_SIMD_FORM_SCALAR_SIMD_3REG;
         decoded->operands.simd.operation = raw & (1U << 11) ? ARM64_SIMD_OP_SQRDMLSH : ARM64_SIMD_OP_SQRDMLAH;
@@ -744,28 +883,72 @@ static enum arm64_decode_status arm64_simd_decode_scalar_3same(arm64_u32 raw, st
     {
         switch ((u << 5) | opcode)
         {
-        case 0x01: operation = ARM64_SIMD_OP_SQADD; break;
-        case 0x05: operation = ARM64_SIMD_OP_SQSUB; break;
-        case 0x09: operation = ARM64_SIMD_OP_SQSHL; break;
-        case 0x0B: operation = ARM64_SIMD_OP_SQRSHL; break;
-        case 0x16: operation = ARM64_SIMD_OP_SQDMULH; break;
-        case 0x21: operation = ARM64_SIMD_OP_UQADD; break;
-        case 0x25: operation = ARM64_SIMD_OP_UQSUB; break;
-        case 0x29: operation = ARM64_SIMD_OP_UQSHL; break;
-        case 0x2B: operation = ARM64_SIMD_OP_UQRSHL; break;
-        case 0x36: operation = ARM64_SIMD_OP_SQRDMULH; break;
-        case 0x06: operation = ARM64_SIMD_OP_CMGT; break;
-        case 0x07: operation = ARM64_SIMD_OP_CMGE; break;
-        case 0x08: operation = ARM64_SIMD_OP_SSHL; break;
-        case 0x0A: operation = ARM64_SIMD_OP_SRSHL; break;
-        case 0x10: operation = ARM64_SIMD_OP_ADD; break;
-        case 0x11: operation = ARM64_SIMD_OP_CMTST; break;
-        case 0x26: operation = ARM64_SIMD_OP_CMHI; break;
-        case 0x27: operation = ARM64_SIMD_OP_CMHS; break;
-        case 0x28: operation = ARM64_SIMD_OP_USHL; break;
-        case 0x2A: operation = ARM64_SIMD_OP_URSHL; break;
-        case 0x30: operation = ARM64_SIMD_OP_SUB; break;
-        case 0x31: operation = ARM64_SIMD_OP_CMEQ; break;
+        case 0x01:
+            operation = ARM64_SIMD_OP_SQADD;
+            break;
+        case 0x05:
+            operation = ARM64_SIMD_OP_SQSUB;
+            break;
+        case 0x09:
+            operation = ARM64_SIMD_OP_SQSHL;
+            break;
+        case 0x0B:
+            operation = ARM64_SIMD_OP_SQRSHL;
+            break;
+        case 0x16:
+            operation = ARM64_SIMD_OP_SQDMULH;
+            break;
+        case 0x21:
+            operation = ARM64_SIMD_OP_UQADD;
+            break;
+        case 0x25:
+            operation = ARM64_SIMD_OP_UQSUB;
+            break;
+        case 0x29:
+            operation = ARM64_SIMD_OP_UQSHL;
+            break;
+        case 0x2B:
+            operation = ARM64_SIMD_OP_UQRSHL;
+            break;
+        case 0x36:
+            operation = ARM64_SIMD_OP_SQRDMULH;
+            break;
+        case 0x06:
+            operation = ARM64_SIMD_OP_CMGT;
+            break;
+        case 0x07:
+            operation = ARM64_SIMD_OP_CMGE;
+            break;
+        case 0x08:
+            operation = ARM64_SIMD_OP_SSHL;
+            break;
+        case 0x0A:
+            operation = ARM64_SIMD_OP_SRSHL;
+            break;
+        case 0x10:
+            operation = ARM64_SIMD_OP_ADD;
+            break;
+        case 0x11:
+            operation = ARM64_SIMD_OP_CMTST;
+            break;
+        case 0x26:
+            operation = ARM64_SIMD_OP_CMHI;
+            break;
+        case 0x27:
+            operation = ARM64_SIMD_OP_CMHS;
+            break;
+        case 0x28:
+            operation = ARM64_SIMD_OP_USHL;
+            break;
+        case 0x2A:
+            operation = ARM64_SIMD_OP_URSHL;
+            break;
+        case 0x30:
+            operation = ARM64_SIMD_OP_SUB;
+            break;
+        case 0x31:
+            operation = ARM64_SIMD_OP_CMEQ;
+            break;
         default:
             operation = arm64_simd_decode_fp_3same_operation(u, size >> 1, opcode);
             if (!arm64_simd_is_scalar_fp_3same_operation(operation)) return ARM64_DECODE_UNALLOCATED;

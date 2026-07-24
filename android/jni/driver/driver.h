@@ -997,6 +997,9 @@ private: // 私有实现，外部无需关系
             case 8:
                 __builtin_memcpy(destination, source, 8);
                 break;
+            case 16:
+                __builtin_memcpy(destination, source, 16);
+                break;
             default:
                 __builtin_memcpy(destination, source, copy_size);
                 break;
