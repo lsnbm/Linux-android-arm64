@@ -105,7 +105,6 @@ static void ptebp_drop_all_monitors(bool lock_mm)
         else if (!write_user_pte_value(mm, page->addr, pte_val(page->orig_pte))) live->armed = false;
     }
 
-    g_ptebp_info = NULL;
     spin_unlock_irqrestore(&g_ptebp_lock, flags);
 
     if (lock_mm) mmap_read_unlock(mm);
@@ -113,10 +112,12 @@ static void ptebp_drop_all_monitors(bool lock_mm)
 
 static void ptebp_clear_monitors(void)
 {
+    struct break_point *info;
     struct mm_struct *mm;
     unsigned long flags;
 
     spin_lock_irqsave(&g_ptebp_lock, flags);
+    info = g_ptebp_info;
     mm = g_ptebp_mm;
     g_ptebp_info = NULL;
     g_ptebp_mm = NULL;
@@ -125,6 +126,7 @@ static void ptebp_clear_monitors(void)
     spin_unlock_irqrestore(&g_ptebp_lock, flags);
 
     if (mm) mmput(mm);
+    if (info) __builtin_memset(info, 0, sizeof(*info));
 }
 
 static int ptebp_handle_exec_fault(struct pt_regs *hook_regs)
@@ -200,7 +202,7 @@ out_unlock:
     if (stopping || restored_page) goto handled;
 
     if (hit_point && hit_point->on_hit) hit_point->on_hit((void *)regs, (void *)hit_point);
-    if (!emulate_insn(regs, NULL, NULL)) ptebp_drop_all_monitors(false);
+    if (!emulate_insn(regs, NULL)) ptebp_drop_all_monitors(false);
 
 handled:
     hook_regs->regs[0] = 0;
@@ -215,7 +217,6 @@ static inline void stop_ptebp_monitor(void)
 {
     ptebp_drop_all_monitors(true);
     inline_hook_remove(g_ptebp_fault_hooks);
-    synchronize_rcu();
     ptebp_clear_monitors();
 }
 
@@ -235,11 +236,11 @@ static int ptebp_install_page(struct break_point *info, size_t point_slot, struc
     hook_addr = untagged_addr(point->hit_addr) & ~0x3ULL;
     if (!hook_addr || hook_addr >= READ_ONCE(mm->task_size) || sizeof(uint32_t) > READ_ONCE(mm->task_size) - hook_addr)
     {
-        ls_log_tag("ptebp", "install page rejected pid=%d slot=%zu addr=0x%llx task_size=0x%llx status=%d\n", info->pid, point_slot, (unsigned long long)hook_addr, (unsigned long long)READ_ONCE(mm->task_size), -EFAULT);
+        ls_log_tag("ptebp", "install page rejected tgid=%d slot=%zu addr=0x%llx task_size=0x%llx status=%d\n", info->tgid, point_slot, (unsigned long long)hook_addr, (unsigned long long)READ_ONCE(mm->task_size), -EFAULT);
         return -EFAULT;
     }
     page_vaddr = hook_addr & PAGE_MASK;
-    ls_log_tag("ptebp", "install page begin pid=%d slot=%zu addr=0x%llx page=0x%llx\n", info->pid, point_slot, (unsigned long long)hook_addr, (unsigned long long)page_vaddr);
+    ls_log_tag("ptebp", "install page begin tgid=%d slot=%zu addr=0x%llx page=0x%llx\n", info->tgid, point_slot, (unsigned long long)hook_addr, (unsigned long long)page_vaddr);
 
     for (scan_slot = 0; scan_slot < point_slot; scan_slot++)
     {
@@ -247,7 +248,7 @@ static int ptebp_install_page(struct break_point *info, size_t point_slot, struc
 
         if (ptebp_active(candidate) && (untagged_addr(candidate->hit_addr) & ~0x3ULL) == hook_addr)
         {
-            ls_log_tag("ptebp", "install page duplicate pid=%d slot=%zu previous_slot=%zu addr=0x%llx status=%d\n", info->pid, point_slot, scan_slot, (unsigned long long)hook_addr, -EEXIST);
+            ls_log_tag("ptebp", "install page duplicate tgid=%d slot=%zu previous_slot=%zu addr=0x%llx status=%d\n", info->tgid, point_slot, scan_slot, (unsigned long long)hook_addr, -EEXIST);
             return -EEXIST;
         }
     }
@@ -256,36 +257,36 @@ static int ptebp_install_page(struct break_point *info, size_t point_slot, struc
     if (page)
     {
         status = ptebp_page_matches(page, mm, PTEBP_UXN) ? 0 : -EFAULT;
-        ls_log_tag("ptebp", "install page reused pid=%d slot=%zu page=0x%llx armed=%d status=%d\n", info->pid, point_slot, (unsigned long long)page_vaddr, page->armed, status);
+        ls_log_tag("ptebp", "install page reused tgid=%d slot=%zu page=0x%llx armed=%d status=%d\n", info->tgid, point_slot, (unsigned long long)page_vaddr, page->armed, status);
         return status;
     }
 
     ptep = get_user_pte(mm, page_vaddr);
     if (!ptep)
     {
-        ls_log_tag("ptebp", "install page no pte pid=%d slot=%zu page=0x%llx status=%d\n", info->pid, point_slot, (unsigned long long)page_vaddr, -EFAULT);
+        ls_log_tag("ptebp", "install page no pte tgid=%d slot=%zu page=0x%llx status=%d\n", info->tgid, point_slot, (unsigned long long)page_vaddr, -EFAULT);
         return -EFAULT;
     }
 
     orig_pte = READ_ONCE(*ptep);
-    ls_log_tag("ptebp", "install page pte pid=%d slot=%zu page=0x%llx ptep=0x%llx orig=0x%llx present=%d pfn_valid=%d uxn=%d\n", info->pid, point_slot, (unsigned long long)page_vaddr, (unsigned long long)ptep, (unsigned long long)pte_val(orig_pte), pte_present(orig_pte), pfn_valid(pte_pfn(orig_pte)), !!(pte_val(orig_pte) & PTEBP_UXN));
+    ls_log_tag("ptebp", "install page pte tgid=%d slot=%zu page=0x%llx ptep=0x%llx orig=0x%llx present=%d pfn_valid=%d uxn=%d\n", info->tgid, point_slot, (unsigned long long)page_vaddr, (unsigned long long)ptep, (unsigned long long)pte_val(orig_pte), pte_present(orig_pte), pfn_valid(pte_pfn(orig_pte)), !!(pte_val(orig_pte) & PTEBP_UXN));
     if (!pte_present(orig_pte) || !pfn_valid(pte_pfn(orig_pte)))
     {
-        ls_log_tag("ptebp", "install page invalid pte pid=%d slot=%zu page=0x%llx status=%d\n", info->pid, point_slot, (unsigned long long)page_vaddr, -EFAULT);
+        ls_log_tag("ptebp", "install page invalid pte tgid=%d slot=%zu page=0x%llx status=%d\n", info->tgid, point_slot, (unsigned long long)page_vaddr, -EFAULT);
         return -EFAULT;
     }
     if (pte_val(orig_pte) & PTEBP_UXN)
     {
-        ls_log_tag("ptebp", "install page already uxn pid=%d slot=%zu page=0x%llx status=%d\n", info->pid, point_slot, (unsigned long long)page_vaddr, -EACCES);
+        ls_log_tag("ptebp", "install page already uxn tgid=%d slot=%zu page=0x%llx status=%d\n", info->tgid, point_slot, (unsigned long long)page_vaddr, -EACCES);
         return -EACCES;
     }
 
     status = write_user_pte_value(mm, page_vaddr, pte_val(orig_pte) | PTEBP_UXN);
-    ls_log_tag("ptebp", "install page write pid=%d slot=%zu page=0x%llx requested=0x%llx readback=0x%llx status=%d\n", info->pid, point_slot, (unsigned long long)page_vaddr, (unsigned long long)(pte_val(orig_pte) | PTEBP_UXN), (unsigned long long)pte_val(READ_ONCE(*ptep)), status);
+    ls_log_tag("ptebp", "install page write tgid=%d slot=%zu page=0x%llx requested=0x%llx readback=0x%llx status=%d\n", info->tgid, point_slot, (unsigned long long)page_vaddr, (unsigned long long)(pte_val(orig_pte) | PTEBP_UXN), (unsigned long long)pte_val(READ_ONCE(*ptep)), status);
     if (status) return status;
     page = &g_ptebp_pages[point_slot];
     *page = (struct ptebp_page){.orig_pte = orig_pte, .addr = page_vaddr, .armed = true};
-    ls_log_tag("ptebp", "install page ok pid=%d slot=%zu addr=0x%llx page=0x%llx\n", info->pid, point_slot, (unsigned long long)hook_addr, (unsigned long long)page_vaddr);
+    ls_log_tag("ptebp", "install page ok tgid=%d slot=%zu addr=0x%llx page=0x%llx\n", info->tgid, point_slot, (unsigned long long)hook_addr, (unsigned long long)page_vaddr);
     return 0;
 }
 
@@ -296,39 +297,36 @@ static inline int start_ptebp_monitor(struct break_point *info)
     struct mm_struct *mm;
     unsigned long flags;
 
-    if (!info || info->pid <= 0)
+    if (!info || info->tgid <= 0)
     {
-        ls_log_tag("ptebp", "start rejected info=0x%llx pid=%d status=%d\n", (unsigned long long)info, info ? info->pid : -1, -EINVAL);
+        ls_log_tag("ptebp", "start rejected info=0x%llx tgid=%d status=%d\n", (unsigned long long)info, info ? info->tgid : -1, -EINVAL);
         return -EINVAL;
     }
 
-    ls_log_tag("ptebp", "start begin pid=%d\n", info->pid);
+    ls_log_tag("ptebp", "start begin tgid=%d\n", info->tgid);
 
     for (point_slot = 0; point_slot < ARRAY_SIZE(info->points); point_slot++)
         if (ptebp_active(&info->points[point_slot])) break;
     if (point_slot == ARRAY_SIZE(info->points))
     {
-        ls_log_tag("ptebp", "start rejected pid=%d no active execute point status=%d\n", info->pid, -EINVAL);
+        ls_log_tag("ptebp", "start rejected tgid=%d no active execute point status=%d\n", info->tgid, -EINVAL);
         return -EINVAL;
     }
 
-    ls_log_tag("ptebp", "start stopping previous monitor pid=%d first_slot=%zu first_addr=0x%llx\n", info->pid, point_slot, (unsigned long long)info->points[point_slot].hit_addr);
-    stop_ptebp_monitor();
-
-    mm = get_mm_by_pid(info->pid);
+    mm = get_mm_by_pid(info->tgid);
     if (!mm)
     {
-        ls_log_tag("ptebp", "start get mm failed pid=%d status=%d\n", info->pid, -EINVAL);
+        ls_log_tag("ptebp", "start get mm failed tgid=%d status=%d\n", info->tgid, -EINVAL);
         return -EINVAL;
     }
 
     status = inline_hook_install(g_ptebp_fault_hooks);
     if (status)
     {
-        ls_log_tag("ptebp", "start hook install failed pid=%d status=%d\n", info->pid, status);
+        ls_log_tag("ptebp", "start hook install failed tgid=%d status=%d\n", info->tgid, status);
         goto err_put_mm;
     }
-    ls_log_tag("ptebp", "start hook installed pid=%d target=0x%llx\n", info->pid, (unsigned long long)g_ptebp_fault_hooks[0].target_addr);
+    ls_log_tag("ptebp", "start hook installed tgid=%d target=0x%llx\n", info->tgid, (unsigned long long)g_ptebp_fault_hooks[0].target_addr);
 
     mmap_read_lock(mm);
     spin_lock_irqsave(&g_ptebp_lock, flags);
@@ -345,11 +343,11 @@ static inline int start_ptebp_monitor(struct break_point *info)
 
     if (!status)
     {
-        ls_log_tag("ptebp", "start ok pid=%d mm=0x%llx\n", info->pid, (unsigned long long)mm);
+        ls_log_tag("ptebp", "start ok tgid=%d mm=0x%llx\n", info->tgid, (unsigned long long)mm);
         return 0;
     }
 
-    ls_log_tag("ptebp", "start page install failed pid=%d slot=%zu status=%d, cleaning up\n", info->pid, point_slot, status);
+    ls_log_tag("ptebp", "start page install failed tgid=%d slot=%zu status=%d, cleaning up\n", info->tgid, point_slot, status);
     stop_ptebp_monitor();
     return status;
 

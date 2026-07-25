@@ -455,12 +455,6 @@ def android_breakpoint_clear() -> dict[str, Any]:
 
 
 @mcp.tool()
-def android_breakpoint_record_remove(index: Annotated[int, Field(ge=0)]) -> dict[str, Any]:
-    """Remove one record using its global flattened index across all breakpoint points."""
-    return _call_bridge_operation("breakpoint_record.remove", {"index": index})
-
-
-@mcp.tool()
 def android_breakpoint_record_update(
     index: Annotated[int, Field(ge=0)],
     field: BreakpointRecordField,
@@ -494,6 +488,31 @@ def android_syscall_stop() -> dict[str, Any]:
 def android_syscall_log() -> dict[str, Any]:
     """Read all currently available lsdriver syscall log lines."""
     return _call_bridge_operation("syscall.read")
+
+
+@mcp.tool()
+def android_cntvct_start() -> dict[str, Any]:
+    """Start CNTVCT_EL0 read monitoring and return the currently available log."""
+    response = _call_bridge_operation("cntvct.start")
+    log_response = _call_bridge_operation("cntvct.read")
+    log_data = log_response.get("data")
+    data = response.setdefault("data", {})
+    if isinstance(data, dict) and isinstance(log_data, dict):
+        data["log"] = log_data.get("log", "")
+        data["line_count"] = log_data.get("line_count", 0)
+    return response
+
+
+@mcp.tool()
+def android_cntvct_stop() -> dict[str, Any]:
+    """Stop CNTVCT_EL0 read monitoring for the current target PID."""
+    return _call_bridge_operation("cntvct.stop")
+
+
+@mcp.tool()
+def android_cntvct_log() -> dict[str, Any]:
+    """Read all currently available lsdriver CNTVCT monitor log lines."""
+    return _call_bridge_operation("cntvct.read")
 
 
 @mcp.tool()

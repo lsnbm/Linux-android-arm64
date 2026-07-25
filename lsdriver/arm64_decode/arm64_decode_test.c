@@ -1188,6 +1188,27 @@ static void test_vector(void)
     };
     static const struct
     {
+        arm64_u32 base;
+        enum arm64_simd_operation operation;
+        arm64_u8 widening;
+    } integer_reduce_cases[] = {
+        {0x0E31B800U, ARM64_SIMD_OP_ADDV, 0},   {0x0E303800U, ARM64_SIMD_OP_SADDLV, 1}, {0x2E303800U, ARM64_SIMD_OP_UADDLV, 1},
+        {0x0E30A800U, ARM64_SIMD_OP_SMAXV, 0},  {0x0E31A800U, ARM64_SIMD_OP_SMINV, 0},  {0x2E30A800U, ARM64_SIMD_OP_UMAXV, 0},
+        {0x2E31A800U, ARM64_SIMD_OP_UMINV, 0},
+    };
+    static const struct
+    {
+        arm64_u32 vector_base;
+        arm64_u32 scalar_base;
+        enum arm64_simd_operation operation;
+    } narrow_cases[] = {
+        {0x0E212800U, 0, ARM64_SIMD_OP_XTN},
+        {0x0E214800U, 0x5E214800U, ARM64_SIMD_OP_SQXTN},
+        {0x2E214800U, 0x7E214800U, ARM64_SIMD_OP_UQXTN},
+        {0x2E212800U, 0x7E212800U, ARM64_SIMD_OP_SQXTUN},
+    };
+    static const struct
+    {
         arm64_u32 bits;
         enum arm64_simd_operation operation;
     } compare_zero_relations[] = {
@@ -1435,6 +1456,70 @@ static void test_vector(void)
     decode_status_is(0x0EE00820U, ARM64_DECODE_UNALLOCATED);
     decode_status_is(0x2EA00820U, ARM64_DECODE_UNALLOCATED);
     decode_status_is(0x0E601820U, ARM64_DECODE_UNALLOCATED);
+
+    for (operation_index = 0; operation_index < sizeof(integer_reduce_cases) / sizeof(integer_reduce_cases[0]); operation_index++)
+    {
+        for (q_index = 0; q_index < 2; q_index++)
+        {
+            for (size_index = 0; size_index < 3; size_index++)
+            {
+                arm64_u32 raw = integer_reduce_cases[operation_index].base | ((arm64_u32)q_index << 30) | ((arm64_u32)size_index << 22) | 0x63U;
+
+                if (size_index == 2 && !q_index)
+                {
+                    decode_status_is(raw, ARM64_DECODE_UNALLOCATED);
+                    continue;
+                }
+
+                decoded = decode_ok(raw);
+                CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_VECTOR_INTEGER_REDUCE);
+                CHECK(decoded.operands.simd.operation == integer_reduce_cases[operation_index].operation);
+                CHECK(decoded.rd == 3);
+                CHECK(decoded.rn == 3);
+                CHECK(decoded.operand_width == (q_index ? 128 : 64));
+                CHECK(decoded.operands.simd.element_width == (8U << size_index));
+                CHECK(decoded.operands.simd.result_element_width == ((8U << size_index) << integer_reduce_cases[operation_index].widening));
+            }
+        }
+        decode_status_is(integer_reduce_cases[operation_index].base | 0x00C00063U, ARM64_DECODE_UNALLOCATED);
+    }
+
+    for (operation_index = 0; operation_index < sizeof(narrow_cases) / sizeof(narrow_cases[0]); operation_index++)
+    {
+        for (q_index = 0; q_index < 2; q_index++)
+        {
+            for (size_index = 0; size_index < 3; size_index++)
+            {
+                decoded = decode_ok(narrow_cases[operation_index].vector_base | ((arm64_u32)q_index << 30) | ((arm64_u32)size_index << 22) | 0x63U);
+                CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_VECTOR_NARROW);
+                CHECK(decoded.operands.simd.operation == narrow_cases[operation_index].operation);
+                CHECK(decoded.rd == 3);
+                CHECK(decoded.rn == 3);
+                CHECK(decoded.operand_width == (q_index ? 128 : 64));
+                CHECK(decoded.operands.simd.element_width == (16U << size_index));
+                CHECK(decoded.operands.simd.result_element_width == (8U << size_index));
+                CHECK(!!(decoded.operands.simd.flags & ARM64_SIMD_FLAG_DEST_HIGH_HALF) == q_index);
+            }
+        }
+        decode_status_is(narrow_cases[operation_index].vector_base | 0x00C00063U, ARM64_DECODE_UNALLOCATED);
+
+        if (narrow_cases[operation_index].scalar_base)
+        {
+            for (size_index = 0; size_index < 3; size_index++)
+            {
+                decoded = decode_ok(narrow_cases[operation_index].scalar_base | ((arm64_u32)size_index << 22) | 0x63U);
+                CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_SCALAR_NARROW);
+                CHECK(decoded.operands.simd.operation == narrow_cases[operation_index].operation);
+                CHECK(decoded.rd == 3);
+                CHECK(decoded.rn == 3);
+                CHECK(decoded.operand_width == (8U << size_index));
+                CHECK(decoded.operands.simd.element_width == (16U << size_index));
+                CHECK(decoded.operands.simd.result_element_width == (8U << size_index));
+            }
+            decode_status_is(narrow_cases[operation_index].scalar_base | 0x00C00063U, ARM64_DECODE_UNALLOCATED);
+        }
+    }
+    decode_status_is(0x5E212863U, ARM64_DECODE_UNALLOCATED);
 
     for (operation_index = 0; operation_index < sizeof(fp_reduce_cases) / sizeof(fp_reduce_cases[0]); operation_index++)
     {

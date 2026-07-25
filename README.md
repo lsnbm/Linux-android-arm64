@@ -86,7 +86,7 @@ GitHub 的 Download ZIP 不包含子模块源码，请使用 Git 克隆仓库。
 - `GetPid` / `SetGlobalPid`
 - `GetMemoryInformation` / `GetModuleAddress` / `GetScanRegions`
 - `DumpMemory`，按模块名或 `start-end` 地址范围导出内存到 `.bin` 文件
-- `GetHwbpInfoRef` / `SetProcessHwbpRef` / `RemoveProcessHwbpRef` / `RemoveHwbpRecord`
+- `GetHwbpInfoRef` / `SetProcessHwbpRef` / `RemoveProcessHwbpRef`
 - `SignatureScanner`，基于驱动读内存和扫描区域完成特征生成、过滤和扫描
 
 ---
@@ -635,8 +635,7 @@ inline hook 表：
 
 - `GetHwbpInfoRef()` 刷新并返回 `bp_info`
 - `SetProcessHwbpRef(...)` 设置断点
-- `RemoveProcessHwbpRef()` 删除断点
-- `RemoveHwbpRecord(index)` 删除指定 PC 命中记录并压缩数组
+- `RemoveProcessHwbpRef()` 删除断点，并由驱动清空共享断点信息
 
 ### 11.5 特征扫描辅助
 

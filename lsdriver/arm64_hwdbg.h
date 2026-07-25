@@ -44,7 +44,7 @@ static bool hwbp_info_has_active_point(struct break_point *info)
 {
     int point_slot;
 
-    if (!info || info->pid <= 0) return false;
+    if (!info || info->tgid <= 0) return false;
 
     for (point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
     {
@@ -54,10 +54,10 @@ static bool hwbp_info_has_active_point(struct break_point *info)
     return false;
 }
 
-// 判断一个 break_point 配置中是否包含指定线程组 pid 的有效点位。
-static bool hwbp_info_has_pid(struct break_point *info, pid_t pid)
+// 判断一个 break_point 配置中是否包含指定线程组 TGID 的有效点位。
+static bool hwbp_info_has_tgid(struct break_point *info, pid_t tgid)
 {
-    if (!info || pid <= 0 || info->pid != pid) return false;
+    if (!info || tgid <= 0 || info->tgid != tgid) return false;
 
     return hwbp_info_has_active_point(info);
 }
@@ -289,7 +289,7 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
             struct bp_point *point = &bp_info->points[j];
 
             // 地址不相等跳过
-            if (!hwbp_point_is_active(point) || bp_info->pid != current->tgid || hw_breakpoint_parse(point, 0, &info) || info.address != addr) continue;
+            if (!hwbp_point_is_active(point) || bp_info->tgid != current->tgid || hw_breakpoint_parse(point, 0, &info) || info.address != addr) continue;
 
             /*
                 上案例
@@ -324,12 +324,12 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
             if (info.address != (regs->pc & ~0x3ULL)) continue;
 
             // 地址相等、控制码相等且当前槽位启用才派发
-            if ((ctrl & 0x1) && ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) == (ctrl & ~0x1ULL)) && bp_info->pid == current->tgid)
+            if ((ctrl & 0x1) && ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) == (ctrl & ~0x1ULL)) && bp_info->tgid == current->tgid)
             {
 
                 point->on_hit((void *)regs, (void *)point);
                 // 模拟指令步过,失败走禁用进行步过
-                if (!emulate_insn(regs, NULL, NULL))
+                if (!emulate_insn(regs, NULL))
                 {
                     // 只清 enable 位，保留原有寄存器配置，继续走原异常处理链
                     write_wb_reg(AARCH64_DBG_REG_BCR, slot, ctrl & ~0x1);
@@ -393,7 +393,7 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
         {
             struct bp_point *point = &bp_info->points[j];
 
-            if (!hwbp_point_is_active(point) || bp_info->pid != current->tgid || hw_breakpoint_parse(point, 0, &info) || info.ctrl.type == ARM_BREAKPOINT_EXECUTE || info.address != addr || ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) != (ctrl & ~0x1ULL)) || !watchpoint_access_matches(&info, esr)) continue;
+            if (!hwbp_point_is_active(point) || bp_info->tgid != current->tgid || hw_breakpoint_parse(point, 0, &info) || info.ctrl.type == ARM_BREAKPOINT_EXECUTE || info.address != addr || ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) != (ctrl & ~0x1ULL)) || !watchpoint_access_matches(&info, esr)) continue;
 
             /*
             内核 perf 可以在没有精确命中时选择最近 watchpoint 兜底；
@@ -417,7 +417,7 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
 
     // 模拟指令步过,失败走禁用进行步过
     {
-        if (!emulate_insn(regs, NULL, NULL))
+        if (!emulate_insn(regs, NULL))
         {
             // 只清 enable 位，保留原有寄存器配置，继续走原异常处理链
             write_wb_reg(AARCH64_DBG_REG_WCR, hit_slot, hit_ctrl & ~0x1);
@@ -550,7 +550,7 @@ static void __attribute__((used, __noinline__)) ret_work_finish_task_switch(void
 
     if (bp_info)
     {
-        if (hwbp_info_has_pid(bp_info, current->tgid))
+        if (hwbp_info_has_tgid(bp_info, current->tgid))
         {
             if (current->pid == current->tgid)
             {
@@ -736,17 +736,17 @@ static int start_task_run_monitor(struct break_point *bp_info)
 // 注销 hook，取消监听
 static void stop_task_run_monitor(void)
 {
+    struct break_point *info = READ_ONCE(g_bp_info);
     int cpu;
 
-    if (!g_bp_info) return;
+    if (!info) return;
 
     // 遍历所有在线 CPU，清理寄存器
     for_each_online_cpu(cpu) smp_call_function_single(cpu, clear_hwbp_regs_on_cpu, NULL, 1);
 
-    g_bp_info = NULL;
-    ls_log_tag("hwbp", "monitor config removed\n");
-
-    ls_log_tag("hwbp", "monitor stop\n");
     inline_hook_remove(g_finish_task_switch_ret_hooks);
     inline_hook_remove(g_debug_exception_hooks);
+    WRITE_ONCE(g_bp_info, NULL);
+    __builtin_memset(info, 0, sizeof(*info));
+    ls_log_tag("hwbp", "monitor stop\n");
 }

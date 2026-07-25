@@ -19,7 +19,6 @@
 #include "arm64_reg.h"
 
 #define TLS_THREAD_NAME_LEN 16
-
 struct env_params
 {
     char thread_name[TLS_THREAD_NAME_LEN];
@@ -205,7 +204,7 @@ struct break_point
 
     uint64_t num_brps;                     // 执行断点的数量
     uint64_t num_wrps;                     // 访问断点的数量
-    int pid;                               // 这个 break_point 属于哪个进程
+    int tgid;                              // 这个 break_point 属于哪个进程
     struct bp_point points[BP_CONFIG_MAX]; // 多个观点地址
 };
 
@@ -303,9 +302,13 @@ enum request_op
     request_op_syscall_monitor_set,    // 监控指定进程的系统调用
     request_op_syscall_monitor_remove, // 取消指定进程的系统调用监控
 
+    request_op_cntvct_monitor_set,    // 监控指定进程读取 CNTVCT_EL0
+    request_op_cntvct_monitor_remove, // 取消 CNTVCT_EL0 读取监控
+
     request_op_env_get_params, // 获取指定task环境参数
 
-    request_op_kernel_exit // 内核线程退出
+    request_op_kernel_exit, // 内核线程退出
+
 };
 
 // 将在队列中使用的请求实例结构体
@@ -314,7 +317,7 @@ struct request_obj
     bool kernel; // 由用户模式设置 true = 内核有待处理的请求, false = 请求已完成
     bool user;   // 由内核模式设置 true = 用户模式有待处理的请求, false = 请求已完成
 
-    int pid; // 当前派发指定的pid
+    int tgid; // 当前派发指定的进程 TGID
 
     enum request_op op; // 请求操作类型
     int status;         // 请求操作状态

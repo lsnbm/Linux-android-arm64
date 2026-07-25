@@ -68,7 +68,6 @@ public: // 共有结构体和锁
     SpinLock m_mutex;
 
 #define TLS_THREAD_NAME_LEN 16
-
     struct env_params
     {
         char thread_name[TLS_THREAD_NAME_LEN];
@@ -254,7 +253,7 @@ public: // 共有结构体和锁
 
         uint64_t num_brps;                     // 执行断点的数量
         uint64_t num_wrps;                     // 访问断点的数量
-        int pid;                               // 这个 break_point 属于哪个进程
+        int tgid;                              // 这个 break_point 属于哪个进程
         struct bp_point points[BP_CONFIG_MAX]; // 多个观点地址
     };
 
@@ -352,9 +351,13 @@ public: // 共有结构体和锁
         request_op_syscall_monitor_set,    // 监控指定进程的系统调用
         request_op_syscall_monitor_remove, // 取消指定进程的系统调用监控
 
+        request_op_cntvct_monitor_set,    // 监控指定进程读取 CNTVCT_EL0
+        request_op_cntvct_monitor_remove, // 取消 CNTVCT_EL0 读取监控
+
         request_op_env_get_params, // 获取指定task环境参数
 
-        request_op_kernel_exit // 内核线程退出
+        request_op_kernel_exit, // 内核线程退出
+
     };
 
     // 将在队列中使用的请求实例结构体
@@ -363,7 +366,7 @@ public: // 共有结构体和锁
         bool kernel; // 由用户模式设置 true = 内核有待处理的请求, false = 请求已完成
         bool user;   // 由内核模式设置 true = 用户模式有待处理的请求, false = 请求已完成
 
-        int pid; // 当前派发指定的pid
+        int tgid; // 当前派发指定的进程 TGID
 
         enum request_op op; // 请求操作类型
         int status;         // 请求操作状态
@@ -843,28 +846,6 @@ public: // 外部硬件断点接口
         HandleStepbpEvent(request_op_stepbp_remove);
     }
 
-    // 删除指定索引内容
-    void RemoveHwbpRecord(int index)
-    {
-        if (index < 0) return;
-
-        int flat_index = 0;
-        for (auto &point : req->bp_info.points)
-        {
-            if (index >= flat_index && index < flat_index + point.record_count)
-            {
-                const int local_index = index - flat_index;
-                const int tail_count = point.record_count - local_index - 1;
-                if (tail_count > 0) __builtin_memmove(&point.records[local_index], &point.records[local_index + 1], static_cast<size_t>(tail_count) * sizeof(bp_record));
-                point.record_count--;
-                __builtin_memset(&point.records[point.record_count], 0, sizeof(bp_record));
-                return;
-            }
-
-            flat_index += point.record_count;
-        }
-    }
-
 public: // 外部系统调用监控接口
     int StartSyscallMonitor(int pid)
     {
@@ -874,6 +855,17 @@ public: // 外部系统调用监控接口
     int StopSyscallMonitor(int pid)
     {
         return HandleSyscallMonitorEvent(request_op_syscall_monitor_remove, pid);
+    }
+
+public: // 外部 CNTVCT_EL0 读取监控接口
+    int StartCntvctMonitor(int pid)
+    {
+        return HandleCntvctMonitorEvent(request_op_cntvct_monitor_set, pid);
+    }
+
+    int StopCntvctMonitor(int pid)
+    {
+        return HandleCntvctMonitorEvent(request_op_cntvct_monitor_remove, pid);
     }
 
 public:
@@ -1011,7 +1003,7 @@ private: // 私有实现，外部无需关系
             asm volatile("" ::: "memory");
             const size_t chunk = (size - processed > 0x1000) ? 0x1000 : (size - processed);
             req->op = op;
-            req->pid = global_pid;
+            req->tgid = global_pid;
             req->vmemrw_info.rw_addr = addr + processed;
             req->vmemrw_info.size = chunk;
             req->status = 0;
@@ -1047,7 +1039,7 @@ private: // 私有实现，外部无需关系
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
         req->op = request_op_vmem_info;
-        req->pid = global_pid;
+        req->tgid = global_pid;
         IoCommitAndWait();
         return req->status;
     }
@@ -1120,9 +1112,8 @@ private: // 私有实现，外部无需关系
         req->status = 0;
         if (op == request_op_hwbp_set)
         {
-            __builtin_memset(&req->bp_info, 0, sizeof(req->bp_info));
-            req->pid = global_pid;
-            req->bp_info.pid = global_pid;
+            req->tgid = global_pid;
+            req->bp_info.tgid = global_pid;
             const size_t count = std::min(points.size(), std::size(req->bp_info.points));
             for (size_t i = 0; i < count; ++i)
             {
@@ -1146,9 +1137,8 @@ private: // 私有实现，外部无需关系
         req->status = 0;
         if (op == request_op_ptebp_set)
         {
-            __builtin_memset(&req->bp_info, 0, sizeof(req->bp_info));
-            req->pid = global_pid;
-            req->bp_info.pid = global_pid;
+            req->tgid = global_pid;
+            req->bp_info.tgid = global_pid;
             const size_t count = std::min(points.size(), std::size(req->bp_info.points));
             for (size_t index = 0; index < count; ++index)
             {
@@ -1172,9 +1162,8 @@ private: // 私有实现，外部无需关系
         req->status = 0;
         if (op == request_op_stepbp_set)
         {
-            __builtin_memset(&req->bp_info, 0, sizeof(req->bp_info));
-            req->pid = global_pid;
-            req->bp_info.pid = global_pid;
+            req->tgid = global_pid;
+            req->bp_info.tgid = global_pid;
             const size_t count = std::min(points.size(), std::size(req->bp_info.points));
             for (size_t index = 0; index < count; ++index)
             {
@@ -1184,6 +1173,7 @@ private: // 私有实现，外部无需关系
                 req->bp_info.points[index].bs = points[index].bs;
             }
         }
+
         IoCommitAndWait();
         return req->status;
     }
@@ -1192,13 +1182,25 @@ private: // 私有实现，外部无需关系
     // 此接口只负责启停监控，系统调用日志由驱动写入内核 printk 环形缓冲区，不通过 req 返回。
     // Android shell 查看已有输出：su -c "dmesg | grep -E 'lsdriver'"
     // Android shell 实时查看输出：su -c "dmesg -w | grep -E 'lsdriver'"
-    int HandleSyscallMonitorEvent(request_op op, int pid)
+    int HandleSyscallMonitorEvent(request_op op, int tgid)
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
-        if ((op != request_op_syscall_monitor_set && op != request_op_syscall_monitor_remove) || pid <= 0) return -1;
+        if ((op != request_op_syscall_monitor_set && op != request_op_syscall_monitor_remove) || tgid <= 0) return -1;
 
         req->op = op;
-        req->pid = pid;
+        req->tgid = tgid;
+        req->status = 0;
+        IoCommitAndWait();
+        return req->status;
+    }
+
+    int HandleCntvctMonitorEvent(request_op op, int tgid)
+    {
+        std::scoped_lock<SpinLock> lock(m_mutex);
+        if ((op != request_op_cntvct_monitor_set && op != request_op_cntvct_monitor_remove) || tgid <= 0) return -EINVAL;
+
+        req->op = op;
+        req->tgid = tgid;
         req->status = 0;
         IoCommitAndWait();
         return req->status;
@@ -1211,7 +1213,7 @@ private: // 私有实现，外部无需关系
         if (global_pid <= 0) return -1;
 
         req->op = request_op_env_get_params;
-        req->pid = global_pid;
+        req->tgid = global_pid;
         req->status = 0;
         __builtin_memset(&req->env_info, 0, sizeof(req->env_info));
         const size_t copyLen = std::min(threadName.size(), static_cast<size_t>(TLS_THREAD_NAME_LEN - 1));

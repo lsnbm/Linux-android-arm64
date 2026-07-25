@@ -58,6 +58,7 @@ enum emu_insn_result
 #define EMU_SYSREG_FPSR        ARM64_SYSREG_KEY(3, 3, 4, 4, 1)
 #define EMU_SYSREG_TPIDR_EL0   ARM64_SYSREG_KEY(3, 3, 13, 0, 2)
 #define EMU_SYSREG_TPIDRRO_EL0 ARM64_SYSREG_KEY(3, 3, 13, 0, 3)
+#define EMU_SYSREG_CNTVCT_EL0  ARM64_SYSREG_KEY(3, 3, 14, 0, 2)
 
 // 整数寄存器与条件执行辅助
 static __always_inline uint64_t reg_read(struct pt_regs *regs, uint32_t n)
@@ -78,26 +79,16 @@ static __always_inline void addr_reg_write(struct pt_regs *regs, uint32_t n, uin
     else regs->regs[n] = val;
 }
 
-struct emu_mem_access
-{
-    int (*read)(void *ctx, uint64_t addr, int bytes, __uint128_t *out);
-    int (*write)(void *ctx, uint64_t addr, int bytes, __uint128_t value);
-    void *ctx;
-};
-
-/* 自定义读取器返回 -EOPNOTSUPP 表示该地址不归它处理，继续走当前进程物理页直访。 */
-static __always_inline int emu_read_mem(const struct emu_mem_access *access, uint64_t addr, int bytes, __uint128_t *out)
+/*
+只保留默认访存路径：此前主动把用户页设为不可读时，需要自定义读写绕过页异常；
+现在默认实现直接将 VA 翻译为 PA，并通过线性映射拷贝物理内存，不再受页读写权限影响。
+*/
+static __always_inline int emu_read_mem(uint64_t addr, int bytes, __uint128_t *out)
 {
     phys_addr_t first_physical;
     phys_addr_t second_physical;
     size_t first_bytes;
     int status;
-
-    if (access && access->read)
-    {
-        status = access->read(access->ctx, addr, bytes, out);
-        if (status != -EOPNOTSUPP) return status;
-    }
 
     if (!out || (bytes != 1 && bytes != 2 && bytes != 4 && bytes != 8 && bytes != 16)) return -EFAULT;
     addr = untagged_addr(addr);
@@ -118,19 +109,12 @@ static __always_inline int emu_read_mem(const struct emu_mem_access *access, uin
     return linear_read_physical(second_physical, (uint8_t *)out + first_bytes, bytes - first_bytes);
 }
 
-/* 自定义写入器返回 -EOPNOTSUPP 表示该地址不归它处理，继续走当前进程物理页直访。 */
-static __always_inline int emu_write_mem(const struct emu_mem_access *access, uint64_t addr, int bytes, __uint128_t value)
+static __always_inline int emu_write_mem(uint64_t addr, int bytes, __uint128_t value)
 {
     phys_addr_t first_physical;
     phys_addr_t second_physical;
     size_t first_bytes;
     int status;
-
-    if (access && access->write)
-    {
-        status = access->write(access->ctx, addr, bytes, value);
-        if (status != -EOPNOTSUPP) return status;
-    }
 
     if (bytes != 1 && bytes != 2 && bytes != 4 && bytes != 8 && bytes != 16) return -EFAULT;
     addr = untagged_addr(addr);
@@ -652,6 +636,9 @@ static __always_inline enum emu_insn_result emu_simulate_system_insn(struct pt_r
             case EMU_SYSREG_TPIDRRO_EL0:
                 val = read_sysreg(tpidrro_el0);
                 break;
+            case EMU_SYSREG_CNTVCT_EL0:
+                val = read_sysreg(cntvct_el0);
+                break;
             default:
                 handled = false;
                 val = 0;
@@ -747,9 +734,9 @@ static __always_inline enum emu_insn_result emu_simulate_branch_insn(struct pt_r
 
 #define EMU_LDST_MASK(B)     (~0ULL >> (64 - (B) * 8))
 #define EMU_LDST_SX(V, B)    emu_sign_extend_hw((uint64_t)(V), (B))
-#define EMU_LDST_ST(A, B, V) emu_write_mem(mem_access, (A), (B), (V))
+#define EMU_LDST_ST(A, B, V) emu_write_mem((A), (B), (V))
 
-static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct pt_regs *regs, const struct arm64_decoded_insn *decoded, uint64_t pc, const struct emu_mem_access *mem_access)
+static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct pt_regs *regs, const struct arm64_decoded_insn *decoded, uint64_t pc)
 {
     const struct arm64_load_store_operands *operands = &decoded->operands.load_store;
     bool is_fp = (decoded->flags & ARM64_INSN_FLAG_FP) != 0;
@@ -767,7 +754,7 @@ static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct 
         __uint128_t mem;
 
         if (addr & (bytes - 1)) return EMU_INSN_FAULT;
-        if (emu_read_mem(mem_access, addr, bytes, &mem)) return EMU_INSN_FAULT;
+        if (emu_read_mem(addr, bytes, &mem)) return EMU_INSN_FAULT;
 
         old = (uint64_t)mem & mask;
         switch (decoded->operation)
@@ -822,7 +809,7 @@ static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct 
         __uint128_t mem;
 
         if (addr & (bytes - 1)) return EMU_INSN_FAULT;
-        if (emu_read_mem(mem_access, addr, bytes, &mem)) return EMU_INSN_FAULT;
+        if (emu_read_mem(addr, bytes, &mem)) return EMU_INSN_FAULT;
 
         old = (uint64_t)mem & mask;
         if (old == expected)
@@ -846,7 +833,7 @@ static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct 
         __uint128_t mem0, mem1, pair;
 
         if (addr & (total - 1)) return EMU_INSN_FAULT;
-        if (emu_read_mem(mem_access, addr, bytes, &mem0) || emu_read_mem(mem_access, addr + bytes, bytes, &mem1)) return EMU_INSN_FAULT;
+        if (emu_read_mem(addr, bytes, &mem0) || emu_read_mem(addr + bytes, bytes, &mem1)) return EMU_INSN_FAULT;
 
         old0 = (uint64_t)mem0 & mask;
         old1 = (uint64_t)mem1 & mask;
@@ -882,13 +869,13 @@ static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct 
 
         if (load)
         {
-            if (emu_read_mem(mem_access, addr, bytes, &val0)) return EMU_INSN_FAULT;
+            if (emu_read_mem(addr, bytes, &val0)) return EMU_INSN_FAULT;
             reg_write(regs, decoded->rt, (u64)val0, decoded->operand_width == 64);
             if (pair)
             {
                 __uint128_t val1;
 
-                if (emu_read_mem(mem_access, addr + bytes, bytes, &val1)) return EMU_INSN_FAULT;
+                if (emu_read_mem(addr + bytes, bytes, &val1)) return EMU_INSN_FAULT;
                 reg_write(regs, decoded->rt2, (u64)val1, decoded->operand_width == 64);
             }
             if (decoded->flags & ARM64_INSN_FLAG_ACQUIRE) smp_mb();
@@ -896,8 +883,8 @@ static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct 
         else
         {
             if (decoded->flags & ARM64_INSN_FLAG_RELEASE) smp_mb();
-            if (emu_write_mem(mem_access, addr, bytes, reg_read(regs, decoded->rt))) return EMU_INSN_FAULT;
-            if (pair && emu_write_mem(mem_access, addr + bytes, bytes, reg_read(regs, decoded->rt2))) return EMU_INSN_FAULT;
+            if (emu_write_mem(addr, bytes, reg_read(regs, decoded->rt))) return EMU_INSN_FAULT;
+            if (pair && emu_write_mem(addr + bytes, bytes, reg_read(regs, decoded->rt2))) return EMU_INSN_FAULT;
             if (!ordered) reg_write(regs, decoded->rs, 0, false);
         }
 
@@ -912,14 +899,14 @@ static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct 
         if (decoded->flags & ARM64_INSN_FLAG_STORE)
         {
             smp_mb();
-            if (emu_write_mem(mem_access, addr, bytes, reg_read(regs, decoded->rt))) return EMU_INSN_FAULT;
+            if (emu_write_mem(addr, bytes, reg_read(regs, decoded->rt))) return EMU_INSN_FAULT;
         }
         else
         {
             __uint128_t val;
             uint64_t raw;
 
-            if (emu_read_mem(mem_access, addr, bytes, &val)) return EMU_INSN_FAULT;
+            if (emu_read_mem(addr, bytes, &val)) return EMU_INSN_FAULT;
             raw = (u64)val;
             if (decoded->flags & ARM64_INSN_FLAG_SIGN_EXTEND) raw = EMU_LDST_SX(raw, bytes);
             reg_write(regs, decoded->rt, raw, decoded->operand_width == 64);
@@ -935,7 +922,7 @@ static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct 
         __uint128_t val;
 
         if (addr & (bytes - 1)) return EMU_INSN_FAULT;
-        if (emu_read_mem(mem_access, addr, bytes, &val)) return EMU_INSN_FAULT;
+        if (emu_read_mem(addr, bytes, &val)) return EMU_INSN_FAULT;
         reg_write(regs, decoded->rt, (u64)val, decoded->operand_width == 64);
         smp_mb();
         regs->pc = pc + 4;
@@ -965,7 +952,7 @@ static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct 
         {
             __uint128_t val;
 
-            if (emu_read_mem(mem_access, addr, bytes, &val)) return EMU_INSN_FAULT;
+            if (emu_read_mem(addr, bytes, &val)) return EMU_INSN_FAULT;
             fp_regs[decoded->rt] = val;
             fp_dirty = true;
         }
@@ -973,7 +960,7 @@ static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct 
         {
             __uint128_t val;
 
-            if (emu_read_mem(mem_access, addr, bytes, &val)) return EMU_INSN_FAULT;
+            if (emu_read_mem(addr, bytes, &val)) return EMU_INSN_FAULT;
             reg_write(regs, decoded->rt, decoded->flags & ARM64_INSN_FLAG_SIGN_EXTEND ? EMU_LDST_SX(val, bytes) : (u64)val, decoded->operand_width == 64);
         }
         goto done_ldst;
@@ -993,7 +980,7 @@ static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct 
         {
             __uint128_t val1, val2;
 
-            if (emu_read_mem(mem_access, addr, bytes, &val1) || emu_read_mem(mem_access, addr + bytes, bytes, &val2)) return EMU_INSN_FAULT;
+            if (emu_read_mem(addr, bytes, &val1) || emu_read_mem(addr + bytes, bytes, &val2)) return EMU_INSN_FAULT;
             if (is_fp)
             {
                 fp_regs[decoded->rt] = val1;
@@ -1038,7 +1025,7 @@ static __always_inline enum emu_insn_result emu_simulate_load_store_insn(struct 
         {
             __uint128_t val;
 
-            if (emu_read_mem(mem_access, addr, bytes, &val)) return EMU_INSN_FAULT;
+            if (emu_read_mem(addr, bytes, &val)) return EMU_INSN_FAULT;
             if (is_fp)
             {
                 fp_regs[decoded->rt] = val;
@@ -2613,6 +2600,127 @@ static __always_inline bool emu_simd_rev_hw(enum arm64_simd_operation operation,
     }
 }
 
+#define EMU_SIMD_INTEGER_REDUCE_EXEC(INST)                                                              \
+    do                                                                                                  \
+    {                                                                                                   \
+        if (vector_width == 64 && element_width == 8) EMU_FP_UN(INST " b0, v1.8b", dst, source);        \
+        else if (vector_width == 128 && element_width == 8) EMU_FP_UN(INST " b0, v1.16b", dst, source); \
+        else if (vector_width == 64 && element_width == 16) EMU_FP_UN(INST " h0, v1.4h", dst, source);  \
+        else if (vector_width == 128 && element_width == 16) EMU_FP_UN(INST " h0, v1.8h", dst, source); \
+        else if (vector_width == 128 && element_width == 32) EMU_FP_UN(INST " s0, v1.4s", dst, source); \
+        else return false;                                                                              \
+        return true;                                                                                    \
+    } while (0)
+
+#define EMU_SIMD_INTEGER_REDUCE_LONG_EXEC(INST)                                                         \
+    do                                                                                                  \
+    {                                                                                                   \
+        if (vector_width == 64 && element_width == 8) EMU_FP_UN(INST " h0, v1.8b", dst, source);        \
+        else if (vector_width == 128 && element_width == 8) EMU_FP_UN(INST " h0, v1.16b", dst, source); \
+        else if (vector_width == 64 && element_width == 16) EMU_FP_UN(INST " s0, v1.4h", dst, source);  \
+        else if (vector_width == 128 && element_width == 16) EMU_FP_UN(INST " s0, v1.8h", dst, source); \
+        else if (vector_width == 128 && element_width == 32) EMU_FP_UN(INST " d0, v1.4s", dst, source); \
+        else return false;                                                                              \
+        return true;                                                                                    \
+    } while (0)
+
+static __always_inline bool emu_simd_integer_reduce_hw(enum arm64_simd_operation operation, void *dst, const void *source, uint32_t element_width, uint32_t result_element_width, uint32_t vector_width)
+{
+    switch (operation)
+    {
+    case ARM64_SIMD_OP_ADDV:
+        if (result_element_width != element_width) return false;
+        EMU_SIMD_INTEGER_REDUCE_EXEC("addv");
+    case ARM64_SIMD_OP_SADDLV:
+        if (result_element_width != element_width * 2) return false;
+        EMU_SIMD_INTEGER_REDUCE_LONG_EXEC("saddlv");
+    case ARM64_SIMD_OP_UADDLV:
+        if (result_element_width != element_width * 2) return false;
+        EMU_SIMD_INTEGER_REDUCE_LONG_EXEC("uaddlv");
+    case ARM64_SIMD_OP_SMAXV:
+        if (result_element_width != element_width) return false;
+        EMU_SIMD_INTEGER_REDUCE_EXEC("smaxv");
+    case ARM64_SIMD_OP_SMINV:
+        if (result_element_width != element_width) return false;
+        EMU_SIMD_INTEGER_REDUCE_EXEC("sminv");
+    case ARM64_SIMD_OP_UMAXV:
+        if (result_element_width != element_width) return false;
+        EMU_SIMD_INTEGER_REDUCE_EXEC("umaxv");
+    case ARM64_SIMD_OP_UMINV:
+        if (result_element_width != element_width) return false;
+        EMU_SIMD_INTEGER_REDUCE_EXEC("uminv");
+    default:
+        return false;
+    }
+}
+
+#define EMU_SIMD_VECTOR_NARROW_EXEC(INST, INST2)                                 \
+    do                                                                           \
+    {                                                                            \
+        if (result_element_width == 8 && element_width == 16)                    \
+        {                                                                        \
+            if (high_half) EMU_FP_UN_MERGE(INST2 " v0.16b, v1.8h", dst, source); \
+            else EMU_FP_UN(INST " v0.8b, v1.8h", dst, source);                   \
+        }                                                                        \
+        else if (result_element_width == 16 && element_width == 32)              \
+        {                                                                        \
+            if (high_half) EMU_FP_UN_MERGE(INST2 " v0.8h, v1.4s", dst, source);  \
+            else EMU_FP_UN(INST " v0.4h, v1.4s", dst, source);                   \
+        }                                                                        \
+        else if (result_element_width == 32 && element_width == 64)              \
+        {                                                                        \
+            if (high_half) EMU_FP_UN_MERGE(INST2 " v0.4s, v1.2d", dst, source);  \
+            else EMU_FP_UN(INST " v0.2s, v1.2d", dst, source);                   \
+        }                                                                        \
+        else return false;                                                       \
+        return true;                                                             \
+    } while (0)
+
+#define EMU_SIMD_SCALAR_NARROW_EXEC(INST)                                                                   \
+    do                                                                                                      \
+    {                                                                                                       \
+        if (result_element_width == 8 && element_width == 16) EMU_FP_UN(INST " b0, h1", dst, source);       \
+        else if (result_element_width == 16 && element_width == 32) EMU_FP_UN(INST " h0, s1", dst, source); \
+        else if (result_element_width == 32 && element_width == 64) EMU_FP_UN(INST " s0, d1", dst, source); \
+        else return false;                                                                                  \
+        return true;                                                                                        \
+    } while (0)
+
+static __always_inline bool emu_simd_narrow_hw(enum arm64_simd_operation operation, void *dst, const void *source, uint32_t element_width, uint32_t result_element_width, uint32_t flags, bool scalar)
+{
+    bool high_half = flags & ARM64_SIMD_FLAG_DEST_HIGH_HALF;
+
+    if (scalar)
+    {
+        if (high_half) return false;
+        switch (operation)
+        {
+        case ARM64_SIMD_OP_SQXTN:
+            EMU_SIMD_SCALAR_NARROW_EXEC("sqxtn");
+        case ARM64_SIMD_OP_UQXTN:
+            EMU_SIMD_SCALAR_NARROW_EXEC("uqxtn");
+        case ARM64_SIMD_OP_SQXTUN:
+            EMU_SIMD_SCALAR_NARROW_EXEC("sqxtun");
+        default:
+            return false;
+        }
+    }
+
+    switch (operation)
+    {
+    case ARM64_SIMD_OP_XTN:
+        EMU_SIMD_VECTOR_NARROW_EXEC("xtn", "xtn2");
+    case ARM64_SIMD_OP_SQXTN:
+        EMU_SIMD_VECTOR_NARROW_EXEC("sqxtn", "sqxtn2");
+    case ARM64_SIMD_OP_UQXTN:
+        EMU_SIMD_VECTOR_NARROW_EXEC("uqxtn", "uqxtn2");
+    case ARM64_SIMD_OP_SQXTUN:
+        EMU_SIMD_VECTOR_NARROW_EXEC("sqxtun", "sqxtun2");
+    default:
+        return false;
+    }
+}
+
 static __always_inline bool emu_simd_fp_reduce_hw(enum arm64_simd_operation operation, void *dst, const void *source, uint32_t element_width, uint32_t vector_width)
 {
     if (element_width == 16 && !emu_simd_current_cpu_has_fp16()) return false;
@@ -2981,6 +3089,16 @@ static __always_inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_
     else if (operands->form == ARM64_SIMD_FORM_FP_REDUCE)
     {
         if (!emu_simd_fp_reduce_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], operands->element_width, decoded->operand_width)) return EMU_INSN_SKIP;
+        result = EMU_INSN_HANDLED;
+    }
+    else if (operands->form == ARM64_SIMD_FORM_VECTOR_INTEGER_REDUCE)
+    {
+        if (!emu_simd_integer_reduce_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], operands->element_width, operands->result_element_width, decoded->operand_width)) return EMU_INSN_SKIP;
+        result = EMU_INSN_HANDLED;
+    }
+    else if (operands->form == ARM64_SIMD_FORM_VECTOR_NARROW || operands->form == ARM64_SIMD_FORM_SCALAR_NARROW)
+    {
+        if (!emu_simd_narrow_hw(operands->operation, &fp_regs[decoded->rd], &fp_regs[decoded->rn], operands->element_width, operands->result_element_width, operands->flags, operands->form == ARM64_SIMD_FORM_SCALAR_NARROW)) return EMU_INSN_SKIP;
         result = EMU_INSN_HANDLED;
     }
     else if (operands->form == ARM64_SIMD_FORM_VECTOR_EXTRACT)
@@ -4380,7 +4498,7 @@ static __always_inline enum emu_insn_result emu_simulate_data_processing_insn(st
     return EMU_INSN_SKIP;
 }
 
-static __always_inline bool emulate_insn(struct pt_regs *regs, const uint32_t *specified_insn, const struct emu_mem_access *mem_access)
+static __always_inline bool emulate_insn(struct pt_regs *regs, const uint32_t *specified_insn)
 {
     uint32_t insn;
     uint64_t pc = regs->pc;
@@ -4391,7 +4509,7 @@ static __always_inline bool emulate_insn(struct pt_regs *regs, const uint32_t *s
     if (specified_insn) insn = *specified_insn;
     else
     {
-        if (emu_read_mem(mem_access, pc, sizeof(insn), &fetched_insn))
+        if (emu_read_mem(pc, sizeof(insn), &fetched_insn))
         {
             ls_log_always_tag("emulate_insn", "failed pc=0x%llx insn_read_failed\n", (unsigned long long)pc);
             return false;
@@ -4435,7 +4553,7 @@ static __always_inline bool emulate_insn(struct pt_regs *regs, const uint32_t *s
             }
             break;
         case ARM64_INSN_CLASS_LOAD_STORE:
-            result = emu_simulate_load_store_insn(regs, &decoded, pc, mem_access);
+            result = emu_simulate_load_store_insn(regs, &decoded, pc);
             break;
         case ARM64_INSN_CLASS_DATA_PROCESSING_SIMD_FP:
             result = emu_simulate_fp_simd_insn(regs, &decoded, pc);

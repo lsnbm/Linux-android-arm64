@@ -209,6 +209,7 @@ class HttpBridgeWindow(QWidget):
         self.bp_info_data: dict | None = None
         self.breakpoint_mode = ""
         self.syscall_active = False
+        self.cntvct_active = False
         self.hwbp_selected_index: int | None = None
         self.hwbp_point_rows: list[dict[str, object]] = []
         self.live_refresh_inflight = False
@@ -374,6 +375,7 @@ class HttpBridgeWindow(QWidget):
         self.pointer_page = QWidget()
         self.breakpoint_page = QWidget()
         self.syscall_page = QWidget()
+        self.cntvct_page = QWidget()
         self.environment_page = QWidget()
         self.signature_page = QWidget()
         self.save_page = QWidget()
@@ -386,6 +388,7 @@ class HttpBridgeWindow(QWidget):
         self.tabs.addTab(self.pointer_page, "指针页")
         self.tabs.addTab(self.breakpoint_page, "断点页")
         self.tabs.addTab(self.syscall_page, "系统调用页")
+        self.tabs.addTab(self.cntvct_page, "CNTVCT页")
         self.tabs.addTab(self.environment_page, "环境参数页")
         self.tabs.addTab(self.signature_page, "特征码页")
         self.tabs.addTab(self.log_page, "日志页")
@@ -397,6 +400,7 @@ class HttpBridgeWindow(QWidget):
         self._build_pointer_page()
         self._build_breakpoint_page()
         self._build_syscall_page()
+        self._build_cntvct_page()
         self._build_environment_page()
         self._build_signature_page()
         self._build_save_page()
@@ -419,6 +423,9 @@ class HttpBridgeWindow(QWidget):
 
     def _is_syscall_tab_active(self) -> bool:
         return self.tabs.currentWidget() is self.syscall_page
+
+    def _is_cntvct_tab_active(self) -> bool:
+        return self.tabs.currentWidget() is self.cntvct_page
 
     def on_tab_changed(self, _index: int) -> None:
         if self._is_connected():
@@ -1164,6 +1171,31 @@ class HttpBridgeWindow(QWidget):
         card_layout.addWidget(self.syscall_log_view, 1)
         self._apply_syscall_state()
 
+    def _build_cntvct_page(self) -> None:
+        layout = self._create_page_layout(self.cntvct_page)
+        card, card_layout = self._create_section_card(parent=self.cntvct_page)
+        layout.addWidget(card, 1)
+
+        row = QHBoxLayout()
+        self.cntvct_status_label = QLabel("未监听")
+        self.cntvct_start_button = QPushButton("开始监听")
+        self.cntvct_stop_button = QPushButton("停止监听")
+        refresh_button = QPushButton("刷新日志")
+        clear_button = QPushButton("清空显示")
+        self.cntvct_log_view = QTextEdit()
+        self.cntvct_log_view.setReadOnly(True)
+        self.cntvct_log_view.setPlaceholderText("Android 端 cntvct 标签的内核日志将在这里实时显示。")
+        self.cntvct_start_button.clicked.connect(self.on_cntvct_start)
+        self.cntvct_stop_button.clicked.connect(self.on_cntvct_stop)
+        refresh_button.clicked.connect(self.on_cntvct_log_refresh)
+        clear_button.clicked.connect(self.cntvct_log_view.clear)
+        for widget in (self.cntvct_status_label, self.cntvct_start_button, self.cntvct_stop_button, refresh_button, clear_button):
+            row.addWidget(widget)
+        row.addStretch(1)
+        card_layout.addLayout(row)
+        card_layout.addWidget(self.cntvct_log_view, 1)
+        self._apply_cntvct_state()
+
     def _log(self, text: str) -> None:
         time_text = datetime.now().strftime("%H:%M:%S")
         self.log_view.append(f"[{time_text}] {text}")
@@ -1317,6 +1349,9 @@ class HttpBridgeWindow(QWidget):
         self.syscall_active = False
         self._apply_syscall_state()
         self.syscall_log_view.clear()
+        self.cntvct_active = False
+        self._apply_cntvct_state()
+        self.cntvct_log_view.clear()
         self.environment_view.clear()
 
     def _connect_device(self) -> None:
@@ -1823,57 +1858,6 @@ class HttpBridgeWindow(QWidget):
                 return None
             flat_index += record_count
         return None
-
-    def _hwbp_record_indices_for_point(self, point_index: int) -> list[int]:
-        if point_index < 0:
-            return []
-        points_raw = self._hwbp_points_raw()
-        flat_index = 0
-        for idx, point in enumerate(points_raw):
-            if not isinstance(point, dict):
-                continue
-            records = self._hwbp_point_records(point)
-            record_count = self._hwbp_point_record_count(point)
-            if idx == point_index:
-                return list(range(flat_index + record_count - 1, flat_index - 1, -1))
-            flat_index += record_count
-        return []
-
-    def _remove_hwbp_records(self, indices: list[int]) -> list[int]:
-        valid_indices = sorted({idx for idx in indices if idx >= 0}, reverse=True)
-        deleted_indices: list[int] = []
-        failed_indices: list[int] = []
-        for idx in valid_indices:
-            response = self._request_ok(
-                "breakpoint_record.remove",
-                {"index": idx},
-                error_title="删除失败",
-                warn=False,
-            )
-            if response is None:
-                failed_indices.append(idx)
-                continue
-            deleted_indices.append(idx)
-        self.on_hwbp_refresh(silent=True)
-        if failed_indices:
-            failed_text = ", ".join(str(idx) for idx in failed_indices)
-            QMessageBox.warning(self, "删除失败", f"部分 record 删除失败: {failed_text}")
-        return deleted_indices
-
-    def _remove_hwbp_point(self, point_payload: dict) -> None:
-        point_index = self._safe_int(point_payload.get("point_index"), -1)
-        indices = self._hwbp_record_indices_for_point(point_index)
-        if not indices:
-            QMessageBox.warning(self, "删除失败", "当前 point 下没有可删除的 bp_record。")
-            return
-
-        deleted_indices = self._remove_hwbp_records(indices)
-        point = point_payload.get("point")
-        point_data = point if isinstance(point, dict) else {}
-        hit_addr = self._safe_int(point_data.get("hit_addr"), 0)
-        self._set_status(
-            f"已删除 point[{point_index}] 0x{hit_addr:X} 下的 {len(deleted_indices)} 条 record"
-        )
 
     @staticmethod
     def _parse_hwbp_hex_value(value_text: str, field_name: str) -> int | None:
@@ -3285,6 +3269,8 @@ class HttpBridgeWindow(QWidget):
             task = {"kind": "breakpoint"}
         elif self._is_syscall_tab_active():
             task = {"kind": "syscall"}
+        elif self._is_cntvct_tab_active():
+            task = {"kind": "cntvct"}
 
         if task is None:
             return
@@ -3313,6 +3299,8 @@ class HttpBridgeWindow(QWidget):
                 result["response"] = self.http_bridge.call_operation("breakpoint.get").to_dict()
             elif kind == "syscall":
                 result["response"] = self.http_bridge.call_operation("syscall.read").to_dict()
+            elif kind == "cntvct":
+                result["response"] = self.http_bridge.call_operation("cntvct.read").to_dict()
         except BridgeConnectionError as exc:
             result["connection_error"] = str(exc)
         except BridgeError as exc:
@@ -3374,6 +3362,11 @@ class HttpBridgeWindow(QWidget):
             if isinstance(response, dict) and self._response_ok(response):
                 data = self._response_data_dict(response)
                 self._set_text_preserve_interaction(self.syscall_log_view, str(data.get("log", "")))
+        elif kind == "cntvct":
+            response = result_obj.get("response")
+            if isinstance(response, dict) and self._response_ok(response):
+                data = self._response_data_dict(response)
+                self._set_text_preserve_interaction(self.cntvct_log_view, str(data.get("log", "")))
 
     def _apply_syscall_state(self) -> None:
         self.syscall_status_label.setText("已监听" if self.syscall_active else "未监听")
@@ -3407,6 +3400,39 @@ class HttpBridgeWindow(QWidget):
         self._set_text_preserve_interaction(self.syscall_log_view, str(data.get("log", "")))
         if not silent:
             self._set_status(f"系统调用日志已刷新，共 {self._safe_int(data.get('line_count'), 0)} 行")
+
+    def _apply_cntvct_state(self) -> None:
+        self.cntvct_status_label.setText("已监听" if self.cntvct_active else "未监听")
+        self.cntvct_start_button.setEnabled(not self.cntvct_active)
+        self.cntvct_stop_button.setEnabled(self.cntvct_active)
+
+    def on_cntvct_start(self) -> None:
+        data = self._request_data_dict("cntvct.start", error_title="监听失败", error_prefix="启动监听失败: ")
+        if data is None:
+            return
+        self.cntvct_active = True
+        self._apply_cntvct_state()
+        self._set_status(f"已监听 PID {self._safe_int(data.get('pid'), 0)} 的 CNTVCT_EL0 读取")
+        self.on_cntvct_log_refresh(silent=True)
+
+    def on_cntvct_stop(self) -> None:
+        data = self._request_data_dict("cntvct.stop", error_title="停止失败", error_prefix="停止监听失败: ")
+        if data is None:
+            return
+        self.cntvct_active = False
+        self._apply_cntvct_state()
+        self._set_status("CNTVCT_EL0 读取监听已停止")
+
+    def on_cntvct_log_refresh(self, silent: bool = False) -> None:
+        data = self._request_data_dict(
+            "cntvct.read", error_title="日志刷新失败",
+            log_enabled=not silent, warn=not silent,
+        )
+        if data is None:
+            return
+        self._set_text_preserve_interaction(self.cntvct_log_view, str(data.get("log", "")))
+        if not silent:
+            self._set_status(f"CNTVCT 日志已刷新，共 {self._safe_int(data.get('line_count'), 0)} 行")
 
     def on_sync_pid(self) -> None:
         input_text = self.pid_input.text().strip()
@@ -3676,16 +3702,13 @@ class HttpBridgeWindow(QWidget):
         menu = QMenu(self.hwbp_tree)
         edit_value_action = None
         copy_json_action = None
-        delete_action = None
         if item_field:
             edit_value_action = menu.addAction("修改寄存器值")
         if record_payload is not None:
             copy_json_action = menu.addAction("复制当前记录完整JSON")
-            delete_action = menu.addAction("删除当前 record")
         elif point_payload is not None:
             copy_json_action = menu.addAction("复制当前 point 完整JSON")
-            delete_action = menu.addAction("删除当前 point")
-        if edit_value_action is not None or copy_json_action is not None or delete_action is not None:
+        if edit_value_action is not None or copy_json_action is not None:
             menu.addSeparator()
 
         action = menu.exec(self.hwbp_tree.mapToGlobal(pos))
@@ -3703,18 +3726,6 @@ class HttpBridgeWindow(QWidget):
                 QApplication.clipboard().setText(json.dumps(point_payload, ensure_ascii=False, indent=2))
                 self._set_status(f"已复制 point[{point_index}] JSON")
             return
-        if action != delete_action:
-            return
-
-        if record_payload is not None and item_index is not None:
-            deleted_indices = self._remove_hwbp_records([item_index])
-            if item_index in deleted_indices:
-                self._set_status(f"已删除 record[{item_index}]")
-            else:
-                self._set_status(f"record[{item_index}] 删除失败")
-            return
-        if point_payload is not None:
-            self._remove_hwbp_point(point_payload)
 
     def _render_signature_data(self, data: dict, status_text: str) -> None:
         self.sig_status_label.setText(status_text)

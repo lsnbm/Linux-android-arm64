@@ -248,6 +248,14 @@ class MainUI
         std::chrono::steady_clock::time_point nextLogRefresh{};
     } syscallParams_;
 
+    struct CntvctParams
+    {
+        int lastStatus = 0;
+        bool hasResult = false;
+        std::string log;
+        std::chrono::steady_clock::time_point nextLogRefresh{};
+    } cntvctParams_;
+
     struct EnvParams
     {
         bool hasResult = false;
@@ -562,6 +570,7 @@ class MainUI
     {
         Config::g_Running = false;
         MemoryTool::StopSyscallMonitor();
+        MemoryTool::StopCntvctMonitor();
     }
 
     void draw()
@@ -687,6 +696,8 @@ class MainUI
                             envParams_ = {};
                             syscallParams_.log.clear();
                             syscallParams_.hasResult = false;
+                            cntvctParams_.log.clear();
+                            cntvctParams_.hasResult = false;
                         }
                     }
                 }
@@ -700,7 +711,7 @@ class MainUI
     void drawContent(float w, float h)
     {
         using DrawFn = void (MainUI::*)();
-        DrawFn tabs[] = {&MainUI::drawScanTab, &MainUI::drawSavedTab, &MainUI::drawViewerTab, &MainUI::drawModuleTab, &MainUI::drawPointerTab, &MainUI::drawSignatureTab, &MainUI::drawBreakpointTab, &MainUI::drawSyscallTab, &MainUI::drawEnvTab};
+        DrawFn tabs[] = {&MainUI::drawScanTab, &MainUI::drawSavedTab, &MainUI::drawViewerTab, &MainUI::drawModuleTab, &MainUI::drawPointerTab, &MainUI::drawSignatureTab, &MainUI::drawBreakpointTab, &MainUI::drawSyscallTab, &MainUI::drawCntvctTab, &MainUI::drawEnvTab};
         UI::ColorChild("Content", {w, h}, Colors::BG_MID, [&] { (this->*tabs[state_.tab])(); });
     }
 
@@ -711,9 +722,9 @@ class MainUI
             "Tabs", {w, h}, Colors::BG_PANEL,
             [&]
             {
-                constexpr int N = 9;
+                constexpr int N = 10;
                 float bw = (w - S(36)) / N;
-                const char *labels[] = {"扫描", "保存", "浏览", "模块", "指针", "特征", "断点", "调用", "环境"};
+                const char *labels[] = {"扫描", "保存", "浏览", "模块", "指针", "特征", "断点", "调用", "计时", "环境"};
                 for (int i = 0; i < N; ++i)
                 {
                     if (i > 0) ImGui::SameLine();
@@ -781,7 +792,7 @@ class MainUI
         const auto now = std::chrono::steady_clock::now();
         if (now >= syscallParams_.nextLogRefresh)
         {
-            syscallParams_.log = SyscallLog::ReadDmesg();
+            syscallParams_.log = SyscallLog::ReadDmesg("sysmon");
             syscallParams_.nextLogRefresh = now + std::chrono::seconds(1);
         }
 
@@ -820,6 +831,60 @@ class MainUI
         if (UI::Btn("刷新日志", {w, S(42)}, Colors::BTN_TEAL)) syscallParams_.nextLogRefresh = {};
         UI::Text(Colors::HINT, "实时筛选包含 lsdriver 的内核日志");
         if (ImGui::BeginChild("SyscallLog", {w, 0}, true, ImGuiWindowFlags_HorizontalScrollbar)) ImGui::TextUnformatted(syscallParams_.log.empty() ? "暂无系统调用日志" : syscallParams_.log.c_str());
+        ImGui::EndChild();
+    }
+
+    // ================================================================
+    // CNTVCT_EL0 读取监控页
+    // ================================================================
+    void drawCntvctTab()
+    {
+        float w = ImGui::GetContentRegionAvail().x;
+        const int targetPid = dr->GetGlobalPid();
+        const int monitoredPid = MemoryTool::CntvctMonitorPid().load(std::memory_order_acquire);
+        const bool active = monitoredPid > 0;
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= cntvctParams_.nextLogRefresh)
+        {
+            cntvctParams_.log = SyscallLog::ReadDmesg("cntvct");
+            cntvctParams_.nextLogRefresh = now + std::chrono::seconds(1);
+        }
+
+        UI::Text(Colors::TITLE, "━━ CNTVCT_EL0 读取监控 ━━");
+        UI::Space(S(8));
+        UI::LabelValue(Colors::LABEL, "当前目标 PID: ", targetPid > 0 ? Colors::ADDR_GREEN : Colors::ERR, "%d", targetPid);
+        UI::LabelValue(Colors::LABEL, "监听状态: ", active ? Colors::OK : Colors::HINT, "%s", active ? "已监听" : "未监听");
+        if (active) UI::LabelValue(Colors::LABEL, "监听 PID: ", Colors::ADDR_CYAN, "%d", monitoredPid);
+
+        UI::Space(S(12));
+        ImGui::BeginDisabled(targetPid <= 0 || active);
+        if (UI::Btn("开始监听", {w, S(54)}, Colors::BTN_GREEN))
+        {
+            cntvctParams_.lastStatus = MemoryTool::StartCntvctMonitor();
+            cntvctParams_.hasResult = true;
+        }
+        ImGui::EndDisabled();
+
+        UI::Space(S(8));
+        ImGui::BeginDisabled(!active);
+        if (UI::Btn("取消监听", {w, S(54)}, Colors::BTN_RED))
+        {
+            cntvctParams_.lastStatus = MemoryTool::StopCntvctMonitor();
+            cntvctParams_.hasResult = true;
+        }
+        ImGui::EndDisabled();
+
+        UI::Space(S(12));
+        if (cntvctParams_.hasResult)
+        {
+            if (cntvctParams_.lastStatus == 0) UI::Text(Colors::OK, "请求执行成功");
+            else UI::Text(Colors::ERR, "请求执行失败，状态: %d", cntvctParams_.lastStatus);
+        }
+
+        UI::Space(S(8));
+        if (UI::Btn("刷新日志", {w, S(42)}, Colors::BTN_TEAL)) cntvctParams_.nextLogRefresh = {};
+        UI::Text(Colors::HINT, "实时筛选 cntvct 标签的内核日志");
+        if (ImGui::BeginChild("CntvctLog", {w, 0}, true, ImGuiWindowFlags_HorizontalScrollbar)) ImGui::TextUnformatted(cntvctParams_.log.empty() ? "暂无 CNTVCT 读取日志" : cntvctParams_.log.c_str());
         ImGui::EndChild();
     }
 
@@ -1608,9 +1673,6 @@ class MainUI
         static bool pointExpandState[16] = {};
         static bool recordsExpandState[16] = {};
         static bool recordExpandState[16 * 0x100] = {};
-        int deleteRecordIdx = -1;
-        int deletePointStart = -1;
-        int deletePointCount = 0;
         int flatIndex = 0;
 
         for (int p = 0; p < 16; ++p)
@@ -1632,16 +1694,9 @@ class MainUI
             }
 
             ImGui::PushID(p);
-            const float deletePointW = S(78);
             const float expandPointW = S(55);
             UI::Text(Colors::ADDR_CYAN, "hit_addr:0x%llX  point[%d]  records:%d  总命中:%llu", (unsigned long long)point.hit_addr, p, recordCount, (unsigned long long)pointHits);
-            ImGui::SameLine(w - deletePointW);
-            if (UI::Btn("删point", {deletePointW, S(32)}, Colors::BTN_DEL))
-            {
-                deletePointStart = pointFlatStart;
-                deletePointCount = recordCount;
-            }
-            ImGui::SameLine(w - deletePointW - expandPointW - S(4));
+            ImGui::SameLine(w - expandPointW);
             if (UI::Btn(pointExpandState[p] ? "收起" : "展开", {expandPointW, S(32)}, Colors::BTN_BLUE)) pointExpandState[p] = !pointExpandState[p];
 
             if (pointExpandState[p])
@@ -1665,13 +1720,10 @@ class MainUI
                         const auto pc = HwbpRead<std::uint64_t>(rec, Driver::IDX_PC);
                         const auto hitCount = HwbpRead<std::uint64_t>(rec, Driver::IDX_HIT_COUNT);
                         ImGui::PushID(recordFlatIndex);
-                        const float deleteRecordW = S(72);
                         const float expandRecordW = S(55);
 
                         UI::Text({0.7f, 0.85f, 1, 1}, "record[%d:%d]  PC:0x%llX  命中:%llu", p, r, (unsigned long long)pc, (unsigned long long)hitCount);
-                        ImGui::SameLine(w - deleteRecordW);
-                        if (UI::Btn("删record", {deleteRecordW, S(32)}, Colors::BTN_DEL)) deleteRecordIdx = recordFlatIndex;
-                        ImGui::SameLine(w - deleteRecordW - expandRecordW - S(4));
+                        ImGui::SameLine(w - expandRecordW);
                         if (UI::Btn(recordExpandState[recordFlatIndex] ? "收起" : "展开", {expandRecordW, S(32)}, {0.2f, 0.3f, 0.45f, 1})) recordExpandState[recordFlatIndex] = !recordExpandState[recordFlatIndex];
 
                         if (recordExpandState[recordFlatIndex])
@@ -1697,18 +1749,6 @@ class MainUI
             UI::Space(S(4));
             ImGui::PopID();
             flatIndex += recordCount;
-        }
-        if (deleteRecordIdx >= 0)
-        {
-            dr->RemoveHwbpRecord(deleteRecordIdx);
-            bpParams_.editingRecordIdx = -1;
-            bpParams_.editingField = -1;
-        }
-        if (deletePointStart >= 0 && deletePointCount > 0)
-        {
-            for (int i = deletePointCount - 1; i >= 0; --i) dr->RemoveHwbpRecord(deletePointStart + i);
-            bpParams_.editingRecordIdx = -1;
-            bpParams_.editingField = -1;
         }
     }
 

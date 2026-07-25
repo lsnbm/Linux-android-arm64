@@ -1189,7 +1189,22 @@ namespace
 
         if (op == "syscall.read")
         {
-            const std::string log = SyscallLog::ReadDmesg();
+            const std::string log = SyscallLog::ReadDmesg("sysmon");
+            return okData({{"log", log}, {"line_count", std::ranges::count(log, '\n')}});
+        }
+
+        if (op == "cntvct.start" || op == "cntvct.stop")
+        {
+            const int pid = dr->GetGlobalPid();
+            if (pid <= 0) return fail("全局PID未设置，请先执行 target.select 或 target.attach");
+            const int status = op == "cntvct.start" ? MemoryTool::StartCntvctMonitor() : MemoryTool::StopCntvctMonitor();
+            if (status != 0) return fail(std::format("CNTVCT 监听请求失败，状态={}", status));
+            return okData({{"pid", pid}, {"active", op == "cntvct.start"}, {"status", status}});
+        }
+
+        if (op == "cntvct.read")
+        {
+            const std::string log = SyscallLog::ReadDmesg("cntvct");
             return okData({{"log", log}, {"line_count", std::ranges::count(log, '\n')}});
         }
 
@@ -1528,17 +1543,6 @@ namespace
             else dr->RemoveProcessPtebpRef();
             activeMode.clear();
             return okData({{"mode", ""}, {"cleared", true}});
-        }
-
-        if (op == "breakpoint_record.remove")
-        {
-            const auto index = requiredInt("index", "index");
-            if (std::holds_alternative<json>(index)) return std::get<json>(index);
-            if (std::get<int>(index) < 0) return fail("index 无效");
-            const auto &info = dr->GetHwbpInfoRef();
-            if (std::get<int>(index) >= getHwbpTotalRecordCount(info)) return fail("index 越界");
-            dr->RemoveHwbpRecord(std::get<int>(index));
-            return okData({{"record_count", getHwbpTotalRecordCount(info)}});
         }
 
         if (op == "breakpoint_record.update")

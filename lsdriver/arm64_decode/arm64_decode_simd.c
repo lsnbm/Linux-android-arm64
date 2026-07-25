@@ -1264,6 +1264,107 @@ static enum arm64_decode_status arm64_simd_decode_rev(arm64_u32 raw, struct arm6
     return ARM64_DECODE_OK;
 }
 
+static enum arm64_decode_status arm64_simd_decode_narrow(arm64_u32 raw, struct arm64_decoded_insn *decoded)
+{
+    arm64_u32 size = (raw >> 22) & 0x3;
+    arm64_u32 signature;
+    arm64_u8 scalar = (raw >> 28) & 1;
+
+    if (scalar)
+    {
+        signature = raw & 0xFF3FFC00U;
+        switch (signature)
+        {
+        case 0x5E212800U:
+            return ARM64_DECODE_UNALLOCATED;
+        case 0x5E214800U:
+            decoded->operands.simd.operation = ARM64_SIMD_OP_SQXTN;
+            break;
+        case 0x7E214800U:
+            decoded->operands.simd.operation = ARM64_SIMD_OP_UQXTN;
+            break;
+        case 0x7E212800U:
+            decoded->operands.simd.operation = ARM64_SIMD_OP_SQXTUN;
+            break;
+        default:
+            return ARM64_DECODE_NO_MATCH;
+        }
+        if (size == 3) return ARM64_DECODE_UNALLOCATED;
+        decoded->operands.simd.form = ARM64_SIMD_FORM_SCALAR_NARROW;
+        decoded->operand_width = 8U << size;
+    }
+    else
+    {
+        signature = raw & 0xBF3FFC00U;
+        switch (signature)
+        {
+        case 0x0E212800U:
+            decoded->operands.simd.operation = ARM64_SIMD_OP_XTN;
+            break;
+        case 0x0E214800U:
+            decoded->operands.simd.operation = ARM64_SIMD_OP_SQXTN;
+            break;
+        case 0x2E214800U:
+            decoded->operands.simd.operation = ARM64_SIMD_OP_UQXTN;
+            break;
+        case 0x2E212800U:
+            decoded->operands.simd.operation = ARM64_SIMD_OP_SQXTUN;
+            break;
+        default:
+            return ARM64_DECODE_NO_MATCH;
+        }
+        if (size == 3) return ARM64_DECODE_UNALLOCATED;
+        decoded->operands.simd.form = ARM64_SIMD_FORM_VECTOR_NARROW;
+        decoded->operand_width = raw & (1U << 30) ? 128 : 64;
+        if (raw & (1U << 30)) decoded->operands.simd.flags |= ARM64_SIMD_FLAG_DEST_HIGH_HALF;
+    }
+
+    decoded->operands.simd.element_width = 16U << size;
+    decoded->operands.simd.result_element_width = 8U << size;
+    return ARM64_DECODE_OK;
+}
+
+static enum arm64_decode_status arm64_simd_decode_integer_reduce(arm64_u32 raw, struct arm64_decoded_insn *decoded)
+{
+    arm64_u32 size = (raw >> 22) & 0x3;
+
+    switch (raw & 0xBF3FFC00U)
+    {
+    case 0x0E31B800U:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_ADDV;
+        break;
+    case 0x0E303800U:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_SADDLV;
+        break;
+    case 0x2E303800U:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_UADDLV;
+        break;
+    case 0x0E30A800U:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_SMAXV;
+        break;
+    case 0x0E31A800U:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_SMINV;
+        break;
+    case 0x2E30A800U:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_UMAXV;
+        break;
+    case 0x2E31A800U:
+        decoded->operands.simd.operation = ARM64_SIMD_OP_UMINV;
+        break;
+    default:
+        return ARM64_DECODE_NO_MATCH;
+    }
+
+    if (size == 3 || (size == 2 && !(raw & (1U << 30)))) return ARM64_DECODE_UNALLOCATED;
+    decoded->operands.simd.form = ARM64_SIMD_FORM_VECTOR_INTEGER_REDUCE;
+    decoded->operand_width = raw & (1U << 30) ? 128 : 64;
+    decoded->operands.simd.element_width = 8U << size;
+    decoded->operands.simd.result_element_width = decoded->operands.simd.element_width;
+    if (decoded->operands.simd.operation == ARM64_SIMD_OP_SADDLV || decoded->operands.simd.operation == ARM64_SIMD_OP_UADDLV)
+        decoded->operands.simd.result_element_width *= 2;
+    return ARM64_DECODE_OK;
+}
+
 static enum arm64_decode_status arm64_simd_decode_fp_reduce(arm64_u32 raw, struct arm64_decoded_insn *decoded)
 {
     arm64_u32 signature;
@@ -1616,6 +1717,18 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
         enum arm64_decode_status rev_status = arm64_simd_decode_rev(raw, decoded);
 
         if (rev_status != ARM64_DECODE_NO_MATCH) return rev_status;
+    }
+
+    {
+        enum arm64_decode_status narrow_status = arm64_simd_decode_narrow(raw, decoded);
+
+        if (narrow_status != ARM64_DECODE_NO_MATCH) return narrow_status;
+    }
+
+    {
+        enum arm64_decode_status integer_reduce_status = arm64_simd_decode_integer_reduce(raw, decoded);
+
+        if (integer_reduce_status != ARM64_DECODE_NO_MATCH) return integer_reduce_status;
     }
 
     {

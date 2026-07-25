@@ -21,6 +21,7 @@
 #include "hide_task.h"
 #include "hide_kgsl.h"
 #include "arm64_syscalldbg.h"
+#include "arm64_cntvctdbg.h"
 #include "arm64_env.h"
 
 #include "virtual_input.h"
@@ -64,10 +65,10 @@ static int DispatchThreadFunction(void *data)
                     break;
                 case request_op_vmem_read:
                 case request_op_vmem_write:
-                    req->status = virtual_memory_rw(req->op, req->pid, req->vmemrw_info.rw_addr, &req->vmemrw_info.user_buffer, req->vmemrw_info.size);
+                    req->status = virtual_memory_rw(req->op, req->tgid, req->vmemrw_info.rw_addr, &req->vmemrw_info.user_buffer, req->vmemrw_info.size);
                     break;
                 case request_op_vmem_info:
-                    req->status = virtual_memory_enum(req->pid, &req->vmem_info);
+                    req->status = virtual_memory_enum(req->tgid, &req->vmem_info);
                     break;
                 case request_op_touch_init:
                     req->status = v_touch_init(req->vinput_info.request_virtual_slots, &req->vinput_info.POSITION_X, &req->vinput_info.POSITION_Y);
@@ -108,14 +109,21 @@ static int DispatchThreadFunction(void *data)
                     remove_process_stepbp();
                     break;
                 case request_op_syscall_monitor_set:
-                    req->status = syscall_monitor_install(req->pid);
+                    req->status = syscall_monitor_install(req->tgid);
                     break;
                 case request_op_syscall_monitor_remove:
-                    syscall_monitor_remove(req->pid);
+                    syscall_monitor_remove(req->tgid);
+                    req->status = 0;
+                    break;
+                case request_op_cntvct_monitor_set:
+                    req->status = cntvct_monitor_install(req->tgid);
+                    break;
+                case request_op_cntvct_monitor_remove:
+                    cntvct_monitor_remove(req->tgid);
                     req->status = 0;
                     break;
                 case request_op_env_get_params:
-                    req->status = get_env_params(req->pid, req->env_info.thread_name, &req->env_info.tpidr_el0, &req->env_info.pacga_lo, &req->env_info.pacga_hi, &req->env_info.tls_status, &req->env_info.pacga_status);
+                    req->status = get_env_params(req->tgid, req->env_info.thread_name, &req->env_info.tpidr_el0, &req->env_info.pacga_lo, &req->env_info.pacga_hi, &req->env_info.tls_status, &req->env_info.pacga_status);
                     break;
                 case request_op_kernel_exit:
                     hide_task_remove(connect_thread_task->pid);
@@ -432,6 +440,7 @@ static int do_exit_hook_work(struct pt_regs *regs)
 
     // 任意被监控目标退出时移除其 TGID，防止 PID 槽位和 do_el0_svc hook 残留。
     syscall_monitor_remove(task->tgid);
+    cntvct_monitor_remove(task->tgid);
 
     // 仅匹配用户态通过 PR_SET_NAME 设置的精确进程名。
     if (__builtin_strcmp(task->comm, "LS") == 0)
@@ -449,6 +458,7 @@ static int do_exit_hook_work(struct pt_regs *regs)
         remove_process_ptebp();       // 清理 PTEBP
         remove_process_stepbp();      // 清理单步断点
         syscall_monitor_remove_all(); // 清理全部系统调用监控目标
+        cntvct_monitor_remove_all();  // 清理 CNTVCT_EL0 读取监控
         ls_process_task = NULL;       // 标记用户进程已断开
         if (!connect_thread_task && !dispatch_thread_task)
         {

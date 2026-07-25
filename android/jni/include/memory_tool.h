@@ -97,11 +97,14 @@ namespace Config
 
 namespace SyscallLog
 {
-    inline std::string ReadDmesg()
+    inline std::string ReadDmesg(std::string_view tag = {})
     {
         std::string out;
         std::array<char, 4096> buf{};
-        FILE *pipe = popen("dmesg 2>/dev/null | grep lsdriver", "r");
+        std::string command = "dmesg 2>/dev/null | grep 'lsdriver:";
+        if (!tag.empty()) command += std::format(" {}:", tag);
+        command += "'";
+        FILE *pipe = popen(command.c_str(), "r");
         if (!pipe) return {};
         while (fgets(buf.data(), static_cast<int>(buf.size()), pipe)) out += buf.data();
         pclose(pipe);
@@ -4297,6 +4300,18 @@ namespace MemoryTool
         return mutex;
     }
 
+    inline std::atomic_int &CntvctMonitorPid()
+    {
+        static std::atomic_int pid{0};
+        return pid;
+    }
+
+    inline std::mutex &CntvctMonitorMutex()
+    {
+        static std::mutex mutex;
+        return mutex;
+    }
+
     inline int StartSyscallMonitor()
     {
         std::lock_guard lock(SyscallMonitorMutex());
@@ -4328,6 +4343,37 @@ namespace MemoryTool
         return status;
     }
 
+    inline int StartCntvctMonitor()
+    {
+        std::lock_guard lock(CntvctMonitorMutex());
+        const int pid = dr->GetGlobalPid();
+        if (pid <= 0) return EINVAL;
+
+        const int monitoredPid = CntvctMonitorPid().load(std::memory_order_acquire);
+        if (monitoredPid == pid) return 0;
+        if (monitoredPid > 0)
+        {
+            const int status = dr->StopCntvctMonitor(monitoredPid);
+            if (status != 0) return status;
+            CntvctMonitorPid().store(0, std::memory_order_release);
+        }
+
+        const int status = dr->StartCntvctMonitor(pid);
+        if (status == 0) CntvctMonitorPid().store(pid, std::memory_order_release);
+        return status;
+    }
+
+    inline int StopCntvctMonitor()
+    {
+        std::lock_guard lock(CntvctMonitorMutex());
+        const int pid = CntvctMonitorPid().load(std::memory_order_acquire);
+        if (pid <= 0) return 0;
+
+        const int status = dr->StopCntvctMonitor(pid);
+        if (status == 0) CntvctMonitorPid().store(0, std::memory_order_release);
+        return status;
+    }
+
     inline bool SelectTarget(int pid)
     {
         std::lock_guard targetLock(Config::TargetMutex);
@@ -4335,6 +4381,7 @@ namespace MemoryTool
         if (pid == dr->GetGlobalPid()) return true;
         if (Scanner().isScanning() || Pointer().isBusy()) return false;
         if (StopSyscallMonitor() != 0) return false;
+        if (StopCntvctMonitor() != 0) return false;
 
         auto &mode = HwbpMode();
         if (mode == "hwbp") dr->RemoveProcessHwbpRef();

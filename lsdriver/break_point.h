@@ -414,7 +414,7 @@ static inline void prepare_break_point_handlers(struct break_point *info)
 {
     int point_slot;
 
-    if (!info || info->pid <= 0) return;
+    if (!info || info->tgid <= 0) return;
 
     for (point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
     {
