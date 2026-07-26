@@ -266,9 +266,8 @@ static const char *exit_watch_process_name(const char *comm)
     static const char *const process_names[] = {
         "com.tencent.tmgp.dfm", "com.tencent.tmgp.sgame", "com.pi.czrxdfirst", "com.bwxrk.yqmy.gz", "me.hd.ggtutorial",
     };
-    int i;
 
-    for (i = 0; i < ARRAY_SIZE(process_names); i++)
+    for (int i = 0; i < ARRAY_SIZE(process_names); i++)
     {
         size_t length = __builtin_strlen(process_names[i]);
         const char *suffix = length >= TASK_COMM_LEN ? process_names[i] + length - (TASK_COMM_LEN - 1) : process_names[i];
@@ -391,17 +390,16 @@ static void log_exit_kernel_chain(const char *tag, const struct pt_regs *regs)
 static int arm64_force_sig_fault_hook_work(struct pt_regs *regs)
 {
     struct task_struct *task = current;
-    struct pt_regs *user_regs = task_pt_regs(task);
     char process_comm[TASK_COMM_LEN];
-    const char *process_name;
+
+    get_task_comm(process_comm, task->group_leader);
+    const char *process_name = exit_watch_process_name(process_comm);
+    if (!process_name) return 0;
+
+    struct pt_regs *user_regs = task_pt_regs(task);
     const char *source = (const char *)(uintptr_t)regs->regs[3];
     unsigned int signal = (unsigned int)regs->regs[0];
     int code = (int)regs->regs[1];
-
-    get_task_comm(process_comm, task->group_leader);
-    process_name = exit_watch_process_name(process_comm);
-    if (!process_name) return 0;
-
     ls_log_always_tag("fault", "process=%s thread=%s tgid=%d tid=%d signal=%s(%u) si_code=%s(%d) addr=0x%lx esr=0x%lx source=%s pc=0x%llx lr=0x%llx sp=0x%llx\n", process_name, task->comm, task->tgid, task->pid, exit_signal_name(signal), signal, exit_fault_code_name(signal, code), code, (unsigned long)regs->regs[2], task->thread.fault_code, source ? source : "<none>", (unsigned long long)user_regs->pc, (unsigned long long)user_regs->regs[30], (unsigned long long)user_regs->sp);
     log_exit_kernel_chain("fault", regs);
     return 0;
@@ -429,13 +427,12 @@ static int do_exit_hook_work(struct pt_regs *regs)
     // 调用 do_exit 的进程就是当前正在运行并准备死去的进程 (current)
     struct task_struct *task = current;
     char process_comm[TASK_COMM_LEN];
-    const char *process_name;
 
     // 只监听主线程的退出
     if (!thread_group_leader(task)) return 0;
 
     get_task_comm(process_comm, task);
-    process_name = exit_watch_process_name(process_comm);
+    const char *process_name = exit_watch_process_name(process_comm);
     if (process_name) log_watched_process_exit(task, process_name, regs);
 
     // 任意被监控目标退出时移除其 TGID，防止 PID 槽位和 do_el0_svc hook 残留。
@@ -474,9 +471,7 @@ static int do_exit_init(void)
         HOOK_ENTRY("do_exit", do_exit_hook_work),
     };
 
-    int ret;
-
-    ret = inline_hook_install(exit_hooks);
+    int ret = inline_hook_install(exit_hooks);
     if (ret < 0)
     {
         ls_log_tag("core", "安装进程异常/退出 inline hook 失败，错误码: %d\n", ret);

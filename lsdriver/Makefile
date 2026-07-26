@@ -25,6 +25,9 @@ ccflags-y += -march=armv8.2-a+fp16
 # 将所有警告降级，不再视为错误
 ccflags-y += -Wno-error
 
+# 驱动源码使用 C99 使用点声明与 for 初始化子句变量；旧内核默认 GNU89，需显式启用现代 GNU C 方言。
+ccflags-y += -std=gnu11
+
 #禁用栈溢出保护
 ccflags-y += -fno-stack-protector
 

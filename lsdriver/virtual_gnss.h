@@ -182,10 +182,6 @@ static u64 vgnss_e7_to_double_bits(int value)
 {
     u64 sign = 0;
     u64 mag;
-    u64 fixed;
-    int top;
-    int exp;
-    u64 mant;
 
     if (value < 0)
     {
@@ -199,14 +195,15 @@ static u64 vgnss_e7_to_double_bits(int value)
 
     if (!mag) return sign;
 
-    fixed = ((mag << 32) + (VGNSS_COORD_SCALE_E7 / 2)) / VGNSS_COORD_SCALE_E7;
+    u64 fixed = ((mag << 32) + (VGNSS_COORD_SCALE_E7 / 2)) / VGNSS_COORD_SCALE_E7;
     if (!fixed) return sign;
 
-    top = fls64(fixed) - 1;
-    exp = top - 32 + 1023;
+    int top = fls64(fixed) - 1;
+    int exp = top - 32 + 1023;
     if (exp <= 0) return sign;
     if (exp >= 2047) return sign | VGNSS_DOUBLE_EXP_MASK;
 
+    u64 mant;
     if (top > 52) mant = fixed >> (top - 52);
     else mant = fixed << (52 - top);
 
@@ -216,12 +213,11 @@ static u64 vgnss_e7_to_double_bits(int value)
 // 在 UTF-16LE Parcel 字符串中匹配 ASCII interface token。
 static bool vgnss_match_utf16le_ascii(const char *buf, size_t len, size_t pos, const char *token)
 {
-    size_t i;
     size_t token_len = __builtin_strlen(token);
 
     if (pos + token_len * 2 > len) return false;
 
-    for (i = 0; i < token_len; i++)
+    for (size_t i = 0; i < token_len; i++)
     {
         if ((u8)buf[pos + i * 2] != (u8)token[i]) return false;
         if (buf[pos + i * 2 + 1] != 0) return false;
@@ -235,9 +231,8 @@ static bool vgnss_find_location_token(const char *buf, size_t len, size_t *token
 {
     static const char listener_token[] = "android.location.ILocationListener";
     static const char callback_token[] = "android.location.ILocationCallback";
-    size_t i;
 
-    for (i = 0; i + 16 < len; i++)
+    for (size_t i = 0; i + 16 < len; i++)
     {
         if (vgnss_match_utf16le_ascii(buf, len, i, listener_token))
         {
@@ -267,20 +262,12 @@ static bool vgnss_time_fields_plausible(u64 time_ms, u64 elapsed_ns)
 // 按 Location Parcelable 布局校验并替换指定位置处的经纬度字段。
 static bool vgnss_patch_location_at(char *buf, size_t len, size_t start, u64 lat_bits, u64 lon_bits)
 {
-    s32 provider_len;
-    size_t pos;
-    u32 fields_mask;
-    u64 time_ms;
-    u64 elapsed_ns;
-    u64 old_lat;
-    u64 old_lon;
-
     if (start + sizeof(u32) > len) return false;
 
-    provider_len = vgnss_read_s32(buf + start);
+    s32 provider_len = vgnss_read_s32(buf + start);
     if (provider_len < -1 || provider_len > VGNSS_MAX_PROVIDER_BYTES) return false;
 
-    pos = start + sizeof(u32);
+    size_t pos = start + sizeof(u32);
     if (provider_len >= 0)
     {
         if (pos + (size_t)provider_len + 1 > len) return false;
@@ -290,12 +277,12 @@ static bool vgnss_patch_location_at(char *buf, size_t len, size_t start, u64 lat
 
     if (pos + sizeof(u32) + sizeof(u64) * 2 > len) return false;
 
-    fields_mask = vgnss_read_u32(buf + pos);
+    u32 fields_mask = vgnss_read_u32(buf + pos);
     if (fields_mask & ~VGNSS_LOCATION_KNOWN_FIELD_MASK) return false;
 
     pos += sizeof(u32);
-    time_ms = vgnss_read_u64(buf + pos);
-    elapsed_ns = vgnss_read_u64(buf + pos + sizeof(u64));
+    u64 time_ms = vgnss_read_u64(buf + pos);
+    u64 elapsed_ns = vgnss_read_u64(buf + pos + sizeof(u64));
     if (!vgnss_time_fields_plausible(time_ms, elapsed_ns)) return false;
 
     pos += sizeof(u64) * 2;
@@ -303,8 +290,8 @@ static bool vgnss_patch_location_at(char *buf, size_t len, size_t start, u64 lat
 
     if (pos + sizeof(u64) * 2 > len) return false;
 
-    old_lat = vgnss_read_u64(buf + pos);
-    old_lon = vgnss_read_u64(buf + pos + sizeof(u64));
+    u64 old_lat = vgnss_read_u64(buf + pos);
+    u64 old_lon = vgnss_read_u64(buf + pos + sizeof(u64));
     if (!vgnss_double_abs_le(old_lat, VGNSS_DOUBLE_ABS_LAT_90)) return false;
     if (!vgnss_double_abs_le(old_lon, VGNSS_DOUBLE_ABS_LON_180)) return false;
 
@@ -317,17 +304,14 @@ static bool vgnss_patch_location_at(char *buf, size_t len, size_t start, u64 lat
 static int vgnss_patch_location_parcel(char *buf, size_t len)
 {
     size_t token_end = 0;
-    size_t pos;
     int patched = 0;
-    u64 lat_bits;
-    u64 lon_bits;
 
     if (!vgnss_find_location_token(buf, len, &token_end)) return 0;
 
-    lat_bits = vgnss_e7_to_double_bits(READ_ONCE(vgps.latitude_e7));
-    lon_bits = vgnss_e7_to_double_bits(READ_ONCE(vgps.longitude_e7));
+    u64 lat_bits = vgnss_e7_to_double_bits(READ_ONCE(vgps.latitude_e7));
+    u64 lon_bits = vgnss_e7_to_double_bits(READ_ONCE(vgps.longitude_e7));
 
-    for (pos = vgnss_align4(token_end); pos + 40 <= len; pos += 4)
+    for (size_t pos = vgnss_align4(token_end); pos + 40 <= len; pos += 4)
     {
         if (vgnss_patch_location_at(buf, len, pos, lat_bits, lon_bits)) patched++;
     }
@@ -338,17 +322,12 @@ static int vgnss_patch_location_parcel(char *buf, size_t len)
 // 复制并修补单个 Binder transaction 中的 Parcel 数据。
 static int vgnss_patch_transaction(const struct vgnss_binder_transaction_data *tr)
 {
-    char __user *user_buffer;
-    char *parcel;
-    size_t data_size;
-    int patched;
-
-    data_size = (size_t)tr->data_size;
+    size_t data_size = (size_t)tr->data_size;
     if (!data_size || data_size > VGNSS_MAX_PARCEL_BYTES) return 0;
     if (!tr->data.ptr.buffer) return 0;
 
-    user_buffer = (char __user *)(uintptr_t)tr->data.ptr.buffer;
-    parcel = vmalloc(data_size);
+    char __user *user_buffer = (char __user *)(uintptr_t)tr->data.ptr.buffer;
+    char *parcel = vmalloc(data_size);
     if (!parcel) return 0;
 
     if (copy_from_user(parcel, user_buffer, data_size))
@@ -357,7 +336,7 @@ static int vgnss_patch_transaction(const struct vgnss_binder_transaction_data *t
         return 0;
     }
 
-    patched = vgnss_patch_location_parcel(parcel, data_size);
+    int patched = vgnss_patch_location_parcel(parcel, data_size);
     if (patched > 0)
     {
         unsigned long missing = copy_to_user(user_buffer, parcel, data_size);
@@ -412,20 +391,15 @@ static int vgnss_patch_binder_write_buffer(char *buf, size_t len)
 // 处理被 inline hook 拦截到的 ioctl 参数，只拦截 Binder BINDER_WRITE_READ。
 static int vgnss_handle_ioctl(struct pt_regs *regs, enum vgnss_ioctl_arg_mode mode)
 {
-    struct pt_regs *sys_regs;
     unsigned int cmd;
     void __user *argp;
-    struct vgnss_binder_write_read bwr;
-    char __user *write_user;
-    char *write_buf;
-    size_t write_size;
 
     if (!READ_ONCE(vgps.enabled) || !READ_ONCE(vgps.has_fix)) return 0;
     if (!regs) return 0;
 
     if (mode == VGNSS_IOCTL_ARGS_ARM64_SYSCALL)
     {
-        sys_regs = (struct pt_regs *)regs->regs[0];
+        struct pt_regs *sys_regs = (struct pt_regs *)regs->regs[0];
         if (!sys_regs) return 0;
 
         cmd = (unsigned int)sys_regs->regs[1];
@@ -439,13 +413,14 @@ static int vgnss_handle_ioctl(struct pt_regs *regs, enum vgnss_ioctl_arg_mode mo
 
     if (cmd != VGNSS_BINDER_WRITE_READ || !argp) return 0;
 
+    struct vgnss_binder_write_read bwr;
     if (copy_from_user(&bwr, argp, sizeof(bwr))) return 0;
 
-    write_size = (size_t)bwr.write_size;
+    size_t write_size = (size_t)bwr.write_size;
     if (!write_size || write_size > VGNSS_MAX_BINDER_WRITE_BYTES || !bwr.write_buffer) return 0;
 
-    write_user = (char __user *)(uintptr_t)bwr.write_buffer;
-    write_buf = vmalloc(write_size);
+    char __user *write_user = (char __user *)(uintptr_t)bwr.write_buffer;
+    char *write_buf = vmalloc(write_size);
     if (!write_buf) return 0;
 
     if (!copy_from_user(write_buf, write_user, write_size)) vgnss_patch_binder_write_buffer(write_buf, write_size);
@@ -474,10 +449,9 @@ static struct hook_entry vgnss_ioctl_hook_targets[][1] = {
 // 安装 Binder ioctl inline hook，优先挂 syscall wrapper，失败后回退到内部实现。
 static int vgnss_install_hook_locked(void)
 {
-    int i;
     int ret = -ENOENT;
 
-    for (i = 0; i < ARRAY_SIZE(vgnss_ioctl_hook_targets); i++)
+    for (int i = 0; i < ARRAY_SIZE(vgnss_ioctl_hook_targets); i++)
     {
         ret = inline_hook_install(vgnss_ioctl_hook_targets[i]);
         if (!ret)
@@ -529,8 +503,6 @@ static inline int v_gnss_report(int latitude_e7, int longitude_e7)
 // 停用虚拟定位并卸载 Binder ioctl inline hook。
 static inline void v_gnss_destroy(void)
 {
-    int i;
-
     mutex_lock(&vgnss_lock);
 
     WRITE_ONCE(vgps.enabled, false);
@@ -538,7 +510,7 @@ static inline void v_gnss_destroy(void)
     WRITE_ONCE(vgps.latitude_e7, 0);
     WRITE_ONCE(vgps.longitude_e7, 0);
 
-    for (i = 0; i < ARRAY_SIZE(vgnss_ioctl_hook_targets); i++) inline_hook_remove(vgnss_ioctl_hook_targets[i]);
+    for (int i = 0; i < ARRAY_SIZE(vgnss_ioctl_hook_targets); i++) inline_hook_remove(vgnss_ioctl_hook_targets[i]);
 
     ls_log_tag("vgnss", "inline hook unregistered\n");
     ls_log_tag("vgnss", "destroy\n");

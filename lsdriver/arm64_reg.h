@@ -208,6 +208,14 @@ static void write_wb_reg(int reg, int n, uint64_t val)
 
 // ========== FP/SIMD 寄存器操作 ==========
 
+#define ARM64_FP_Q_REG_COUNT 32
+
+// Q0-Q31 统一按 128 位宽度保存；V/S/D/H/B 都是这些槽位的不同视图。
+struct fp_regs
+{
+    __uint128_t q[ARM64_FP_Q_REG_COUNT];
+};
+
 // Q寄存器名称拼接辅助宏：QREG(0) → q0, QREG(1) → q1, ...
 #define QREG(n) q##n
 #define VREG(n) v##n
@@ -441,11 +449,6 @@ static void print_smccc_arch_feature(enum arm_smccc_conduit conduit, unsigned lo
 // 强制使用 HVC 探测 SMCCC
 static void print_smccc_probe(unsigned int current_el, unsigned int el2_implemented)
 {
-    struct arm_smccc_res res;
-    // 注释掉或移除相关代码，避免引入未导出符号
-    // enum arm_smccc_conduit kernel_conduit;
-    enum arm_smccc_conduit conduit = SMCCC_CONDUIT_HVC;
-
     ls_log("===== SMCCC Probe =====\n");
 
     if (current_el != 1)
@@ -464,6 +467,10 @@ static void print_smccc_probe(unsigned int current_el, unsigned int el2_implemen
         return;
     }
 
+    struct arm_smccc_res res;
+    // 注释掉或移除相关代码，避免引入未导出符号
+    // enum arm_smccc_conduit kernel_conduit;
+    enum arm_smccc_conduit conduit = SMCCC_CONDUIT_HVC;
     arm_smccc_call_conduit(conduit, ARM_SMCCC_VERSION_FUNC_ID, 0, 0, 0, 0, 0, 0, 0, &res);
     ls_log("SMCCC version      : 0x%lx (major=%lu minor=%lu)\n", res.a0, (res.a0 >> 16) & 0xffff, res.a0 & 0xffff);
 
@@ -480,15 +487,9 @@ static void print_smccc_probe(unsigned int current_el, unsigned int el2_implemen
 // 输出Hypervisor相关信息
 static void print_el2_status(void)
 {
-    unsigned int current_el;
-    unsigned int el2_implemented;
-    unsigned int vhe_supported;
-    unsigned long sctlr_el1;
-
     struct device_node *np;
     struct property *prop;
     const char *str;
-    const char *model;
     bool hyp_hint = false;
     bool tz_hint = false;
 
@@ -498,7 +499,7 @@ static void print_el2_status(void)
     01b = EL1
     10b = EL2
     */
-    current_el = read_current_el();
+    unsigned int current_el = read_current_el();
 
     /*
     判断硬件是否实现 EL2。
@@ -506,21 +507,21 @@ static void print_el2_status(void)
     0 = 未实现 EL2
     1 = 实现 EL2
     */
-    el2_implemented = read_el2_implemented();
+    unsigned int el2_implemented = read_el2_implemented();
 
     /*
     判断硬件是否支持 VHE(Virtualization Host Extensions)。
     ID_AA64MMFR1_EL1[11:8]
     非 0 表示支持虚拟机主机扩展
     */
-    vhe_supported = read_vhe_support();
+    unsigned int vhe_supported = read_vhe_support();
 
     /*
     读取 SCTLR_EL1。是 MMU 与 Cache 是否启用的总开关。
     在 VHE 模式下，EL1 系统寄存器访问可能会被重定向到 EL2 侧。
     这里仅打印出来作为辅助判断信息。
     */
-    sctlr_el1 = read_sctlr_el1();
+    unsigned long sctlr_el1 = read_sctlr_el1();
 
     ls_log("===== EL2 Detection =====\n");
 
@@ -626,6 +627,8 @@ static void print_el2_status(void)
     np = of_find_node_by_path("/");
     if (np)
     {
+        const char *model;
+
         if (!of_property_read_string(np, "model", &model)) ls_log("DT model           : %s\n", model);
         else ls_log("DT model           : unavailable\n");
 

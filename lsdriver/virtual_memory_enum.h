@@ -106,14 +106,13 @@ static inline const char *get_vma_anon_label(struct vm_area_struct *vma)
 
 static inline int find_or_add_module(struct module_info *modules, int *module_count, const uint8_t *name)
 {
-    int i;
-    for (i = 0; i < *module_count; i++)
+    for (int i = 0; i < *module_count; i++)
         if (__builtin_strcmp((const char *)modules[i].name, (const char *)name) == 0) return i;
     if (*module_count >= MAX_MODULES) return -1;
-    i = (*module_count)++;
-    strscpy(modules[i].name, name, MOD_NAME_LEN);
-    modules[i].seg_count = 0;
-    return i;
+    int index = (*module_count)++;
+    strscpy(modules[index].name, name, MOD_NAME_LEN);
+    modules[index].seg_count = 0;
+    return index;
 }
 
 static inline void add_seg(struct module_info *m, short type_tag, uint8_t prot, uint64_t start, uint64_t end)
@@ -130,11 +129,8 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
 {
     struct mm_struct *mm = NULL;
     struct vm_area_struct *vma, *prev = NULL;
-    char *path_buf, *path;
+    char *path_buf;
     int last_mod_idx = -1;
-    int i, j;
-    short seq;
-    bool excluded, mod_accepted;
 
     /*
     开始解释:为何我根据权限把内存页加入到模块列表
@@ -241,11 +237,11 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
         {
             last_mod_idx = -1;
 
-            path = d_path(&vma->vm_file->f_path, path_buf, PATH_MAX);
+            char *path = d_path(&vma->vm_file->f_path, path_buf, PATH_MAX);
             if (!IS_ERR(path))
             {
-                mod_accepted = false;
-                for (i = 0; mod_include_prefixes[i]; i++)
+                bool mod_accepted = false;
+                for (int i = 0; mod_include_prefixes[i]; i++)
                 {
                     if (__builtin_strncmp(path, mod_include_prefixes[i], __builtin_strlen(mod_include_prefixes[i])) == 0)
                     {
@@ -293,7 +289,7 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
 
             if (vma->vm_file)
             {
-                path = d_path(&vma->vm_file->f_path, path_buf, PATH_MAX);
+                char *path = d_path(&vma->vm_file->f_path, path_buf, PATH_MAX);
                 if (!IS_ERR(path)) scnprintf(rwx_name, sizeof(rwx_name), "%s:%s:%llx-%llx", kind, path, (unsigned long long)vma->vm_start, (unsigned long long)vma->vm_end);
                 else scnprintf(rwx_name, sizeof(rwx_name), "anon:%s:%llx-%llx", kind, (unsigned long long)vma->vm_start, (unsigned long long)vma->vm_end);
             }
@@ -328,21 +324,21 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
 
         if (VMA_IS_RWP(vma) && info->region_count < MAX_SCAN_REGIONS)
         {
-            excluded = false;
+            bool excluded = false;
 
             if (vma->vm_file)
             {
-                path = d_path(&vma->vm_file->f_path, path_buf, PATH_MAX);
+                char *path = d_path(&vma->vm_file->f_path, path_buf, PATH_MAX);
                 if (!IS_ERR(path))
                 {
-                    for (i = 0; excl_prefixes[i]; i++)
+                    for (int i = 0; excl_prefixes[i]; i++)
                         if (__builtin_strncmp(path, excl_prefixes[i], __builtin_strlen(excl_prefixes[i])) == 0)
                         {
                             excluded = true;
                             break;
                         }
                     if (!excluded)
-                        for (i = 0; excl_keywords[i]; i++)
+                        for (int i = 0; excl_keywords[i]; i++)
                             if (__builtin_strstr(path, excl_keywords[i]))
                             {
                                 excluded = true;
@@ -475,7 +471,7 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
     =========================================================================================
     */
 
-    for (i = 0; i < info->module_count; i++)
+    for (int i = 0; i < info->module_count; i++)
     {
         struct module_info *m = &info->modules[i];
 
@@ -509,7 +505,7 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
             uint64_t best_base = current_base;
             uint64_t best_end = current_end;
 
-            for (j = 1; j < m->seg_count; j++)
+            for (int j = 1; j < m->seg_count; j++)
             {
                 if (m->segs[j].start >= current_end && (m->segs[j].start - current_end > 0x1000000))
                 {
@@ -547,7 +543,7 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
             防止后续 BSS 碎片因 end 超界而被误杀。
             */
             int valid_count = 0;
-            for (j = 0; j < m->seg_count; j++)
+            for (int j = 0; j < m->seg_count; j++)
             {
                 if (m->segs[j].start >= best_base && m->segs[j].end <= best_end)
                 {
@@ -566,7 +562,7 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
             /* --- 步骤 4：严谨拓扑标记 --- */
             int first_data_idx = -1;
             cond_resched(); // 主动调度让出cpu,这几步的超大循环连续跑会单核长时间不进入 RCU 静止态
-            for (j = 0; j < m->seg_count; j++)
+            for (int j = 0; j < m->seg_count; j++)
             {
                 if (m->segs[j].index == -1) continue;
 
@@ -577,7 +573,7 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
                 }
             }
 
-            for (j = 0; j < m->seg_count; j++)
+            for (int j = 0; j < m->seg_count; j++)
             {
                 if (m->segs[j].index == -1) continue;
 
@@ -605,7 +601,7 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
             同时修正 BSS 的 -w-p 异常权限为标准 RW。
             缝合阶段（步骤 5）不再需要合并 prot。
             */
-            for (j = 0; j < m->seg_count; j++)
+            for (int j = 0; j < m->seg_count; j++)
             {
                 switch (m->segs[j].index)
                 {
@@ -626,7 +622,7 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
 
             /*  步骤 6：拉链式缝合  */
             int out_idx = 0;
-            for (j = 1; j < m->seg_count; j++)
+            for (int j = 1; j < m->seg_count; j++)
             {
                 struct segment_info *prev_seg = &m->segs[out_idx];
                 struct segment_info *curr_seg = &m->segs[j];
@@ -645,8 +641,8 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
             m->seg_count = out_idx + 1;
 
             /* 步骤 7：最终 Index 序列化  */
-            seq = 0;
-            for (j = 0; j < m->seg_count; j++)
+            short seq = 0;
+            for (int j = 0; j < m->seg_count; j++)
             {
                 if (m->segs[j].index != -1) m->segs[j].index = seq++;
             }

@@ -12,7 +12,9 @@ static int failures;
 
 static struct arm64_decoded_insn decode_ok(arm64_u32 raw)
 {
-    struct arm64_decoded_insn decoded = arm64_decode_insn(raw);
+    struct arm64_decoded_insn decoded;
+
+    arm64_decode_insn(raw, &decoded);
 
     CHECK(decoded.status == ARM64_DECODE_OK);
     return decoded;
@@ -20,7 +22,9 @@ static struct arm64_decoded_insn decode_ok(arm64_u32 raw)
 
 static void decode_status_is(arm64_u32 raw, enum arm64_decode_status expected)
 {
-    struct arm64_decoded_insn decoded = arm64_decode_insn(raw);
+    struct arm64_decoded_insn decoded;
+
+    arm64_decode_insn(raw, &decoded);
 
     CHECK(decoded.status == expected);
 }
@@ -63,8 +67,6 @@ static void test_fp_conversions(void)
         {0x80400000U, 64, 64},
     };
     struct arm64_decoded_insn decoded;
-    size_t operation_index;
-    size_t shape_index;
 
     decoded = decode_ok(0x5EA1B842U);
     CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_CONVERT);
@@ -75,9 +77,9 @@ static void test_fp_conversions(void)
     CHECK(decoded.rd == 2);
     CHECK(decoded.rn == 2);
 
-    for (operation_index = 0; operation_index < sizeof(simd_operations) / sizeof(simd_operations[0]); operation_index++)
+    for (size_t operation_index = 0; operation_index < sizeof(simd_operations) / sizeof(simd_operations[0]); operation_index++)
     {
-        for (shape_index = 0; shape_index < sizeof(simd_shapes) / sizeof(simd_shapes[0]); shape_index++)
+        for (size_t shape_index = 0; shape_index < sizeof(simd_shapes) / sizeof(simd_shapes[0]); shape_index++)
         {
             decoded = decode_ok(simd_operations[operation_index].base | simd_shapes[shape_index].bits | 0x62U);
             CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_CONVERT);
@@ -90,9 +92,9 @@ static void test_fp_conversions(void)
         }
     }
 
-    for (operation_index = 0; operation_index < sizeof(gpr_operations) / sizeof(gpr_operations[0]); operation_index++)
+    for (size_t operation_index = 0; operation_index < sizeof(gpr_operations) / sizeof(gpr_operations[0]); operation_index++)
     {
-        for (shape_index = 0; shape_index < sizeof(gpr_shapes) / sizeof(gpr_shapes[0]); shape_index++)
+        for (size_t shape_index = 0; shape_index < sizeof(gpr_shapes) / sizeof(gpr_shapes[0]); shape_index++)
         {
             decoded = decode_ok(gpr_operations[operation_index].base | gpr_shapes[shape_index].bits | 0x62U);
             CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_CONVERT);
@@ -137,7 +139,11 @@ static void test_dispatch(void)
     decode_status_is(0xDAC12020U, ARM64_DECODE_UNALLOCATED);
     decode_status_is(0xDAC143E0U, ARM64_DECODE_UNSUPPORTED);
     decode_status_is(0xDAC147E0U, ARM64_DECODE_UNSUPPORTED);
-    decode_status_is(0x0000C19FU, ARM64_DECODE_UNSUPPORTED);
+    arm64_decode_insn(0x0000C19FU, &decoded);
+    CHECK(decoded.status == ARM64_DECODE_UNSUPPORTED);
+    CHECK(decoded.insn_class == ARM64_INSN_CLASS_BRANCH_EXCEPTION_SYSTEM);
+    CHECK(decoded.opcode == ARM64_OP_EXCEPTION_GENERATION);
+    CHECK(decoded.operands.system.immediate == 0xC19F);
 
     decoded = decode_ok(0x90000000U);
     CHECK(decoded.insn_class == ARM64_INSN_CLASS_DATA_PROCESSING_IMMEDIATE);
@@ -148,7 +154,7 @@ static void test_dispatch(void)
     decode_status_is(0x04000000U, ARM64_DECODE_UNSUPPORTED);
     decode_status_is(0xC00800FFU, ARM64_DECODE_UNSUPPORTED);
     decode_status_is(0x40000000U, ARM64_DECODE_UNALLOCATED);
-    decoded = arm64_decode_insn(0x80000000U);
+    arm64_decode_insn(0x80000000U, &decoded);
     CHECK(decoded.status == ARM64_DECODE_UNSUPPORTED);
     CHECK(decoded.insn_class == ARM64_INSN_CLASS_SME);
 }
@@ -166,7 +172,6 @@ static void test_system(void)
         {0xD503249FU, ARM64_BTI_TYPE_J},
         {0xD50324DFU, ARM64_BTI_TYPE_JC},
     };
-    unsigned int index;
 
     CHECK(decoded.raw == 0xD5033BBFU);
     CHECK(decoded.status == ARM64_DECODE_OK);
@@ -183,7 +188,7 @@ static void test_system(void)
     CHECK(decoded.opcode == ARM64_OP_HINT);
     CHECK(decoded.operands.system.operation == ARM64_SYSTEM_OP_PACIASP);
 
-    for (index = 0; index < sizeof(bti_cases) / sizeof(bti_cases[0]); index++)
+    for (unsigned int index = 0; index < sizeof(bti_cases) / sizeof(bti_cases[0]); index++)
     {
         decoded = decode_ok(bti_cases[index].raw);
         CHECK(decoded.opcode == ARM64_OP_HINT);
@@ -195,21 +200,17 @@ static void test_system(void)
 static void test_load_store(void)
 {
     struct arm64_decoded_insn decoded = decode_ok(0xA8410440U);
-    struct arm64_memory_address address;
 
     CHECK(decoded.opcode == ARM64_OP_LOAD_STORE_PAIR);
     CHECK(decoded.flags & ARM64_INSN_FLAG_NON_TEMPORAL);
     CHECK(decoded.flags & ARM64_INSN_FLAG_LOAD);
     CHECK(decoded.operands.load_store.offset == 16);
-    CHECK(arm64_decode_memory_address(&decoded, 0, 0x1000, 0, &address));
-    CHECK(address.address == 0x1010);
-    CHECK(!address.writeback);
+    CHECK(decoded.operands.load_store.address_mode == ARM64_ADDRESS_BASE);
 
     decoded = decode_ok(0xA8C10440U);
-    CHECK(arm64_decode_memory_address(&decoded, 0, 0x1000, 0, &address));
-    CHECK(address.address == 0x1000);
-    CHECK(address.writeback);
-    CHECK(address.writeback_address == 0x1010);
+    CHECK(decoded.operands.load_store.address_mode == ARM64_ADDRESS_POST_INDEX);
+    CHECK(decoded.operands.load_store.offset == 16);
+    CHECK(decoded.flags & ARM64_INSN_FLAG_WRITEBACK);
 
     decoded = decode_ok(0xF84098E6U);
     CHECK(decoded.opcode == ARM64_OP_LOAD_STORE_SINGLE);
@@ -219,17 +220,18 @@ static void test_load_store(void)
 
     decoded = decode_ok(0xF862D820U);
     CHECK(decoded.operands.load_store.address_mode == ARM64_ADDRESS_REGISTER_OFFSET);
-    CHECK(arm64_decode_memory_address(&decoded, 0, 0x1000, 0xFFFFFFFFULL, &address));
-    CHECK(address.address == 0xFF8);
+    CHECK(decoded.operands.load_store.extend_type == 6);
+    CHECK(decoded.operands.load_store.shift_amount == 3);
 
     decoded = decode_ok(0xF8657883U);
-    CHECK(arm64_decode_memory_address(&decoded, 0, 0x1000, 3, &address));
-    CHECK(address.address == 0x1018);
+    CHECK(decoded.operands.load_store.address_mode == ARM64_ADDRESS_REGISTER_OFFSET);
+    CHECK(decoded.operands.load_store.extend_type == 3);
+    CHECK(decoded.operands.load_store.shift_amount == 3);
 
     decoded = decode_ok(0xF9802020U);
     CHECK(decoded.opcode == ARM64_OP_PREFETCH);
-    CHECK(arm64_decode_memory_address(&decoded, 0, 0x1000, 0, &address));
-    CHECK(address.address == 0x1040);
+    CHECK(decoded.operands.load_store.address_mode == ARM64_ADDRESS_UNSIGNED_OFFSET);
+    CHECK(decoded.operands.load_store.offset == 0x40);
 
     decoded = decode_ok(0xF8800020U);
     CHECK(decoded.opcode == ARM64_OP_PREFETCH);
@@ -352,38 +354,29 @@ static void test_load_store(void)
 static void test_control_flow(void)
 {
     struct arm64_decoded_insn decoded = decode_ok(0x14000004U);
-    arm64_u64 target = 0;
 
-    CHECK(arm64_decode_direct_target(&decoded, 0x1000, &target));
-    CHECK(target == 0x1010);
+    CHECK(decoded.opcode == ARM64_OP_B);
+    CHECK(decoded.operands.branch.offset == 16);
 
     decoded = decode_ok(0x90000000U);
-    CHECK(arm64_decode_direct_target(&decoded, 0x12345, &target));
-    CHECK(target == 0x12000);
+    CHECK(decoded.opcode == ARM64_OP_ADRP);
+    CHECK(decoded.operands.pc_relative.offset == 0);
 
     decoded = decode_ok(0x10FFFFE0U);
     CHECK(decoded.opcode == ARM64_OP_ADR);
     CHECK(decoded.operands.pc_relative.offset == -4);
-    CHECK(arm64_decode_direct_target(&decoded, 0x1004, &target));
-    CHECK(target == 0x1000);
 
     decoded = decode_ok(0x10000081U);
     CHECK(decoded.opcode == ARM64_OP_ADR);
     CHECK(decoded.operands.pc_relative.offset == 16);
-    CHECK(arm64_decode_direct_target(&decoded, 0x1008, &target));
-    CHECK(target == 0x1018);
 
     decoded = decode_ok(0xB0000002U);
     CHECK(decoded.opcode == ARM64_OP_ADRP);
     CHECK(decoded.operands.pc_relative.offset == 0x1000);
-    CHECK(arm64_decode_direct_target(&decoded, 0x12345, &target));
-    CHECK(target == 0x13000);
 
     decoded = decode_ok(0xF0FFFFE3U);
     CHECK(decoded.opcode == ARM64_OP_ADRP);
     CHECK(decoded.operands.pc_relative.offset == -0x1000);
-    CHECK(arm64_decode_direct_target(&decoded, 0x12345, &target));
-    CHECK(target == 0x11000);
 
     decoded = decode_ok(0x34000000U);
     CHECK(decoded.opcode == ARM64_OP_CBZ);
@@ -400,7 +393,6 @@ static void test_scalar_fp(void)
         ARM64_SIMD_OP_FMUL, ARM64_SIMD_OP_FDIV, ARM64_SIMD_OP_FADD, ARM64_SIMD_OP_FSUB, ARM64_SIMD_OP_FMAX, ARM64_SIMD_OP_FMIN, ARM64_SIMD_OP_FMAXNM, ARM64_SIMD_OP_FMINNM, ARM64_SIMD_OP_FNMUL,
     };
     struct arm64_decoded_insn decoded = decode_ok(0x1E2E1000U);
-    size_t operation_index;
 
     CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_SCALAR_FP_IMMEDIATE);
     CHECK(decoded.operands.simd.operation == ARM64_SIMD_OP_FMOV);
@@ -457,7 +449,7 @@ static void test_scalar_fp(void)
     CHECK(decoded.operand_width == 16);
     CHECK(decoded.operands.simd.element_width == 16);
 
-    for (operation_index = 0; operation_index < sizeof(two_source_operations) / sizeof(two_source_operations[0]); operation_index++)
+    for (size_t operation_index = 0; operation_index < sizeof(two_source_operations) / sizeof(two_source_operations[0]); operation_index++)
     {
         arm64_u32 raw = 0x1EE00820U | ((arm64_u32)operation_index << 12) | 0x62U;
 
@@ -489,10 +481,8 @@ static void test_scalar_copy(void)
         {0x5E010420U, 8, 0}, {0x5E1F0462U, 8, 15}, {0x5E0204A4U, 16, 0}, {0x5E1E04E6U, 16, 7}, {0x5E040528U, 32, 0}, {0x5E0C0422U, 32, 1}, {0x5E1C056AU, 32, 3}, {0x5E0805ACU, 64, 0}, {0x5E1805EEU, 64, 1},
     };
     struct arm64_decoded_insn decoded;
-    arm64_u32 imm5;
-    size_t index;
 
-    for (index = 0; index < sizeof(cases) / sizeof(cases[0]); index++)
+    for (size_t index = 0; index < sizeof(cases) / sizeof(cases[0]); index++)
     {
         decoded = decode_ok(cases[index].raw);
         CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_SCALAR_COPY);
@@ -506,10 +496,9 @@ static void test_scalar_copy(void)
     CHECK(decoded.rd == 2);
     CHECK(decoded.rn == 1);
 
-    for (imm5 = 0; imm5 < 32; imm5++)
+    for (arm64_u32 imm5 = 0; imm5 < 32; imm5++)
     {
         arm64_u32 raw = 0x5E000420U | (imm5 << 16);
-        arm64_u8 size;
 
         if (!imm5 || imm5 == 16)
         {
@@ -517,7 +506,7 @@ static void test_scalar_copy(void)
             continue;
         }
 
-        size = (arm64_u8)__builtin_ctz(imm5);
+        arm64_u8 size = (arm64_u8)__builtin_ctz(imm5);
         decoded = decode_ok(raw);
         CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_SCALAR_COPY);
         CHECK(decoded.operands.simd.element_width == (8U << size));
@@ -549,12 +538,10 @@ static void test_fp_by_element(void)
         {0x0F3F1883U, 64, 16, 7, 15}, {0x4F3F1883U, 128, 16, 7, 15}, {0x0FBF1883U, 64, 32, 3, 31}, {0x4FBF1883U, 128, 32, 3, 31}, {0x4FDF1883U, 128, 64, 1, 31}, {0x5F3F1883U, 16, 16, 7, 15}, {0x5FBF1883U, 32, 32, 3, 31}, {0x5FDF1883U, 64, 64, 1, 31},
     };
     struct arm64_decoded_insn decoded;
-    size_t operation_index;
-    size_t shape_index;
 
-    for (operation_index = 0; operation_index < sizeof(operations) / sizeof(operations[0]); operation_index++)
+    for (size_t operation_index = 0; operation_index < sizeof(operations) / sizeof(operations[0]); operation_index++)
     {
-        for (shape_index = 0; shape_index < sizeof(shapes) / sizeof(shapes[0]); shape_index++)
+        for (size_t shape_index = 0; shape_index < sizeof(shapes) / sizeof(shapes[0]); shape_index++)
         {
             decoded = decode_ok(shapes[shape_index].fmla | operations[operation_index].bits);
             CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_FP_BY_ELEMENT);
@@ -610,15 +597,12 @@ static void test_fhm_by_element(void)
         {0x00300800U, 7},
     };
     struct arm64_decoded_insn decoded;
-    size_t operation_index;
-    size_t lane_index;
-    size_t q;
 
-    for (operation_index = 0; operation_index < sizeof(operations) / sizeof(operations[0]); operation_index++)
+    for (size_t operation_index = 0; operation_index < sizeof(operations) / sizeof(operations[0]); operation_index++)
     {
-        for (lane_index = 0; lane_index < sizeof(lanes) / sizeof(lanes[0]); lane_index++)
+        for (size_t lane_index = 0; lane_index < sizeof(lanes) / sizeof(lanes[0]); lane_index++)
         {
-            for (q = 0; q < 2; q++)
+            for (size_t q = 0; q < 2; q++)
             {
                 arm64_u32 raw = operations[operation_index].base | lanes[lane_index].bits | ((arm64_u32)q << 30) | 0x20064U;
 
@@ -759,12 +743,10 @@ static void test_fcma(void)
         {0, 1, 0, 0, 64, 16, 0}, {0, 1, 0, 1, 64, 16, 1}, {1, 1, 0, 0, 128, 16, 0}, {1, 1, 0, 1, 128, 16, 1}, {1, 1, 1, 0, 128, 16, 2}, {1, 1, 1, 1, 128, 16, 3}, {1, 2, 0, 0, 128, 32, 0}, {1, 2, 1, 0, 128, 32, 1},
     };
     struct arm64_decoded_insn decoded;
-    size_t shape_index;
-    size_t rotation;
 
-    for (shape_index = 0; shape_index < sizeof(vector_shapes) / sizeof(vector_shapes[0]); shape_index++)
+    for (size_t shape_index = 0; shape_index < sizeof(vector_shapes) / sizeof(vector_shapes[0]); shape_index++)
     {
-        for (rotation = 0; rotation < 4; rotation++)
+        for (size_t rotation = 0; rotation < 4; rotation++)
         {
             arm64_u32 raw = 0x2E00C400U | ((arm64_u32)vector_shapes[shape_index].q << 30) | ((arm64_u32)vector_shapes[shape_index].size << 22) | ((arm64_u32)rotation << 11) | 0x20064U;
 
@@ -779,7 +761,7 @@ static void test_fcma(void)
             CHECK(decoded.rm == 2);
         }
 
-        for (rotation = 0; rotation < 2; rotation++)
+        for (size_t rotation = 0; rotation < 2; rotation++)
         {
             arm64_u32 raw = 0x2E00E400U | ((arm64_u32)vector_shapes[shape_index].q << 30) | ((arm64_u32)vector_shapes[shape_index].size << 22) | ((arm64_u32)rotation << 12) | 0x20064U;
 
@@ -792,9 +774,9 @@ static void test_fcma(void)
         }
     }
 
-    for (shape_index = 0; shape_index < sizeof(element_shapes) / sizeof(element_shapes[0]); shape_index++)
+    for (size_t shape_index = 0; shape_index < sizeof(element_shapes) / sizeof(element_shapes[0]); shape_index++)
     {
-        for (rotation = 0; rotation < 4; rotation++)
+        for (size_t rotation = 0; rotation < 4; rotation++)
         {
             arm64_u32 raw = 0x2F001000U | ((arm64_u32)element_shapes[shape_index].q << 30) | ((arm64_u32)element_shapes[shape_index].size << 22) | ((arm64_u32)element_shapes[shape_index].l << 21) | (1U << 20) | (2U << 16) | ((arm64_u32)rotation << 13) | ((arm64_u32)element_shapes[shape_index].h << 11) | 0x64U;
 
@@ -832,15 +814,12 @@ static void test_vector_3same_extra(void)
         {1, 16, 0x6, 0, 0, ARM64_SIMD_OP_SQRDMLAH}, {1, 17, 0x6, 0, 0, ARM64_SIMD_OP_SQRDMLSH}, {0, 18, 0x4, 8, 32, ARM64_SIMD_OP_SDOT}, {1, 18, 0x4, 8, 32, ARM64_SIMD_OP_UDOT}, {0, 19, 0x4, 8, 32, ARM64_SIMD_OP_USDOT},
     };
     struct arm64_decoded_insn decoded;
-    size_t operation_index;
-    size_t q;
-    size_t size;
 
-    for (operation_index = 0; operation_index < sizeof(operations) / sizeof(operations[0]); operation_index++)
+    for (size_t operation_index = 0; operation_index < sizeof(operations) / sizeof(operations[0]); operation_index++)
     {
-        for (q = 0; q < 2; q++)
+        for (size_t q = 0; q < 2; q++)
         {
-            for (size = 0; size < 4; size++)
+            for (size_t size = 0; size < 4; size++)
             {
                 arm64_u32 raw = 0x0E008400U | ((arm64_u32)q << 30) | ((arm64_u32)operations[operation_index].u << 29) | ((arm64_u32)size << 22) | ((arm64_u32)operations[operation_index].opcode << 11) | 0x20064U;
 
@@ -959,12 +938,10 @@ static void test_scalar_3same(void)
         {0, 0, 3, ARM64_SIMD_OP_FMULX}, {0, 0, 4, ARM64_SIMD_OP_FCMEQ}, {0, 0, 7, ARM64_SIMD_OP_FRECPS}, {0, 1, 7, ARM64_SIMD_OP_FRSQRTS}, {1, 0, 4, ARM64_SIMD_OP_FCMGE}, {1, 0, 5, ARM64_SIMD_OP_FACGE}, {1, 1, 2, ARM64_SIMD_OP_FABD}, {1, 1, 4, ARM64_SIMD_OP_FCMGT}, {1, 1, 5, ARM64_SIMD_OP_FACGT},
     };
     struct arm64_decoded_insn decoded;
-    size_t index;
-    size_t size;
 
-    for (index = 0; index < sizeof(integer_operations) / sizeof(integer_operations[0]); index++)
+    for (size_t index = 0; index < sizeof(integer_operations) / sizeof(integer_operations[0]); index++)
     {
-        for (size = 0; size < 4; size++)
+        for (size_t size = 0; size < 4; size++)
         {
             arm64_u32 raw = 0x5E200400U | ((arm64_u32)integer_operations[index].u << 29) | ((arm64_u32)size << 22) | ((arm64_u32)integer_operations[index].opcode << 11) | 0x20064U;
 
@@ -985,9 +962,9 @@ static void test_scalar_3same(void)
         }
     }
 
-    for (index = 0; index < sizeof(fp_operations) / sizeof(fp_operations[0]); index++)
+    for (size_t index = 0; index < sizeof(fp_operations) / sizeof(fp_operations[0]); index++)
     {
-        for (size = 0; size < 2; size++)
+        for (size_t size = 0; size < 2; size++)
         {
             arm64_u32 raw = 0x5E200400U | ((arm64_u32)fp_operations[index].u << 29) | ((arm64_u32)((fp_operations[index].alternate << 1) | size) << 22) | ((arm64_u32)fp_operations[index].opcode << 11) | 0x20064U;
 
@@ -999,7 +976,7 @@ static void test_scalar_3same(void)
         }
     }
 
-    for (index = 0; index < sizeof(fp16_operations) / sizeof(fp16_operations[0]); index++)
+    for (size_t index = 0; index < sizeof(fp16_operations) / sizeof(fp16_operations[0]); index++)
     {
         arm64_u32 raw = 0x5E400400U | ((arm64_u32)fp16_operations[index].u << 29) | ((arm64_u32)fp16_operations[index].alternate << 23) | ((arm64_u32)fp16_operations[index].opcode << 11) | 0x20064U;
 
@@ -1010,13 +987,11 @@ static void test_scalar_3same(void)
         CHECK(decoded.operands.simd.element_width == 16);
     }
 
-    for (index = 0; index < 2; index++)
+    for (size_t index = 0; index < 2; index++)
     {
-        size_t opcode;
-
-        for (opcode = 16; opcode < 32; opcode++)
+        for (size_t opcode = 16; opcode < 32; opcode++)
         {
-            for (size = 0; size < 4; size++)
+            for (size_t size = 0; size < 4; size++)
             {
                 arm64_u32 raw = 0x5E000400U | ((arm64_u32)index << 29) | ((arm64_u32)size << 22) | ((arm64_u32)opcode << 11) | 0x20064U;
 
@@ -1062,12 +1037,10 @@ static void test_scalar_fp_3source(void)
         {0x00C00000U, 16},
     };
     struct arm64_decoded_insn decoded;
-    size_t operation_index;
-    size_t shape_index;
 
-    for (operation_index = 0; operation_index < sizeof(operations) / sizeof(operations[0]); operation_index++)
+    for (size_t operation_index = 0; operation_index < sizeof(operations) / sizeof(operations[0]); operation_index++)
     {
-        for (shape_index = 0; shape_index < sizeof(shapes) / sizeof(shapes[0]); shape_index++)
+        for (size_t shape_index = 0; shape_index < sizeof(shapes) / sizeof(shapes[0]); shape_index++)
         {
             decoded = decode_ok(0x1F041000U | operations[operation_index].bits | shapes[shape_index].bits);
             CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_SCALAR_FP_TERNARY);
@@ -1192,9 +1165,7 @@ static void test_vector(void)
         enum arm64_simd_operation operation;
         arm64_u8 widening;
     } integer_reduce_cases[] = {
-        {0x0E31B800U, ARM64_SIMD_OP_ADDV, 0},   {0x0E303800U, ARM64_SIMD_OP_SADDLV, 1}, {0x2E303800U, ARM64_SIMD_OP_UADDLV, 1},
-        {0x0E30A800U, ARM64_SIMD_OP_SMAXV, 0},  {0x0E31A800U, ARM64_SIMD_OP_SMINV, 0},  {0x2E30A800U, ARM64_SIMD_OP_UMAXV, 0},
-        {0x2E31A800U, ARM64_SIMD_OP_UMINV, 0},
+        {0x0E31B800U, ARM64_SIMD_OP_ADDV, 0}, {0x0E303800U, ARM64_SIMD_OP_SADDLV, 1}, {0x2E303800U, ARM64_SIMD_OP_UADDLV, 1}, {0x0E30A800U, ARM64_SIMD_OP_SMAXV, 0}, {0x0E31A800U, ARM64_SIMD_OP_SMINV, 0}, {0x2E30A800U, ARM64_SIMD_OP_UMAXV, 0}, {0x2E31A800U, ARM64_SIMD_OP_UMINV, 0},
     };
     static const struct
     {
@@ -1223,11 +1194,6 @@ static void test_vector(void)
         {0x0EF80800U, 64, 16}, {0x4EF80800U, 128, 16}, {0x0EA00800U, 64, 32}, {0x4EA00800U, 128, 32}, {0x4EE00800U, 128, 64}, {0x5EF80800U, 16, 16}, {0x5EA00800U, 32, 32}, {0x5EE00800U, 64, 64},
     };
     struct arm64_decoded_insn decoded = decode_ok(0x4F00E640U);
-    size_t operation_index;
-    size_t q_index;
-    size_t relation_index;
-    size_t shape_index;
-    size_t size_index;
 
     CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_VECTOR_IMMEDIATE);
     CHECK(decoded.operands.simd.operation == ARM64_SIMD_OP_MOVI);
@@ -1280,11 +1246,11 @@ static void test_vector(void)
     CHECK(decoded.operands.simd.operation == ARM64_SIMD_OP_CMHI);
     CHECK(decoded.operands.simd.element_width == 8);
 
-    for (operation_index = 0; operation_index < sizeof(integer_3same_operations) / sizeof(integer_3same_operations[0]); operation_index++)
+    for (size_t operation_index = 0; operation_index < sizeof(integer_3same_operations) / sizeof(integer_3same_operations[0]); operation_index++)
     {
-        for (q_index = 0; q_index < 2; q_index++)
+        for (size_t q_index = 0; q_index < 2; q_index++)
         {
-            for (size_index = 0; size_index < 4; size_index++)
+            for (size_t size_index = 0; size_index < 4; size_index++)
             {
                 arm64_u32 raw = 0x0E200400U | ((arm64_u32)q_index << 30) | ((arm64_u32)integer_3same_operations[operation_index].u << 29) | ((arm64_u32)size_index << 22) | ((arm64_u32)integer_3same_operations[operation_index].opcode << 11) | 0x20064U;
 
@@ -1314,9 +1280,9 @@ static void test_vector(void)
     CHECK(decoded.operand_width == 128);
     CHECK(decoded.operands.simd.element_width == 32);
 
-    for (operation_index = 0; operation_index < sizeof(logical_operations) / sizeof(logical_operations[0]); operation_index++)
+    for (size_t operation_index = 0; operation_index < sizeof(logical_operations) / sizeof(logical_operations[0]); operation_index++)
     {
-        for (shape_index = 0; shape_index < sizeof(logical_shapes) / sizeof(logical_shapes[0]); shape_index++)
+        for (size_t shape_index = 0; shape_index < sizeof(logical_shapes) / sizeof(logical_shapes[0]); shape_index++)
         {
             decoded = decode_ok(0x0E201C00U | logical_operations[operation_index].bits | logical_shapes[shape_index].bits | 0x30041U);
             CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_VECTOR_LOGICAL);
@@ -1338,9 +1304,9 @@ static void test_vector(void)
     CHECK(decoded.operand_width == 64);
     CHECK(decoded.operands.simd.element_width == 8);
 
-    for (operation_index = 0; operation_index < sizeof(permute_operations) / sizeof(permute_operations[0]); operation_index++)
+    for (size_t operation_index = 0; operation_index < sizeof(permute_operations) / sizeof(permute_operations[0]); operation_index++)
     {
-        for (shape_index = 0; shape_index < sizeof(permute_shapes) / sizeof(permute_shapes[0]); shape_index++)
+        for (size_t shape_index = 0; shape_index < sizeof(permute_shapes) / sizeof(permute_shapes[0]); shape_index++)
         {
             decoded = decode_ok(permute_shapes[shape_index].base | permute_operations[operation_index].bits | 0x50081U);
             CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_VECTOR_PERMUTE);
@@ -1363,9 +1329,9 @@ static void test_vector(void)
     CHECK(decoded.operands.simd.element_width == 32);
     decode_status_is(0x0EC23820U, ARM64_DECODE_UNALLOCATED);
 
-    for (operation_index = 0; operation_index < sizeof(fp_vector_3reg_operations) / sizeof(fp_vector_3reg_operations[0]); operation_index++)
+    for (size_t operation_index = 0; operation_index < sizeof(fp_vector_3reg_operations) / sizeof(fp_vector_3reg_operations[0]); operation_index++)
     {
-        for (shape_index = 0; shape_index < sizeof(fp_vector_shapes) / sizeof(fp_vector_shapes[0]); shape_index++)
+        for (size_t shape_index = 0; shape_index < sizeof(fp_vector_shapes) / sizeof(fp_vector_shapes[0]); shape_index++)
         {
             arm64_u32 base = fp_vector_shapes[shape_index].fp16 ? fp_vector_3reg_operations[operation_index].fp16_base : fp_vector_3reg_operations[operation_index].fp32_base;
 
@@ -1389,9 +1355,9 @@ static void test_vector(void)
     CHECK(decoded.operands.simd.element_width == 32);
     decode_status_is(0x0E62CC20U, ARM64_DECODE_UNALLOCATED);
 
-    for (operation_index = 0; operation_index < sizeof(fhm_operations) / sizeof(fhm_operations[0]); operation_index++)
+    for (size_t operation_index = 0; operation_index < sizeof(fhm_operations) / sizeof(fhm_operations[0]); operation_index++)
     {
-        for (q_index = 0; q_index < 2; q_index++)
+        for (size_t q_index = 0; q_index < 2; q_index++)
         {
             arm64_u32 raw = fhm_operations[operation_index].base | ((arm64_u32)q_index << 30) | 0x20064U;
 
@@ -1410,9 +1376,9 @@ static void test_vector(void)
         decode_status_is(fhm_operations[operation_index].base | 0x00420064U, ARM64_DECODE_UNALLOCATED);
     }
 
-    for (operation_index = 0; operation_index < sizeof(fp_vector_2reg_operations) / sizeof(fp_vector_2reg_operations[0]); operation_index++)
+    for (size_t operation_index = 0; operation_index < sizeof(fp_vector_2reg_operations) / sizeof(fp_vector_2reg_operations[0]); operation_index++)
     {
-        for (shape_index = 0; shape_index < sizeof(fp_vector_shapes) / sizeof(fp_vector_shapes[0]); shape_index++)
+        for (size_t shape_index = 0; shape_index < sizeof(fp_vector_shapes) / sizeof(fp_vector_shapes[0]); shape_index++)
         {
             arm64_u32 base = fp_vector_shapes[shape_index].fp16 ? fp_vector_2reg_operations[operation_index].fp16_base : fp_vector_2reg_operations[operation_index].fp32_base;
 
@@ -1436,11 +1402,11 @@ static void test_vector(void)
     CHECK(decoded.operands.simd.element_width == 32);
     decode_status_is(0x2EE2E420U, ARM64_DECODE_UNALLOCATED);
 
-    for (operation_index = 0; operation_index < sizeof(rev_operations) / sizeof(rev_operations[0]); operation_index++)
+    for (size_t operation_index = 0; operation_index < sizeof(rev_operations) / sizeof(rev_operations[0]); operation_index++)
     {
-        for (shape_index = 0; shape_index <= rev_operations[operation_index].max_size; shape_index++)
+        for (size_t shape_index = 0; shape_index <= rev_operations[operation_index].max_size; shape_index++)
         {
-            for (q_index = 0; q_index < 2; q_index++)
+            for (size_t q_index = 0; q_index < 2; q_index++)
             {
                 decoded = decode_ok(rev_operations[operation_index].base | ((arm64_u32)shape_index << 22) | ((arm64_u32)q_index << 30) | 0x64U);
                 CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_VECTOR_REVERSE);
@@ -1457,11 +1423,11 @@ static void test_vector(void)
     decode_status_is(0x2EA00820U, ARM64_DECODE_UNALLOCATED);
     decode_status_is(0x0E601820U, ARM64_DECODE_UNALLOCATED);
 
-    for (operation_index = 0; operation_index < sizeof(integer_reduce_cases) / sizeof(integer_reduce_cases[0]); operation_index++)
+    for (size_t operation_index = 0; operation_index < sizeof(integer_reduce_cases) / sizeof(integer_reduce_cases[0]); operation_index++)
     {
-        for (q_index = 0; q_index < 2; q_index++)
+        for (size_t q_index = 0; q_index < 2; q_index++)
         {
-            for (size_index = 0; size_index < 3; size_index++)
+            for (size_t size_index = 0; size_index < 3; size_index++)
             {
                 arm64_u32 raw = integer_reduce_cases[operation_index].base | ((arm64_u32)q_index << 30) | ((arm64_u32)size_index << 22) | 0x63U;
 
@@ -1484,11 +1450,11 @@ static void test_vector(void)
         decode_status_is(integer_reduce_cases[operation_index].base | 0x00C00063U, ARM64_DECODE_UNALLOCATED);
     }
 
-    for (operation_index = 0; operation_index < sizeof(narrow_cases) / sizeof(narrow_cases[0]); operation_index++)
+    for (size_t operation_index = 0; operation_index < sizeof(narrow_cases) / sizeof(narrow_cases[0]); operation_index++)
     {
-        for (q_index = 0; q_index < 2; q_index++)
+        for (size_t q_index = 0; q_index < 2; q_index++)
         {
-            for (size_index = 0; size_index < 3; size_index++)
+            for (size_t size_index = 0; size_index < 3; size_index++)
             {
                 decoded = decode_ok(narrow_cases[operation_index].vector_base | ((arm64_u32)q_index << 30) | ((arm64_u32)size_index << 22) | 0x63U);
                 CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_VECTOR_NARROW);
@@ -1505,7 +1471,7 @@ static void test_vector(void)
 
         if (narrow_cases[operation_index].scalar_base)
         {
-            for (size_index = 0; size_index < 3; size_index++)
+            for (size_t size_index = 0; size_index < 3; size_index++)
             {
                 decoded = decode_ok(narrow_cases[operation_index].scalar_base | ((arm64_u32)size_index << 22) | 0x63U);
                 CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_SCALAR_NARROW);
@@ -1521,7 +1487,7 @@ static void test_vector(void)
     }
     decode_status_is(0x5E212863U, ARM64_DECODE_UNALLOCATED);
 
-    for (operation_index = 0; operation_index < sizeof(fp_reduce_cases) / sizeof(fp_reduce_cases[0]); operation_index++)
+    for (size_t operation_index = 0; operation_index < sizeof(fp_reduce_cases) / sizeof(fp_reduce_cases[0]); operation_index++)
     {
         decoded = decode_ok(fp_reduce_cases[operation_index].base | 0x64U);
         CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_FP_REDUCE);
@@ -1535,9 +1501,9 @@ static void test_vector(void)
     decode_status_is(0x5E70D820U, ARM64_DECODE_UNALLOCATED);
     decode_status_is(0x2E30C820U, ARM64_DECODE_UNALLOCATED);
 
-    for (relation_index = 0; relation_index < sizeof(compare_zero_relations) / sizeof(compare_zero_relations[0]); relation_index++)
+    for (size_t relation_index = 0; relation_index < sizeof(compare_zero_relations) / sizeof(compare_zero_relations[0]); relation_index++)
     {
-        for (shape_index = 0; shape_index < sizeof(compare_zero_shapes) / sizeof(compare_zero_shapes[0]); shape_index++)
+        for (size_t shape_index = 0; shape_index < sizeof(compare_zero_shapes) / sizeof(compare_zero_shapes[0]); shape_index++)
         {
             decoded = decode_ok(compare_zero_shapes[shape_index].bits | compare_zero_relations[relation_index].bits | 0x61U);
             CHECK(decoded.operands.simd.form == ARM64_SIMD_FORM_FP_COMPARE_ZERO);
@@ -1607,9 +1573,8 @@ static int run_tests(void)
 void *memset(void *destination, int value, size_t count)
 {
     unsigned char *bytes = destination;
-    size_t index;
 
-    for (index = 0; index < count; index++) bytes[index] = (unsigned char)value;
+    for (size_t index = 0; index < count; index++) bytes[index] = (unsigned char)value;
     return destination;
 }
 
@@ -1617,9 +1582,8 @@ void *memcpy(void *destination, const void *source, size_t count)
 {
     unsigned char *destination_bytes = destination;
     const unsigned char *source_bytes = source;
-    size_t index;
 
-    for (index = 0; index < count; index++) destination_bytes[index] = source_bytes[index];
+    for (size_t index = 0; index < count; index++) destination_bytes[index] = source_bytes[index];
     return destination;
 }
 

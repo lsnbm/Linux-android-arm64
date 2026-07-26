@@ -528,13 +528,6 @@ struct arm64_load_store_operands
     arm64_u8 shift_amount;
 };
 
-struct arm64_memory_address
-{
-    arm64_u64 address;
-    arm64_u64 writeback_address;
-    arm64_u8 writeback;
-};
-
 struct arm64_simd_operands
 {
     enum arm64_simd_form form;
@@ -588,20 +581,13 @@ struct arm64_decoded_insn
 /*
 解码一条 AArch64 指令。
 
-返回结构始终包含 raw/status。status 为 OK 时可消费完整语义；为
+调用方提供最终结果存储地址，decoder 直接填充该对象，避免大结构体按值返回时
+产生隐藏返回槽以及调用端的结构体复制。
+
+输出结构始终包含 raw/status。status 为 OK 时可消费完整语义；为
 UNSUPPORTED 时只保证已填写的 class/opcode/flags 等识别信息有效；其他失败
-状态下调用方不应执行该指令。大结构由 ABI 直接写入调用方返回槽，不产生额外复制。
+状态下调用方不应执行该指令。
 */
-struct arm64_decoded_insn arm64_decode_insn(arm64_u32 raw);
-
-// 解析 ADR/ADRP、直接分支和 literal load/prefetch 的绝对目标地址。
-int arm64_decode_direct_target(const struct arm64_decoded_insn *decoded, arm64_u64 pc, arm64_u64 *target);
-
-/*
-根据已归一化寻址模式计算访存地址。index_value 应由调用方从 rm 读取；
-扩展宽度由 extend_type 决定，无寄存器 offset 的形式可传 0。
-返回非零表示成功，返回 0 表示该指令没有可解析的访存地址或参数无效。
-*/
-int arm64_decode_memory_address(const struct arm64_decoded_insn *decoded, arm64_u64 pc, arm64_u64 base, arm64_u64 index_value, struct arm64_memory_address *address);
+void arm64_decode_insn(arm64_u32 raw, struct arm64_decoded_insn *decoded);
 
 #endif

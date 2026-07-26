@@ -28,8 +28,14 @@ static void arm64_decode_sysreg(arm64_u32 raw, struct arm64_decoded_insn *decode
 enum arm64_decode_status arm64_decode_branch(arm64_u32 raw, struct arm64_decoded_insn *decoded)
 {
     struct arm64_system_operands *system = &decoded->operands.system;
-    arm64_u32 branch_reg;
-    arm64_u32 iclass = (raw >> 25) & 0xF;
+
+    if ((raw & 0xFFFF0000U) == 0)
+    {
+        decoded->insn_class = ARM64_INSN_CLASS_BRANCH_EXCEPTION_SYSTEM;
+        decoded->opcode = ARM64_OP_EXCEPTION_GENERATION;
+        system->immediate = raw & 0xFFFF;
+        return ARM64_DECODE_UNSUPPORTED;
+    }
 
     if ((raw & 0xFFFFF01FU) == ARM64_HINT_NOP_INSN)
     {
@@ -154,7 +160,7 @@ enum arm64_decode_status arm64_decode_branch(arm64_u32 raw, struct arm64_decoded
         return ARM64_DECODE_OK;
     }
 
-    branch_reg = raw & 0xFFFFFC1FU;
+    arm64_u32 branch_reg = raw & 0xFFFFFC1FU;
     if (branch_reg == 0xD61F0000U || branch_reg == 0xD63F0000U || branch_reg == 0xD65F0000U)
     {
         decoded->insn_class = ARM64_INSN_CLASS_BRANCH_EXCEPTION_SYSTEM;
@@ -195,6 +201,7 @@ enum arm64_decode_status arm64_decode_branch(arm64_u32 raw, struct arm64_decoded
         return ARM64_DECODE_OK;
     }
 
+    arm64_u32 iclass = (raw >> 25) & 0xF;
     if ((iclass & 0xE) == 0xA)
     {
         decoded->insn_class = ARM64_INSN_CLASS_BRANCH_EXCEPTION_SYSTEM;

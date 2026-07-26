@@ -53,9 +53,8 @@ static __always_inline void cntvct_monitor_restore_cpu(void)
 static __always_inline void cntvct_monitor_arm_cpu(void)
 {
     struct cntvct_monitor_cpu_state *state = this_cpu_ptr(&g_cntvct_monitor_cpu_state);
-    unsigned long cntkctl;
 
-    cntkctl = read_sysreg(cntkctl_el1);
+    unsigned long cntkctl = read_sysreg(cntkctl_el1);
     if (!state->armed)
     {
         state->access_was_enabled = !!(cntkctl & ARCH_TIMER_USR_VCT_ACCESS_EN);
@@ -82,12 +81,11 @@ static int cntvct_monitor_update_online_cpus(void)
 {
     int cpu;
     int status = 0;
-    int cpu_status;
 
     cpus_read_lock();
     for_each_online_cpu(cpu)
     {
-        cpu_status = smp_call_function_single(cpu, cntvct_monitor_update_current_cpu, NULL, 1);
+        int cpu_status = smp_call_function_single(cpu, cntvct_monitor_update_current_cpu, NULL, 1);
         if (status == 0 && cpu_status < 0) status = cpu_status;
     }
     cpus_read_unlock();
@@ -105,15 +103,11 @@ next 的原生基线，不能再恢复旧任务保存的值，只清除 armed �
 */
 static int cntvct_monitor_switch_hook_work(struct pt_regs *hook_regs)
 {
-    struct cntvct_monitor_cpu_state *state;
-    struct task_struct *next;
-    pid_t target_tgid;
-
     if (!hook_regs) return 0;
 
-    state = this_cpu_ptr(&g_cntvct_monitor_cpu_state);
-    next = (struct task_struct *)(uintptr_t)hook_regs->regs[1];
-    target_tgid = cntvct_monitor_target_tgid();
+    struct cntvct_monitor_cpu_state *state = this_cpu_ptr(&g_cntvct_monitor_cpu_state);
+    struct task_struct *next = (struct task_struct *)(uintptr_t)hook_regs->regs[1];
+    pid_t target_tgid = cntvct_monitor_target_tgid();
     if (state->armed && IS_ENABLED(CONFIG_ARM64_ERRATUM_1418040) && g_cntvct_monitor_this_cpu_has_cap && g_cntvct_monitor_this_cpu_has_cap(ARM64_WORKAROUND_1418040))
     {
         state->armed = false;
@@ -143,19 +137,15 @@ static void cntvct_monitor_sys_exit_probe(void *data, struct pt_regs *regs, long
 
 static int cntvct_monitor_read_hook_work(struct pt_regs *hook_regs)
 {
-    unsigned long esr;
-    struct pt_regs *regs;
-    pid_t target_tgid;
-
     if (!hook_regs) return 0;
 
-    target_tgid = cntvct_monitor_target_tgid();
+    pid_t target_tgid = cntvct_monitor_target_tgid();
     if (target_tgid <= 0 || current->tgid != target_tgid) return 0;
 
-    esr = hook_regs->regs[0];
+    unsigned long esr = hook_regs->regs[0];
     if ((esr & ESR_ELx_SYS64_ISS_SYS_OP_MASK) != ESR_ELx_SYS64_ISS_SYS_CNTVCT) return 0;
 
-    regs = (struct pt_regs *)(uintptr_t)hook_regs->regs[1];
+    struct pt_regs *regs = (struct pt_regs *)(uintptr_t)hook_regs->regs[1];
     if (!regs || !user_mode(regs)) return 0;
 
     ls_log_always_tag("cntvct", "tgid=%d pid=%d comm=%s pc=0x%llx\n", current->tgid, current->pid, current->comm, (unsigned long long)regs->pc);

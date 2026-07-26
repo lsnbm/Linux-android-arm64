@@ -55,10 +55,9 @@ static arm64_u64 arm64_ror_element(arm64_u64 value, arm64_u8 rotation, arm64_u8 
 static arm64_u64 arm64_replicate(arm64_u64 value, arm64_u8 element_width, arm64_u8 width)
 {
     arm64_u64 result = 0;
-    arm64_u8 offset;
 
     value &= arm64_low_mask(element_width);
-    for (offset = 0; offset < width; offset += element_width) result |= value << offset;
+    for (arm64_u8 offset = 0; offset < width; offset += element_width) result |= value << offset;
     return result;
 }
 
@@ -66,106 +65,26 @@ static int arm64_decode_bit_masks(arm64_u8 n, arm64_u8 immr, arm64_u8 imms, arm6
 {
     /* 按 ARM ARM DecodeBitMasks 规则展开逻辑立即数和位域掩码。 */
     arm64_u32 value = ((arm64_u32)n << 6) | (~imms & 0x3F);
-    arm64_u8 len;
-    arm64_u8 levels;
-    arm64_u8 s;
-    arm64_u8 r;
-    arm64_u8 diff;
-    arm64_u8 element_width;
 
     if (!value) return 0;
-    len = (arm64_u8)(31U - __builtin_clz(value));
+    arm64_u8 len = (arm64_u8)(31U - __builtin_clz(value));
     if (len < 1 || (width == 32 && len == 6)) return 0;
 
-    levels = (1U << len) - 1;
-    s = imms & levels;
-    r = immr & levels;
+    arm64_u8 levels = (1U << len) - 1;
+    arm64_u8 s = imms & levels;
+    arm64_u8 r = immr & levels;
     if (immediate && s == levels) return 0;
 
-    diff = (s - r) & levels;
-    element_width = 1U << len;
+    arm64_u8 diff = (s - r) & levels;
+    arm64_u8 element_width = 1U << len;
     *wmask = arm64_replicate(arm64_ror_element(arm64_low_mask(s + 1), r, element_width), element_width, width);
     *tmask = arm64_replicate(arm64_low_mask(diff + 1), element_width, width);
     return 1;
 }
 
-static enum arm64_operation arm64_decode_2source_operation(arm64_u32 selector)
-{
-    switch (selector)
-    {
-    case 2:
-        return ARM64_OPERATION_UDIV;
-    case 3:
-        return ARM64_OPERATION_SDIV;
-    case 8:
-        return ARM64_OPERATION_LSLV;
-    case 9:
-        return ARM64_OPERATION_LSRV;
-    case 10:
-        return ARM64_OPERATION_ASRV;
-    case 11:
-        return ARM64_OPERATION_RORV;
-    case 0x10:
-        return ARM64_OPERATION_CRC32B;
-    case 0x11:
-        return ARM64_OPERATION_CRC32H;
-    case 0x12:
-        return ARM64_OPERATION_CRC32W;
-    case 0x13:
-        return ARM64_OPERATION_CRC32X;
-    case 0x14:
-        return ARM64_OPERATION_CRC32CB;
-    case 0x15:
-        return ARM64_OPERATION_CRC32CH;
-    case 0x16:
-        return ARM64_OPERATION_CRC32CW;
-    case 0x17:
-        return ARM64_OPERATION_CRC32CX;
-    case 0x18:
-        return ARM64_OPERATION_SMAX;
-    case 0x19:
-        return ARM64_OPERATION_UMAX;
-    case 0x1A:
-        return ARM64_OPERATION_SMIN;
-    case 0x1B:
-        return ARM64_OPERATION_UMIN;
-    default:
-        return ARM64_OPERATION_NONE;
-    }
-}
-
-static enum arm64_operation arm64_decode_1source_operation(arm64_u32 selector)
-{
-    switch (selector)
-    {
-    case 0:
-        return ARM64_OPERATION_RBIT;
-    case 1:
-        return ARM64_OPERATION_REV16;
-    case 2:
-        return ARM64_OPERATION_REV32;
-    case 3:
-        return ARM64_OPERATION_REV64;
-    case 4:
-        return ARM64_OPERATION_CLZ;
-    case 5:
-        return ARM64_OPERATION_CLS;
-    case 6:
-        return ARM64_OPERATION_CTZ;
-    case 7:
-        return ARM64_OPERATION_CNT;
-    case 8:
-        return ARM64_OPERATION_ABS;
-    default:
-        return ARM64_OPERATION_NONE;
-    }
-}
-
 /* 解码 Data Processing -- Immediate，并展开 PC-relative/普通立即数。 */
 enum arm64_decode_status arm64_decode_data_processing_immediate(arm64_u32 raw, struct arm64_decoded_insn *decoded)
 {
-    arm64_u32 opc;
-
     decoded->insn_class = ARM64_INSN_CLASS_DATA_PROCESSING_IMMEDIATE;
 
     if ((raw & 0x1F000000U) == 0x10000000U)
@@ -198,7 +117,7 @@ enum arm64_decode_status arm64_decode_data_processing_immediate(arm64_u32 raw, s
         decoded->opcode = ARM64_OP_MIN_MAX_IMMEDIATE;
         arm64_decode_base_registers(raw, decoded);
         decoded->operands.data.immediate = (raw >> 10) & 0xFF;
-        opc = (raw >> 18) & 0x3;
+        arm64_u32 opc = (raw >> 18) & 0x3;
         decoded->operation = opc == 0 ? ARM64_OPERATION_SMAX : opc == 1 ? ARM64_OPERATION_UMAX : opc == 2 ? ARM64_OPERATION_SMIN : ARM64_OPERATION_UMIN;
         return ARM64_DECODE_OK;
     }
@@ -223,7 +142,7 @@ enum arm64_decode_status arm64_decode_data_processing_immediate(arm64_u32 raw, s
 
         decoded->opcode = ARM64_OP_BITFIELD;
         arm64_decode_base_registers(raw, decoded);
-        opc = (raw >> 29) & 0x3;
+        arm64_u32 opc = (raw >> 29) & 0x3;
         if (opc == 3) return ARM64_DECODE_UNALLOCATED;
         decoded->operation = opc == 0 ? ARM64_OPERATION_SBFM : opc == 1 ? ARM64_OPERATION_BFM : ARM64_OPERATION_UBFM;
         decoded->operands.data.option = (raw >> 22) & 1;
@@ -248,7 +167,7 @@ enum arm64_decode_status arm64_decode_data_processing_immediate(arm64_u32 raw, s
     {
         decoded->opcode = ARM64_OP_MOVE_WIDE;
         arm64_decode_base_registers(raw, decoded);
-        opc = (raw >> 29) & 0x3;
+        arm64_u32 opc = (raw >> 29) & 0x3;
         if (opc == 1) return ARM64_DECODE_UNALLOCATED;
         decoded->operation = opc == 0 ? ARM64_OPERATION_MOVN : opc == 2 ? ARM64_OPERATION_MOVZ : ARM64_OPERATION_MOVK;
         decoded->operands.data.immediate = (raw >> 5) & 0xFFFF;
@@ -264,8 +183,6 @@ enum arm64_decode_status arm64_decode_data_processing_immediate(arm64_u32 raw, s
 /* 解码 Data Processing -- Register，并把编码选择位转换成 operation。 */
 enum arm64_decode_status arm64_decode_data_processing_register(arm64_u32 raw, struct arm64_decoded_insn *decoded)
 {
-    arm64_u32 opc;
-
     decoded->insn_class = ARM64_INSN_CLASS_DATA_PROCESSING_REGISTER;
 
     if ((raw & 0x1F200000U) == 0x0B000000U || (raw & 0x1FE00000U) == 0x0B200000U)
@@ -309,7 +226,7 @@ enum arm64_decode_status arm64_decode_data_processing_register(arm64_u32 raw, st
         arm64_decode_base_registers(raw, decoded);
         if (raw & 0x00000800U) return ARM64_DECODE_UNALLOCATED;
         decoded->operands.data.condition = (raw >> 12) & 0xF;
-        opc = ((raw >> 29) & 1) << 1 | ((raw >> 10) & 1);
+        arm64_u32 opc = ((raw >> 29) & 1) << 1 | ((raw >> 10) & 1);
         decoded->operation = opc == 0 ? ARM64_OPERATION_CSEL : opc == 1 ? ARM64_OPERATION_CSINC : opc == 2 ? ARM64_OPERATION_CSINV : ARM64_OPERATION_CSNEG;
         return ARM64_DECODE_OK;
     }
@@ -318,9 +235,66 @@ enum arm64_decode_status arm64_decode_data_processing_register(arm64_u32 raw, st
     {
         decoded->opcode = ARM64_OP_DATA_PROCESSING_2_SOURCE;
         arm64_decode_base_registers(raw, decoded);
-        opc = (raw >> 10) & 0x3F;
-        decoded->operation = arm64_decode_2source_operation(opc);
-        if (decoded->operation == ARM64_OPERATION_NONE) return ARM64_DECODE_UNSUPPORTED;
+        arm64_u32 opc = (raw >> 10) & 0x3F;
+        switch (opc)
+        {
+        case 2:
+            decoded->operation = ARM64_OPERATION_UDIV;
+            break;
+        case 3:
+            decoded->operation = ARM64_OPERATION_SDIV;
+            break;
+        case 8:
+            decoded->operation = ARM64_OPERATION_LSLV;
+            break;
+        case 9:
+            decoded->operation = ARM64_OPERATION_LSRV;
+            break;
+        case 10:
+            decoded->operation = ARM64_OPERATION_ASRV;
+            break;
+        case 11:
+            decoded->operation = ARM64_OPERATION_RORV;
+            break;
+        case 0x10:
+            decoded->operation = ARM64_OPERATION_CRC32B;
+            break;
+        case 0x11:
+            decoded->operation = ARM64_OPERATION_CRC32H;
+            break;
+        case 0x12:
+            decoded->operation = ARM64_OPERATION_CRC32W;
+            break;
+        case 0x13:
+            decoded->operation = ARM64_OPERATION_CRC32X;
+            break;
+        case 0x14:
+            decoded->operation = ARM64_OPERATION_CRC32CB;
+            break;
+        case 0x15:
+            decoded->operation = ARM64_OPERATION_CRC32CH;
+            break;
+        case 0x16:
+            decoded->operation = ARM64_OPERATION_CRC32CW;
+            break;
+        case 0x17:
+            decoded->operation = ARM64_OPERATION_CRC32CX;
+            break;
+        case 0x18:
+            decoded->operation = ARM64_OPERATION_SMAX;
+            break;
+        case 0x19:
+            decoded->operation = ARM64_OPERATION_UMAX;
+            break;
+        case 0x1A:
+            decoded->operation = ARM64_OPERATION_SMIN;
+            break;
+        case 0x1B:
+            decoded->operation = ARM64_OPERATION_UMIN;
+            break;
+        default:
+            return ARM64_DECODE_UNSUPPORTED;
+        }
         if ((opc >= 0x10 && opc <= 0x12) || (opc >= 0x14 && opc <= 0x16))
         {
             if (decoded->operand_width != 32) return ARM64_DECODE_UNALLOCATED;
@@ -377,7 +351,7 @@ enum arm64_decode_status arm64_decode_data_processing_register(arm64_u32 raw, st
     {
         decoded->opcode = ARM64_OP_ADD_SUB_CARRY;
         arm64_decode_base_registers(raw, decoded);
-        opc = ((raw >> 30) & 1) << 1 | ((raw >> 29) & 1);
+        arm64_u32 opc = ((raw >> 30) & 1) << 1 | ((raw >> 29) & 1);
         decoded->operation = opc == 0 ? ARM64_OPERATION_ADC : opc == 1 ? ARM64_OPERATION_ADCS : opc == 2 ? ARM64_OPERATION_SBC : ARM64_OPERATION_SBCS;
         if (raw & 0x20000000U) decoded->flags |= ARM64_INSN_FLAG_SETFLAGS;
         if (raw & 0x40000000U) decoded->flags |= ARM64_INSN_FLAG_SUBTRACT;
@@ -417,9 +391,39 @@ enum arm64_decode_status arm64_decode_data_processing_register(arm64_u32 raw, st
     {
         decoded->opcode = ARM64_OP_DATA_PROCESSING_1_SOURCE;
         arm64_decode_base_registers(raw, decoded);
-        opc = (raw >> 10) & 0x3F;
-        decoded->operation = arm64_decode_1source_operation(opc);
-        if (decoded->operation == ARM64_OPERATION_NONE) return ARM64_DECODE_UNSUPPORTED;
+        arm64_u32 opc = (raw >> 10) & 0x3F;
+        switch (opc)
+        {
+        case 0:
+            decoded->operation = ARM64_OPERATION_RBIT;
+            break;
+        case 1:
+            decoded->operation = ARM64_OPERATION_REV16;
+            break;
+        case 2:
+            decoded->operation = ARM64_OPERATION_REV32;
+            break;
+        case 3:
+            decoded->operation = ARM64_OPERATION_REV64;
+            break;
+        case 4:
+            decoded->operation = ARM64_OPERATION_CLZ;
+            break;
+        case 5:
+            decoded->operation = ARM64_OPERATION_CLS;
+            break;
+        case 6:
+            decoded->operation = ARM64_OPERATION_CTZ;
+            break;
+        case 7:
+            decoded->operation = ARM64_OPERATION_CNT;
+            break;
+        case 8:
+            decoded->operation = ARM64_OPERATION_ABS;
+            break;
+        default:
+            return ARM64_DECODE_UNSUPPORTED;
+        }
         if (decoded->operation == ARM64_OPERATION_REV64 && decoded->operand_width != 64) return ARM64_DECODE_UNALLOCATED;
         return ARM64_DECODE_OK;
     }

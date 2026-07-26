@@ -47,8 +47,8 @@ static struct
 // 返回当前有多少虚拟 slot 处于按下状态
 static inline int vt_active_count(void)
 {
-    int i, count = 0;
-    for (i = 0; i < virtual_slots; i++)
+    int count = 0;
+    for (int i = 0; i < virtual_slots; i++)
         if (vt.tracking_ids[i] != -1) count++;
     return count;
 }
@@ -56,8 +56,6 @@ static inline int vt_active_count(void)
 // 动态初始化虚拟触摸的运行时参数，若设备实际 slot 数不足，init 后 v_touch_init 会返回 -EINVAL。
 static inline int init_virtual_input_params(int requested_virtual_slots)
 {
-    int i;
-
     if (requested_virtual_slots <= 0 || requested_virtual_slots > MAX_VIRTUAL_SLOTS) return -EINVAL;
 
     virtual_slots = requested_virtual_slots;
@@ -68,7 +66,7 @@ static inline int init_virtual_input_params(int requested_virtual_slots)
     virtual_slot_base = physical_slots;
     vtouch_tracking_id_base = 40000;
 
-    for (i = 0; i < MAX_VIRTUAL_SLOTS; i++) vt.tracking_ids[i] = -1;
+    for (int i = 0; i < MAX_VIRTUAL_SLOTS; i++) vt.tracking_ids[i] = -1;
 
     return 0;
 }
@@ -139,12 +137,11 @@ static inline void update_global_keys(void)
     struct input_mt *mt = dev->mt;
     bool relock_keys = vt.global_keys_locked;
     int count = 0;
-    int i;
 
     // 遍历物理 Slot (0 ~ physical_slots-1)，检查是否有真实手指按在屏幕上
     // 通过读取 mt 结构体中的 tracking_id 来判断
     // tracking_id != -1 表示该 Slot 处于按下状态
-    for (i = 0; i < physical_slots; i++)
+    for (int i = 0; i < physical_slots; i++)
     {
         if (input_mt_get_value(&mt->slots[i], ABS_MT_TRACKING_ID) != -1) count++;
     }
@@ -171,21 +168,20 @@ static inline void update_global_keys(void)
 static inline int send_report(int vslot, int x, int y, bool touching)
 {
     struct input_dev *dev = vt.dev;
-    struct input_mt *mt = dev->mt;
-    int hw_slot = virtual_slot_base + vslot;
-    int tracking_id;
-    int old_slot;
+    if (!dev) return -ENODEV;
 
-    if (!dev || !mt) return -ENODEV;
+    struct input_mt *mt = dev->mt;
+    if (!mt) return -ENODEV;
 
     if ((unsigned)vslot >= virtual_slots) return -EINVAL;
 
     if (touching && vt.tracking_ids[vslot] == -1) return -EINVAL;
 
-    tracking_id = touching ? vt.tracking_ids[vslot] : -1;
+    int hw_slot = virtual_slot_base + vslot;
+    int tracking_id = touching ? vt.tracking_ids[vslot] : -1;
 
     // 记住当前物理驱动正在操作的 slot
-    old_slot = mt->slot;
+    int old_slot = mt->slot;
 
     // 瞬间开启所有 slot
     mt->num_slots = original_slots;
@@ -243,10 +239,6 @@ static int match_touchscreen(struct device *dev, void *data)
 
 static inline int v_touch_init(int request_virtual_slots, int *max_x, int *max_y)
 {
-    struct input_dev *found = NULL;
-    struct class *input_class;
-    int ret;
-
     if (!max_x || !max_y) return -EINVAL;
 
     if (vt.initialized)
@@ -264,16 +256,17 @@ static inline int v_touch_init(int request_virtual_slots, int *max_x, int *max_y
         return 0;
     }
 
-    ret = init_virtual_input_params(request_virtual_slots);
+    int ret = init_virtual_input_params(request_virtual_slots);
     if (ret) return ret;
 
-    input_class = (struct class *)generic_kallsyms_lookup_name("input_class");
+    struct class *input_class = (struct class *)generic_kallsyms_lookup_name("input_class");
     if (!input_class)
     {
         ls_log_tag("vtouch", "input_class 查找失败\n");
         return -EFAULT;
     }
 
+    struct input_dev *found = NULL;
     class_for_each_device(input_class, NULL, &found, match_touchscreen);
     if (!found)
     {
@@ -307,13 +300,11 @@ static inline int v_touch_init(int request_virtual_slots, int *max_x, int *max_y
 
 static inline void v_touch_destroy(void)
 {
-    int i;
-
     // 防止重复调用
     if (!vt.initialized) return;
 
     // 发送所有仍按下的虚拟 slot 的抬起信号
-    for (i = 0; i < virtual_slots; i++)
+    for (int i = 0; i < virtual_slots; i++)
     {
         if (vt.tracking_ids[i] != -1)
         {
@@ -346,17 +337,11 @@ static inline void v_touch_destroy(void)
 
     vt.initialized = false;
 
-    for (i = 0; i < virtual_slots; i++) vt.tracking_ids[i] = -1;
+    for (int i = 0; i < virtual_slots; i++) vt.tracking_ids[i] = -1;
 }
 
 static inline void v_touch_event(enum request_op op, int slot, int x, int y)
 {
-    int old_tracking_id;
-    int ret;
-    bool last_virtual;
-    int max_x;
-    int max_y;
-
     if (!vt.initialized) return;
 
     // 越界保护,slot定义的是int,不是short,与内核字节对齐吧
@@ -368,8 +353,8 @@ static inline void v_touch_event(enum request_op op, int slot, int x, int y)
     {
         if (!vt.dev || !vt.dev->absinfo) return;
 
-        max_x = vt.dev->absinfo[ABS_MT_POSITION_X].maximum;
-        max_y = vt.dev->absinfo[ABS_MT_POSITION_Y].maximum;
+        int max_x = vt.dev->absinfo[ABS_MT_POSITION_X].maximum;
+        int max_y = vt.dev->absinfo[ABS_MT_POSITION_Y].maximum;
 
         if (max_x <= 0 || max_y <= 0) return;
 
@@ -393,7 +378,7 @@ static inline void v_touch_event(enum request_op op, int slot, int x, int y)
             // 第一个虚拟手指按下时，通常还没有锁定全局按键；send_report 会自己在 event_lock 内安全上报按键
             if (vt_active_count() == 1)
             {
-                ret = send_report(slot, x, y, true);
+                int ret = send_report(slot, x, y, true);
                 if (ret)
                 {
                     vt.tracking_ids[slot] = -1;
@@ -407,7 +392,7 @@ static inline void v_touch_event(enum request_op op, int slot, int x, int y)
             else
             {
                 // 已有虚拟手指按住（已锁），直接注入
-                ret = send_report(slot, x, y, true);
+                int ret = send_report(slot, x, y, true);
                 if (ret) vt.tracking_ids[slot] = -1;
             }
         }
@@ -416,9 +401,8 @@ static inline void v_touch_event(enum request_op op, int slot, int x, int y)
     {
         if (vt.tracking_ids[slot] != -1)
         {
-            old_tracking_id = vt.tracking_ids[slot];
             vt.tracking_ids[slot] = -1;
-            last_virtual = vt_active_count() == 0;
+            bool last_virtual = vt_active_count() == 0;
 
             // 虚拟手指抬起了
             send_report(slot, 0, 0, false);

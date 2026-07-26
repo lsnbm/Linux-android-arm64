@@ -62,20 +62,16 @@ static inline u64 arm64_ghost_region_find_hole_locked(struct mm_struct *mm, size
 // 刷新指定用户虚拟地址范围在所有 ASID 中的 TLB 缓存。
 static inline void arm64_ghost_region_flush_tlb(u64 user_va, unsigned int page_count)
 {
-    unsigned int index;
-
-    for (index = 0; index < page_count; index++) flush_user_tlb_addr_all_asid(user_va + (u64)index * PAGE_SIZE);
+    for (unsigned int index = 0; index < page_count; index++) flush_user_tlb_addr_all_asid(user_va + (u64)index * PAGE_SIZE);
 }
 
 // 在已持有 mmap 写锁时补齐页表，并按 break-before-make 顺序安装用户只读可执行 PTE。
 static inline int arm64_ghost_region_install_locked(struct mm_struct *mm, struct page **pages, unsigned int page_count, u64 user_va)
 {
-    unsigned int index;
-
-    for (index = 0; index < page_count; index++)
+    for (unsigned int index = 0; index < page_count; index++)
         if (!get_or_alloc_user_pte(mm, user_va + (u64)index * PAGE_SIZE)) return -ENOMEM;
 
-    for (index = 0; index < page_count; index++)
+    for (unsigned int index = 0; index < page_count; index++)
     {
         u64 addr = user_va + (u64)index * PAGE_SIZE;
         pte_t *ptep = get_user_pte(mm, addr);
@@ -84,7 +80,7 @@ static inline int arm64_ghost_region_install_locked(struct mm_struct *mm, struct
     }
     arm64_ghost_region_flush_tlb(user_va, page_count);
 
-    for (index = 0; index < page_count; index++)
+    for (unsigned int index = 0; index < page_count; index++)
     {
         u64 addr = user_va + (u64)index * PAGE_SIZE;
         pte_t *ptep = get_user_pte(mm, addr);
@@ -110,17 +106,14 @@ static inline void arm64_ghost_region_sync_icache(struct page **pages, unsigned 
 {
     unsigned long line_size = arm64_ghost_region_dcache_line_size();
     size_t remaining = code_size;
-    unsigned int index;
 
-    for (index = 0; index < page_count && remaining; index++)
+    for (unsigned int index = 0; index < page_count && remaining; index++)
     {
         size_t bytes = min_t(size_t, remaining, PAGE_SIZE);
         void *mapping = page_address(pages[index]);
         unsigned long start = (unsigned long)mapping;
         unsigned long end = start + bytes;
-        unsigned long line;
-
-        for (line = start & ~(line_size - 1); line < end; line += line_size) asm volatile("dc cvau, %0" : : "r"(line) : "memory");
+        for (unsigned long line = start & ~(line_size - 1); line < end; line += line_size) asm volatile("dc cvau, %0" : : "r"(line) : "memory");
 
         remaining -= bytes;
     }
@@ -145,7 +138,6 @@ static inline u64 arm64_ghost_region_create(pid_t pid, const void *code, size_t 
     size_t remaining = size;
     unsigned int page_count;
     unsigned int allocated_count = 0;
-    unsigned int index;
     u64 user_va = 0;
     int status = -ENOMEM;
 
@@ -163,14 +155,14 @@ static inline u64 arm64_ghost_region_create(pid_t pid, const void *code, size_t 
     pages = kvcalloc(page_count, sizeof(*pages), GFP_KERNEL);
     if (!pages) goto err_release;
 
-    for (index = 0; index < page_count; index++)
+    for (unsigned int index = 0; index < page_count; index++)
     {
         pages[index] = alloc_page(GFP_KERNEL | __GFP_ZERO);
         if (!pages[index]) goto err_release;
         allocated_count++;
     }
 
-    for (index = 0; index < page_count && remaining; index++)
+    for (unsigned int index = 0; index < page_count && remaining; index++)
     {
         size_t chunk = min_t(size_t, remaining, PAGE_SIZE);
         void *mapping = page_address(pages[index]);

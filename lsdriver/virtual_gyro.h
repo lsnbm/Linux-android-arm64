@@ -72,10 +72,6 @@ static u32 vgyro_milli_to_float_bits(int value)
 {
     u32 sign = 0;
     u64 mag;
-    u64 q;
-    int top;
-    int exp;
-    u32 mant;
 
     if (!value) return 0;
 
@@ -89,14 +85,15 @@ static u32 vgyro_milli_to_float_bits(int value)
         mag = (u64)value;
     }
 
-    q = (mag << 24) / VGYRO_SCALE_MILLI;
+    u64 q = (mag << 24) / VGYRO_SCALE_MILLI;
     if (!q) return sign;
 
-    top = fls64(q) - 1;
-    exp = top - 24 + 127;
+    int top = fls64(q) - 1;
+    int exp = top - 24 + 127;
     if (exp <= 0) return sign;
     if (exp >= 255) return sign | 0x7f800000U;
 
+    u32 mant;
     if (top > 23)
     {
         int shift = top - 23;
@@ -126,22 +123,18 @@ static u32 vgyro_float_bits_add(u32 a, u32 b)
 {
     u32 abs_a = a & 0x7fffffffU;
     u32 abs_b = b & 0x7fffffffU;
-    u32 sign_a, sign_b, sign_r;
-    int exp_a, exp_b, exp_r;
-    u64 mant_a, mant_b, mant_r;
-    int diff;
 
     if (!abs_a) return b;
     if (!abs_b) return a;
     if ((abs_a & 0x7f800000U) == 0x7f800000U) return a;
     if ((abs_b & 0x7f800000U) == 0x7f800000U) return b;
 
-    sign_a = a >> 31;
-    sign_b = b >> 31;
-    exp_a = (a >> 23) & 0xff;
-    exp_b = (b >> 23) & 0xff;
-    mant_a = a & 0x7fffffU;
-    mant_b = b & 0x7fffffU;
+    u32 sign_a = a >> 31;
+    u32 sign_b = b >> 31;
+    int exp_a = (a >> 23) & 0xff;
+    int exp_b = (b >> 23) & 0xff;
+    u64 mant_a = a & 0x7fffffU;
+    u64 mant_b = b & 0x7fffffU;
 
     if (exp_a) mant_a |= 0x800000U;
     else exp_a = 1;
@@ -165,11 +158,13 @@ static u32 vgyro_float_bits_add(u32 a, u32 b)
         mant_b = tmp_mant;
     }
 
-    diff = exp_a - exp_b;
+    int diff = exp_a - exp_b;
     if (diff >= 56) mant_b = 0;
     else mant_b >>= diff;
 
-    exp_r = exp_a;
+    u32 sign_r;
+    int exp_r = exp_a;
+    u64 mant_r;
     if (sign_a == sign_b)
     {
         sign_r = sign_a;
@@ -239,15 +234,15 @@ static bool vgyro_is_gyro_event_type(int type)
 // 扫描内核临时缓冲区并给陀螺仪事件叠加虚拟三轴值。
 static int vgyro_patch_kernel_events(char *buf, size_t len)
 {
-    size_t off;
     int patched = 0;
+
+    if (!buf || !vgyro_buffer_maybe_events(len)) return 0;
+
     u32 fx = vgyro_milli_to_float_bits(READ_ONCE(vg.gyro_x_mrad_s));
     u32 fy = vgyro_milli_to_float_bits(READ_ONCE(vg.gyro_y_mrad_s));
     u32 fz = vgyro_milli_to_float_bits(READ_ONCE(vg.gyro_z_mrad_s));
 
-    if (!buf || !vgyro_buffer_maybe_events(len)) return 0;
-
-    for (off = 0; off + VGYRO_ASENSOR_EVENT_SIZE <= len; off += VGYRO_ASENSOR_EVENT_SIZE)
+    for (size_t off = 0; off + VGYRO_ASENSOR_EVENT_SIZE <= len; off += VGYRO_ASENSOR_EVENT_SIZE)
     {
         int version = *(int *)(buf + off + VGYRO_ASENSOR_VERSION_OFFSET);
         int type = *(int *)(buf + off + VGYRO_ASENSOR_TYPE_OFFSET);
@@ -268,18 +263,15 @@ static int vgyro_patch_kernel_events(char *buf, size_t len)
 // 处理被 inline hook 拦截到的 sendto 参数并回写修改后的用户缓冲区。
 static int vgyro_handle_sendto(struct pt_regs *regs, enum vgyro_sendto_arg_mode mode)
 {
-    struct pt_regs *sys_regs = NULL;
     char __user *ubuf;
     size_t len;
-    char *kbuf;
-    int patched;
 
     if (!READ_ONCE(vg.active)) return 0;
     if (!regs) return 0;
 
     if (mode == VGYRO_SENDTO_ARGS_ARM64_SYSCALL)
     {
-        sys_regs = (struct pt_regs *)regs->regs[0];
+        struct pt_regs *sys_regs = (struct pt_regs *)regs->regs[0];
         if (!sys_regs) return 0;
 
         ubuf = (char __user *)sys_regs->regs[1];
@@ -293,12 +285,12 @@ static int vgyro_handle_sendto(struct pt_regs *regs, enum vgyro_sendto_arg_mode 
 
     if (!ubuf || !vgyro_buffer_maybe_events(len)) return 0;
 
-    kbuf = vmalloc(len);
+    char *kbuf = vmalloc(len);
     if (!kbuf) return 0;
 
     if (copy_from_user(kbuf, ubuf, len)) goto out;
 
-    patched = vgyro_patch_kernel_events(kbuf, len);
+    int patched = vgyro_patch_kernel_events(kbuf, len);
     if (patched > 0)
     {
         unsigned long missing = copy_to_user(ubuf, kbuf, len);
@@ -332,9 +324,7 @@ static struct hook_entry vgyro_sendto_hook_targets[][1] = {
 // 判断任意 sendto inline hook 是否已经安装。
 static bool vgyro_sendto_hook_installed(void)
 {
-    int i;
-
-    for (i = 0; i < ARRAY_SIZE(vgyro_sendto_hook_targets); i++)
+    for (int i = 0; i < ARRAY_SIZE(vgyro_sendto_hook_targets); i++)
     {
         if (vgyro_sendto_hook_targets[i][0].installed) return true;
     }
@@ -345,10 +335,9 @@ static bool vgyro_sendto_hook_installed(void)
 // 安装 sendto inline hook，优先挂 syscall wrapper，失败后回退到内部实现。
 static int vgyro_install_hook_locked(void)
 {
-    int i;
-    int ret;
+    int ret = -ENOENT;
 
-    for (i = 0; i < ARRAY_SIZE(vgyro_sendto_hook_targets); i++)
+    for (int i = 0; i < ARRAY_SIZE(vgyro_sendto_hook_targets); i++)
     {
         ret = inline_hook_install(vgyro_sendto_hook_targets[i]);
         if (!ret)
@@ -397,8 +386,6 @@ static inline int v_gyro_report(int gyro_x_mrad_s, int gyro_y_mrad_s, int gyro_z
 // 停用虚拟陀螺仪并卸载 sendto inline hook。
 static inline void v_gyro_destroy(void)
 {
-    int i;
-
     mutex_lock(&vgyro_lock);
 
     WRITE_ONCE(vg.active, false);
@@ -406,7 +393,7 @@ static inline void v_gyro_destroy(void)
     WRITE_ONCE(vg.gyro_y_mrad_s, 0);
     WRITE_ONCE(vg.gyro_z_mrad_s, 0);
 
-    for (i = 0; i < ARRAY_SIZE(vgyro_sendto_hook_targets); i++) inline_hook_remove(vgyro_sendto_hook_targets[i]);
+    for (int i = 0; i < ARRAY_SIZE(vgyro_sendto_hook_targets); i++) inline_hook_remove(vgyro_sendto_hook_targets[i]);
 
     ls_log_tag("vgyro", "inline hook unregistered\n");
 

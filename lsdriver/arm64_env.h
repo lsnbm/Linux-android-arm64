@@ -76,19 +76,16 @@ static inline int get_pacga_key(pid_t pid, unsigned long *lo, unsigned long *hi)
 
 static inline int get_env_params(pid_t pid, const char *thread_name, uint64_t *tpidr_el0, uint64_t *pacga_lo, uint64_t *pacga_hi, int *tls_status, int *pacga_status)
 {
-    unsigned long lo = 0;
-    unsigned long hi = 0;
-    int tls_ret;
-    int pacga_ret;
-
     if (pid <= 0 || !thread_name || !tpidr_el0 || !pacga_lo || !pacga_hi || !tls_status || !pacga_status) return -EINVAL;
 
     *tpidr_el0 = 0;
     *pacga_lo = 0;
     *pacga_hi = 0;
 
-    tls_ret = get_tpidr_el0_by_name(pid, thread_name, tpidr_el0);
-    pacga_ret = get_pacga_key(pid, &lo, &hi);
+    unsigned long lo = 0;
+    unsigned long hi = 0;
+    int tls_ret = get_tpidr_el0_by_name(pid, thread_name, tpidr_el0);
+    int pacga_ret = get_pacga_key(pid, &lo, &hi);
 
     *pacga_lo = (uint64_t)lo;
     *pacga_hi = (uint64_t)hi;

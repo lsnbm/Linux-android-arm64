@@ -55,8 +55,12 @@ int (*fn_aarch64_insn_patch_text)(void *addrs[], uint32_t insns[], int cnt);
         直接比较 hash 值。如果不对，直接触发 BRK 指令宕机。
 如果是 6.1+ 内核，不存在 __cfi_slowpath，
 
-所以有好人给了一个5系的解决代码给我，所以5系就不用下面纯汇编进行间接调用了
-感谢bypass_cfi由https://github.com/wangchuan2009(忘川)，处理运行时校验函数来过5系cfi
+所以有人提供了一个5系的解决代码给我，所以5系就不用下面纯汇编进行间接调用了
+感谢https://github.com/wangchuan2009(忘川)，bypass_cfi处理运行时5系的集中校验函数,patch为ret来过5系cfi
+
+2026/7/25 22:23 !!!!!!
+后续我实机测试发现部分内核有间接调用__cfi_slowpath或__cfi_slowpath_diag或_cfi_slowpath,
+直接patch为ret后cfi倒是过了，但是部分内核部分函数间接调用cfi检查函数下 BTI直接导致内核panic
 */
 
 __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
@@ -65,9 +69,6 @@ __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
 #define AARCH64_RET_INSTR 0xD65F03C0
     // 内部状态，记录是否已经热更新成功
     static bool is_cfi_bypassed = false;
-    uint64_t cfi_addr = 0;
-    void *patch_addrs[1];
-    uint32_t patch_insns[1] = {AARCH64_RET_INSTR};
 
     if (is_cfi_bypassed) return true;
 
@@ -86,14 +87,15 @@ __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
     if (!fn_aarch64_insn_patch_text) return false;
 
     //  依次查找各个版本的 CFI slowpath 函数
-    cfi_addr = generic_kallsyms_lookup_name("__cfi_slowpath");                     // 5.10
+    uint64_t cfi_addr = generic_kallsyms_lookup_name("__cfi_slowpath");            // 5.10
     if (!cfi_addr) cfi_addr = generic_kallsyms_lookup_name("__cfi_slowpath_diag"); // 5.15
     if (!cfi_addr) cfi_addr = generic_kallsyms_lookup_name("_cfi_slowpath");       // 5.4
 
     if (!cfi_addr) return false;
 
-    // 强行 Patch 成 RET 指令 (直接返回，使得所有 CFI 校验默认通过)
-    patch_addrs[0] = (void *)cfi_addr;
+    // 2026/7/25 22:23实机测试 修复，保留入口第 1 条 BTI 指令，固定将第 2 条指令 Patch 成 RET。
+    void *patch_addrs[1] = {(void *)(cfi_addr + 4)};
+    uint32_t patch_insns[1] = {AARCH64_RET_INSTR};
     if (fn_aarch64_insn_patch_text(patch_addrs, patch_insns, 1) != 0) return false;
 
     is_cfi_bypassed = true;
@@ -168,9 +170,7 @@ static inline void flush_kernel_tlb_addr_all_asid_current_cpu(uint64_t addr)
 // 返回 32 位位图中最低置位下标；没有置位时返回 32。
 static inline uint32_t lowest_set_bit32(uint32_t value)
 {
-    uint32_t bit;
-
-    for (bit = 0; bit < 32; bit++)
+    for (uint32_t bit = 0; bit < 32; bit++)
     {
         if (value & (1U << bit)) return bit;
     }
@@ -181,9 +181,7 @@ static inline uint32_t lowest_set_bit32(uint32_t value)
 // 返回 32 位位图中最高置位下标；没有置位时返回 32。
 static inline uint32_t highest_set_bit32(uint32_t value)
 {
-    int bit;
-
-    for (bit = 31; bit >= 0; bit--)
+    for (int bit = 31; bit >= 0; bit--)
     {
         if (value & (1U << bit)) return (uint32_t)bit;
     }
@@ -194,15 +192,12 @@ static inline uint32_t highest_set_bit32(uint32_t value)
 // 把已按指令单位计算好的有符号立即数写入 ARM64 指令字段。
 static inline int arm64_patch_signed_imm_field(uint32_t *insn, uint32_t enc_template, int64_t imm, int imm_bits, int imm_shift)
 {
-    int64_t limit;
-    uint32_t mask;
-
     if (!insn || imm_bits <= 0 || imm_bits > 31 || imm_shift < 0 || imm_bits + imm_shift > 32) return -EINVAL;
 
-    limit = 1LL << (imm_bits - 1);
+    int64_t limit = 1LL << (imm_bits - 1);
     if (imm < -limit || imm >= limit) return -ERANGE;
 
-    mask = (uint32_t)((1ULL << imm_bits) - 1ULL);
+    uint32_t mask = (uint32_t)((1ULL << imm_bits) - 1ULL);
     *insn = enc_template | (((uint32_t)imm & mask) << imm_shift);
     return 0;
 }
@@ -210,22 +205,16 @@ static inline int arm64_patch_signed_imm_field(uint32_t *insn, uint32_t enc_temp
 // 获取内核态虚拟地址的pte
 static inline pte_t *get_kernel_pte(uint64_t vaddr)
 {
-    pgd_t *pgd;
-    p4d_t *p4d;
-    pud_t *pud;
-    pmd_t *pmd;
-    pte_t *ptep;
-
     // PGD Level
-    pgd = get_kernel_pgd_base() + pgd_index(vaddr);
+    pgd_t *pgd = get_kernel_pgd_base() + pgd_index(vaddr);
     if (pgd_none(*pgd) || pgd_bad(*pgd)) return NULL;
 
     // P4D Level
-    p4d = p4d_offset(pgd, vaddr);
+    p4d_t *p4d = p4d_offset(pgd, vaddr);
     if (p4d_none(*p4d) || p4d_bad(*p4d)) return NULL;
 
     // PUD Level (可能遇到 1GB 大页)
-    pud = pud_offset(p4d, vaddr);
+    pud_t *pud = pud_offset(p4d, vaddr);
     if (pud_none(*pud)) return NULL;
 
     // 检查是否是 1G 大页
@@ -234,7 +223,7 @@ static inline pte_t *get_kernel_pte(uint64_t vaddr)
     if (pud_bad(*pud)) return NULL;
 
     // PMD Level (可能遇到 2MB 大页)
-    pmd = pmd_offset(pud, vaddr);
+    pmd_t *pmd = pmd_offset(pud, vaddr);
     if (pmd_none(*pmd)) return NULL;
 
     // 检查是否是 2M 大页
@@ -244,7 +233,7 @@ static inline pte_t *get_kernel_pte(uint64_t vaddr)
 
     // PTE Level (普通的 4KB 页)
     // 较新内核中 __pte_offset_map 不导出，对于 64位 系统直接使用 pte_offset_kernel 即可
-    ptep = pte_offset_kernel(pmd, vaddr);
+    pte_t *ptep = pte_offset_kernel(pmd, vaddr);
     if (!ptep) return NULL;
 
     return ptep;
@@ -253,24 +242,18 @@ static inline pte_t *get_kernel_pte(uint64_t vaddr)
 // 获取用户态虚拟地址的pte
 static inline pte_t *get_user_pte(struct mm_struct *mm, uint64_t vaddr)
 {
-    pgd_t *pgd;
-    p4d_t *p4d;
-    pud_t *pud;
-    pmd_t *pmd;
-    pte_t *ptep;
-
     if (!mm) return NULL;
 
     // PGD Level
-    pgd = pgd_offset(mm, vaddr);
+    pgd_t *pgd = pgd_offset(mm, vaddr);
     if (pgd_none(*pgd) || pgd_bad(*pgd)) return NULL;
 
     // P4D Level
-    p4d = p4d_offset(pgd, vaddr);
+    p4d_t *p4d = p4d_offset(pgd, vaddr);
     if (p4d_none(*p4d) || p4d_bad(*p4d)) return NULL;
 
     // PUD Level (可能遇到 1GB 大页)
-    pud = pud_offset(p4d, vaddr);
+    pud_t *pud = pud_offset(p4d, vaddr);
     if (pud_none(*pud)) return NULL;
 
     // 检查是否是 1G 大页
@@ -279,7 +262,7 @@ static inline pte_t *get_user_pte(struct mm_struct *mm, uint64_t vaddr)
     if (pud_bad(*pud)) return NULL;
 
     // PMD Level (可能遇到 2MB 大页)
-    pmd = pmd_offset(pud, vaddr);
+    pmd_t *pmd = pmd_offset(pud, vaddr);
     if (pmd_none(*pmd)) return NULL;
 
     // 检查是否是 2M 大页
@@ -289,7 +272,7 @@ static inline pte_t *get_user_pte(struct mm_struct *mm, uint64_t vaddr)
 
     // PTE Level (普通的 4KB 页)
     // 较新内核中 __pte_offset_map 不导出，对于 64位 系统直接使用 pte_offset_kernel 即可
-    ptep = pte_offset_kernel(pmd, vaddr);
+    pte_t *ptep = pte_offset_kernel(pmd, vaddr);
     if (!ptep) return NULL;
 
     return ptep;
@@ -298,13 +281,10 @@ static inline pte_t *get_user_pte(struct mm_struct *mm, uint64_t vaddr)
 // 根据 pid 获取 task_struct，调用方负责 put_task_struct。
 static inline struct task_struct *get_task_by_pid(pid_t pid)
 {
-    struct pid *pid_struct;
-    struct task_struct *task;
-
-    pid_struct = find_get_pid(pid);
+    struct pid *pid_struct = find_get_pid(pid);
     if (!pid_struct) return NULL;
 
-    task = get_pid_task(pid_struct, PIDTYPE_PID);
+    struct task_struct *task = get_pid_task(pid_struct, PIDTYPE_PID);
     put_pid(pid_struct);
     return task;
 }
@@ -312,13 +292,10 @@ static inline struct task_struct *get_task_by_pid(pid_t pid)
 // 根据 pid 获取 mm_struct，调用方负责 mmput。
 static inline struct mm_struct *get_mm_by_pid(pid_t pid)
 {
-    struct task_struct *task;
-    struct mm_struct *mm;
-
-    task = get_task_by_pid(pid);
+    struct task_struct *task = get_task_by_pid(pid);
     if (!task) return NULL;
 
-    mm = get_task_mm(task);
+    struct mm_struct *mm = get_task_mm(task);
     put_task_struct(task);
     return mm;
 }
@@ -330,15 +307,9 @@ static inline struct mm_struct *get_mm_by_pid(pid_t pid)
 */
 static inline pte_t *get_or_alloc_user_pte(struct mm_struct *mm, uint64_t vaddr)
 {
-    pgd_t *pgd;
-    p4d_t *p4d;
-    pud_t *pud;
-    pmd_t *pmd;
-    pte_t *ptep;
-
     if (!mm) return NULL;
 
-    pgd = pgd_offset(mm, vaddr);
+    pgd_t *pgd = pgd_offset(mm, vaddr);
     if (pgd_bad(*pgd)) return NULL;
     if (pgd_none(*pgd))
     {
@@ -347,7 +318,7 @@ static inline pte_t *get_or_alloc_user_pte(struct mm_struct *mm, uint64_t vaddr)
         pgd_populate(mm, pgd, new_p4d);
     }
 
-    p4d = p4d_offset(pgd, vaddr);
+    p4d_t *p4d = p4d_offset(pgd, vaddr);
     if (p4d_bad(*p4d)) return NULL;
     if (p4d_none(*p4d))
     {
@@ -356,7 +327,7 @@ static inline pte_t *get_or_alloc_user_pte(struct mm_struct *mm, uint64_t vaddr)
         p4d_populate(mm, p4d, new_pud);
     }
 
-    pud = pud_offset(p4d, vaddr);
+    pud_t *pud = pud_offset(p4d, vaddr);
     if (pud_leaf(*pud) || pud_bad(*pud)) return NULL;
     if (pud_none(*pud))
     {
@@ -365,7 +336,7 @@ static inline pte_t *get_or_alloc_user_pte(struct mm_struct *mm, uint64_t vaddr)
         pud_populate(mm, pud, new_pmd);
     }
 
-    pmd = pmd_offset(pud, vaddr);
+    pmd_t *pmd = pmd_offset(pud, vaddr);
     if (pmd_leaf(*pmd) || pmd_bad(*pmd)) return NULL;
     if (pmd_none(*pmd))
     {
@@ -374,18 +345,16 @@ static inline pte_t *get_or_alloc_user_pte(struct mm_struct *mm, uint64_t vaddr)
         pmd_populate(mm, pmd, new_pte);
     }
 
-    ptep = pte_offset_kernel(pmd, vaddr);
+    pte_t *ptep = pte_offset_kernel(pmd, vaddr);
     return ptep;
 }
 
 // 检查一段用户 VA 范围是否没有 present PTE，调用方负责持有合适的 mmap 锁。
 static inline bool user_pte_range_empty(struct mm_struct *mm, uint64_t addr, size_t size)
 {
-    uint64_t cur;
-
     if (!mm) return false;
 
-    for (cur = addr; cur < addr + size; cur += PAGE_SIZE)
+    for (uint64_t cur = addr; cur < addr + size; cur += PAGE_SIZE)
     {
         pte_t *ptep = get_user_pte(mm, cur);
         if (ptep && pte_present(READ_ONCE(*ptep))) return false;
@@ -397,15 +366,12 @@ static inline bool user_pte_range_empty(struct mm_struct *mm, uint64_t addr, siz
 // 读取用户地址所在页的 PTE 值。
 static inline int read_user_pte_value(struct mm_struct *mm, uint64_t addr, pteval_t *out_pte)
 {
-    pte_t *ptep;
-    pte_t current_pte;
-
     if (!mm || !out_pte) return -EINVAL;
 
-    ptep = get_user_pte(mm, addr);
+    pte_t *ptep = get_user_pte(mm, addr);
     if (!ptep) return -EFAULT;
 
-    current_pte = READ_ONCE(*ptep);
+    pte_t current_pte = READ_ONCE(*ptep);
     if (!pte_present(current_pte)) return -EFAULT;
 
     *out_pte = pte_val(current_pte);
@@ -415,16 +381,13 @@ static inline int read_user_pte_value(struct mm_struct *mm, uint64_t addr, pteva
 // 根据 pid 读取用户地址所在页的 PTE 值，内部完成 mm 获取和 mmap 读锁。
 static inline int read_user_pte_value_by_pid(pid_t pid, uint64_t addr, pteval_t *out_pte)
 {
-    int status;
-    struct mm_struct *mm;
-
     if (!out_pte) return -EINVAL;
 
-    mm = get_mm_by_pid(pid);
+    struct mm_struct *mm = get_mm_by_pid(pid);
     if (!mm) return -ESRCH;
 
     mmap_read_lock(mm);
-    status = read_user_pte_value(mm, addr, out_pte);
+    int status = read_user_pte_value(mm, addr, out_pte);
     mmap_read_unlock(mm);
     mmput(mm);
     return status;
@@ -433,15 +396,12 @@ static inline int read_user_pte_value_by_pid(pid_t pid, uint64_t addr, pteval_t 
 // 写入用户地址所在页的 PTE，并用汇编刷新该用户页 TLB。
 static inline int write_user_pte_value(struct mm_struct *mm, uint64_t addr, pteval_t new_pte)
 {
-    pte_t *ptep;
-    struct vm_area_struct *vma;
-
     if (!mm) return -EINVAL;
 
-    vma = find_vma(mm, addr);
+    struct vm_area_struct *vma = find_vma(mm, addr);
     if (!vma || addr < vma->vm_start) return -EFAULT;
 
-    ptep = get_user_pte(mm, addr);
+    pte_t *ptep = get_user_pte(mm, addr);
     if (!ptep) return -EFAULT;
 
     set_pte(ptep, __pte(new_pte));
@@ -452,14 +412,11 @@ static inline int write_user_pte_value(struct mm_struct *mm, uint64_t addr, ptev
 // 根据 pid 写入用户地址所在页的 PTE 值，要求目标地址属于现有 VMA。
 static inline int write_user_pte_value_by_pid(pid_t pid, uint64_t addr, pteval_t new_pte)
 {
-    int status;
-    struct mm_struct *mm;
-
-    mm = get_mm_by_pid(pid);
+    struct mm_struct *mm = get_mm_by_pid(pid);
     if (!mm) return -ESRCH;
 
     mmap_read_lock(mm);
-    status = write_user_pte_value(mm, addr, new_pte);
+    int status = write_user_pte_value(mm, addr, new_pte);
     mmap_read_unlock(mm);
     mmput(mm);
     return status;
@@ -595,37 +552,27 @@ struct execmem_private_header
 // 分配可执行内存页
 static void *execmem_alloc(int type, size_t size)
 {
-    struct execmem_private_header *hdr; // 私有头，用于释放时找回 base
-    void *base;
-    void *code;
-    size_t header_size;
-    size_t alloc_size;
-    unsigned long start;
-    unsigned long addr;
-    unsigned long end;
-
     (void)type;
 
     if (!size) return NULL;
 
-    header_size = ALIGN(sizeof(struct execmem_private_header),
-                        EXECMEM_PRIVATE_ALIGN);  // 对齐私有头
-    alloc_size = PAGE_ALIGN(header_size + size); // 私有头 + 代码区整体按页对齐
+    size_t header_size = ALIGN(sizeof(struct execmem_private_header),
+                               EXECMEM_PRIVATE_ALIGN);  // 对齐私有头
+    size_t alloc_size = PAGE_ALIGN(header_size + size); // 私有头 + 代码区整体按页对齐
 
-    base = vzalloc(alloc_size);
+    void *base = vzalloc(alloc_size);
     if (!base) return NULL;
 
-    start = (unsigned long)base;
-    end = start + alloc_size;
+    unsigned long start = (unsigned long)base;
+    unsigned long end = start + alloc_size;
 
     /*
          * Inline copy of arm64 set_memory_x():
          * set PTE_MAYBE_GP, clear PTE_PXN, then flush kernel TLB.
          */
-    for (addr = start; addr < end; addr += PAGE_SIZE)
+    for (unsigned long addr = start; addr < end; addr += PAGE_SIZE)
     {
         pte_t *ptep = get_kernel_pte(addr);
-        pteval_t pte;
 
         if (!ptep)
         {
@@ -633,7 +580,7 @@ static void *execmem_alloc(int type, size_t size)
             return NULL;
         }
 
-        pte = READ_ONCE(pte_val(*ptep));
+        pteval_t pte = READ_ONCE(pte_val(*ptep));
         pte &= ~PTE_PXN;
         pte |= EXECMEM_PTE_MAYBE_GP;
         WRITE_ONCE(pte_val(*ptep), pte);
@@ -642,12 +589,12 @@ static void *execmem_alloc(int type, size_t size)
     // 刷新tlb缓存，让映射生效
     flush_tlb_kernel_range(start, end);
 
-    hdr = (struct execmem_private_header *)base;
+    struct execmem_private_header *hdr = (struct execmem_private_header *)base; // 私有头，用于释放时找回 base
     hdr->magic = EXECMEM_PRIVATE_MAGIC;
     hdr->base = base;
     hdr->alloc_size = alloc_size;
 
-    code = (void *)(start + header_size);
+    void *code = (void *)(start + header_size);
 
     flush_icache_range(start, end);
 
@@ -657,41 +604,32 @@ static void *execmem_alloc(int type, size_t size)
 // 释放可执行内存页
 static void execmem_free(void *ptr)
 {
-    struct execmem_private_header *hdr; // 私有头地址
-    size_t header_size;
-    void *base;
-    size_t alloc_size;
-    unsigned long start;
-    unsigned long addr;
-    unsigned long end;
-
     if (!ptr) return;
 
-    header_size = ALIGN(sizeof(struct execmem_private_header), EXECMEM_PRIVATE_ALIGN);
+    size_t header_size = ALIGN(sizeof(struct execmem_private_header), EXECMEM_PRIVATE_ALIGN);
 
-    hdr = (struct execmem_private_header *)((char *)ptr - header_size); // 由代码区地址反推私有头
+    struct execmem_private_header *hdr = (struct execmem_private_header *)((char *)ptr - header_size); // 由代码区地址反推私有头
 
     if (hdr->magic != EXECMEM_PRIVATE_MAGIC || !hdr->base || !hdr->alloc_size) return;
 
-    base = hdr->base;
-    alloc_size = hdr->alloc_size;
+    void *base = hdr->base;
+    size_t alloc_size = hdr->alloc_size;
     hdr->magic = 0;
 
-    start = (unsigned long)base;
-    end = start + alloc_size;
+    unsigned long start = (unsigned long)base;
+    unsigned long end = start + alloc_size;
 
     /*
          * Inline copy of arm64 set_memory_nx():
          * set PTE_PXN, clear PTE_MAYBE_GP, then flush kernel TLB.
          */
-    for (addr = start; addr < end; addr += PAGE_SIZE)
+    for (unsigned long addr = start; addr < end; addr += PAGE_SIZE)
     {
         pte_t *ptep = get_kernel_pte(addr);
-        pteval_t pte;
 
         if (!ptep) continue;
 
-        pte = READ_ONCE(pte_val(*ptep));
+        pteval_t pte = READ_ONCE(pte_val(*ptep));
         pte |= PTE_PXN;
         pte &= ~EXECMEM_PTE_MAYBE_GP;
         WRITE_ONCE(pte_val(*ptep), pte);

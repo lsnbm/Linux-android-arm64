@@ -53,9 +53,7 @@ static const struct syscall_monitor_name g_syscall_monitor_names[__NR_syscalls] 
 // 判断 syscall 监控表是否还有目标，空表时可卸载 do_el0_svc hook。
 static bool syscall_monitor_has_pid(void)
 {
-    int i;
-
-    for (i = 0; i < ARM_SYSCALL_MONITOR_MAX_PIDS; i++)
+    for (int i = 0; i < ARM_SYSCALL_MONITOR_MAX_PIDS; i++)
         if (READ_ONCE(g_syscall_monitor_pids[i])) return true;
     return false;
 }
@@ -63,9 +61,7 @@ static bool syscall_monitor_has_pid(void)
 // 判断当前 task 是否属于需要监控 syscall 的目标进程。
 static bool syscall_monitor_should_trace(void)
 {
-    int i;
-
-    for (i = 0; i < ARM_SYSCALL_MONITOR_MAX_PIDS; i++)
+    for (int i = 0; i < ARM_SYSCALL_MONITOR_MAX_PIDS; i++)
     {
         pid_t target_tgid = READ_ONCE(g_syscall_monitor_pids[i]);
 
@@ -77,11 +73,9 @@ static bool syscall_monitor_should_trace(void)
 // 将 arm64 syscall 号转换成由目标内核 syscall 表生成的可读名称。
 static const char *syscall_monitor_name(long scno)
 {
-    const struct syscall_monitor_name *entry;
-
     if ((unsigned long)scno >= ARRAY_SIZE(g_syscall_monitor_names)) return "unknown";
 
-    entry = &g_syscall_monitor_names[scno];
+    const struct syscall_monitor_name *entry = &g_syscall_monitor_names[scno];
     if (!entry->fn_name) return "unknown";
 
     // 这两个 64 位兼容包装的处理函数名与用户态 syscall 名不同。
@@ -105,8 +99,6 @@ strncpy_from_user 会安全处理不可访问的用户地址；失败时仅输�
 static void syscall_monitor_append_user_string(char *text, size_t size, size_t *pos, const char *label, unsigned long addr)
 {
     char value[SYSCALL_MONITOR_PATH_PREVIEW];
-    long copied;
-    int i;
 
     if (*pos >= size) return;
     if (!addr)
@@ -115,7 +107,7 @@ static void syscall_monitor_append_user_string(char *text, size_t size, size_t *
         return;
     }
 
-    copied = strncpy_from_user(value, (const char __user *)(uintptr_t)addr, sizeof(value) - 1);
+    long copied = strncpy_from_user(value, (const char __user *)(uintptr_t)addr, sizeof(value) - 1);
     if (copied < 0)
     {
         *pos += scnprintf(text + *pos, size - *pos, " %s=<fault>", label);
@@ -123,7 +115,7 @@ static void syscall_monitor_append_user_string(char *text, size_t size, size_t *
     }
 
     value[min_t(size_t, copied, sizeof(value) - 1)] = '\0';
-    for (i = 0; value[i]; i++)
+    for (int i = 0; value[i]; i++)
         if ((unsigned char)value[i] < 0x20 || value[i] == 0x7f) value[i] = '.';
 
     *pos += scnprintf(text + *pos, size - *pos, " %s=\"%s\"%s", label, value, copied >= sizeof(value) - 1 ? "..." : "");
@@ -138,7 +130,6 @@ static void syscall_monitor_append_data(char *text, size_t size, size_t *pos, co
 {
     u8 data[SYSCALL_MONITOR_DATA_PREVIEW];
     size_t preview = min_t(size_t, length, sizeof(data));
-    size_t i;
 
     if (*pos >= size || !length) return;
     if (!addr)
@@ -153,7 +144,7 @@ static void syscall_monitor_append_data(char *text, size_t size, size_t *pos, co
     }
 
     *pos += scnprintf(text + *pos, size - *pos, " %s=", label);
-    for (i = 0; i < preview && *pos < size; i++) *pos += scnprintf(text + *pos, size - *pos, "%02x", data[i]);
+    for (size_t i = 0; i < preview && *pos < size; i++) *pos += scnprintf(text + *pos, size - *pos, "%02x", data[i]);
     if (preview < length && *pos < size) *pos += scnprintf(text + *pos, size - *pos, "...");
 }
 
@@ -659,16 +650,12 @@ do_el0_svc 入口 hook：hook_regs 是 do_el0_svc 函数入口的寄存器快照
 */
 static int syscall_monitor_do_el0_svc_hook_work(struct pt_regs *hook_regs)
 {
-    struct pt_regs *sys_regs;
-    struct task_struct *task = current;
-    long scno;
-
     if (!syscall_monitor_should_trace()) return 0;
 
     if (!hook_regs) return 0;
 
     // do_el0_svc(struct pt_regs *regs) 的 x0 指向用户态异常现场。
-    sys_regs = (struct pt_regs *)(uintptr_t)hook_regs->regs[0];
+    struct pt_regs *sys_regs = (struct pt_regs *)(uintptr_t)hook_regs->regs[0];
     if (!sys_regs || !user_mode(sys_regs)) return 0;
 
     /*
@@ -676,7 +663,8 @@ static int syscall_monitor_do_el0_svc_hook_work(struct pt_regs *hook_regs)
       x8      = syscall number
       x0-x5   = syscall arguments
     */
-    scno = (long)sys_regs->regs[8];
+    struct task_struct *task = current;
+    long scno = (long)sys_regs->regs[8];
 
     if (syscall_monitor_handle_file(task, sys_regs, scno) || syscall_monitor_handle_memory(task, sys_regs, scno) || syscall_monitor_handle_process(task, sys_regs, scno) || syscall_monitor_handle_network(task, sys_regs, scno) || syscall_monitor_handle_module(task, sys_regs, scno)) return 0;
 
@@ -697,7 +685,7 @@ static struct hook_entry g_syscall_monitor_hooks[] = {
 static int syscall_monitor_install(pid_t target_tgid)
 {
     int ret;
-    int i, empty = -1;
+    int empty = -1;
 
     if (target_tgid <= 0) return -EINVAL;
 
@@ -705,7 +693,7 @@ static int syscall_monitor_install(pid_t target_tgid)
     ret = inline_hook_install(g_syscall_monitor_hooks);
     if (!ret)
     {
-        for (i = 0; i < ARM_SYSCALL_MONITOR_MAX_PIDS; i++)
+        for (int i = 0; i < ARM_SYSCALL_MONITOR_MAX_PIDS; i++)
         {
             pid_t monitored_tgid = READ_ONCE(g_syscall_monitor_pids[i]);
 
@@ -731,12 +719,10 @@ out_unlock:
 // 删除指定目标进程 tgid；如果监控表空了，就卸载 do_el0_svc hook。
 static void syscall_monitor_remove(pid_t target_tgid)
 {
-    int i;
-
     if (target_tgid <= 0) return;
 
     mutex_lock(&g_syscall_monitor_lock);
-    for (i = 0; i < ARM_SYSCALL_MONITOR_MAX_PIDS; i++)
+    for (int i = 0; i < ARM_SYSCALL_MONITOR_MAX_PIDS; i++)
     {
         if (READ_ONCE(g_syscall_monitor_pids[i]) == target_tgid) WRITE_ONCE(g_syscall_monitor_pids[i], 0);
     }
@@ -748,10 +734,8 @@ static void syscall_monitor_remove(pid_t target_tgid)
 // 控制端异常退出时清空全部目标，避免残留 PID 继续占用 hook。
 static void syscall_monitor_remove_all(void)
 {
-    int i;
-
     mutex_lock(&g_syscall_monitor_lock);
-    for (i = 0; i < ARM_SYSCALL_MONITOR_MAX_PIDS; i++) WRITE_ONCE(g_syscall_monitor_pids[i], 0);
+    for (int i = 0; i < ARM_SYSCALL_MONITOR_MAX_PIDS; i++) WRITE_ONCE(g_syscall_monitor_pids[i], 0);
     inline_hook_remove(g_syscall_monitor_hooks);
     mutex_unlock(&g_syscall_monitor_lock);
 }

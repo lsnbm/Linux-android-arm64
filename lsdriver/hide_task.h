@@ -41,9 +41,7 @@ static DEFINE_MUTEX(g_hide_task_lock);
 // hook 热路径的快速空表判断：没有隐藏 PID 时直接放行原 filldir64。
 static bool hide_task_has_pid(void)
 {
-    int i;
-
-    for (i = 0; i < HIDE_TASK_MAX_PIDS; i++)
+    for (int i = 0; i < HIDE_TASK_MAX_PIDS; i++)
         if (READ_ONCE(g_hidden_pids[i])) return true;
     return false;
 }
@@ -52,18 +50,17 @@ static bool hide_task_has_pid(void)
 static bool hide_task_match_pid_name(const char *name, int namlen, unsigned int d_type)
 {
     char pid_str[16];
-    int i, pid_len;
 
     if (d_type != DT_DIR || !name || namlen <= 0 || namlen >= sizeof(pid_str)) return false;
 
-    for (i = 0; i < HIDE_TASK_MAX_PIDS; i++)
+    for (int i = 0; i < HIDE_TASK_MAX_PIDS; i++)
     {
         pid_t hidden_pid = READ_ONCE(g_hidden_pids[i]);
 
         if (!hidden_pid) continue;
 
         // name 不是 NUL 结尾字符串，必须按 namlen 做定长比较。
-        pid_len = snprintf(pid_str, sizeof(pid_str), "%d", hidden_pid);
+        int pid_len = snprintf(pid_str, sizeof(pid_str), "%d", hidden_pid);
         if (pid_len == namlen && __builtin_memcmp(name, pid_str, namlen) == 0) return true;
     }
     return false;
@@ -98,7 +95,7 @@ static struct hook_entry g_filldir64_hook[] = {
 static int hide_task_install(pid_t pid)
 {
     int ret = 0;
-    int i, empty = -1;
+    int empty = -1;
 
     if (pid <= 0) return -EINVAL;
 
@@ -108,7 +105,7 @@ static int hide_task_install(pid_t pid)
     if (ret) goto out_unlock;
 
     // hook 安装成功后再写隐藏表，避免表里有 PID 但拦截点没生效。
-    for (i = 0; i < HIDE_TASK_MAX_PIDS; i++)
+    for (int i = 0; i < HIDE_TASK_MAX_PIDS; i++)
     {
         pid_t hidden_pid = READ_ONCE(g_hidden_pids[i]);
 
@@ -132,12 +129,10 @@ out_unlock:
 // 删除一个隐藏 PID；如果隐藏表已经空了，就卸载 filldir64 hook。
 static void hide_task_remove(pid_t pid)
 {
-    int i;
-
     if (pid <= 0) return;
 
     mutex_lock(&g_hide_task_lock);
-    for (i = 0; i < HIDE_TASK_MAX_PIDS; i++)
+    for (int i = 0; i < HIDE_TASK_MAX_PIDS; i++)
     {
         if (READ_ONCE(g_hidden_pids[i]) == pid) WRITE_ONCE(g_hidden_pids[i], 0);
     }

@@ -81,31 +81,26 @@ static void slot_free(int index)
 // patch预留代码段
 static int trampoline_patch(uint32_t *dst, const uint32_t *src)
 {
-    int i;
-    void *addrs[TRAMP_WORDS];
-
     if (!fn_aarch64_insn_patch_text) return -ENOENT;
 
-    for (i = 0; i < TRAMP_WORDS; i++) addrs[i] = (void *)&dst[i];
+    void *addrs[TRAMP_WORDS];
+    for (int i = 0; i < TRAMP_WORDS; i++) addrs[i] = (void *)&dst[i];
 
     return fn_aarch64_insn_patch_text(addrs, (uint32_t *)src, TRAMP_WORDS);
 }
 // 保存目标入口即将被覆盖的原始AArch64指令word。
 static void hook_save_orig_insns(uint64_t addr, uint32_t *insns, int count)
 {
-    int i;
     // AArch64指令天然4字节对齐，这里逐条READ_ONCE保存入口被覆盖的指令word。
-    for (i = 0; i < count; i++) insns[i] = READ_ONCE(*(uint32_t *)(uintptr_t)(addr + i * 4));
+    for (int i = 0; i < count; i++) insns[i] = READ_ONCE(*(uint32_t *)(uintptr_t)(addr + i * 4));
 }
 
 static int hook_validate_orig_insns(uint64_t addr, const uint32_t *insns, int count)
 {
-    struct arm64_decoded_insn decoded;
-    int i;
-
-    for (i = 0; i < count; i++)
+    for (int i = 0; i < count; i++)
     {
-        decoded = arm64_decode_insn(insns[i]);
+        struct arm64_decoded_insn decoded;
+        arm64_decode_insn(insns[i], &decoded);
 
         switch (decoded.opcode)
         {
@@ -135,14 +130,12 @@ static int hook_validate_orig_insns(uint64_t addr, const uint32_t *insns, int co
 // 批量 patch 一段 AArch64 指令；aarch64_insn_patch_text 内部负责 stop_machine 同步。
 static int hook_patch_words(uint64_t addr, const uint32_t *insns, int count)
 {
-    int i;
-    void *addrs[HOOK_STUB_WORDS];
-
     if (!fn_aarch64_insn_patch_text) return -ENOENT;
 
     if (count <= 0 || count > HOOK_STUB_WORDS) return -EINVAL;
 
-    for (i = 0; i < count; i++) addrs[i] = (void *)(uintptr_t)(addr + i * 4);
+    void *addrs[HOOK_STUB_WORDS];
+    for (int i = 0; i < count; i++) addrs[i] = (void *)(uintptr_t)(addr + i * 4);
 
     return fn_aarch64_insn_patch_text(addrs, (uint32_t *)insns, count);
 }
@@ -346,10 +339,7 @@ static void trampoline_build(uint32_t *buf, const uint32_t orig_insn[HOOK_STUB_W
 // 安装单条hook
 static int hook_entry_install(struct hook_entry *e)
 {
-    uint32_t tramp_code[TRAMP_WORDS];
-    uint32_t hook_code[HOOK_STUB_WORDS];
     int ret, slot;
-    uint64_t return_addr;
 
     if (e->installed) return 0;
 
@@ -377,9 +367,10 @@ static int hook_entry_install(struct hook_entry *e)
     e->slot_index = slot;
 
     // return_addr = handler + 16(跳过被我们覆盖的4条指令)
-    return_addr = e->target_addr + HOOK_STUB_BYTES;
+    uint64_t return_addr = e->target_addr + HOOK_STUB_BYTES;
 
     // 填充跳板
+    uint32_t tramp_code[TRAMP_WORDS];
     trampoline_build(tramp_code, e->saved_insn, (uint64_t)e->work_fn, return_addr);
 
     // 写到预留代码段槽位
@@ -393,6 +384,7 @@ static int hook_entry_install(struct hook_entry *e)
     }
 
     // 编码入口ret跳板
+    uint32_t hook_code[HOOK_STUB_WORDS];
     arm64_make_ldr_ret((uint64_t)e->trampoline, hook_code);
 
     // patch 目标函数入口；失败时恢复原始指令，避免半安装状态。
@@ -427,12 +419,11 @@ static void hook_entry_remove(struct hook_entry *e)
 // 批量安装卸载接口
 int inline_hook_install_count(struct hook_entry *entries, int count)
 {
-    int i, ret;
     if (count > TRAMP_SLOT_COUNT) return -ENOSPC;
 
-    for (i = 0; i < count; i++)
+    for (int i = 0; i < count; i++)
     {
-        ret = hook_entry_install(&entries[i]);
+        int ret = hook_entry_install(&entries[i]);
         // 失败回退
         if (ret)
         {
@@ -452,17 +443,13 @@ void inline_hook_remove_count(struct hook_entry *entries, int count)
 // 用于驱动/用户态退出的强行卸载所有hook
 void inline_hook_remove_all(void)
 {
-    int i;
-    uint32_t *trampoline;
-    uint64_t target_addr;
-
-    for (i = 0; i < TRAMP_SLOT_COUNT; i++)
+    for (int i = 0; i < TRAMP_SLOT_COUNT; i++)
     {
         if (!test_bit(i, g_slot_used)) continue;
 
         // trampoline[TRAMP_ORIG_INSN_INDEX..] 是被覆盖的原始指令，直接还原
-        trampoline = inline_hook_trampoline_slots + i * TRAMP_WORDS;
-        target_addr = *(uint64_t *)&trampoline[TRAMP_RET_SLOT_INDEX] - HOOK_STUB_BYTES; // RET_SLOT存的是target+16
+        uint32_t *trampoline = inline_hook_trampoline_slots + i * TRAMP_WORDS;
+        uint64_t target_addr = *(uint64_t *)&trampoline[TRAMP_RET_SLOT_INDEX] - HOOK_STUB_BYTES; // RET_SLOT存的是target+16
 
         hook_patch_words(target_addr, &trampoline[TRAMP_ORIG_INSN_INDEX], HOOK_STUB_WORDS);
         slot_free(i);

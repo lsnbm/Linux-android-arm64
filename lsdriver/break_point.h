@@ -23,12 +23,11 @@
 static inline void sample_hbp_handler(struct pt_regs *regs, struct bp_point *point)
 {
     struct bp_record *rec = NULL;
-    int i;
 
     if (!regs || !point) return;
 
     // 唯一的一次查找：查找当前 PC 是否记录过
-    for (i = 0; i < point->record_count; i++)
+    for (int i = 0; i < point->record_count; i++)
     {
         if (point->records[i].pc == regs->pc)
         {
@@ -42,7 +41,7 @@ static inline void sample_hbp_handler(struct pt_regs *regs, struct bp_point *poi
         rec = &point->records[point->record_count];
         rec->pc = regs->pc;
         // 新槽位所有寄存器的mask默认读取
-        for (i = IDX_PC; i < MAX_REG_COUNT; i++) BP_SET_MASK(rec, i, BP_OP_READ);
+        for (int i = IDX_PC; i < MAX_REG_COUNT; i++) BP_SET_MASK(rec, i, BP_OP_READ);
         point->record_count++;
     }
 
@@ -412,11 +411,9 @@ static inline void sample_hbp_handler_entry(void *regs, void *self)
 
 static inline void prepare_break_point_handlers(struct break_point *info)
 {
-    int point_slot;
-
     if (!info || info->tgid <= 0) return;
 
-    for (point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
+    for (int point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
     {
         if (info->points[point_slot].hit_addr != 0) info->points[point_slot].on_hit = sample_hbp_handler_entry;
     }
@@ -425,13 +422,11 @@ static inline void prepare_break_point_handlers(struct break_point *info)
 #include "arm64_hwdbg.h"
 static inline int set_process_hwbp(struct break_point *info)
 {
-    int ret;
-
     if (!info) return -EINVAL;
 
     prepare_break_point_handlers(info);
 
-    ret = start_task_run_monitor(info);
+    int ret = start_task_run_monitor(info);
     if (ret) return ret;
 
     return 0;

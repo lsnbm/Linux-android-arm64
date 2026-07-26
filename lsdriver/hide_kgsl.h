@@ -133,9 +133,7 @@ static DEFINE_MUTEX(g_hide_kgsl_lock);
 // 快速判断 KGSL 隐藏表是否还有目标，空表时可卸载 hook。
 static bool hide_kgsl_has_pid(void)
 {
-    int i;
-
-    for (i = 0; i < HIDE_KGSL_MAX_PIDS; i++)
+    for (int i = 0; i < HIDE_KGSL_MAX_PIDS; i++)
         if (READ_ONCE(g_hide_kgsl_pids[i])) return true;
     return false;
 }
@@ -143,9 +141,7 @@ static bool hide_kgsl_has_pid(void)
 // 判断当前 task 是否属于需要隐藏 KGSL 节点的目标进程。
 static bool should_hide(void)
 {
-    int i;
-
-    for (i = 0; i < HIDE_KGSL_MAX_PIDS; i++)
+    for (int i = 0; i < HIDE_KGSL_MAX_PIDS; i++)
     {
         pid_t hide_pid = READ_ONCE(g_hide_kgsl_pids[i]);
 
@@ -212,7 +208,7 @@ static struct hook_entry g_kgsl_hooks[] = {
 int hide_kgsl_install(pid_t pid)
 {
     int ret = 0;
-    int i, empty = -1;
+    int empty = -1;
 
     if (pid <= 0) return -EINVAL;
 
@@ -227,7 +223,7 @@ int hide_kgsl_install(pid_t pid)
     ls_log_tag("kgsl_hide", "inline hook installed\n");
 
     // hook 安装成功后再写隐藏表，避免表里有 PID 但拦截点没生效。
-    for (i = 0; i < HIDE_KGSL_MAX_PIDS; i++)
+    for (int i = 0; i < HIDE_KGSL_MAX_PIDS; i++)
     {
         pid_t hidden_pid = READ_ONCE(g_hide_kgsl_pids[i]);
 
@@ -252,12 +248,10 @@ out_unlock:
 // 删除指定目标 PID；如果隐藏表空了，就卸载 KGSL hooks。
 void hide_kgsl_remove(pid_t pid)
 {
-    int i;
-
     if (pid <= 0) return;
 
     mutex_lock(&g_hide_kgsl_lock);
-    for (i = 0; i < HIDE_KGSL_MAX_PIDS; i++)
+    for (int i = 0; i < HIDE_KGSL_MAX_PIDS; i++)
     {
         if (READ_ONCE(g_hide_kgsl_pids[i]) == pid) WRITE_ONCE(g_hide_kgsl_pids[i], 0);
     }

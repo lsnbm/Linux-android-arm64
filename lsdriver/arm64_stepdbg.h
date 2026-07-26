@@ -77,11 +77,9 @@ static inline bool stepbp_point_matches_task(const struct bp_point *point, struc
 
 static inline bool stepbp_info_matches_task(const struct break_point *info, struct task_struct *task)
 {
-    int point_slot;
-
     if (!stepbp_info_targets_task(info, task)) return false;
 
-    for (point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
+    for (int point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
     {
         if (stepbp_point_matches_task(&info->points[point_slot], task)) return true;
     }
@@ -91,11 +89,9 @@ static inline bool stepbp_info_matches_task(const struct break_point *info, stru
 
 static bool stepbp_info_has_active_point(const struct break_point *info)
 {
-    int point_slot;
-
     if (!info || READ_ONCE(info->tgid) <= 0) return false;
 
-    for (point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
+    for (int point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
     {
         if (stepbp_point_is_active(&info->points[point_slot])) return true;
     }
@@ -328,7 +324,6 @@ __attribute__((naked, used)) void ret_trampoline_stepbp_call_step_hook(void)
 
 static int __attribute__((used, __noinline__)) stepbp_finish_call_step_hook(int native_result, struct stepbp_return_frame *frame)
 {
-    int point_slot;
     int hit_slot = -1;
     int result = native_result;
     unsigned long flags;
@@ -352,7 +347,7 @@ static int __attribute__((used, __noinline__)) stepbp_finish_call_step_hook(int 
         target_task = stepbp_info_targets_task(info, current) && (stopping || stepbp_info_matches_task(info, current));
         if (target_task && !stopping && native_result != DBG_HOOK_HANDLED)
         {
-            for (point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
+            for (int point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
             {
                 struct bp_point *point = &info->points[point_slot];
                 uint64_t point_hit_addr;
@@ -445,16 +440,14 @@ static struct hook_entry g_stepbp_switch_hook[] = {
 
 static void stepbp_dump_hook_symbols(void)
 {
-    int i;
-
     ls_log_tag("stepbp", "patch_text=0x%llx\n", (unsigned long long)fn_aarch64_insn_patch_text);
-    for (i = 0; i < (int)(sizeof(g_stepbp_required_hooks) / sizeof(g_stepbp_required_hooks[0])); i++)
+    for (int i = 0; i < (int)(sizeof(g_stepbp_required_hooks) / sizeof(g_stepbp_required_hooks[0])); i++)
     {
         unsigned long addr = generic_kallsyms_lookup_name(g_stepbp_required_hooks[i].target_sym);
         ls_log_tag("stepbp", "required symbol %s=0x%lx\n", g_stepbp_required_hooks[i].target_sym, addr);
     }
 
-    for (i = 0; i < (int)(sizeof(g_stepbp_switch_hook) / sizeof(g_stepbp_switch_hook[0])); i++)
+    for (int i = 0; i < (int)(sizeof(g_stepbp_switch_hook) / sizeof(g_stepbp_switch_hook[0])); i++)
     {
         unsigned long addr = generic_kallsyms_lookup_name(g_stepbp_switch_hook[i].target_sym);
         ls_log_tag("stepbp", "optional symbol %s=0x%lx\n", g_stepbp_switch_hook[i].target_sym, addr);
@@ -462,13 +455,11 @@ static void stepbp_dump_hook_symbols(void)
 }
 static int stepbp_install_required_hooks(void)
 {
-    int i;
-    int ret;
     int count = sizeof(g_stepbp_required_hooks) / sizeof(g_stepbp_required_hooks[0]);
 
-    for (i = 0; i < count; i++)
+    for (int i = 0; i < count; i++)
     {
-        ret = hook_entry_install(&g_stepbp_required_hooks[i]);
+        int ret = hook_entry_install(&g_stepbp_required_hooks[i]);
         if (ret)
         {
             ls_log_tag("stepbp", "required hook failed index=%d symbol=%s status=%d target=0x%llx patch_text=0x%llx\n", i, g_stepbp_required_hooks[i].target_sym, ret, (unsigned long long)g_stepbp_required_hooks[i].target_addr, (unsigned long long)fn_aarch64_insn_patch_text);
@@ -484,16 +475,12 @@ static int stepbp_install_required_hooks(void)
 
 static void stepbp_remove_required_hooks(void)
 {
-    int i;
-
-    for (i = (int)(sizeof(g_stepbp_required_hooks) / sizeof(g_stepbp_required_hooks[0])) - 1; i >= 0; i--) hook_entry_remove(&g_stepbp_required_hooks[i]);
+    for (int i = (int)(sizeof(g_stepbp_required_hooks) / sizeof(g_stepbp_required_hooks[0])) - 1; i >= 0; i--) hook_entry_remove(&g_stepbp_required_hooks[i]);
 }
 
 static void stepbp_install_optional_switch_hook(void)
 {
-    int status;
-
-    status = inline_hook_install_count(g_stepbp_switch_hook, sizeof(g_stepbp_switch_hook) / sizeof(g_stepbp_switch_hook[0]));
+    int status = inline_hook_install_count(g_stepbp_switch_hook, sizeof(g_stepbp_switch_hook) / sizeof(g_stepbp_switch_hook[0]));
     if (status)
     {
         ls_log_tag("stepbp", "optional switch hook skipped status=%d target=0x%llx\n", status, (unsigned long long)g_stepbp_switch_hook[0].target_addr);

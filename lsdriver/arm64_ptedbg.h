@@ -42,13 +42,11 @@ static __always_inline bool ptebp_active(const struct bp_point *point)
 
 static bool ptebp_page_matches(const struct ptebp_page *page, struct mm_struct *mm, pteval_t flags)
 {
-    pte_t *ptep;
-    pte_t pte_now;
     pteval_t mutable = 0;
 
-    ptep = get_user_pte(mm, page->addr);
+    pte_t *ptep = get_user_pte(mm, page->addr);
     if (!ptep) return false;
-    pte_now = READ_ONCE(*ptep);
+    pte_t pte_now = READ_ONCE(*ptep);
     if (!pte_present(pte_now) || !pfn_valid(pte_pfn(pte_now))) return false;
 
 #ifdef PTE_AF
@@ -63,10 +61,8 @@ static bool ptebp_page_matches(const struct ptebp_page *page, struct mm_struct *
 
 static struct ptebp_page *ptebp_find_page(struct ptebp_page *pages, uint64_t addr)
 {
-    size_t index;
-
     addr &= PAGE_MASK;
-    for (index = 0; index < BP_CONFIG_MAX; index++)
+    for (size_t index = 0; index < BP_CONFIG_MAX; index++)
         if (pages[index].addr && pages[index].addr == addr) return &pages[index];
     return NULL;
 }
@@ -76,7 +72,6 @@ static void ptebp_drop_all_monitors(bool lock_mm)
     struct ptebp_page pages[ARRAY_SIZE(g_ptebp_pages)];
     struct mm_struct *mm;
     unsigned long flags;
-    size_t point_slot;
 
     spin_lock_irqsave(&g_ptebp_lock, flags);
     mm = g_ptebp_mm;
@@ -95,7 +90,7 @@ static void ptebp_drop_all_monitors(bool lock_mm)
         spin_lock_irqsave(&g_ptebp_lock, flags);
     }
 
-    for (point_slot = 0; point_slot < ARRAY_SIZE(pages); point_slot++)
+    for (size_t point_slot = 0; point_slot < ARRAY_SIZE(pages); point_slot++)
     {
         struct ptebp_page *page = &pages[point_slot];
         struct ptebp_page *live = &g_ptebp_pages[point_slot];
@@ -131,12 +126,9 @@ static void ptebp_clear_monitors(void)
 
 static int ptebp_handle_exec_fault(struct pt_regs *hook_regs)
 {
-    uint64_t pc;
-    struct pt_regs *regs;
     struct break_point *info = NULL;
     struct bp_point *hit_point = NULL;
     unsigned long flags;
-    size_t point_slot;
     bool managed_page = false;
     bool restored_page = false;
     bool stale_page = false;
@@ -144,11 +136,11 @@ static int ptebp_handle_exec_fault(struct pt_regs *hook_regs)
 
     if (!hook_regs) return 0;
 
-    regs = (struct pt_regs *)hook_regs->regs[2];
+    struct pt_regs *regs = (struct pt_regs *)hook_regs->regs[2];
     if (((hook_regs->regs[1] >> 26) & 0x3f) != PTEBP_ESR_EC_IABT_LOW || (hook_regs->regs[1] & PTEBP_ESR_FSC_MASK) != PTEBP_ESR_FSC_PERM_L3) return 0;
     if (!regs || !current->mm || !user_mode(regs)) return 0;
 
-    pc = untagged_addr(regs->pc) & ~0x3ULL;
+    uint64_t pc = untagged_addr(regs->pc) & ~0x3ULL;
     if ((untagged_addr(hook_regs->regs[0]) & PAGE_MASK) != (pc & PAGE_MASK)) return 0;
 
     spin_lock_irqsave(&g_ptebp_lock, flags);
@@ -176,7 +168,7 @@ static int ptebp_handle_exec_fault(struct pt_regs *hook_regs)
     }
     if (stopping || restored_page) goto out_unlock;
 
-    for (point_slot = 0; point_slot < ARRAY_SIZE(g_ptebp_pages); point_slot++)
+    for (size_t point_slot = 0; point_slot < ARRAY_SIZE(g_ptebp_pages); point_slot++)
     {
         struct ptebp_page *page = &g_ptebp_pages[point_slot];
         struct bp_point *point = info ? &info->points[point_slot] : NULL;
@@ -202,7 +194,13 @@ out_unlock:
     if (stopping || restored_page) goto handled;
 
     if (hit_point && hit_point->on_hit) hit_point->on_hit((void *)regs, (void *)hit_point);
-    if (!emulate_insn(regs, NULL)) ptebp_drop_all_monitors(false);
+
+    struct fp_regs fp_regs;
+    for (int qreg = 0; qreg < ARM64_FP_Q_REG_COUNT; qreg++) read_q_reg(qreg, &fp_regs.q[qreg]);
+    bool emulated = emulate_insn(regs, &fp_regs, NULL);
+    for (int qreg = 0; qreg < ARM64_FP_Q_REG_COUNT; qreg++) write_q_reg(qreg, &fp_regs.q[qreg]);
+
+    if (!emulated) ptebp_drop_all_monitors(false);
 
 handled:
     hook_regs->regs[0] = 0;
@@ -222,27 +220,17 @@ static inline void stop_ptebp_monitor(void)
 
 static int ptebp_install_page(struct break_point *info, size_t point_slot, struct mm_struct *mm)
 {
-    struct bp_point *point;
-    struct ptebp_page *page;
-    pte_t *ptep;
-    pte_t orig_pte;
-    uint64_t page_vaddr;
-    uint64_t hook_addr;
-    size_t scan_slot;
-    int status;
-
-    point = &info->points[point_slot];
-    page = &g_ptebp_pages[point_slot];
-    hook_addr = untagged_addr(point->hit_addr) & ~0x3ULL;
+    struct bp_point *point = &info->points[point_slot];
+    uint64_t hook_addr = untagged_addr(point->hit_addr) & ~0x3ULL;
     if (!hook_addr || hook_addr >= READ_ONCE(mm->task_size) || sizeof(uint32_t) > READ_ONCE(mm->task_size) - hook_addr)
     {
         ls_log_tag("ptebp", "install page rejected tgid=%d slot=%zu addr=0x%llx task_size=0x%llx status=%d\n", info->tgid, point_slot, (unsigned long long)hook_addr, (unsigned long long)READ_ONCE(mm->task_size), -EFAULT);
         return -EFAULT;
     }
-    page_vaddr = hook_addr & PAGE_MASK;
+    uint64_t page_vaddr = hook_addr & PAGE_MASK;
     ls_log_tag("ptebp", "install page begin tgid=%d slot=%zu addr=0x%llx page=0x%llx\n", info->tgid, point_slot, (unsigned long long)hook_addr, (unsigned long long)page_vaddr);
 
-    for (scan_slot = 0; scan_slot < point_slot; scan_slot++)
+    for (size_t scan_slot = 0; scan_slot < point_slot; scan_slot++)
     {
         struct bp_point *candidate = &info->points[scan_slot];
 
@@ -253,22 +241,22 @@ static int ptebp_install_page(struct break_point *info, size_t point_slot, struc
         }
     }
 
-    page = ptebp_find_page(g_ptebp_pages, page_vaddr);
+    struct ptebp_page *page = ptebp_find_page(g_ptebp_pages, page_vaddr);
     if (page)
     {
-        status = ptebp_page_matches(page, mm, PTEBP_UXN) ? 0 : -EFAULT;
+        int status = ptebp_page_matches(page, mm, PTEBP_UXN) ? 0 : -EFAULT;
         ls_log_tag("ptebp", "install page reused tgid=%d slot=%zu page=0x%llx armed=%d status=%d\n", info->tgid, point_slot, (unsigned long long)page_vaddr, page->armed, status);
         return status;
     }
 
-    ptep = get_user_pte(mm, page_vaddr);
+    pte_t *ptep = get_user_pte(mm, page_vaddr);
     if (!ptep)
     {
         ls_log_tag("ptebp", "install page no pte tgid=%d slot=%zu page=0x%llx status=%d\n", info->tgid, point_slot, (unsigned long long)page_vaddr, -EFAULT);
         return -EFAULT;
     }
 
-    orig_pte = READ_ONCE(*ptep);
+    pte_t orig_pte = READ_ONCE(*ptep);
     ls_log_tag("ptebp", "install page pte tgid=%d slot=%zu page=0x%llx ptep=0x%llx orig=0x%llx present=%d pfn_valid=%d uxn=%d\n", info->tgid, point_slot, (unsigned long long)page_vaddr, (unsigned long long)ptep, (unsigned long long)pte_val(orig_pte), pte_present(orig_pte), pfn_valid(pte_pfn(orig_pte)), !!(pte_val(orig_pte) & PTEBP_UXN));
     if (!pte_present(orig_pte) || !pfn_valid(pte_pfn(orig_pte)))
     {
@@ -281,7 +269,7 @@ static int ptebp_install_page(struct break_point *info, size_t point_slot, struc
         return -EACCES;
     }
 
-    status = write_user_pte_value(mm, page_vaddr, pte_val(orig_pte) | PTEBP_UXN);
+    int status = write_user_pte_value(mm, page_vaddr, pte_val(orig_pte) | PTEBP_UXN);
     ls_log_tag("ptebp", "install page write tgid=%d slot=%zu page=0x%llx requested=0x%llx readback=0x%llx status=%d\n", info->tgid, point_slot, (unsigned long long)page_vaddr, (unsigned long long)(pte_val(orig_pte) | PTEBP_UXN), (unsigned long long)pte_val(READ_ONCE(*ptep)), status);
     if (status) return status;
     page = &g_ptebp_pages[point_slot];
