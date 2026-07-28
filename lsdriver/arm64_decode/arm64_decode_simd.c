@@ -99,10 +99,6 @@ arm64_simd_operation，调用方不需要了解原始 opcode/signature。
 */
 enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_insn *decoded)
 {
-    arm64_u32 iclass = (raw >> 25) & 0xF;
-
-    if (iclass != 0x7 && iclass != 0xF) return ARM64_DECODE_NO_MATCH;
-
     decoded->insn_class = ARM64_INSN_CLASS_DATA_PROCESSING_SIMD_FP;
     decoded->opcode = ARM64_OP_FP_SIMD;
     decoded->flags = ARM64_INSN_FLAG_FP;

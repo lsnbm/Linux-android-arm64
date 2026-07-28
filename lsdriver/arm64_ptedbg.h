@@ -130,7 +130,6 @@ static int ptebp_handle_exec_fault(struct pt_regs *hook_regs)
     struct bp_point *hit_point = NULL;
     unsigned long flags;
     bool managed_page = false;
-    bool restored_page = false;
     bool stale_page = false;
     bool stopping = false;
 
@@ -156,17 +155,16 @@ static int ptebp_handle_exec_fault(struct pt_regs *hook_regs)
             managed_page = true;
             if (!ptebp_page_matches(page, current->mm, PTEBP_UXN))
             {
-                restored_page = stopping && ptebp_page_matches(page, current->mm, 0);
-                stale_page = !restored_page;
+                stale_page = !stopping || !ptebp_page_matches(page, current->mm, 0);
             }
         }
         else if (stopping && ptebp_page_matches(page, current->mm, 0))
         {
-            managed_page = restored_page = true;
+            managed_page = true;
         }
         else goto out_unlock;
     }
-    if (stopping || restored_page) goto out_unlock;
+    if (stopping) goto out_unlock;
 
     for (size_t point_slot = 0; point_slot < ARRAY_SIZE(g_ptebp_pages); point_slot++)
     {
@@ -187,11 +185,10 @@ out_unlock:
     if (stale_page)
     {
         ptebp_drop_all_monitors(false);
-        if (!managed_page) return 0;
         goto handled;
     }
     if (!managed_page) return 0;
-    if (stopping || restored_page) goto handled;
+    if (stopping) goto handled;
 
     if (hit_point && hit_point->on_hit) hit_point->on_hit((void *)regs, (void *)hit_point);
 

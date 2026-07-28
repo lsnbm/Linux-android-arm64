@@ -31,6 +31,9 @@ windows/__pycache__/
 # VS Code settings in subdirectories
 **/.vscode/
 
+# Local ARM64 decoder and executor tests
+lsdriver/arm64_tests/
+
 
 # Android Studio / Gradle / NDK outputs
 .gradle/

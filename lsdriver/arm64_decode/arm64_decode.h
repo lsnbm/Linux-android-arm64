@@ -23,8 +23,6 @@ enum arm64_decode_status
     ARM64_DECODE_UNPREDICTABLE,
     // 编码属于保留/非法组合，或没有任何子解码器能够识别。
     ARM64_DECODE_UNALLOCATED,
-    // 仅供子解码器内部调度：该指令不属于当前解码器。
-    ARM64_DECODE_NO_MATCH,
 };
 
 // 对应 Arm A64 main encoding table 的顶层指令分类。

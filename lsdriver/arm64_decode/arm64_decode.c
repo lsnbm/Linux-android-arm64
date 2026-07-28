@@ -55,17 +55,9 @@ void arm64_decode_insn(arm64_u32 raw, struct arm64_decoded_insn *decoded)
             status = arm64_decode_simd(raw, decoded);
             break;
         default:
-            status = ARM64_DECODE_NO_MATCH;
+            status = ARM64_DECODE_UNALLOCATED;
             break;
         }
-    }
-
-    if (status == ARM64_DECODE_NO_MATCH)
-    {
-        /* 没有任何编码空间认领该 word，按架构未分配编码处理。 */
-        decoded->insn_class = ARM64_INSN_CLASS_UNKNOWN;
-        decoded->opcode = ARM64_OP_UNKNOWN;
-        status = ARM64_DECODE_UNALLOCATED;
     }
 
     decoded->status = status;

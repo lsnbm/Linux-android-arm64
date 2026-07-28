@@ -1,11 +1,4 @@
-#include "arm64_decode.h"
-
-static arm64_s64 arm64_sign_extend(arm64_u64 value, arm64_u8 bits)
-{
-    arm64_u64 sign = 1ULL << (bits - 1);
-
-    return (arm64_s64)((value ^ sign) - sign);
-}
+#include "arm64_decode_internal.h"
 
 static void arm64_decode_base_registers(arm64_u32 raw, struct arm64_decoded_insn *decoded)
 {

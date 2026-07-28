@@ -1,16 +1,9 @@
-#include "arm64_decode.h"
+#include "arm64_decode_internal.h"
 
 #define ARM64_SYSREG_INSN_MASK 0xFFF00000U
 #define ARM64_SYSREG_MRS_INSN  0xD5300000U
 #define ARM64_SYSREG_MSR_INSN  0xD5100000U
 #define ARM64_HINT_NOP_INSN    0xD503201FU
-
-static arm64_s64 arm64_sign_extend(arm64_u64 value, arm64_u8 bits)
-{
-    arm64_u64 sign = 1ULL << (bits - 1);
-
-    return (arm64_s64)((value ^ sign) - sign);
-}
 
 static void arm64_decode_sysreg(arm64_u32 raw, struct arm64_decoded_insn *decoded)
 {
@@ -201,13 +194,7 @@ enum arm64_decode_status arm64_decode_branch(arm64_u32 raw, struct arm64_decoded
         return ARM64_DECODE_OK;
     }
 
-    arm64_u32 iclass = (raw >> 25) & 0xF;
-    if ((iclass & 0xE) == 0xA)
-    {
-        decoded->insn_class = ARM64_INSN_CLASS_BRANCH_EXCEPTION_SYSTEM;
-        decoded->opcode = ARM64_OP_UNKNOWN;
-        return ARM64_DECODE_UNSUPPORTED;
-    }
-
-    return ARM64_DECODE_NO_MATCH;
+    decoded->insn_class = ARM64_INSN_CLASS_BRANCH_EXCEPTION_SYSTEM;
+    decoded->opcode = ARM64_OP_UNKNOWN;
+    return ARM64_DECODE_UNSUPPORTED;
 }

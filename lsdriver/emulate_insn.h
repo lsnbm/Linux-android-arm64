@@ -459,7 +459,6 @@ static inline bool emu_hw_store_gpr(uint64_t addr, int bytes, bool unprivileged,
 
 static inline bool emu_hw_load_fp(uint64_t addr, int bytes, __uint128_t *out)
 {
-    *out = 0;
     if (bytes == 1) asm volatile(".arch_extension fp\n.arch_extension simd\nldr b0, [%1]\nstr q0, [%0]" : : "r"(out), "r"(addr) : "memory", "v0");
     else if (bytes == 2) asm volatile(".arch_extension fp\n.arch_extension simd\nldr h0, [%1]\nstr q0, [%0]" : : "r"(out), "r"(addr) : "memory", "v0");
     else if (bytes == 4) asm volatile(".arch_extension fp\n.arch_extension simd\nldr s0, [%1]\nstr q0, [%0]" : : "r"(out), "r"(addr) : "memory", "v0");
@@ -508,8 +507,6 @@ static inline bool emu_hw_store_pair_gpr(uint64_t addr, int bytes, bool non_temp
 
 static inline bool emu_hw_load_pair_fp(uint64_t addr, int bytes, bool non_temporal, __uint128_t *first, __uint128_t *second)
 {
-    *first = 0;
-    *second = 0;
     if (bytes == 4 && non_temporal) asm volatile(".arch_extension fp\n.arch_extension simd\nldnp s0, s1, [%2]\nstr q0, [%0]\nstr q1, [%1]" : : "r"(first), "r"(second), "r"(addr) : "memory", "v0", "v1");
     else if (bytes == 4) asm volatile(".arch_extension fp\n.arch_extension simd\nldp s0, s1, [%2]\nstr q0, [%0]\nstr q1, [%1]" : : "r"(first), "r"(second), "r"(addr) : "memory", "v0", "v1");
     else if (bytes == 8 && non_temporal) asm volatile(".arch_extension fp\n.arch_extension simd\nldnp d0, d1, [%2]\nstr q0, [%0]\nstr q1, [%1]" : : "r"(first), "r"(second), "r"(addr) : "memory", "v0", "v1");
@@ -917,14 +914,6 @@ static inline enum emu_insn_result emu_simulate_load_store_insn(struct pt_regs *
 
     if (decoded->opcode == ARM64_OP_PREFETCH || decoded->opcode == ARM64_OP_PREFETCH_LITERAL) return EMU_INSN_NOP;
 
-    uint32_t fpsr = 0;
-    uint32_t fpcr = 0;
-    if (is_fp)
-    {
-        fpsr = read_fpsr();
-        fpcr = read_fpcr();
-    }
-
     /* Literal load. */
     if (decoded->opcode == ARM64_OP_LOAD_LITERAL)
     {
@@ -946,11 +935,6 @@ static inline enum emu_insn_result emu_simulate_load_store_insn(struct pt_regs *
             reg_write(regs, decoded->rt, value, sf);
         }
 
-        if (is_fp)
-        {
-            write_fpsr(fpsr);
-            write_fpcr(fpcr);
-        }
         regs->pc = pc + 4;
         return EMU_INSN_HANDLED;
     }
@@ -991,11 +975,6 @@ static inline enum emu_insn_result emu_simulate_load_store_insn(struct pt_regs *
         }
         if (memory_address.writeback) addr_reg_write(regs, decoded->rn, memory_address.writeback_address);
 
-        if (is_fp)
-        {
-            write_fpsr(fpsr);
-            write_fpcr(fpcr);
-        }
         regs->pc = pc + 4;
         return EMU_INSN_HANDLED;
     }
@@ -1038,11 +1017,6 @@ static inline enum emu_insn_result emu_simulate_load_store_insn(struct pt_regs *
         if (memory_address.writeback) addr_reg_write(regs, decoded->rn, memory_address.writeback_address);
     }
 
-    if (is_fp)
-    {
-        write_fpsr(fpsr);
-        write_fpcr(fpcr);
-    }
     regs->pc = pc + 4;
     return EMU_INSN_HANDLED;
 }
@@ -2914,9 +2888,6 @@ static inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_regs *reg
 
     if (operands->form == ARM64_SIMD_FORM_VECTOR_IMMEDIATE)
     {
-        __uint128_t immediate;
-
-        if (!emu_simd_materialize_bits_hw(&immediate, operands->expanded_immediate, decoded->operand_width)) return EMU_INSN_SKIP;
         switch (operands->operation)
         {
         case ARM64_SIMD_OP_MOVI:
@@ -2924,17 +2895,29 @@ static inline enum emu_insn_result emu_simulate_fp_simd_insn(struct pt_regs *reg
             if (!emu_simd_materialize_bits_hw(&fp_regs->q[decoded->rd], operands->expanded_immediate, decoded->operand_width)) return EMU_INSN_SKIP;
             break;
         case ARM64_SIMD_OP_MVNI:
-            if (decoded->operand_width == 64) EMU_FP_UN("mvn v0.8b, v1.8b", &fp_regs->q[decoded->rd], &immediate);
-            else EMU_FP_UN("mvn v0.16b, v1.16b", &fp_regs->q[decoded->rd], &immediate);
-            break;
         case ARM64_SIMD_OP_ORR:
-            if (decoded->operand_width == 64) EMU_FP_BIN("orr v0.8b, v1.8b, v2.8b", &fp_regs->q[decoded->rd], &fp_regs->q[decoded->rd], &immediate);
-            else EMU_FP_BIN("orr v0.16b, v1.16b, v2.16b", &fp_regs->q[decoded->rd], &fp_regs->q[decoded->rd], &immediate);
-            break;
         case ARM64_SIMD_OP_BIC:
-            if (decoded->operand_width == 64) EMU_FP_BIN("bic v0.8b, v1.8b, v2.8b", &fp_regs->q[decoded->rd], &fp_regs->q[decoded->rd], &immediate);
-            else EMU_FP_BIN("bic v0.16b, v1.16b, v2.16b", &fp_regs->q[decoded->rd], &fp_regs->q[decoded->rd], &immediate);
+        {
+            __uint128_t immediate;
+
+            if (!emu_simd_materialize_bits_hw(&immediate, operands->expanded_immediate, decoded->operand_width)) return EMU_INSN_SKIP;
+            if (operands->operation == ARM64_SIMD_OP_MVNI)
+            {
+                if (decoded->operand_width == 64) EMU_FP_UN("mvn v0.8b, v1.8b", &fp_regs->q[decoded->rd], &immediate);
+                else EMU_FP_UN("mvn v0.16b, v1.16b", &fp_regs->q[decoded->rd], &immediate);
+            }
+            else if (operands->operation == ARM64_SIMD_OP_ORR)
+            {
+                if (decoded->operand_width == 64) EMU_FP_BIN("orr v0.8b, v1.8b, v2.8b", &fp_regs->q[decoded->rd], &fp_regs->q[decoded->rd], &immediate);
+                else EMU_FP_BIN("orr v0.16b, v1.16b, v2.16b", &fp_regs->q[decoded->rd], &fp_regs->q[decoded->rd], &immediate);
+            }
+            else
+            {
+                if (decoded->operand_width == 64) EMU_FP_BIN("bic v0.8b, v1.8b, v2.8b", &fp_regs->q[decoded->rd], &fp_regs->q[decoded->rd], &immediate);
+                else EMU_FP_BIN("bic v0.16b, v1.16b, v2.16b", &fp_regs->q[decoded->rd], &fp_regs->q[decoded->rd], &immediate);
+            }
             break;
+        }
         default:
             return EMU_INSN_SKIP;
         }
@@ -3964,24 +3947,12 @@ static inline uint64_t emu_minmax_hw(uint64_t a, uint64_t b, bool is_min, bool i
     return result32;
 }
 
-static inline uint64_t emu_sign_extend_hw(uint64_t value, uint32_t bytes)
+static inline uint64_t emu_sign_extend_byte_hw(uint64_t value)
 {
     uint64_t result;
 
-    switch (bytes)
-    {
-    case 1:
-        asm volatile("sxtb %0, %w1\n" : "=r"(result) : "r"((uint32_t)value));
-        return result;
-    case 2:
-        asm volatile("sxth %0, %w1\n" : "=r"(result) : "r"((uint32_t)value));
-        return result;
-    case 4:
-        asm volatile("sxtw %0, %w1\n" : "=r"(result) : "r"((uint32_t)value));
-        return result;
-    default:
-        return value;
-    }
+    asm volatile("sxtb %0, %w1\n" : "=r"(result) : "r"((uint32_t)value));
+    return result;
 }
 
 static inline uint64_t emu_dp_mask(bool sf)
@@ -4433,7 +4404,7 @@ static inline enum emu_insn_result emu_simulate_data_processing_insn(struct pt_r
         bool is_min = decoded->operation == ARM64_OPERATION_SMIN || decoded->operation == ARM64_OPERATION_UMIN;
         bool is_unsigned = decoded->operation == ARM64_OPERATION_UMAX || decoded->operation == ARM64_OPERATION_UMIN;
         uint64_t a = reg_read(regs, decoded->rn) & emu_dp_mask(sf);
-        uint64_t b = is_unsigned ? operands->immediate : emu_sign_extend_hw(operands->immediate, 1) & emu_dp_mask(sf);
+        uint64_t b = is_unsigned ? operands->immediate : emu_sign_extend_byte_hw(operands->immediate) & emu_dp_mask(sf);
         uint64_t result = emu_minmax_hw(a, b, is_min, is_unsigned, sf);
 
         reg_write(regs, decoded->rd, result, sf);
@@ -4800,6 +4771,9 @@ static inline enum emu_insn_result emu_simulate_data_processing_insn(struct pt_r
 
 /* ======================== 总入口：解码与架构大类分派 ======================== */
 
+//访存类指令使用模板汇编让硬件真实同语义需要注意一个问题：
+//COW:当前进程准备写入一个仍与其他进程或映射共享的物理页，而该虚拟内存区域在逻辑上属于私有可写。Linux 为避免提前复制页面，先让这些映射共享同一物理页，并将相关 PTE 设置为只读。首次写入触发权限异常后，内核为当前进程建立私有副本，将其 PTE 改为可写，然后重新执行写入指令。
+//这里执行访存类指令写的时候目标地址页如果刚好处于COW中就会之间panic
 static inline bool emulate_insn(struct pt_regs *regs, struct fp_regs *fp_regs, const uint32_t *specified_insn)
 {
     uint32_t insn;
@@ -4814,7 +4788,6 @@ static inline bool emulate_insn(struct pt_regs *regs, struct fp_regs *fp_regs, c
     asm volatile(".inst 0xd500409f" ::: "memory");
     result = EMU_INSN_SKIP;
     saved_fp_reg_count = 0;
-    handled = false;
     pc = regs->pc;
 
     if (specified_insn) insn = *specified_insn;

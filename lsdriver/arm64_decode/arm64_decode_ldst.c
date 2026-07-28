@@ -1,11 +1,4 @@
-#include "arm64_decode.h"
-
-static arm64_s64 arm64_sign_extend(arm64_u64 value, arm64_u8 bits)
-{
-    arm64_u64 sign = 1ULL << (bits - 1);
-
-    return (arm64_s64)((value ^ sign) - sign);
-}
+#include "arm64_decode_internal.h"
 
 static void arm64_decode_ldst_registers(arm64_u32 raw, struct arm64_decoded_insn *decoded)
 {
@@ -23,7 +16,6 @@ static void arm64_decode_ldst_fp_flag(arm64_u32 raw, struct arm64_decoded_insn *
 
 enum arm64_ldst_single_form
 {
-    ARM64_LDST_SINGLE_UNALLOCATED,
     ARM64_LDST_SINGLE_UNSIGNED_OFFSET,
     ARM64_LDST_SINGLE_IMMEDIATE,
     ARM64_LDST_SINGLE_REGISTER_OFFSET,
@@ -370,6 +362,6 @@ enum arm64_decode_status arm64_decode_ldst(arm64_u32 raw, struct arm64_decoded_i
         return ARM64_DECODE_UNSUPPORTED;
 
     default:
-        return ARM64_DECODE_NO_MATCH;
+        return ARM64_DECODE_UNALLOCATED;
     }
 }

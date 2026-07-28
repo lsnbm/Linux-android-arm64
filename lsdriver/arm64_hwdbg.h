@@ -191,7 +191,6 @@ static uint64_t get_distance_from_watchpoint(uint64_t fault_addr, uint64_t watch
     fault_addr = untagged_addr(fault_addr);
     uint32_t lens = lowest_set_bit32(ctrl->len);
     uint32_t lene = highest_set_bit32(ctrl->len);
-    if (lens >= 32 || lene >= 32) return ~0ULL;
 
     uint64_t wp_low = watch_addr + lens;
     uint64_t wp_high = watch_addr + lene;
@@ -218,7 +217,7 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
     struct break_point *bp_info = g_bp_info;
     struct pt_regs *regs = (struct pt_regs *)hook_regs->regs[2];
 
-    if (!bp_info) return 0;
+    if (!bp_info || bp_info->tgid != current->tgid) return 0;
 
     /*
    这里说明一下为何可以这么做进行步过
@@ -274,7 +273,7 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
             struct arch_hw_breakpoint info;
 
             // 地址不相等跳过
-            if (!hwbp_point_is_active(point) || bp_info->tgid != current->tgid || hw_breakpoint_parse(point, 0, &info) || info.address != addr) continue;
+            if (!hwbp_point_is_active(point) || hw_breakpoint_parse(point, 0, &info) || info.address != addr) continue;
 
             /*
                 上案例
@@ -309,7 +308,7 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
             if (info.address != (regs->pc & ~0x3ULL)) continue;
 
             // 地址相等、控制码相等且当前槽位启用才派发
-            if ((ctrl & 0x1) && ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) == (ctrl & ~0x1ULL)) && bp_info->tgid == current->tgid)
+            if ((ctrl & 0x1) && ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) == (ctrl & ~0x1ULL)))
             {
                 point->on_hit((void *)regs, (void *)point);
 
@@ -353,18 +352,17 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
     uint64_t hit_ctrl = 0;
     uint64_t fault_addr = hook_regs->regs[0];
     uint64_t esr = hook_regs->regs[1];
-    bool exact_match = false;
     struct break_point *bp_info = g_bp_info;
     struct bp_point *hit_point = NULL;
     struct pt_regs *regs = (struct pt_regs *)hook_regs->regs[2];
 
-    if (!bp_info) return 0;
+    if (!bp_info || bp_info->tgid != current->tgid) return 0;
 
     /*
     watchpoint_handler 原型是 (addr, esr, regs)。这里用 addr 判断真实命中的访问地址，
     用 esr 判断读写方向，避免只证明 point 安装在某个 WRP 槽就误派发。
     */
-    for (int slot = 0; slot < num_wrps && !exact_match; slot++)
+    for (int slot = 0; slot < num_wrps && !hit_point; slot++)
     {
         uint64_t addr = read_wb_reg(AARCH64_DBG_REG_WVR, slot);
         uint64_t ctrl = read_wb_reg(AARCH64_DBG_REG_WCR, slot);
@@ -376,7 +374,7 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
             struct bp_point *point = &bp_info->points[j];
             struct arch_hw_breakpoint info;
 
-            if (!hwbp_point_is_active(point) || bp_info->tgid != current->tgid || hw_breakpoint_parse(point, 0, &info) || info.ctrl.type == ARM_BREAKPOINT_EXECUTE || info.address != addr || ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) != (ctrl & ~0x1ULL)) || !watchpoint_access_matches(&info, esr)) continue;
+            if (!hwbp_point_is_active(point) || hw_breakpoint_parse(point, 0, &info) || info.address != addr || ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) != (ctrl & ~0x1ULL)) || !watchpoint_access_matches(&info, esr)) continue;
 
             /*
             内核 perf 可以在没有精确命中时选择最近 watchpoint 兜底；
@@ -388,7 +386,6 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
             hit_point = point;
             hit_slot = slot;
             hit_ctrl = ctrl;
-            exact_match = true;
 
             break;
         }
@@ -404,12 +401,10 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
     for (int qreg = 0; qreg < ARM64_FP_Q_REG_COUNT; qreg++) write_q_reg(qreg, &fp_regs.q[qreg]);
 
     // 模拟指令步过,失败走禁用进行步过
+    if (!emulated)
     {
-        if (!emulated)
-        {
-            // 只清 enable 位，保留原有寄存器配置，继续走原异常处理链
-            write_wb_reg(AARCH64_DBG_REG_WCR, hit_slot, hit_ctrl & ~0x1);
-        }
+        // 只清 enable 位，保留原有寄存器配置，继续走原异常处理链
+        write_wb_reg(AARCH64_DBG_REG_WCR, hit_slot, hit_ctrl & ~0x1);
     }
 
     // slots = this_cpu_ptr(wp_on_reg);
