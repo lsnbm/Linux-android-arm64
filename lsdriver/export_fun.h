@@ -17,11 +17,12 @@
 #include <asm/pgtable.h>
 #include <asm/pgtable-prot.h>
 #include <asm/tlbflush.h>
+#include "arm64_encode/arm64_encode.h"
 #include "arm64_reg.h"
 #include "lsdriver_log.h"
 
 /*
-还有注意所有地方使用函数指针调用内核api，参数类型和返回值类型一定要与内核对齐，比如这里的 unsigned long就不能写为uint64_t
+还有注意所有地方使用函数指针调用内核api，参数类型和返回值类型一定要与内核对齐，比如这里的 unsigned long就不能写为uint64_t, uint64_t定义为unsigned long long,虽然宽度一样，但是不能混合使用
 */
 
 // 屏蔽 CFI 检查，统一利用 kprobe 获取 kallsyms_lookup_name 地址
@@ -65,8 +66,6 @@ int (*fn_aarch64_insn_patch_text)(void *addrs[], uint32_t insns[], int cnt);
 
 __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
 {
-    // AArch64 RET 指令机器码
-#define AARCH64_RET_INSTR 0xD65F03C0
     // 内部状态，记录是否已经热更新成功
     static bool is_cfi_bypassed = false;
 
@@ -95,7 +94,8 @@ __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
 
     // 2026/7/25 22:23实机测试 修复，保留入口第 1 条 BTI 指令，固定将第 2 条指令 Patch 成 RET。
     void *patch_addrs[1] = {(void *)(cfi_addr + 4)};
-    uint32_t patch_insns[1] = {AARCH64_RET_INSTR};
+    uint32_t patch_insns[1];
+    if (arm64_encode_ret(30, patch_insns)) return false;
     if (fn_aarch64_insn_patch_text(patch_addrs, patch_insns, 1) != 0) return false;
 
     is_cfi_bypassed = true;
@@ -104,101 +104,129 @@ __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
 
 //------------------下面是通用，但未导出，未定义函数-----------------
 
-#define TLBI_VADDR_MASK ((1ULL << 44) - 1ULL)
-
-static inline uint64_t make_tlbi_addr(uint64_t addr)
+// 刷新同一缓存一致性域（Inner Shareable 域）内全部 CPU 中，与指定 VA 对应的所有 ASID TLB 项。
+// Android SMP SoC 中屏障范围必须与 TLBI 广播范围匹配：VAALE1IS 广播到 Inner Shareable 域，因此前后必须使用 ISHST/ISH，不能使用仅覆盖本地范围的 NSHST/NSH。
+static inline void flush_tlb_addr_all_asid_all_cpus(uint64_t addr)
 {
-    return (addr >> 12) & TLBI_VADDR_MASK;
+    // TLBI 操作数不是原始 VA；__TLBI_VADDR() 会去掉页内偏移并转换为架构要求的 VA[55:12] 格式。
+    uint64_t tlbi_addr = __TLBI_VADDR(addr, 0);
+
+    asm volatile( // DSB ISHST：范围与后面的 VAALE1IS 广播范围匹配，等待此前 PTE 写入对域内其他 CPU 可见。
+        "dsb ishst\n\t"
+        // TLBI VAALE1IS 字段：VA=按虚拟地址，A=所有 ASID，L=仅最后一级页表项，E1=EL1 Stage-1，IS=广播到一致性域。
+        "tlbi vaale1is, %[tlbi_addr]\n\t"
+        // DSB ISH：范围同样与 VAALE1IS 匹配，等待该域内所有目标 CPU 完成失效后才能使用新映射。
+        "dsb ish\n\t"
+        // ISB：清空并重新同步当前 CPU 的取指/执行流水线，使后续指令使用更新后的地址翻译环境。
+        "isb\n\t"
+        :
+        : [tlbi_addr] "r"(tlbi_addr)
+        : "memory");
 }
 
-// 用 ARM64 TLBI 指令刷新全部cpu一个用户 VA 对应的所有 ASID TLB 项
-static inline void flush_user_tlb_addr_all_asid(uint64_t addr)
+// 刷新同一缓存一致性域内全部 CPU 中，与半开区间 [start, end) 相交页面对应的所有 ASID TLB 项。
+static inline void flush_tlb_range_all_asid_all_cpus(uint64_t start, uint64_t end)
 {
-    uint64_t tlbi_addr = make_tlbi_addr(addr);
+    if (end <= start) return;
 
-    asm volatile("dsb ishst\n\t"
-                 "tlbi vaale1is, %[tlbi_addr]\n\t" // 需要所有cpu，因为写的是目标用户态的页，随时都能被其他cpu执行
+    uint64_t first_page = start & PAGE_MASK;
+    uint64_t last_page = (end - 1) & PAGE_MASK;
+
+    // ISHST 与下面 VAALE1IS 的广播范围匹配，等待此前整批 PTE 写入都对域内其他 CPU 可见。
+    asm volatile("dsb ishst" : : : "memory");
+
+    for (uint64_t addr = first_page;; addr += PAGE_SIZE)
+    {
+        uint64_t tlbi_addr = __TLBI_VADDR(addr, 0);
+        // 逐页广播失效：按 VA、所有 ASID、最后一级 EL1 Stage-1 页表项、Inner Shareable 域。
+        asm volatile("tlbi vaale1is, %0" : : "r"(tlbi_addr) : "memory");
+
+        if (addr == last_page) break;
+    }
+
+    // ISH 与上面的 VAALE1IS 广播范围匹配，等待域内所有目标 CPU 完成整批 TLB 失效。
+    asm volatile("dsb ish\n\t"
+                 // 同步当前 CPU 流水线
+                 "isb\n\t"
+                 :
+                 :
+                 : "memory");
+}
+
+// 仅刷新当前 CPU 中与指定 VA 对应的所有 ASID TLB 项；调用方必须保证不会迁移到其他 CPU。
+static inline void flush_tlb_addr_all_asid_current_cpu(uint64_t addr)
+{
+    // TLBI 操作数使用页号格式，不包含 VA 页内偏移。
+    uint64_t tlbi_addr = __TLBI_VADDR(addr, 0);
+
+    asm volatile("dsb nshst\n\t"
+                 // TLBI VAALE1：字段与 VAALE1IS 相同，但没有 IS，因此只失效当前 PE/CPU 的对应 TLB 项。
+                 "tlbi vaale1, %[tlbi_addr]\n\t"
+                 // 等待当前 CPU 完成本地 TLB 失效。于上面的范围匹配，nsh不是共享域同步
+                 "dsb nsh\n\t"
+                 // 重新同步当前 CPU 的取指/执行流水线。
+                 "isb\n\t"
+                 :
+                 : [tlbi_addr] "r"(tlbi_addr)
+                 : "memory");
+}
+
+// 内部原语：把一段连续虚拟地址对应的数据缓存行清理到统一点。
+static inline void __arm64_clean_dcache_range_to_pou(const void *address, size_t size)
+{
+    unsigned long line_size = arm64_dcache_line_size();
+    unsigned long start = (unsigned long)address;
+    unsigned long end = start + size;
+
+    if (!size) return;
+
+    for (unsigned long line = start & ~(line_size - 1); line < end; line += line_size) asm volatile("dc cvau, %0" : : "r"(line) : "memory");
+}
+
+// 内部原语：等待数据缓存清理完成，失效内部共享域全部 CPU 的指令缓存，并同步当前 CPU 的取指流水线。
+static inline void __arm64_invalidate_icache_all_cpus(void)
+{
+    asm volatile("dsb ish\n\t"
+                 "ic ialluis\n\t"
                  "dsb ish\n\t"
                  "isb\n\t"
                  :
-                 : [tlbi_addr] "r"(tlbi_addr)
-                 : "memory");
-}
-
-// 用 ARM64 TLBI 指令刷新当前 CPU 上一个用户 VA 对应的所有 ASID TLB 项
-static inline void flush_user_tlb_addr_all_asid_current_cpu(uint64_t addr)
-{
-    uint64_t tlbi_addr = make_tlbi_addr(addr);
-
-    asm volatile("dsb nshst\n\t"
-                 "tlbi vaale1, %[tlbi_addr]\n\t"
-                 "dsb nsh\n\t"
-                 "isb\n\t"
                  :
-                 : [tlbi_addr] "r"(tlbi_addr)
                  : "memory");
 }
 
-// 用 ARM64 TLBI 指令刷新全部cpu一个内核 VA 对应的所有 ASID TLB 项
-static inline void flush_kernel_tlb_addr_all_asid(uint64_t addr)
+//同步一段连续地址中的新机器码：内部先用 DC CVAU 把数据缓存清理到 PoU，再失效内部共享域全部 CPU 的指令缓存
+static inline int arm64_sync_code_range_all_cpus(const void *address, size_t size)
 {
-    uint64_t tlbi_addr = make_tlbi_addr(addr);
+    unsigned long start = (unsigned long)address;
 
-    asm volatile("dsb ishst\n\t"
-                 "tlbi vaale1is, %[tlbi_addr]\n\t"
-                 "dsb ish\n\t"
-                 "isb\n\t"
-                 :
-                 : [tlbi_addr] "r"(tlbi_addr)
-                 : "memory");
+    if (!address || !size) return -EINVAL;
+    if (size > ULONG_MAX - start) return -EOVERFLOW;
+
+    __arm64_clean_dcache_range_to_pou(address, size);
+    __arm64_invalidate_icache_all_cpus();
+    return 0;
 }
 
-// 用 ARM64 TLBI 指令刷新当前 CPU 上一个内核 VA 对应的所有 ASID TLB 项
-static inline void flush_kernel_tlb_addr_all_asid_current_cpu(uint64_t addr)
+//同步一组物理页中的新机器码。物理页可以不连续；函数通过各页的内核线性映射逐页清理数据缓存，最后统一失效指令缓存。
+static inline int arm64_sync_code_pages_all_cpus(struct page **pages, unsigned int page_count, size_t code_size)
 {
-    uint64_t tlbi_addr = make_tlbi_addr(addr);
+    size_t remaining = code_size;
 
-    asm volatile("dsb nshst\n\t"
-                 "tlbi vaale1, %[tlbi_addr]\n\t"
-                 "dsb nsh\n\t"
-                 "isb\n\t"
-                 :
-                 : [tlbi_addr] "r"(tlbi_addr)
-                 : "memory");
-}
+    if (!pages || !page_count || !code_size) return -EINVAL;
+    if (code_size > (size_t)page_count * PAGE_SIZE) return -E2BIG;
 
-// 返回 32 位位图中最低置位下标；没有置位时返回 32。
-static inline uint32_t lowest_set_bit32(uint32_t value)
-{
-    for (uint32_t bit = 0; bit < 32; bit++)
+    for (unsigned int index = 0; index < page_count && remaining; index++)
     {
-        if (value & (1U << bit)) return bit;
+        size_t bytes = min_t(size_t, remaining, PAGE_SIZE);
+
+        if (!pages[index]) return -EFAULT;
+
+        __arm64_clean_dcache_range_to_pou(page_address(pages[index]), bytes);
+        remaining -= bytes;
     }
 
-    return 32;
-}
-
-// 返回 32 位位图中最高置位下标；没有置位时返回 32。
-static inline uint32_t highest_set_bit32(uint32_t value)
-{
-    for (int bit = 31; bit >= 0; bit--)
-    {
-        if (value & (1U << bit)) return (uint32_t)bit;
-    }
-
-    return 32;
-}
-
-// 把已按指令单位计算好的有符号立即数写入 ARM64 指令字段。
-static inline int arm64_patch_signed_imm_field(uint32_t *insn, uint32_t enc_template, int64_t imm, int imm_bits, int imm_shift)
-{
-    if (!insn || imm_bits <= 0 || imm_bits > 31 || imm_shift < 0 || imm_bits + imm_shift > 32) return -EINVAL;
-
-    int64_t limit = 1LL << (imm_bits - 1);
-    if (imm < -limit || imm >= limit) return -ERANGE;
-
-    uint32_t mask = (uint32_t)((1ULL << imm_bits) - 1ULL);
-    *insn = enc_template | (((uint32_t)imm & mask) << imm_shift);
+    __arm64_invalidate_icache_all_cpus();
     return 0;
 }
 
@@ -378,21 +406,6 @@ static inline int read_user_pte_value(struct mm_struct *mm, uint64_t addr, pteva
     return 0;
 }
 
-// 根据 pid 读取用户地址所在页的 PTE 值，内部完成 mm 获取和 mmap 读锁。
-static inline int read_user_pte_value_by_pid(pid_t pid, uint64_t addr, pteval_t *out_pte)
-{
-    if (!out_pte) return -EINVAL;
-
-    struct mm_struct *mm = get_mm_by_pid(pid);
-    if (!mm) return -ESRCH;
-
-    mmap_read_lock(mm);
-    int status = read_user_pte_value(mm, addr, out_pte);
-    mmap_read_unlock(mm);
-    mmput(mm);
-    return status;
-}
-
 // 写入用户地址所在页的 PTE，并用汇编刷新该用户页 TLB。
 static inline int write_user_pte_value(struct mm_struct *mm, uint64_t addr, pteval_t new_pte)
 {
@@ -405,21 +418,8 @@ static inline int write_user_pte_value(struct mm_struct *mm, uint64_t addr, ptev
     if (!ptep) return -EFAULT;
 
     set_pte(ptep, __pte(new_pte));
-    flush_user_tlb_addr_all_asid(addr);
+    flush_tlb_addr_all_asid_all_cpus(addr);
     return 0;
-}
-
-// 根据 pid 写入用户地址所在页的 PTE 值，要求目标地址属于现有 VMA。
-static inline int write_user_pte_value_by_pid(pid_t pid, uint64_t addr, pteval_t new_pte)
-{
-    struct mm_struct *mm = get_mm_by_pid(pid);
-    if (!mm) return -ESRCH;
-
-    mmap_read_lock(mm);
-    int status = write_user_pte_value(mm, addr, new_pte);
-    mmap_read_unlock(mm);
-    mmput(mm);
-    return status;
 }
 
 /*
@@ -482,35 +482,6 @@ adrp x16, target_page
 add  x16, x16, target_pageoff
 br   x16
 */
-static int arm64_make_b(uint64_t from, uint64_t to, uint32_t *insn)
-{
-    int64_t offset = (int64_t)to - (int64_t)from;
-
-    if (offset < -(1LL << 27) || offset > ((1LL << 27) - 4)) return -ERANGE;
-
-    *insn = 0x14000000 | ((offset >> 2) & 0x03FFFFFF);
-    return 0;
-}
-
-// 编码长跳转
-static void arm64_make_ldr_ret(uint64_t target, uint32_t *insn)
-{
-    uint32_t ldr_x16_literal = 0x58000050; // ldr x16, [pc, #8]
-    uint32_t ret_x16 = 0xD65F0200;         // ret x16
-
-    /*
-        实际编码结果：
-           insn[0]: ldr x16, [pc, #8]
-           insn[1]: ret x16
-           insn[2]: target low32
-           insn[3]: target high32
-        实际执行的汇编只有2条；后面的8字节是给ldr相对pc寻址到target地址数据。给ret跳
-        */
-    __builtin_memcpy(&insn[0], &ldr_x16_literal, sizeof(uint32_t));
-    __builtin_memcpy(&insn[1], &ret_x16, sizeof(uint32_t));
-    __builtin_memcpy(&insn[2], &target, sizeof(target));
-}
-
 // 释放一批通过GUP获取的page *;避免使用 put_page() 把 page_pinner 拉进来。
 static void release_gup_pages(struct page **pages, int nr)
 {
@@ -530,37 +501,39 @@ static void release_gup_pages(struct page **pages, int nr)
     fn_release_pages(pages, nr);
 }
 
-struct execmem_private_header
+// 分配页对齐的内核 RWX 内存；fixed_address 为 NULL 时随机分配，否则必须传入希望占用的页对齐虚拟地址。
+// size 会向上取整到整页；固定地址已占用或无效时返回 NULL。写入机器码后、首次执行前仍须同步缓存。
+static void *execmem_alloc(void *fixed_address, size_t size)
 {
-    uint64_t magic;    // 校验 execmem_free() 传入的指针是否来自 execmem_alloc()
-    void *base;        // vzalloc() 返回的原始页对齐地址，vfree() 必须释放这个地址
-    size_t alloc_size; // 实际分配并修改页权限的大小，释放时按这个范围恢复 NX
-};
+    if (!size || size > SIZE_MAX - (PAGE_SIZE - 1)) return NULL;
 
-#define EXECMEM_PRIVATE_MAGIC 0x455845434D454DULL
-#define EXECMEM_PRIVATE_ALIGN 16
+    size_t alloc_size = PAGE_ALIGN(size);
+    void *base;
 
-// 如果内核启用了 BTI，可执行页的 Guarded Page 位要为 PTE_GP，否则为 0
-#if defined(PTE_MAYBE_GP)
-#define EXECMEM_PTE_MAYBE_GP PTE_MAYBE_GP
-#elif defined(CONFIG_ARM64_BTI_KERNEL) && defined(PTE_GP)
-#define EXECMEM_PTE_MAYBE_GP PTE_GP
-#else
-#define EXECMEM_PTE_MAYBE_GP 0
-#endif
+    if (!fixed_address)
+    {
+        base = vzalloc(alloc_size);
+    }
+    else
+    {
+        static void *(*fn_vmalloc_node_range)(unsigned long size, unsigned long align, unsigned long start, unsigned long end, gfp_t gfp_mask, pgprot_t prot, unsigned long vm_flags, int node, const void *caller);
+        unsigned long fixed_start = (unsigned long)fixed_address;
 
-// 分配可执行内存页
-static void *execmem_alloc(int type, size_t size)
-{
-    (void)type;
+        if (!IS_ALIGNED(fixed_start, PAGE_SIZE)) return NULL;
+        if (alloc_size > ULONG_MAX - fixed_start) return NULL;
 
-    if (!size) return NULL;
+        if (!fn_vmalloc_node_range) fn_vmalloc_node_range = (void *)generic_kallsyms_lookup_name("__vmalloc_node_range");
+        if (!fn_vmalloc_node_range) fn_vmalloc_node_range = (void *)generic_kallsyms_lookup_name("__vmalloc_node_range_noprof");
+        if (!fn_vmalloc_node_range) return NULL;
 
-    size_t header_size = ALIGN(sizeof(struct execmem_private_header),
-                               EXECMEM_PRIVATE_ALIGN);  // 对齐私有头
-    size_t alloc_size = PAGE_ALIGN(header_size + size); // 私有头 + 代码区整体按页对齐
+        base = fn_vmalloc_node_range(alloc_size, PAGE_SIZE, fixed_start, fixed_start + alloc_size, GFP_KERNEL | __GFP_ZERO | __GFP_NOWARN, PAGE_KERNEL, VM_NO_GUARD, NUMA_NO_NODE, __builtin_return_address(0));
+        if (base != fixed_address)
+        {
+            if (base) vfree(base);
+            return NULL;
+        }
+    }
 
-    void *base = vzalloc(alloc_size);
     if (!base) return NULL;
 
     unsigned long start = (unsigned long)base;
@@ -582,61 +555,21 @@ static void *execmem_alloc(int type, size_t size)
 
         pteval_t pte = READ_ONCE(pte_val(*ptep));
         pte &= ~PTE_PXN;
-        pte |= EXECMEM_PTE_MAYBE_GP;
-        WRITE_ONCE(pte_val(*ptep), pte);
+        pte |= PTE_MAYBE_GP;
+        set_pte(ptep, __pte(pte));
     }
 
-    // 刷新tlb缓存，让映射生效
-    flush_tlb_kernel_range(start, end);
+    // 广播刷新该内核虚拟地址范围的最后一级 TLB 项，让新的执行权限生效。
+    flush_tlb_range_all_asid_all_cpus(start, end);
 
-    struct execmem_private_header *hdr = (struct execmem_private_header *)base; // 私有头，用于释放时找回 base
-    hdr->magic = EXECMEM_PRIVATE_MAGIC;
-    hdr->base = base;
-    hdr->alloc_size = alloc_size;
-
-    void *code = (void *)(start + header_size);
-
-    flush_icache_range(start, end);
-
-    return code;
+    return base;
 }
 
-// 释放可执行内存页
+// 释放 execmem_alloc() 返回的原始地址
 static void execmem_free(void *ptr)
 {
     if (!ptr) return;
-
-    size_t header_size = ALIGN(sizeof(struct execmem_private_header), EXECMEM_PRIVATE_ALIGN);
-
-    struct execmem_private_header *hdr = (struct execmem_private_header *)((char *)ptr - header_size); // 由代码区地址反推私有头
-
-    if (hdr->magic != EXECMEM_PRIVATE_MAGIC || !hdr->base || !hdr->alloc_size) return;
-
-    void *base = hdr->base;
-    size_t alloc_size = hdr->alloc_size;
-    hdr->magic = 0;
-
-    unsigned long start = (unsigned long)base;
-    unsigned long end = start + alloc_size;
-
-    /*
-         * Inline copy of arm64 set_memory_nx():
-         * set PTE_PXN, clear PTE_MAYBE_GP, then flush kernel TLB.
-         */
-    for (unsigned long addr = start; addr < end; addr += PAGE_SIZE)
-    {
-        pte_t *ptep = get_kernel_pte(addr);
-
-        if (!ptep) continue;
-
-        pteval_t pte = READ_ONCE(pte_val(*ptep));
-        pte |= PTE_PXN;
-        pte &= ~EXECMEM_PTE_MAYBE_GP;
-        WRITE_ONCE(pte_val(*ptep), pte);
-    }
-
-    flush_tlb_kernel_range(start, end);
-    vfree(base);
+    vfree(ptr);
 }
 
 #endif /* _EXPORT_FUN_H_ */

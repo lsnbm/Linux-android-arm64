@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../include/logger.h"
 #include <atomic>
 #include <cstdio>
 
@@ -35,7 +36,7 @@ namespace RenderGL
 
     inline bool init(bool preventCapture)
     {
-        printf("[initEGLGUI] 开始初始化 EGL 和 GUI...\n");
+        LS_LOGD_TAG("Render", "开始初始化 EGL 和 GUI");
         displayInfo = android::SurfaceControlManager::GetDisplayInfo();
 
         // 初始化触摸屏幕参数 (重要)
@@ -70,7 +71,7 @@ namespace RenderGL
 
         if (!eglMakeCurrent(display, surface, surface, context)) return false;
 
-    // 初始化 ImGui
+        // 初始化 ImGui
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
         ImGuiIO &io = ImGui::GetIO();

@@ -3,9 +3,9 @@
 #define ARM64_SYSREG_INSN_MASK 0xFFF00000U
 #define ARM64_SYSREG_MRS_INSN  0xD5300000U
 #define ARM64_SYSREG_MSR_INSN  0xD5100000U
-#define ARM64_HINT_NOP_INSN    0xD503201FU
+#define ARM64_HINT_INSN        0xD503201FU
 
-static void arm64_decode_sysreg(arm64_u32 raw, struct arm64_decoded_insn *decoded)
+static void arm64_decode_sysreg(uint32_t raw, struct arm64_decoded_insn *decoded)
 {
     struct arm64_system_operands *system = &decoded->operands.system;
 
@@ -18,60 +18,45 @@ static void arm64_decode_sysreg(arm64_u32 raw, struct arm64_decoded_insn *decode
 }
 
 /* 分支偏移在这里完成符号扩展和缩放，统一以字节为单位返回。 */
-enum arm64_decode_status arm64_decode_branch(arm64_u32 raw, struct arm64_decoded_insn *decoded)
+enum arm64_decode_status arm64_decode_branch(uint32_t raw, struct arm64_decoded_insn *decoded)
 {
     struct arm64_system_operands *system = &decoded->operands.system;
 
-    if ((raw & 0xFFFF0000U) == 0)
+    if ((raw & 0xFFFFF01FU) == ARM64_HINT_INSN)
     {
         decoded->insn_class = ARM64_INSN_CLASS_BRANCH_EXCEPTION_SYSTEM;
-        decoded->opcode = ARM64_OP_EXCEPTION_GENERATION;
-        system->immediate = raw & 0xFFFF;
-        return ARM64_DECODE_UNSUPPORTED;
-    }
-
-    if ((raw & 0xFFFFF01FU) == ARM64_HINT_NOP_INSN)
-    {
-        decoded->insn_class = ARM64_INSN_CLASS_BRANCH_EXCEPTION_SYSTEM;
+        decoded->opcode = ARM64_OP_HINT;
         switch ((raw >> 5) & 0x7F)
         {
         case 0:
-            decoded->opcode = ARM64_OP_NOP;
+            system->operation = ARM64_SYSTEM_OP_NOP;
             return ARM64_DECODE_OK;
         case 1:
-            decoded->opcode = ARM64_OP_HINT;
             system->operation = ARM64_SYSTEM_OP_YIELD;
             return ARM64_DECODE_OK;
         case 2:
-            decoded->opcode = ARM64_OP_HINT;
             system->operation = ARM64_SYSTEM_OP_WFE;
             return ARM64_DECODE_OK;
         case 3:
-            decoded->opcode = ARM64_OP_HINT;
             system->operation = ARM64_SYSTEM_OP_WFI;
             return ARM64_DECODE_OK;
         case 4:
-            decoded->opcode = ARM64_OP_HINT;
             system->operation = ARM64_SYSTEM_OP_SEV;
             return ARM64_DECODE_OK;
         case 5:
-            decoded->opcode = ARM64_OP_HINT;
             system->operation = ARM64_SYSTEM_OP_SEVL;
             return ARM64_DECODE_OK;
         case 0x19:
-            decoded->opcode = ARM64_OP_HINT;
             system->operation = ARM64_SYSTEM_OP_PACIASP;
             return ARM64_DECODE_OK;
         case 0x20:
         case 0x22:
         case 0x24:
         case 0x26:
-            decoded->opcode = ARM64_OP_HINT;
             system->operation = ARM64_SYSTEM_OP_BTI;
             system->option = ((raw >> 5) & 0x7F) - 0x20;
             return ARM64_DECODE_OK;
         default:
-            decoded->opcode = ARM64_OP_UNKNOWN;
             return ARM64_DECODE_UNSUPPORTED;
         }
     }
@@ -149,11 +134,11 @@ enum arm64_decode_status arm64_decode_branch(arm64_u32 raw, struct arm64_decoded
     {
         decoded->insn_class = ARM64_INSN_CLASS_BRANCH_EXCEPTION_SYSTEM;
         decoded->opcode = (raw & 0x80000000U) ? ARM64_OP_BL : ARM64_OP_B;
-        decoded->operands.branch.offset = arm64_sign_extend((arm64_u64)(raw & 0x03FFFFFFU) << 2, 28);
+        decoded->operands.branch.offset = arm64_sign_extend((uint64_t)(raw & 0x03FFFFFFU) << 2, 28);
         return ARM64_DECODE_OK;
     }
 
-    arm64_u32 branch_reg = raw & 0xFFFFFC1FU;
+    uint32_t branch_reg = raw & 0xFFFFFC1FU;
     if (branch_reg == 0xD61F0000U || branch_reg == 0xD63F0000U || branch_reg == 0xD65F0000U)
     {
         decoded->insn_class = ARM64_INSN_CLASS_BRANCH_EXCEPTION_SYSTEM;
@@ -169,7 +154,7 @@ enum arm64_decode_status arm64_decode_branch(arm64_u32 raw, struct arm64_decoded
         decoded->insn_class = ARM64_INSN_CLASS_BRANCH_EXCEPTION_SYSTEM;
         decoded->opcode = ARM64_OP_B_COND;
         decoded->operands.branch.condition = raw & 0xF;
-        decoded->operands.branch.offset = arm64_sign_extend((arm64_u64)((raw >> 5) & 0x7FFFFU) << 2, 21);
+        decoded->operands.branch.offset = arm64_sign_extend((uint64_t)((raw >> 5) & 0x7FFFFU) << 2, 21);
         return ARM64_DECODE_OK;
     }
 
@@ -177,10 +162,9 @@ enum arm64_decode_status arm64_decode_branch(arm64_u32 raw, struct arm64_decoded
     {
         decoded->insn_class = ARM64_INSN_CLASS_BRANCH_EXCEPTION_SYSTEM;
         decoded->opcode = (raw & 0x01000000U) ? ARM64_OP_CBNZ : ARM64_OP_CBZ;
-        decoded->flags = (raw & 0x80000000U) ? ARM64_INSN_FLAG_64BIT : 0;
         decoded->operand_width = (raw & 0x80000000U) ? 64 : 32;
         decoded->rt = raw & 0x1F;
-        decoded->operands.branch.offset = arm64_sign_extend((arm64_u64)((raw >> 5) & 0x7FFFFU) << 2, 21);
+        decoded->operands.branch.offset = arm64_sign_extend((uint64_t)((raw >> 5) & 0x7FFFFU) << 2, 21);
         return ARM64_DECODE_OK;
     }
 
@@ -188,9 +172,10 @@ enum arm64_decode_status arm64_decode_branch(arm64_u32 raw, struct arm64_decoded
     {
         decoded->insn_class = ARM64_INSN_CLASS_BRANCH_EXCEPTION_SYSTEM;
         decoded->opcode = (raw & 0x01000000U) ? ARM64_OP_TBNZ : ARM64_OP_TBZ;
+        decoded->operand_width = (raw & 0x80000000U) ? 64 : 32;
         decoded->rt = raw & 0x1F;
         decoded->operands.branch.test_bit = ((raw >> 26) & 0x20) | ((raw >> 19) & 0x1F);
-        decoded->operands.branch.offset = arm64_sign_extend((arm64_u64)((raw >> 5) & 0x3FFFU) << 2, 16);
+        decoded->operands.branch.offset = arm64_sign_extend((uint64_t)((raw >> 5) & 0x3FFFU) << 2, 16);
         return ARM64_DECODE_OK;
     }
 

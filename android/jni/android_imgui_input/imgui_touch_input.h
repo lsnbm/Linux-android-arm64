@@ -1,4 +1,5 @@
 #pragma once
+#include "../include/logger.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <dirent.h>
@@ -112,12 +113,12 @@ static void deviceHandlerThread(int deviceIndex, int fd, int maxX, int maxY)
         if (poll_ret < 0)
         {
             if (errno == EINTR) continue;
-            fprintf(stderr, "[Touch Error] poll failed for event device: %s\n", strerror(errno));
+            LS_LOGE_TAG("Touch", "poll 设备失败: %s", strerror(errno));
             break;
         }
         if ((pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0)
         {
-            fprintf(stderr, "[Touch Error] event device disconnected, revents=0x%x\n", pfd.revents);
+            LS_LOGE_TAG("Touch", "输入设备断开 revents=0x%x", pfd.revents);
             break;
         }
 
@@ -125,7 +126,7 @@ static void deviceHandlerThread(int deviceIndex, int fd, int maxX, int maxY)
         if (readSize <= 0)
         {
             if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
-            fprintf(stderr, "[Touch Error] read failed for event device: %s\n", strerror(errno));
+            LS_LOGE_TAG("Touch", "读取输入设备失败: %s", strerror(errno));
             break; // 设备断开
         }
 
@@ -258,10 +259,8 @@ void Touch_UpdateImGui()
     io.AddMouseSourceEvent(ImGuiMouseSource_TouchScreen);
     for (const TouchInputEvent &event : events)
     {
-        if (event.type == TouchInputEventType::Position)
-            io.AddMousePosEvent(event.x, event.y);
-        else
-            io.AddMouseButtonEvent(0, event.down);
+        if (event.type == TouchInputEventType::Position) io.AddMousePosEvent(event.x, event.y);
+        else io.AddMouseButtonEvent(0, event.down);
     }
 }
 
@@ -273,8 +272,7 @@ bool Touch_Init()
         std::lock_guard<std::mutex> lock(touch_mutex);
         pendingTouchEvents.clear();
         for (auto &deviceFingers : fingers)
-            for (TouchPoint &finger : deviceFingers)
-                finger = {};
+            for (TouchPoint &finger : deviceFingers) finger = {};
     }
 
     DIR *dir = opendir("/dev/input/");
@@ -309,8 +307,7 @@ bool Touch_Init()
                 info.isPointer = false;
                 snprintf(info.path, sizeof(info.path), "%s", device_path);
                 memset(info.name, 0, sizeof(info.name));
-                if (ioctl(fd, EVIOCGNAME(sizeof(info.name)), info.name) < 0)
-                    snprintf(info.name, sizeof(info.name), "unknown");
+                if (ioctl(fd, EVIOCGNAME(sizeof(info.name)), info.name) < 0) snprintf(info.name, sizeof(info.name), "unknown");
                 sscanf(ptr->d_name, "event%d", &info.eventNum);
 
                 input_absinfo absX, absY;
@@ -377,23 +374,12 @@ bool Touch_Init()
         config_ref.maxX = dev_info.maxX;
         config_ref.maxY = dev_info.maxY;
 
-        fprintf(stderr,
-            "[Touch] selected %s name=%s direct=%d pointer=%d range=%dx%d\n",
-            dev_info.path,
-            dev_info.name,
-            dev_info.isDirect ? 1 : 0,
-            dev_info.isPointer ? 1 : 0,
-            dev_info.maxX,
-            dev_info.maxY);
+        LS_LOGD_TAG("Touch", "选择设备 path=%s name=%s direct=%d pointer=%d range=%dx%d", dev_info.path, dev_info.name, dev_info.isDirect ? 1 : 0, dev_info.isPointer ? 1 : 0, dev_info.maxX, dev_info.maxY);
 
         // 必须在 Touch_Init() 中创建线程。很多调用方会在 main() 内先 fork()
         // 守护化；若在线程池全局构造阶段提前创建线程，fork 后子进程只保留
         // 调用线程，继承的线程池将永远没有 worker 来消费触摸任务。
-        config_ref.task = std::thread(deviceHandlerThread,
-                          config_ref.deviceIndex,
-                          config_ref.deviceFd,
-                          config_ref.maxX,
-                          config_ref.maxY);
+        config_ref.task = std::thread(deviceHandlerThread, config_ref.deviceIndex, config_ref.deviceFd, config_ref.maxX, config_ref.maxY);
     }
     return true;
 }
@@ -444,6 +430,5 @@ void Touch_Shutdown()
     std::lock_guard<std::mutex> lock(touch_mutex);
     pendingTouchEvents.clear();
     for (auto &deviceFingers : fingers)
-        for (TouchPoint &finger : deviceFingers)
-            finger = {};
+        for (TouchPoint &finger : deviceFingers) finger = {};
 }

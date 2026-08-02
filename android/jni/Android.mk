@@ -66,6 +66,11 @@ LOCAL_CPPFLAGS += -O3                                # [优化] 保持O3，避�
 # LOCAL_LDFLAGS += -Wl,-mllvm,-inline-threshold=10000  # [LTO无限内联] 链接期透传参数，强行跨文件内联
 # LOCAL_LDFLAGS += -Wl,-mllvm,-unroll-threshold=10000  # [LTO无限展开] 链接期透传参数，强行跨文件展开
 
+# 默认不把 LS_LOGD/LS_LOGD_TAG 及其格式字符串编译进二进制。
+# 可执行 `ndk-build LS_DEBUG_LOG=1`，或将下一行改为 `LS_DEBUG_LOG := 1`。
+LS_DEBUG_LOG ?= 1
+LOCAL_CFLAGS += -DLS_DEBUG_LOG=$(LS_DEBUG_LOG)
+LOCAL_CPPFLAGS += -DLS_DEBUG_LOG=$(LS_DEBUG_LOG) -include $(SHARED_JNI_ROOT)/include/logger.h
 
 
 

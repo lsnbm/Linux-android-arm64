@@ -355,7 +355,7 @@ namespace MemUtils
         case Driver::IDX_ORIG_X0:
             return record.orig_x0;
         case Driver::IDX_SYSCALLNO:
-            return record.syscallno;
+            return static_cast<std::uint32_t>(record.syscallno);
         case Driver::IDX_PSTATE:
             return record.pstate;
         case Driver::IDX_FPSR:
@@ -392,7 +392,7 @@ namespace MemUtils
             record.orig_x0 = static_cast<std::uint64_t>(value);
             return true;
         case Driver::IDX_SYSCALLNO:
-            record.syscallno = static_cast<std::uint64_t>(value);
+            record.syscallno = static_cast<std::int32_t>(static_cast<std::uint32_t>(value));
             return true;
         case Driver::IDX_PSTATE:
             record.pstate = static_cast<std::uint64_t>(value);
@@ -503,7 +503,7 @@ namespace MemUtils
         const auto regIndex = HwbpRegIndexFromToken(token);
         if (!regIndex.has_value()) return false;
         if (*regIndex >= Driver::IDX_Q0 && *regIndex <= Driver::IDX_Q31) return HwbpWriteRegisterValue(record, *regIndex, value);
-        if ((*regIndex == Driver::IDX_FPSR || *regIndex == Driver::IDX_FPCR) && value > std::numeric_limits<std::uint32_t>::max()) return false;
+        if ((*regIndex == Driver::IDX_SYSCALLNO || *regIndex == Driver::IDX_FPSR || *regIndex == Driver::IDX_FPCR) && value > std::numeric_limits<std::uint32_t>::max()) return false;
         if (value > std::numeric_limits<std::uint64_t>::max()) return false;
         return HwbpWriteRegisterValue(record, *regIndex, value);
     }
@@ -823,7 +823,7 @@ namespace SignatureScanner
                     }
                     else
                     {
-                        std::println(stderr, "[ParseSignature] 无法解析: '{}'", token);
+                        LS_LOGE_TAG_FMT("Signature", "无法解析: '{}'", token);
                         sig.clear();
                         return sig;
                     }
@@ -939,12 +939,12 @@ namespace SignatureScanner
     {
         if (range <= 0 || range > SIG_MAX_RANGE)
         {
-            std::println(stderr, "[找特征] range 无效: {} (1-{})", range, SIG_MAX_RANGE);
+            LS_LOGE_TAG_FMT("Signature", "range 无效: {} (1-{})", range, SIG_MAX_RANGE);
             return false;
         }
         if (addr < static_cast<uintptr_t>(range))
         {
-            std::println(stderr, "[找特征] 地址过小会下溢");
+            LS_LOGE_TAG("Signature", "地址过小会下溢");
             return false;
         }
 
@@ -954,7 +954,7 @@ namespace SignatureScanner
 
         if (dr->Read(addr - range, sig.bytes.data(), totalSize) <= 0)
         {
-            std::println(stderr, "[找特征] 读取失败: 0x{:X}", addr - range);
+            LS_LOGE_TAG_FMT("Signature", "读取失败: 0x{:X}", addr - range);
             return false;
         }
 
@@ -962,11 +962,11 @@ namespace SignatureScanner
 
         if (!WriteSigFileWithFallback(filename, addr, range, sig))
         {
-            std::println(stderr, "[找特征] 写文件失败: {}", filename);
+            LS_LOGE_TAG_FMT("Signature", "写文件失败: {}", filename);
             return false;
         }
 
-        std::println("[找特征] 完成 地址:0x{:X} 范围:±{} 字节:{}", addr, range, totalSize);
+        LS_LOGI_TAG_FMT("Signature", "生成完成: 地址=0x{:X} 范围=±{} 字节={}", addr, range, totalSize);
         return true;
     }
 
@@ -978,20 +978,20 @@ namespace SignatureScanner
         std::string oldSigText;
         if (!ReadSigFileWithFallback(filename, range, oldSigText))
         {
-            std::println(stderr, "[过滤特征] 读取文件失败: {}", filename);
+            LS_LOGE_TAG_FMT("Signature", "读取文件失败: {}", filename);
             return result;
         }
 
         SigElement oldSig = ParseSignature(oldSigText);
         if (oldSig.empty())
         {
-            std::println(stderr, "[过滤特征] 特征码解析失败");
+            LS_LOGE_TAG("Signature", "特征码解析失败");
             return result;
         }
 
         if (addr < static_cast<uintptr_t>(range))
         {
-            std::println(stderr, "[过滤特征] 地址过小");
+            LS_LOGE_TAG("Signature", "过滤地址过小");
             return result;
         }
 
@@ -1000,7 +1000,7 @@ namespace SignatureScanner
 
         if (dr->Read(addr - range, curData.data(), totalSize) <= 0)
         {
-            std::println(stderr, "[过滤特征] 读取失败: 0x{:X}", addr - range);
+            LS_LOGE_TAG_FMT("Signature", "过滤读取失败: 0x{:X}", addr - range);
             return result;
         }
 
@@ -1036,7 +1036,7 @@ namespace SignatureScanner
         WriteSigFileWithFallback(filename, addr, range, newSig);
 
         result.success = true;
-        std::println("[过滤特征] 完成 总字节:{} 变化:{}", result.totalCount, result.changedCount);
+        LS_LOGI_TAG_FMT("Signature", "过滤完成: 总字节={} 变化={}", result.totalCount, result.changedCount);
         return result;
     }
 
@@ -1045,13 +1045,13 @@ namespace SignatureScanner
         SigElement sig = ParseSignature(pattern);
         if (sig.empty())
         {
-            std::println(stderr, "[扫特征码] 解析失败");
+            LS_LOGE_TAG("Signature", "扫描特征码解析失败");
             return {};
         }
 
-        std::println("[扫特征码] 开始 长度:{} 偏移:{}", sig.size(), range);
+        LS_LOGI_TAG_FMT("Signature", "开始扫描: 长度={} 偏移={}", sig.size(), range);
         auto matches = ScanCore(sig, range);
-        std::println("[扫特征码] 完成 找到 {} 个匹配", matches.size());
+        LS_LOGI_TAG_FMT("Signature", "扫描完成: 找到 {} 个匹配", matches.size());
         return matches;
     }
 
@@ -1061,16 +1061,16 @@ namespace SignatureScanner
         std::string sigText;
         if (!ReadSigFileWithFallback(filename, range, sigText))
         {
-            std::println(stderr, "[扫特征码] 读取文件失败: {}", filename);
+            LS_LOGE_TAG_FMT("Signature", "扫描读取文件失败: {}", filename);
             return {};
         }
 
         SigElement sig = ParseSignature(sigText);
         if (sig.empty()) return {};
 
-        std::println("[扫特征码] 开始 长度:{} 范围偏移:{}", sig.size(), range);
+        LS_LOGI_TAG_FMT("Signature", "开始文件扫描: 长度={} 范围偏移={}", sig.size(), range);
         auto matches = ScanCore(sig, range);
-        std::println("[扫特征码] 完成 找到 {} 个匹配", matches.size());
+        LS_LOGI_TAG_FMT("Signature", "文件扫描完成: 找到 {} 个匹配", matches.size());
 
         const std::string outPath = ResolveSigPath(NormalizeSigFileName(filename));
         std::ofstream out(outPath, std::ios::app);
@@ -1364,18 +1364,17 @@ private:
         std::uint64_t fileOffset = 0;
         size_t count = 0;
 
-        scanMemoryRegions(
-            regions,
-            [&](uintptr_t address, const uint8_t *buffer, size_t size)
-            {
-                const size_t usable = size / sizeof(T) * sizeof(T);
-                if (usable == 0) return;
-                if (fwrite(buffer, 1, usable, snapshot.get()) != usable) throw std::runtime_error("写入 Unknown 快照失败");
-                appendSnapshotSpan(spans, address, fileOffset, usable);
-                fileOffset += usable;
-                count += countValidValues<T>(buffer, usable);
-                liveCount_ = count;
-            });
+        scanMemoryRegions(regions,
+                          [&](uintptr_t address, const uint8_t *buffer, size_t size)
+                          {
+                              const size_t usable = size / sizeof(T) * sizeof(T);
+                              if (usable == 0) return;
+                              if (fwrite(buffer, 1, usable, snapshot.get()) != usable) throw std::runtime_error("写入 Unknown 快照失败");
+                              appendSnapshotSpan(spans, address, fileOffset, usable);
+                              fileOffset += usable;
+                              count += countValidValues<T>(buffer, usable);
+                              liveCount_ = count;
+                          });
 
         finishFile(snapshot.get());
         publishSnapshot(std::move(snapshot), std::move(spans), count);
@@ -1389,23 +1388,22 @@ private:
         outputBuffer.reserve(4096);
         size_t count = 0;
 
-        scanMemoryRegions(
-            regions,
-            [&](uintptr_t address, const uint8_t *buffer, size_t size)
-            {
-                for (size_t offset = 0; offset + sizeof(T) <= size; offset += sizeof(T))
-                {
-                    T value{};
-                    std::memcpy(&value, buffer + offset, sizeof(value));
-                    if constexpr (std::is_floating_point_v<T>)
-                    {
-                        if (!MemUtils::IsValidFloat(value)) continue;
-                    }
-                    if (!MemUtils::Compare(value, target, mode, T{}, rangeMax)) continue;
-                    appendCandidate(output.get(), outputBuffer, {address + offset, storeValue(value)});
-                    liveCount_ = ++count;
-                }
-            });
+        scanMemoryRegions(regions,
+                          [&](uintptr_t address, const uint8_t *buffer, size_t size)
+                          {
+                              for (size_t offset = 0; offset + sizeof(T) <= size; offset += sizeof(T))
+                              {
+                                  T value{};
+                                  std::memcpy(&value, buffer + offset, sizeof(value));
+                                  if constexpr (std::is_floating_point_v<T>)
+                                  {
+                                      if (!MemUtils::IsValidFloat(value)) continue;
+                                  }
+                                  if (!MemUtils::Compare(value, target, mode, T{}, rangeMax)) continue;
+                                  appendCandidate(output.get(), outputBuffer, {address + offset, storeValue(value)});
+                                  liveCount_ = ++count;
+                              }
+                          });
 
         finishCandidates(output.get(), outputBuffer);
         publishCandidates(std::move(output), count, mode);
@@ -1543,26 +1541,25 @@ private:
         uintptr_t previousEnd = 0;
         size_t count = 0;
 
-        scanMemoryRegions(
-            regions,
-            [&](uintptr_t address, const uint8_t *buffer, size_t size)
-            {
-                if (address != previousEnd) carry.clear();
-                combined.clear();
-                combined.reserve(carry.size() + size);
-                combined.insert(combined.end(), carry.begin(), carry.end());
-                combined.insert(combined.end(), buffer, buffer + size);
-                const uintptr_t base = address - carry.size();
-                for (size_t offset = 0; offset + needle.size() <= combined.size(); ++offset)
-                {
-                    if (std::memcmp(combined.data() + offset, needle.data(), needle.size()) != 0) continue;
-                    appendCandidate(output.get(), outputBuffer, {base + offset, 0});
-                    liveCount_ = ++count;
-                }
-                const size_t carrySize = std::min(needle.size() - 1, combined.size());
-                carry.assign(combined.end() - carrySize, combined.end());
-                previousEnd = address + size;
-            });
+        scanMemoryRegions(regions,
+                          [&](uintptr_t address, const uint8_t *buffer, size_t size)
+                          {
+                              if (address != previousEnd) carry.clear();
+                              combined.clear();
+                              combined.reserve(carry.size() + size);
+                              combined.insert(combined.end(), carry.begin(), carry.end());
+                              combined.insert(combined.end(), buffer, buffer + size);
+                              const uintptr_t base = address - carry.size();
+                              for (size_t offset = 0; offset + needle.size() <= combined.size(); ++offset)
+                              {
+                                  if (std::memcmp(combined.data() + offset, needle.data(), needle.size()) != 0) continue;
+                                  appendCandidate(output.get(), outputBuffer, {base + offset, 0});
+                                  liveCount_ = ++count;
+                              }
+                              const size_t carrySize = std::min(needle.size() - 1, combined.size());
+                              carry.assign(combined.end() - carrySize, combined.end());
+                              previousEnd = address + size;
+                          });
 
         finishCandidates(output.get(), outputBuffer);
         publishCandidates(std::move(output), count, Types::FuzzyMode::String);
@@ -1691,12 +1688,12 @@ private:
         catch (const std::exception &error)
         {
             liveCount_ = storedCount();
-            std::println(stderr, "内存扫描失败: {}", error.what());
+            LS_LOGE_TAG_FMT("MemoryScan", "扫描失败: {}", error.what());
         }
         catch (...)
         {
             liveCount_ = storedCount();
-            std::println(stderr, "内存扫描失败: 未知异常");
+            LS_LOGE_TAG("MemoryScan", "扫描失败: 未知异常");
         }
     }
 
@@ -1713,12 +1710,12 @@ private:
         catch (const std::exception &error)
         {
             liveCount_ = storedCount();
-            std::println(stderr, "字符串扫描失败: {}", error.what());
+            LS_LOGE_TAG_FMT("MemoryScan", "字符串扫描失败: {}", error.what());
         }
         catch (...)
         {
             liveCount_ = storedCount();
-            std::println(stderr, "字符串扫描失败: 未知异常");
+            LS_LOGE_TAG("MemoryScan", "字符串扫描失败: 未知异常");
         }
     }
 
@@ -3205,7 +3202,7 @@ public:
         FilePtr merged(tmpfile());
         if (!merged)
         {
-            std::println(stderr, "CollectPointers: failed to create merge temp file");
+            LS_LOGE_TAG("Pointer", "无法创建合并临时文件");
             return false;
         }
 
@@ -3265,13 +3262,13 @@ public:
 
         if (collectionFailed)
         {
-            std::println(stderr, "CollectPointers: temporary storage failed");
+            LS_LOGE_TAG("Pointer", "临时存储失败");
             return false;
         }
 
         if (fflush(merged.get()) != 0 || ferror(merged.get()) != 0)
         {
-            std::println(stderr, "CollectPointers: failed to flush temporary storage");
+            LS_LOGE_TAG("Pointer", "刷新临时存储失败");
             return false;
         }
 
@@ -3280,7 +3277,7 @@ public:
         {
             if (st.st_size < 0 || static_cast<size_t>(st.st_size) % sizeof(PtrData) != 0)
             {
-                std::println(stderr, "CollectPointers: invalid temporary storage size");
+                LS_LOGE_TAG("Pointer", "临时存储大小无效");
                 return false;
             }
             size_t total = static_cast<size_t>(st.st_size) / sizeof(PtrData);
@@ -3291,14 +3288,14 @@ public:
                 if (fread(pointers_.data(), sizeof(PtrData), total, merged.get()) != total)
                 {
                     pointers_.clear();
-                    std::println(stderr, "CollectPointers: failed to read merged temporary storage");
+                    LS_LOGE_TAG("Pointer", "读取合并临时存储失败");
                     return false;
                 }
             }
         }
         else
         {
-            std::println(stderr, "CollectPointers: failed to stat merge temp file");
+            LS_LOGE_TAG("Pointer", "获取合并临时文件状态失败");
             return false;
         }
 
@@ -3340,8 +3337,7 @@ private:
             manualBase = MemUtils::Normalize(manualBase);
             arrayBase = MemUtils::Normalize(arrayBase);
 
-            std::println("=== 开始指针扫描 ===");
-            std::println("目标: {:x}, 深度: {}, 偏移: {}", target, depth, maxOffset);
+            LS_LOGI_TAG_FMT("Pointer", "开始扫描: 目标=0x{:X} 深度={} 偏移={}", target, depth, maxOffset);
 
             if (!SnapshotLayout(filterModule))
             {
@@ -3366,16 +3362,16 @@ private:
             size_t pointerCount = 0;
             if (!CollectPointers(pointerCount))
             {
-                std::println(stderr, "扫描失败: 无法创建内存快照");
+                LS_LOGE_TAG("Pointer", "扫描失败: 无法创建内存快照");
                 error = "无法创建内存快照";
                 return;
             }
-            std::println("内存快照数量: {}", pointerCount);
+            LS_LOGI_TAG_FMT("Pointer", "内存快照数量: {}", pointerCount);
 
             FilePtr outfile(tmpfile());
             if (!outfile)
             {
-                std::println(stderr, "无法创建临时文件");
+                LS_LOGE_TAG("Pointer", "无法创建结果临时文件");
                 error = "无法创建结果临时文件";
                 return;
             }
@@ -3387,7 +3383,7 @@ private:
 
             dirs[0].emplace_back(target, 0, 0, 1);
             std::sort(dirs[0].begin(), dirs[0].end(), [](const PtrDir &a, const PtrDir &b) { return a.address < b.address; });
-            std::println("Level 0 初始化完成，目标地址数量: {}", dirs[0].size());
+            LS_LOGI_TAG_FMT("Pointer", "Level 0 初始化完成，目标地址数量: {}", dirs[0].size());
 
             for (int level = 1; level <= depth; level++)
             {
@@ -3396,11 +3392,11 @@ private:
 
                 if (curr.empty())
                 {
-                    std::println("扫描在 Level {} 结束: 未找到指向上级的指针", level);
+                    LS_LOGI_TAG_FMT("Pointer", "扫描在 Level {} 结束: 未找到指向上级的指针", level);
                     break;
                 }
 
-                std::println("Level {} 搜索结果: 找到 {} 个指针", level, curr.size());
+                LS_LOGI_TAG_FMT("Pointer", "Level {} 搜索结果: 找到 {} 个指针", level, curr.size());
                 std::sort(curr.begin(), curr.end(), [](auto a, auto b) { return a->address < b->address; });
 
                 filter_to_ranges(dirs, ranges, curr, level, bases);
@@ -3438,17 +3434,17 @@ private:
                         }
                     }
 
-                    std::println("开始写入文件，正在保存 {} 条链条...", totalChains);
+                    LS_LOGI_TAG_FMT("Pointer", "开始保存 {} 条链条", totalChains);
                     wroteResults = write_bin_file(tree.contents, ranges, outfile.get(), scanMode, target, manualBase, arrayBase, arrayCount);
-                    if (wroteResults) std::println("文件写入完成，总链数: {}", totalChains);
-                    else std::println(stderr, "指针结果序列化失败");
+                    if (wroteResults) LS_LOGI_TAG_FMT("Pointer", "文件写入完成，总链数: {}", totalChains);
+                    else LS_LOGE_TAG("Pointer", "指针结果序列化失败");
                 }
             }
             else
             {
                 std::vector<std::vector<PtrDir *>> emptyContents;
                 wroteResults = write_bin_file(emptyContents, ranges, outfile.get(), scanMode, target, manualBase, arrayBase, arrayCount);
-                std::println("扫描结果为空，已生成空图");
+                LS_LOGI_TAG("Pointer", "扫描结果为空，已生成空图");
             }
 
             if (!wroteResults)
@@ -3466,8 +3462,8 @@ private:
 
             std::string autoName;
             const bool saved = SaveUniqueBin(outfile.get(), autoName);
-            if (saved) std::println("结果已保存至: {}", autoName);
-            else std::println(stderr, "无法原子保存指针结果文件");
+            if (saved) LS_LOGI_TAG_FMT("Pointer", "结果已保存至: {}", autoName);
+            else LS_LOGE_TAG("Pointer", "无法原子保存指针结果文件");
 
             chainCount_ = saved ? totalChains : 0;
             succeeded = saved;
@@ -3999,7 +3995,7 @@ public:
                     RunOperation(Operation::Merging, "指针结果合并失败",
                                  [this](bool &succeeded, std::string &error)
                                  {
-                                     std::println("=== [MergeBins] 开始基于图裁剪算法的极速合并 ===");
+                                     LS_LOGI_TAG("Pointer", "开始基于图裁剪算法合并结果");
 
                                      std::vector<std::string> files;
                                      if (access("Pointer.bin", F_OK) == 0) files.push_back("Pointer.bin");
@@ -4013,12 +4009,12 @@ public:
                                      if (files.size() < 2)
                                      {
                                          error = "至少需要两个指针结果文件";
-                                         std::println(stderr, "MergeBins: {}", error);
+                                         LS_LOGE_TAG_FMT("Pointer", "合并失败: {}", error);
                                          return;
                                      }
 
                                      MemoryGraph GA;
-                                     std::println("加载基准指针图: {}", files[0]);
+                                     LS_LOGI_TAG_FMT("Pointer", "加载基准指针图: {}", files[0]);
                                      if (!GA.load(files[0]))
                                      {
                                          error = std::format("无法加载或校验 {}", files[0]);
@@ -4027,7 +4023,7 @@ public:
 
                                      for (size_t f_idx = 1; f_idx < files.size(); ++f_idx)
                                      {
-                                         std::println("正在比对并裁剪: {}", files[f_idx]);
+                                         LS_LOGI_TAG_FMT("Pointer", "正在比对并裁剪: {}", files[f_idx]);
                                          MemoryGraph GB;
                                          if (!GB.load(files[f_idx]))
                                          {
@@ -4046,7 +4042,7 @@ public:
 
                                          size_t remaining_roots = 0;
                                          for (auto &blk : GA.blocks) remaining_roots += blk.roots.size();
-                                         std::println("  该轮裁剪完毕，剩余有效起始节点: {} 个", remaining_roots);
+                                         LS_LOGI_TAG_FMT("Pointer", "该轮裁剪完毕，剩余有效起始节点: {}", remaining_roots);
                                      }
 
                                      const size_t mergedChainCount = CountGraphChains(GA);
@@ -4064,12 +4060,12 @@ public:
                                      }
                                      for (const auto &fn : files)
                                      {
-                                         if (fn != "Pointer.bin" && remove(fn.c_str()) != 0) std::println(stderr, "MergeBins: 无法删除旧文件 {}: {}", fn, std::strerror(errno));
+                                         if (fn != "Pointer.bin" && remove(fn.c_str()) != 0) LS_LOGE_TAG_FMT("Pointer", "无法删除旧文件 {}: {}", fn, std::strerror(errno));
                                      }
 
                                      chainCount_ = mergedChainCount;
                                      succeeded = true;
-                                     std::println("图层合并结束！已成功剔除失效的指针树分支并生成 Pointer.bin");
+                                     LS_LOGI_TAG("Pointer", "图层合并结束，已生成 Pointer.bin");
                                  });
                 });
         }
@@ -4102,7 +4098,7 @@ public:
                     RunOperation(Operation::Exporting, "指针链导出失败",
                                  [this](bool &succeeded, std::string &error)
                                  {
-                                     std::println("=== 导出文本链条 ===");
+                                     LS_LOGI_TAG("Pointer", "开始导出文本链条");
 
                                      MemoryGraph graph;
                                      if (!graph.load("Pointer.bin"))
@@ -4235,7 +4231,7 @@ public:
 
                                      chainCount_ = exportedChains;
                                      succeeded = true;
-                                     std::println("导出完成: 成功输出 {} 条链条", exportedChains);
+                                     LS_LOGI_TAG_FMT("Pointer", "导出完成: 成功输出 {} 条链条", exportedChains);
                                  });
                 });
         }

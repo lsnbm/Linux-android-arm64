@@ -83,6 +83,7 @@ public: // 共有结构体和锁
 #define BP_OP_READ    0x1 // 01: 读
 #define BP_OP_WRITE   0x2 // 10: 写
 #define BP_CONFIG_MAX 16
+#define BP_RECORD_MAX 0x10
 
 // 设置掩码位的宏，参数1:结构体指针，参数2:寄存器索引，参数3:操作类型
 #define BP_SET_MASK(record, reg, op)                            \
@@ -220,7 +221,7 @@ public: // 共有结构体和锁
         uint64_t lr;        // X30
         uint64_t sp;        // Stack Pointer
         uint64_t orig_x0;   // 原始 X0
-        uint64_t syscallno; // 系统调用号
+        int32_t syscallno;  // 系统调用号
         uint64_t pstate;    // 处理器状态
         uint64_t x0, x1, x2, x3, x4, x5, x6, x7, x8, x9;
         uint64_t x10, x11, x12, x13, x14, x15, x16, x17, x18, x19;
@@ -238,19 +239,18 @@ public: // 共有结构体和锁
     // 单个观点地址结构
     struct bp_point
     {
-        void (*on_hit)(void *regs, void *self); // 触发回调，命中时调用
-        enum bp_type bt;                        // 断点类型
-        enum bp_len bl;                         // 断点长度
-        enum bp_scope bs;                       // 断点作用线程范围
-        uint64_t hit_addr;                      // 监控的地址
-        int record_count;                       // 当前已记录的不同 PC 数量
-        struct bp_record records[0x100];        // 记录不同 PC 触发状态的数组
+        void (*on_hit)(void *regs, void *fp_regs, void *hit_point); // 触发回调，命中时调用
+        enum bp_type bt;                                            // 断点类型
+        enum bp_len bl;                                             // 断点长度
+        enum bp_scope bs;                                           // 断点作用线程范围
+        uint64_t hit_addr;                                          // 监控的地址
+        int record_count;                                           // 当前已记录的不同 PC 数量
+        struct bp_record records[BP_RECORD_MAX];                    // 记录不同 PC 触发状态的数组
     };
 
     // 存储整体命中信息
     struct break_point
     {
-
         uint64_t num_brps;                     // 执行断点的数量
         uint64_t num_wrps;                     // 访问断点的数量
         int tgid;                              // 这个 break_point 属于哪个进程
@@ -363,13 +363,25 @@ public: // 共有结构体和锁
     // 将在队列中使用的请求实例结构体
     struct request_obj
     {
-        bool kernel; // 由用户模式设置 true = 内核有待处理的请求, false = 请求已完成
-        bool user;   // 由内核模式设置 true = 用户模式有待处理的请求, false = 请求已完成
+        /*
+    两者都不保证 ARM64 多核间的硬件内存顺序
+    volatile 约束对象的每次访问，防止编译器省略、合并或用寄存器缓存该字段
+    但不会绕过 CPU Cache。对应到硬件屏障就是
+    dsb:数据访问屏障,等读写内存完成 
+    isb:指令执行屏障,CPU流水线重新取址
+    
+    asm volatile("" ::: "memory") 是当前位置的编译器内存屏障，禁止其它内存访问跨越它重排，是编译时防止指令重排
+    但不会绕过硬件指令访问乱序
+    dmb:指令访问顺序屏障,load/store 内存访问指令的约束乱序访问
+   
+    然后dsb,isb,dmb指令操作数都是共享域范围:ish / nsh / osh / ishst
+    */
+        volatile bool kernel;        // 由用户模式设置 true = 内核有待处理的请求, false = 请求已完成
+        volatile bool user;          // 由内核模式设置 true = 用户模式有待处理的请求, false = 请求已完成
+        volatile enum request_op op; // 请求操作类型
+        volatile int status;         // 请求操作状态
 
         int tgid; // 当前派发指定的进程 TGID
-
-        enum request_op op; // 请求操作类型
-        int status;         // 请求操作状态
 
         // 虚拟内存读写信息
         struct virtual_memoryrw vmemrw_info;
@@ -404,14 +416,14 @@ public:
     void NullIo()
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
-        req->op = request_op_none;
+        StoreRequestOp(request_op_none);
         IoCommitAndWait();
     }
     void ExitKernel()
     {
         // 内核停止运行
         std::scoped_lock<SpinLock> lock(m_mutex);
-        req->op = request_op_kernel_exit;
+        StoreRequestOp(request_op_kernel_exit);
         IoCommitAndWait();
     }
 
@@ -532,7 +544,7 @@ public: // 外部获取内存信息
     {
         if (HandleVirtualMemoryInfo() != 0)
         {
-            std::printf("获取内存信息失败!!!\n");
+            LS_LOGE_TAG("Driver", "获取内存信息失败");
             __builtin_memset(&req->vmem_info, 0, sizeof(req->vmem_info));
         }
         return req->vmem_info;
@@ -543,7 +555,7 @@ public: // 外部获取内存信息
     {
         if (!outAddress)
         {
-            std::fprintf(stderr, "outAddress 为空指针\n");
+            LS_LOGE_TAG("Driver", "outAddress 为空指针");
             return false;
         }
 
@@ -563,24 +575,13 @@ public: // 外部获取内存信息
             if (pos > 0 && fullPath[pos - 1] != '/') continue;
             if (fullPath.substr(pos) != moduleName) continue;
 
-            std::fprintf(stderr, "========== 模块信息 ==========\n");
-            std::fprintf(stderr, "  模块索引  : %d\n", i);
-            std::fprintf(stderr, "  模块名称  : %s\n", mod.name);
-            std::fprintf(stderr, "  区段数量  : %d\n", mod.seg_count);
-            std::fprintf(stderr, "  ----------------------------\n");
+            LS_LOGI_TAG("Driver", "模块索引=%d 名称=%s 区段数量=%d", i, mod.name, mod.seg_count);
 
             for (int j = 0; j < mod.seg_count; ++j)
             {
                 const auto &seg = mod.segs[j];
-                std::fprintf(stderr, "  区段[%d]:\n", j);
-                std::fprintf(stderr, "    index : %d\n", seg.index);
-                std::fprintf(stderr, "    start : 0x%016llX\n", (unsigned long long)seg.start);
-                std::fprintf(stderr, "    end   : 0x%016llX\n", (unsigned long long)seg.end);
-                std::fprintf(stderr, "    size  : 0x%llX (%llu bytes)\n", (unsigned long long)(seg.end - seg.start), (unsigned long long)(seg.end - seg.start));
-                std::fprintf(stderr, "    prot  : %d\n", seg.prot);
+                LS_LOGI_TAG("Driver", "区段[%d] index=%d start=0x%016llX end=0x%016llX size=0x%llX (%llu bytes) prot=%d", j, seg.index, (unsigned long long)seg.start, (unsigned long long)seg.end, (unsigned long long)(seg.end - seg.start), (unsigned long long)(seg.end - seg.start), seg.prot);
             }
-
-            std::fprintf(stderr, "==============================\n");
 
             // 查找目标区段
             for (int j = 0; j < mod.seg_count; ++j)
@@ -592,11 +593,11 @@ public: // 外部获取内存信息
                 return true;
             }
 
-            std::fprintf(stderr, " 模块 '%.*s' 中未找到区段索引 %d\n", (int)moduleName.size(), moduleName.data(), segmentIndex);
+            LS_LOGE_TAG("Driver", "模块 '%.*s' 中未找到区段索引 %d", (int)moduleName.size(), moduleName.data(), segmentIndex);
             return false;
         }
 
-        std::fprintf(stderr, " 未找到模块 '%.*s'\n", (int)moduleName.size(), moduleName.data());
+        LS_LOGE_TAG("Driver", "未找到模块 '%.*s'", (int)moduleName.size(), moduleName.data());
         return false;
     }
     // 驱动获取扫描区域
@@ -606,7 +607,7 @@ public: // 外部获取内存信息
 
         if (HandleVirtualMemoryInfo() != 0)
         {
-            std::fprintf(stderr, "驱动获取内存信息失败\n");
+            LS_LOGE_TAG("Driver", "驱动获取内存信息失败");
             return regions;
         }
 
@@ -659,7 +660,7 @@ public: // 外部获取内存信息
         const size_t first = target.find_first_not_of(" \t\r\n");
         if (first == std::string_view::npos)
         {
-            std::fprintf(stderr, "[-] Dump: 模块名或内存范围为空\n");
+            LS_LOGE_TAG("Dump", "模块名或内存范围为空");
             return false;
         }
         target = target.substr(first, target.find_last_not_of(" \t\r\n") - first + 1);
@@ -727,7 +728,7 @@ public: // 外部获取内存信息
 
             if (segmentCount == 0)
             {
-                std::fprintf(stderr, "[-] Dump: 未找到模块 '%.*s' 或模块没有有效区段\n", (int)target.size(), target.data());
+                LS_LOGE_TAG("Dump", "未找到模块 '%.*s' 或模块没有有效区段", (int)target.size(), target.data());
                 return false;
             }
 
@@ -737,7 +738,7 @@ public: // 外部获取内存信息
             if (extensionPos != std::string_view::npos && extensionPos != 0) baseName = baseName.substr(0, extensionPos);
             if (baseName.empty())
             {
-                std::fprintf(stderr, "[-] Dump: 无法从模块名生成输出文件名\n");
+                LS_LOGE_TAG("Dump", "无法从模块名生成输出文件名");
                 return false;
             }
             outputName = std::string(baseName) + ".bin";
@@ -747,19 +748,17 @@ public: // 外部获取内存信息
         const uint64_t spanSize = maxEnd - baseAddr;
         if (baseAddr >= maxEnd || baseAddr == ~0ULL || spanSize == 0 || spanSize > MAX_DUMP_SIZE)
         {
-            std::fprintf(stderr, "[-] Dump: 地址范围无效或大小超过 500MB\n");
+            LS_LOGE_TAG("Dump", "地址范围无效或大小超过 500MB");
             return false;
         }
 
-        std::fprintf(stdout, "[*] Dump 目标: %.*s\n", (int)target.size(), target.data());
-        if (!rangeDump) std::fprintf(stdout, "[*] 匹配模块: %d 个, 区段: %zu 个\n", matchedModuleCount, segmentCount);
-        std::fprintf(stdout, "[*] 基址: 0x%llX\n", (unsigned long long)baseAddr);
-        std::fprintf(stdout, "[*] 结束: 0x%llX\n", (unsigned long long)maxEnd);
-        std::fprintf(stdout, "[*] 输出大小: 0x%llX (%llu MB)\n", (unsigned long long)spanSize, (unsigned long long)(spanSize / 1024 / 1024));
+        LS_LOGI_TAG("Dump", "目标=%.*s", (int)target.size(), target.data());
+        if (!rangeDump) LS_LOGI_TAG("Dump", "匹配模块=%d 区段=%zu", matchedModuleCount, segmentCount);
+        LS_LOGI_TAG("Dump", "范围=0x%llX-0x%llX 大小=0x%llX (%llu MB)", (unsigned long long)baseAddr, (unsigned long long)maxEnd, (unsigned long long)spanSize, (unsigned long long)(spanSize / 1024 / 1024));
 
         if (mkdir("/sdcard/dump", 0777) != 0 && errno != EEXIST)
         {
-            std::fprintf(stderr, "[-] Dump: 无法创建 /sdcard/dump (%s)\n", std::strerror(errno));
+            LS_LOGE_TAG("Dump", "无法创建 /sdcard/dump: %s", std::strerror(errno));
             return false;
         }
 
@@ -767,7 +766,7 @@ public: // 外部获取内存信息
         FILE *fp = fopen(outPath.c_str(), "wb");
         if (!fp)
         {
-            std::fprintf(stderr, "[-] Dump: 无法创建文件 %s (请检查读写权限)\n", outPath.c_str());
+            LS_LOGE_TAG("Dump", "无法创建文件 %s，请检查读写权限", outPath.c_str());
             return false;
         }
 
@@ -793,7 +792,7 @@ public: // 外部获取内存信息
 
             if (fwrite(page.data(), 1, toRead, fp) != toRead)
             {
-                std::fprintf(stderr, "[-] Dump: 写入文件失败 %s (%s)\n", outPath.c_str(), std::strerror(errno));
+                LS_LOGE_TAG("Dump", "写入文件失败 %s: %s", outPath.c_str(), std::strerror(errno));
                 fclose(fp);
                 remove(outPath.c_str());
                 return false;
@@ -802,13 +801,8 @@ public: // 外部获取内存信息
 
         fclose(fp);
         if (dumpPath) *dumpPath = outPath;
-        std::fprintf(stdout, "[*] 读取完成: 成功 0x%zX 字节, 失败或部分读取 %zu 块\n", totalRead, failedBlocks);
-
-        std::fprintf(stdout, "[+] ==========================================\n");
-        std::fprintf(stdout, "[+] Dump 完成!\n");
-        std::fprintf(stdout, "[+] 路径: %s\n", outPath.c_str());
-        std::fprintf(stdout, "[+] 大小: 0x%llX (%llu MB)\n", (unsigned long long)spanSize, (unsigned long long)(spanSize / 1024 / 1024));
-        std::fprintf(stdout, "[+] ==========================================\n");
+        LS_LOGI_TAG("Dump", "读取完成: 成功 0x%zX 字节，失败或部分读取 %zu 块", totalRead, failedBlocks);
+        LS_LOGI_TAG("Dump", "完成: 路径=%s 大小=0x%llX (%llu MB)", outPath.c_str(), (unsigned long long)spanSize, (unsigned long long)(spanSize / 1024 / 1024));
 
         return true;
     }
@@ -885,18 +879,39 @@ private: // 私有实现，外部无需关系
     struct request_obj *req = nullptr;
     int global_pid = 0;
 
+    inline void StoreRequestOp(request_op op)
+    {
+        asm volatile("" ::: "memory"); // 前边界:前面的读写不允许排这个后面，这里的读写也不允许排前面
+        req->op = op;
+        asm volatile("" ::: "memory"); // 后边界:后面的读写不允许排前面，这里的读写也不允许排后面
+    }
+
+    inline void StoreRequestStatus(int status)
+    {
+        asm volatile("" ::: "memory");
+        req->status = status;
+        asm volatile("" ::: "memory");
+    }
+
+    inline int LoadRequestStatus()
+    {
+        asm volatile("" ::: "memory");
+        int status = req->status;
+        asm volatile("" ::: "memory");
+        return status;
+    }
+
     inline void IoCommitAndWait()
     {
         asm volatile("" ::: "memory");
         req->kernel = true;
 
-        // 等内核完成
         asm volatile("" ::: "memory");
+        // 等内核完成
         while (!req->user)
         {
             asm volatile("yield");
         }
-
         // 消费完成标志
         asm volatile("" ::: "memory");
         req->user = false;
@@ -911,14 +926,13 @@ private: // 私有实现，外部无需关系
 
         if (req == MAP_FAILED)
         {
-            printf("[-] 分配共享内存失败，错误码: %d (%s)\n", errno, strerror(errno));
+            LS_LOGE_TAG("Driver", "分配共享内存失败: errno=%d (%s)", errno, strerror(errno));
             return;
         }
         __builtin_memset(req, 0, sizeof(request_obj));
 
-        printf("[+] 分配虚拟地址成功，地址: %p  大小: %lu\n", req, sizeof(request_obj));
-        printf("当前进程 PID: %d\n", getpid());
-        printf("等待驱动握手...\n");
+        LS_LOGI_TAG("Driver", "分配虚拟地址成功: 地址=%p 大小=%zu", req, sizeof(request_obj));
+        LS_LOGI_TAG("Driver", "当前进程 PID=%d，等待驱动握手", getpid());
 
         asm volatile("" ::: "memory");
         while (!req->user)
@@ -928,7 +942,7 @@ private: // 私有实现，外部无需关系
         asm volatile("" ::: "memory");
         req->user = false;
 
-        printf("驱动已经连接\n");
+        LS_LOGI_TAG("Driver", "驱动已经连接");
     }
 
     // 初始化触摸
@@ -937,7 +951,8 @@ private: // 私有实现，外部无需关系
     void InitTouch(int requested_slots)
     {
         if (requested_slots <= 0) return;
-        req->op = request_op_touch_init;
+        std::scoped_lock<SpinLock> lock(m_mutex);
+        StoreRequestOp(request_op_touch_init);
         req->vinput_info.request_virtual_slots = requested_slots;
         IoCommitAndWait();
     }
@@ -946,9 +961,8 @@ private: // 私有实现，外部无需关系
     void InitGyro(bool enable)
     {
         if (!enable) return;
-
         std::scoped_lock<SpinLock> lock(m_mutex);
-        req->op = request_op_gyro_init;
+        StoreRequestOp(request_op_gyro_init);
         IoCommitAndWait();
     }
 
@@ -956,9 +970,8 @@ private: // 私有实现，外部无需关系
     void InitGnss(bool enable)
     {
         if (!enable) return;
-
         std::scoped_lock<SpinLock> lock(m_mutex);
-        req->op = request_op_gnss_init;
+        StoreRequestOp(request_op_gnss_init);
         IoCommitAndWait();
     }
 
@@ -1001,12 +1014,12 @@ private: // 私有实现，外部无需关系
         while (processed < size)
         {
             asm volatile("" ::: "memory");
-            const size_t chunk = (size - processed > 0x1000) ? 0x1000 : (size - processed);
-            req->op = op;
+            const size_t chunk = std::min(size - processed, sizeof(req->vmemrw_info.user_buffer));
+            StoreRequestOp(op);
             req->tgid = global_pid;
             req->vmemrw_info.rw_addr = addr + processed;
             req->vmemrw_info.size = chunk;
-            req->status = 0;
+            StoreRequestStatus(0);
 
             asm volatile("" ::: "memory");
             if (is_read)
@@ -1021,8 +1034,9 @@ private: // 私有实现，外部无需关系
             IoCommitAndWait();
 
             asm volatile("" ::: "memory");
-            lastStatus = req->status;
-            if (req->status > 0) successfulBytes += std::min(static_cast<size_t>(req->status), chunk);
+            const int requestStatus = LoadRequestStatus();
+            lastStatus = requestStatus;
+            if (requestStatus > 0) successfulBytes += std::min(static_cast<size_t>(requestStatus), chunk);
 
             asm volatile("" ::: "memory");
             if (is_read) copy_virtual_memory_chunk(static_cast<uint8_t *>(buffer) + processed, req->vmemrw_info.user_buffer, chunk);
@@ -1038,10 +1052,10 @@ private: // 私有实现，外部无需关系
     int HandleVirtualMemoryInfo()
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
-        req->op = request_op_vmem_info;
+        StoreRequestOp(request_op_vmem_info);
         req->tgid = global_pid;
         IoCommitAndWait();
-        return req->status;
+        return LoadRequestStatus();
     }
 
     // 触摸事件
@@ -1054,7 +1068,7 @@ private: // 私有实现，外部无需关系
 
         if (x < 0 || y < 0 || x > screenW || y > screenH) return;
 
-        req->op = op;
+        StoreRequestOp(op);
         req->vinput_info.slot = slot;
         // 浮点运算提到前面，保持清晰
         double normX = static_cast<double>(x) / screenW;
@@ -1085,7 +1099,7 @@ private: // 私有实现，外部无需关系
     void HandleGyroReport(int gyro_x_mrad_s, int gyro_y_mrad_s, int gyro_z_mrad_s)
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
-        req->op = request_op_gyro_report;
+        StoreRequestOp(request_op_gyro_report);
         req->vgyro_info.gyro_x_mrad_s = gyro_x_mrad_s;
         req->vgyro_info.gyro_y_mrad_s = gyro_y_mrad_s;
         req->vgyro_info.gyro_z_mrad_s = gyro_z_mrad_s;
@@ -1096,7 +1110,7 @@ private: // 私有实现，外部无需关系
     void HandleGnssReport(int latitude_e7, int longitude_e7)
     {
         std::scoped_lock<SpinLock> lock(m_mutex);
-        req->op = request_op_gnss_report;
+        StoreRequestOp(request_op_gnss_report);
         req->vgnss_info.latitude_e7 = latitude_e7;
         req->vgnss_info.longitude_e7 = longitude_e7;
         IoCommitAndWait();
@@ -1108,8 +1122,8 @@ private: // 私有实现，外部无需关系
         std::scoped_lock<SpinLock> lock(m_mutex);
         if (op != request_op_hwbp_set && op != request_op_hwbp_remove) return -1;
 
-        req->op = op;
-        req->status = 0;
+        StoreRequestOp(op);
+        StoreRequestStatus(0);
         if (op == request_op_hwbp_set)
         {
             req->tgid = global_pid;
@@ -1124,7 +1138,7 @@ private: // 私有实现，外部无需关系
             }
         }
         IoCommitAndWait();
-        return req->status;
+        return LoadRequestStatus();
     }
 
     // PTEBP 复用 bp_info.points 和 records 存储命中现场
@@ -1133,8 +1147,8 @@ private: // 私有实现，外部无需关系
         std::scoped_lock<SpinLock> lock(m_mutex);
         if (op != request_op_ptebp_set && op != request_op_ptebp_remove) return -1;
 
-        req->op = op;
-        req->status = 0;
+        StoreRequestOp(op);
+        StoreRequestStatus(0);
         if (op == request_op_ptebp_set)
         {
             req->tgid = global_pid;
@@ -1149,7 +1163,7 @@ private: // 私有实现，外部无需关系
             }
         }
         IoCommitAndWait();
-        return req->status;
+        return LoadRequestStatus();
     }
 
     // STEPBP 复用 bp_info.points 和 records 存储命中现场
@@ -1158,8 +1172,8 @@ private: // 私有实现，外部无需关系
         std::scoped_lock<SpinLock> lock(m_mutex);
         if (op != request_op_stepbp_set && op != request_op_stepbp_remove) return -1;
 
-        req->op = op;
-        req->status = 0;
+        StoreRequestOp(op);
+        StoreRequestStatus(0);
         if (op == request_op_stepbp_set)
         {
             req->tgid = global_pid;
@@ -1175,7 +1189,7 @@ private: // 私有实现，外部无需关系
         }
 
         IoCommitAndWait();
-        return req->status;
+        return LoadRequestStatus();
     }
 
     // 系统调用监控事件；取消时仍使用启动监控时保存的 PID。
@@ -1187,11 +1201,11 @@ private: // 私有实现，外部无需关系
         std::scoped_lock<SpinLock> lock(m_mutex);
         if ((op != request_op_syscall_monitor_set && op != request_op_syscall_monitor_remove) || tgid <= 0) return -1;
 
-        req->op = op;
+        StoreRequestOp(op);
         req->tgid = tgid;
-        req->status = 0;
+        StoreRequestStatus(0);
         IoCommitAndWait();
-        return req->status;
+        return LoadRequestStatus();
     }
 
     int HandleCntvctMonitorEvent(request_op op, int tgid)
@@ -1199,11 +1213,11 @@ private: // 私有实现，外部无需关系
         std::scoped_lock<SpinLock> lock(m_mutex);
         if ((op != request_op_cntvct_monitor_set && op != request_op_cntvct_monitor_remove) || tgid <= 0) return -EINVAL;
 
-        req->op = op;
+        StoreRequestOp(op);
         req->tgid = tgid;
-        req->status = 0;
+        StoreRequestStatus(0);
         IoCommitAndWait();
-        return req->status;
+        return LoadRequestStatus();
     }
 
     // 获取指定进程的线程 TLS 或 PACGA 环境参数
@@ -1212,14 +1226,14 @@ private: // 私有实现，外部无需关系
         std::scoped_lock<SpinLock> lock(m_mutex);
         if (global_pid <= 0) return -1;
 
-        req->op = request_op_env_get_params;
+        StoreRequestOp(request_op_env_get_params);
         req->tgid = global_pid;
-        req->status = 0;
+        StoreRequestStatus(0);
         __builtin_memset(&req->env_info, 0, sizeof(req->env_info));
-        const size_t copyLen = std::min(threadName.size(), static_cast<size_t>(TLS_THREAD_NAME_LEN - 1));
+        const size_t copyLen = std::min(threadName.size(), sizeof(req->env_info.thread_name) - 1);
         if (copyLen > 0) __builtin_memcpy(req->env_info.thread_name, threadName.data(), copyLen);
         IoCommitAndWait();
-        return req->status;
+        return LoadRequestStatus();
     }
 };
 

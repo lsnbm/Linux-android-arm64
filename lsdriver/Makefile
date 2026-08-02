@@ -2,6 +2,7 @@
 
 obj-m += lsdriver.o
 lsdriver-y := lsdriver_main.o \
+			  arm64_encode/arm64_encode.o \
 			  arm64_decode/arm64_decode.o \
 			  arm64_decode/arm64_decode_base.o \
 			  arm64_decode/arm64_decode_ldst.o \

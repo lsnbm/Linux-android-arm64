@@ -20,8 +20,8 @@
 #include "lsdriver_log.h"
 #include "hide_task.h"
 #include "hide_kgsl.h"
-#include "arm64_syscalldbg.h"
-#include "arm64_cntvctdbg.h"
+#include "arm64_syscall_monitor.h"
+#include "arm64_cntvct_monitor.h"
 #include "arm64_env.h"
 
 #include "virtual_input.h"
@@ -30,10 +30,14 @@
 #include "virtual_memory_rw.h"
 #include "virtual_memory_enum.h"
 #include "break_point.h"
-#include "arm64_ghost_region.h"
 
 static struct request_obj *req = NULL;
 
+/*
+volatile 是对象级约束，这三个指针的每次读写都按易变访问处理，适合在线程循环中持续轮询生命周期状态。
+READ_ONCE/WRITE_ONCE 是访问级约束，只约束指定位置的一次标量访问，适合读取共享字段快照且不影响其它受锁访问的优化。
+两者都不提供 CPU 内存屏障、跨 CPU 顺序或复合操作原子性；需要同步时仍应使用 smp_*、atomic_* 或锁。
+*/
 struct task_struct *volatile connect_thread_task = 0;
 struct task_struct *volatile dispatch_thread_task = 0;
 struct task_struct *volatile ls_process_task = 0;
@@ -113,14 +117,12 @@ static int DispatchThreadFunction(void *data)
                     break;
                 case request_op_syscall_monitor_remove:
                     syscall_monitor_remove(req->tgid);
-                    req->status = 0;
                     break;
                 case request_op_cntvct_monitor_set:
                     req->status = cntvct_monitor_install(req->tgid);
                     break;
                 case request_op_cntvct_monitor_remove:
                     cntvct_monitor_remove(req->tgid);
-                    req->status = 0;
                     break;
                 case request_op_env_get_params:
                     req->status = get_env_params(req->tgid, req->env_info.thread_name, &req->env_info.tpidr_el0, &req->env_info.pacga_lo, &req->env_info.pacga_hi, &req->env_info.tls_status, &req->env_info.pacga_status);
@@ -128,7 +130,8 @@ static int DispatchThreadFunction(void *data)
                 case request_op_kernel_exit:
                     hide_task_remove(connect_thread_task->pid);
                     hide_task_remove(dispatch_thread_task->pid);
-                    connect_thread_task = NULL;  // 标记连接线程退出
+                    connect_thread_task = NULL; // 标记连接线程退出
+                    asm volatile("" ::: "memory");
                     dispatch_thread_task = NULL; // 标记调度线程退出
                     break;
                 default:
@@ -235,7 +238,8 @@ static int ConnectThreadFunction(void *data)
             if (ls_process_task) send_sig(SIGKILL, ls_process_task, 0); // 杀死旧的task
 
             // 成功 get_user_pages_remote 持有页面引用，只需释放 mm
-            ls_process_task = task;        // 保存用户进程指针
+            ls_process_task = task; // 保存用户进程指针
+            asm volatile("" ::: "memory");
             req->user = true;              // 通知用户层已连接
             hide_task_install(task->tgid); // 隐藏进程
             hide_kgsl_install(task->tgid); // 隐藏高通GPU节点
@@ -455,7 +459,7 @@ static int do_exit_hook_work(struct pt_regs *regs)
         remove_process_ptebp();       // 清理 PTEBP
         remove_process_stepbp();      // 清理单步断点
         syscall_monitor_remove_all(); // 清理全部系统调用监控目标
-        cntvct_monitor_remove_all();  // 清理 CNTVCT_EL0 读取监控
+        cntvct_monitor_remove(0);     // 清理 CNTVCT_EL0 读取监控
         ls_process_task = NULL;       // 标记用户进程已断开
         if (!connect_thread_task && !dispatch_thread_task)
         {

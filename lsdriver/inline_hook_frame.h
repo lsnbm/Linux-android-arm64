@@ -14,6 +14,7 @@
 #include <asm/ptrace.h>
 #include <asm/tlbflush.h>
 #include "arm64_decode/arm64_decode.h"
+#include "arm64_encode/arm64_encode.h"
 #include "arm64_reg.h"
 #include "export_fun.h"
 #include "lsdriver_log.h"
@@ -40,7 +41,7 @@ paciasp指令包含bti功能
 #define TRAMP_WORDS             120
 #define TRAMP_BYTES             (TRAMP_WORDS * 4)
 #define TRAMP_SLOT_COUNT        32
-#define TRAMP_ORIG_INSN_INDEX   57
+#define TRAMP_REPLAY_INSN_INDEX 57
 #define TRAMP_RET_TO_ORIG_INDEX 61
 #define TRAMP_RET_SLOT_INDEX    116
 #define TRAMP_WORK_SLOT_INDEX   118
@@ -60,22 +61,39 @@ asm(".pushsection .text\n\t"
                                                      ".endr\n\t"
                                                      ".popsection\n\t");
 
-// 全局槽位位图，多处调用自动分配不冲突
-static DECLARE_BITMAP(g_slot_used, TRAMP_SLOT_COUNT);
+// 一条 hook 的描述
+struct hook_entry
+{
+    const char *target_sym; // 目标函数符号名
+    uint64_t target_addr;   // 运行时填充
+    void *work_fn;          // 工作函数指针: int (*)(struct pt_regs *regs),根据arm64调用约定，参数放在x0寄存器里,下面汇编会把pt_regs结构体指针放到x0传给工作函数
+
+    /* 框架内部 */
+    uint32_t *trampoline;                 // 模块代码段预留的跳板
+    uint32_t saved_insn[HOOK_STUB_WORDS]; // 目标函数入口被覆盖的原始指令
+    bool installed;                       // 是否已安装
+    int slot_index;                       // 分配到的槽位，-1 表示未分配
+};
+
+// 槽位指针同时记录占用状态，并供卸载全部 hook 时找到保存的原始指令。
+static struct hook_entry *g_slot_entries[TRAMP_SLOT_COUNT];
 
 // 分配并获取一个槽位
-static int slot_alloc(uint32_t **trampoline_out)
+static int slot_alloc(struct hook_entry *entry, uint32_t **trampoline_out)
 {
-    int bit = find_first_zero_bit(g_slot_used, TRAMP_SLOT_COUNT);
-    if (bit >= TRAMP_SLOT_COUNT) return -ENOSPC;
-    set_bit(bit, g_slot_used);
-    *trampoline_out = inline_hook_trampoline_slots + bit * TRAMP_WORDS;
-    return bit;
+    for (int i = 0; i < TRAMP_SLOT_COUNT; i++)
+    {
+        if (g_slot_entries[i]) continue;
+        g_slot_entries[i] = entry;
+        *trampoline_out = inline_hook_trampoline_slots + i * TRAMP_WORDS;
+        return i;
+    }
+    return -ENOSPC;
 }
 // 释放槽位
 static void slot_free(int index)
 {
-    clear_bit(index, g_slot_used);
+    g_slot_entries[index] = NULL;
 }
 
 // patch预留代码段
@@ -95,17 +113,36 @@ static void hook_save_orig_insns(uint64_t addr, uint32_t *insns, int count)
     for (int i = 0; i < count; i++) insns[i] = READ_ONCE(*(uint32_t *)(uintptr_t)(addr + i * 4));
 }
 
-static int hook_validate_orig_insns(uint64_t addr, const uint32_t *insns, int count)
+// ADR/ADRP 按跳板 PC 原地重编码，其余 PC 相对指令仍拒绝安装。
+static int hook_relocate_replay_insns(uint64_t source_addr, uint64_t replay_addr, uint32_t *insns, int count)
 {
+    if (!insns || count <= 0 || count > HOOK_STUB_WORDS) return -EINVAL;
+
     for (int i = 0; i < count; i++)
     {
         struct arm64_decoded_insn decoded;
+        uint64_t source_pc = source_addr + i * sizeof(uint32_t);
+        uint64_t replay_pc = replay_addr + i * sizeof(uint32_t);
+
         arm64_decode_insn(insns[i], &decoded);
 
         switch (decoded.opcode)
         {
         case ARM64_OP_ADR:
         case ARM64_OP_ADRP:
+        {
+            bool page_relative = decoded.opcode == ARM64_OP_ADRP;
+            uint64_t source_base = page_relative ? source_pc & ~0xFFFULL : source_pc;
+            uint64_t target = source_base + decoded.operands.pc_relative.offset;
+            int status = page_relative ? arm64_encode_adrp(decoded.rd, replay_pc, target, &insns[i]) : arm64_encode_adr(decoded.rd, replay_pc, target, &insns[i]);
+
+            if (status)
+            {
+                ls_log_tag("hook", "%s relocation out of range source=0x%llx replay=0x%llx target=0x%llx insn=%08x\n", page_relative ? "adrp" : "adr", (unsigned long long)source_pc, (unsigned long long)replay_pc, (unsigned long long)target, insns[i]);
+                return status;
+            }
+            break;
+        }
         case ARM64_OP_B:
         case ARM64_OP_BL:
         case ARM64_OP_B_COND:
@@ -115,13 +152,11 @@ static int hook_validate_orig_insns(uint64_t addr, const uint32_t *insns, int co
         case ARM64_OP_TBNZ:
         case ARM64_OP_LOAD_LITERAL:
         case ARM64_OP_PREFETCH_LITERAL:
-            break;
+            ls_log_tag("hook", "pc-relative instruction cannot be replayed addr=0x%llx insn=%08x\n", (unsigned long long)source_pc, insns[i]);
+            return -EOPNOTSUPP;
         default:
             continue;
         }
-
-        ls_log_tag("hook", "pc-relative instruction cannot be replayed addr=0x%llx insn=%08x\n", (unsigned long long)(addr + i * 4), insns[i]);
-        return -EOPNOTSUPP;
     }
 
     return 0;
@@ -140,27 +175,13 @@ static int hook_patch_words(uint64_t addr, const uint32_t *insns, int count)
     return fn_aarch64_insn_patch_text(addrs, (uint32_t *)insns, count);
 }
 
-// 一条 hook 的描述
-struct hook_entry
-{
-    const char *target_sym; // 目标函数符号名
-    uint64_t target_addr;   // 运行时填充
-    void *work_fn;          // 工作函数指针: int (*)(struct pt_regs *regs),根据arm64调用约定，参数放在x0寄存器里,下面汇编会把pt_regs结构体指针放到x0传给工作函数
-
-    /* 框架内部 */
-    uint32_t *trampoline;                 // 模块代码段预留的跳板
-    uint32_t saved_insn[HOOK_STUB_WORDS]; // 目标函数入口被覆盖的原始指令
-    bool installed;                       // 是否已安装
-    int slot_index;                       // 分配到的槽位，-1 表示未分配
-};
-
 static inline void *hook_frame_metadata(struct pt_regs *regs)
 {
     return regs ? (void *)((char *)regs - HOOK_METADATA_BYTES) : NULL;
 }
 
 // 生成模板跳板汇编代码
-static void trampoline_build(uint32_t *buf, const uint32_t orig_insn[HOOK_STUB_WORDS], uint64_t work_fn, uint64_t return_addr)
+static void trampoline_build(uint32_t *buf, const uint32_t saved_insn[HOOK_STUB_WORDS], uint64_t work_fn, uint64_t return_addr)
 {
     static const uint32_t tramp_template[TRAMP_WORDS] = {
         // 开辟304字节栈空间：前32字节供返回 hook 保存元数据，后272字节按 struct pt_regs 前缀布局。
@@ -215,7 +236,7 @@ static void trampoline_build(uint32_t *buf, const uint32_t orig_insn[HOOK_STUB_W
         0xEB09015F, // [33] cmp x10, x9
         0x54000721, // [34] b.ne [91]              < pc 被修改，走动态pc路径
 
-        // 返回0且PC没改：恢复 regs->sp / regs->pstate / regs[0..30]，执行被覆盖的4条原始指令，再ret跳回原函数
+        // 返回0且PC没改：恢复 regs->sp / regs->pstate / regs[0..30]，回放被覆盖的4条指令，再ret跳回原函数
         // x16暂存pt_regs基址，x17暂存最终SP；切回SP后再恢复原x16/x17，避免破坏原始指令现场
         0x910083F0, // [35] add x16, sp, #32       < synthetic pt_regs 基指针
         0xF9407E11, // [36] ldr x17, [x16, #248]   < 恢复目标sp
@@ -239,10 +260,10 @@ static void trampoline_build(uint32_t *buf, const uint32_t orig_insn[HOOK_STUB_W
         0x9100023F, // [54] mov sp, x17
         0xF9404611, // [55] ldr x17, [x16, #136]
         0xF9404210, // [56] ldr x16, [x16, #128]
-        0x00000000, // [57] orig_insn[0]  <动态填
-        0x00000000, // [58] orig_insn[1]  <动态填
-        0x00000000, // [59] orig_insn[2]  <动态填
-        0x00000000, // [60] orig_insn[3]  <动态填
+        0x00000000, // [57] replay_insn[0]  <动态填
+        0x00000000, // [58] replay_insn[1]  <动态填
+        0x00000000, // [59] replay_insn[2]  <动态填
+        0x00000000, // [60] replay_insn[3]  <动态填
         0x580006F0, // [61] ldr x16, [pc, #0xDC] < RET_SLOT
         0xD65F0200, // [62] ret x16              < 跳回 target_addr + 16
 
@@ -323,12 +344,12 @@ static void trampoline_build(uint32_t *buf, const uint32_t orig_insn[HOOK_STUB_W
     BUILD_BUG_ON(offsetof(struct pt_regs, pstate) != 264);
     BUILD_BUG_ON(offsetof(struct pt_regs, orig_x0) != HOOK_REGS_BYTES);
     // 被覆盖的4个word回放完后，必须紧跟跳回原函数后续地址的ldr/ret序列。
-    BUILD_BUG_ON(TRAMP_RET_TO_ORIG_INDEX != TRAMP_ORIG_INSN_INDEX + HOOK_STUB_WORDS);
+    BUILD_BUG_ON(TRAMP_RET_TO_ORIG_INDEX != TRAMP_REPLAY_INSN_INDEX + HOOK_STUB_WORDS);
 
     // 将模板数组放到可执行段
     __builtin_memcpy(buf, tramp_template, TRAMP_BYTES);
     // 动态填入数据槽
-    __builtin_memcpy(&buf[TRAMP_ORIG_INSN_INDEX], orig_insn, HOOK_STUB_BYTES);
+    __builtin_memcpy(&buf[TRAMP_REPLAY_INSN_INDEX], saved_insn, HOOK_STUB_BYTES);
     __builtin_memcpy(&buf[TRAMP_RET_SLOT_INDEX], &return_addr, sizeof(uint64_t));
     __builtin_memcpy(&buf[TRAMP_WORK_SLOT_INDEX], &work_fn, sizeof(uint64_t));
 
@@ -355,23 +376,29 @@ static int hook_entry_install(struct hook_entry *e)
     }
     if (!e->target_addr || !e->work_fn) return -EINVAL;
 
-    // 保存并验证入口指令，当前固定宽度跳板不能安全扩展PC相对指令。
+    // 保存入口即将被覆盖的原始指令。
     hook_save_orig_insns(e->target_addr, e->saved_insn, HOOK_STUB_WORDS);
     ls_log_tag("hook", "original %s: 0x%llx: %08x %08x %08x %08x\n", e->target_sym ? e->target_sym : "<addr>", e->target_addr, e->saved_insn[0], e->saved_insn[1], e->saved_insn[2], e->saved_insn[3]);
-    ret = hook_validate_orig_insns(e->target_addr, e->saved_insn, HOOK_STUB_WORDS);
-    if (ret) return ret;
 
     // 分配并获取一个槽位
-    slot = slot_alloc(&e->trampoline);
+    slot = slot_alloc(e, &e->trampoline);
     if (slot < 0) return -ENOSPC;
     e->slot_index = slot;
 
     // return_addr = handler + 16(跳过被我们覆盖的4条指令)
     uint64_t return_addr = e->target_addr + HOOK_STUB_BYTES;
 
-    // 填充跳板
+    // 填充跳板，再只对回放区中的 ADR/ADRP 重编码。
     uint32_t tramp_code[TRAMP_WORDS];
     trampoline_build(tramp_code, e->saved_insn, (uint64_t)e->work_fn, return_addr);
+    ret = hook_relocate_replay_insns(e->target_addr, (uint64_t)e->trampoline + TRAMP_REPLAY_INSN_INDEX * sizeof(uint32_t), &tramp_code[TRAMP_REPLAY_INSN_INDEX], HOOK_STUB_WORDS);
+    if (ret)
+    {
+        slot_free(slot);
+        e->slot_index = -1;
+        e->trampoline = NULL;
+        return ret;
+    }
 
     // 写到预留代码段槽位
     ret = trampoline_patch(e->trampoline, tramp_code);
@@ -385,7 +412,14 @@ static int hook_entry_install(struct hook_entry *e)
 
     // 编码入口ret跳板
     uint32_t hook_code[HOOK_STUB_WORDS];
-    arm64_make_ldr_ret((uint64_t)e->trampoline, hook_code);
+    ret = arm64_emit_abs_jump((uint64_t)e->trampoline, 16, hook_code, HOOK_STUB_WORDS);
+    if (ret)
+    {
+        slot_free(slot);
+        e->slot_index = -1;
+        e->trampoline = NULL;
+        return ret;
+    }
 
     // patch 目标函数入口；失败时恢复原始指令，避免半安装状态。
     ret = hook_patch_words(e->target_addr, hook_code, HOOK_STUB_WORDS);
@@ -440,20 +474,14 @@ void inline_hook_remove_count(struct hook_entry *entries, int count)
     for (int i = count - 1; i >= 0; i--) hook_entry_remove(&entries[i]);
 }
 
-// 用于驱动/用户态退出的强行卸载所有hook
+// 用于驱动/用户态退出的卸载所有hook
 void inline_hook_remove_all(void)
 {
     for (int i = 0; i < TRAMP_SLOT_COUNT; i++)
     {
-        if (!test_bit(i, g_slot_used)) continue;
-
-        // trampoline[TRAMP_ORIG_INSN_INDEX..] 是被覆盖的原始指令，直接还原
-        uint32_t *trampoline = inline_hook_trampoline_slots + i * TRAMP_WORDS;
-        uint64_t target_addr = *(uint64_t *)&trampoline[TRAMP_RET_SLOT_INDEX] - HOOK_STUB_BYTES; // RET_SLOT存的是target+16
-
-        hook_patch_words(target_addr, &trampoline[TRAMP_ORIG_INSN_INDEX], HOOK_STUB_WORDS);
-        slot_free(i);
-        ls_log_tag("hook", "force removed slot %d, target 0x%llx\n", i, target_addr);
+        struct hook_entry *entry = g_slot_entries[i];
+        if (!entry) continue;
+        hook_entry_remove(entry);
     }
 }
 

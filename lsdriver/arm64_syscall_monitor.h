@@ -1,8 +1,8 @@
 /*
 指定进程 syscall 入口监控
 */
-#ifndef ARM64_SYSCALLDBG_H
-#define ARM64_SYSCALLDBG_H
+#ifndef ARM64_SYSCALL_MONITOR_H
+#define ARM64_SYSCALL_MONITOR_H
 
 #include <linux/kernel.h>
 #include <linux/mutex.h>
@@ -128,7 +128,7 @@ static void syscall_monitor_append_user_string(char *text, size_t size, size_t *
 */
 static void syscall_monitor_append_data(char *text, size_t size, size_t *pos, const char *label, unsigned long addr, size_t length)
 {
-    u8 data[SYSCALL_MONITOR_DATA_PREVIEW];
+    uint8_t data[SYSCALL_MONITOR_DATA_PREVIEW];
     size_t preview = min_t(size_t, length, sizeof(data));
 
     if (*pos >= size || !length) return;

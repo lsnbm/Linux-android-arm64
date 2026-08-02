@@ -68,24 +68,24 @@ static struct
 static DEFINE_MUTEX(vgyro_lock);
 
 // 将用户层传入的 mrad/s 整数转换为 IEEE754 float bit。
-static u32 vgyro_milli_to_float_bits(int value)
+static uint32_t vgyro_milli_to_float_bits(int value)
 {
-    u32 sign = 0;
-    u64 mag;
+    uint32_t sign = 0;
+    uint64_t mag;
 
     if (!value) return 0;
 
     if (value < 0)
     {
         sign = 0x80000000U;
-        mag = (u64)(-(s64)value);
+        mag = (uint64_t)(-(int64_t)value);
     }
     else
     {
-        mag = (u64)value;
+        mag = (uint64_t)value;
     }
 
-    u64 q = (mag << 24) / VGYRO_SCALE_MILLI;
+    uint64_t q = (mag << 24) / VGYRO_SCALE_MILLI;
     if (!q) return sign;
 
     int top = fls64(q) - 1;
@@ -93,13 +93,13 @@ static u32 vgyro_milli_to_float_bits(int value)
     if (exp <= 0) return sign;
     if (exp >= 255) return sign | 0x7f800000U;
 
-    u32 mant;
+    uint32_t mant;
     if (top > 23)
     {
         int shift = top - 23;
-        u64 half = 1ULL << (shift - 1);
-        u64 mask = (1ULL << shift) - 1;
-        u64 rounded = q >> shift;
+        uint64_t half = 1ULL << (shift - 1);
+        uint64_t mask = (1ULL << shift) - 1;
+        uint64_t rounded = q >> shift;
 
         if ((q & mask) >= half) rounded++;
         if (rounded >= (1ULL << 24))
@@ -108,33 +108,33 @@ static u32 vgyro_milli_to_float_bits(int value)
             exp++;
             if (exp >= 255) return sign | 0x7f800000U;
         }
-        mant = (u32)rounded;
+        mant = (uint32_t)rounded;
     }
     else
     {
-        mant = (u32)(q << (23 - top));
+        mant = (uint32_t)(q << (23 - top));
     }
 
-    return sign | ((u32)exp << 23) | (mant & 0x7fffffU);
+    return sign | ((uint32_t)exp << 23) | (mant & 0x7fffffU);
 }
 
 // 在不使用内核浮点的情况下，对两个 IEEE754 float bit 做加法。
-static u32 vgyro_float_bits_add(u32 a, u32 b)
+static uint32_t vgyro_float_bits_add(uint32_t a, uint32_t b)
 {
-    u32 abs_a = a & 0x7fffffffU;
-    u32 abs_b = b & 0x7fffffffU;
+    uint32_t abs_a = a & 0x7fffffffU;
+    uint32_t abs_b = b & 0x7fffffffU;
 
     if (!abs_a) return b;
     if (!abs_b) return a;
     if ((abs_a & 0x7f800000U) == 0x7f800000U) return a;
     if ((abs_b & 0x7f800000U) == 0x7f800000U) return b;
 
-    u32 sign_a = a >> 31;
-    u32 sign_b = b >> 31;
+    uint32_t sign_a = a >> 31;
+    uint32_t sign_b = b >> 31;
     int exp_a = (a >> 23) & 0xff;
     int exp_b = (b >> 23) & 0xff;
-    u64 mant_a = a & 0x7fffffU;
-    u64 mant_b = b & 0x7fffffU;
+    uint64_t mant_a = a & 0x7fffffU;
+    uint64_t mant_b = b & 0x7fffffU;
 
     if (exp_a) mant_a |= 0x800000U;
     else exp_a = 1;
@@ -146,9 +146,9 @@ static u32 vgyro_float_bits_add(u32 a, u32 b)
 
     if (exp_b > exp_a)
     {
-        u32 tmp_sign = sign_a;
+        uint32_t tmp_sign = sign_a;
         int tmp_exp = exp_a;
-        u64 tmp_mant = mant_a;
+        uint64_t tmp_mant = mant_a;
 
         sign_a = sign_b;
         sign_b = tmp_sign;
@@ -162,9 +162,9 @@ static u32 vgyro_float_bits_add(u32 a, u32 b)
     if (diff >= 56) mant_b = 0;
     else mant_b >>= diff;
 
-    u32 sign_r;
+    uint32_t sign_r;
     int exp_r = exp_a;
-    u64 mant_r;
+    uint64_t mant_r;
     if (sign_a == sign_b)
     {
         sign_r = sign_a;
@@ -213,7 +213,7 @@ static u32 vgyro_float_bits_add(u32 a, u32 b)
     if (exp_r >= 255) return (sign_r << 31) | 0x7f800000U;
     if (exp_r <= 0) return sign_r << 31;
 
-    return (sign_r << 31) | ((u32)exp_r << 23) | (((u32)(mant_r >> 8)) & 0x7fffffU);
+    return (sign_r << 31) | ((uint32_t)exp_r << 23) | (((uint32_t)(mant_r >> 8)) & 0x7fffffU);
 }
 
 // 判断 sendto 缓冲区长度是否可能是一组 ASensorEvent。
@@ -238,15 +238,15 @@ static int vgyro_patch_kernel_events(char *buf, size_t len)
 
     if (!buf || !vgyro_buffer_maybe_events(len)) return 0;
 
-    u32 fx = vgyro_milli_to_float_bits(READ_ONCE(vg.gyro_x_mrad_s));
-    u32 fy = vgyro_milli_to_float_bits(READ_ONCE(vg.gyro_y_mrad_s));
-    u32 fz = vgyro_milli_to_float_bits(READ_ONCE(vg.gyro_z_mrad_s));
+    uint32_t fx = vgyro_milli_to_float_bits(READ_ONCE(vg.gyro_x_mrad_s));
+    uint32_t fy = vgyro_milli_to_float_bits(READ_ONCE(vg.gyro_y_mrad_s));
+    uint32_t fz = vgyro_milli_to_float_bits(READ_ONCE(vg.gyro_z_mrad_s));
 
     for (size_t off = 0; off + VGYRO_ASENSOR_EVENT_SIZE <= len; off += VGYRO_ASENSOR_EVENT_SIZE)
     {
         int version = *(int *)(buf + off + VGYRO_ASENSOR_VERSION_OFFSET);
         int type = *(int *)(buf + off + VGYRO_ASENSOR_TYPE_OFFSET);
-        u32 *data = (u32 *)(buf + off + VGYRO_ASENSOR_DATA_OFFSET);
+        uint32_t *data = (uint32_t *)(buf + off + VGYRO_ASENSOR_DATA_OFFSET);
 
         if (version != VGYRO_ASENSOR_EVENT_SIZE) continue;
         if (!vgyro_is_gyro_event_type(type)) continue;

@@ -19,12 +19,44 @@
 
 #include "io_struct.h"
 
+// 18 字节掩码拆成 16+2 字节加载，将所有差异聚合后只判断一次；最后一个字节的高位不对应任何寄存器，需要忽略。
+static __always_inline bool bp_record_reads_all(const struct bp_record *rec)
+{
+    uint64_t mask0;
+    uint64_t mask1;
+    uint16_t mask_tail;
+    // READ 编码为 01，~0 / 3 在编译期生成重复的 0101...，
+    const uint64_t read_mask_word = (~(uint64_t)0 / 3U) * BP_OP_READ;
+    const uint16_t tail_valid_mask = (1U << (MAX_REG_COUNT * 2 - (sizeof(mask0) + sizeof(mask1)) * 8)) - 1U;
+
+    __builtin_memcpy(&mask0, &rec->mask[0], sizeof(mask0));
+    __builtin_memcpy(&mask1, &rec->mask[sizeof(mask0)], sizeof(mask1));
+    __builtin_memcpy(&mask_tail, &rec->mask[sizeof(mask0) + sizeof(mask1)], sizeof(mask_tail));
+
+    return ((mask0 ^ read_mask_word) | (mask1 ^ read_mask_word) | ((mask_tail ^ read_mask_word) & tail_valid_mask)) == 0;
+}
+
+// bp_record 的 x0-x29、q0-q31 与对应软件现场均连续存放，全 READ 模式可分别一次性复制。
+static __always_inline void bp_record_read_all(struct bp_record *rec, const struct pt_regs *regs, const struct fp_regs *fp_regs)
+{
+    rec->pc = regs->pc;
+    rec->lr = regs->regs[30];
+    rec->sp = regs->sp;
+    rec->orig_x0 = regs->orig_x0;
+    rec->syscallno = regs->syscallno;
+    rec->pstate = regs->pstate;
+    __builtin_memcpy(&rec->x0, &regs->regs[0], sizeof(rec->x0) * 30);
+    rec->fpsr = fp_regs->fpsr;
+    rec->fpcr = fp_regs->fpcr;
+    __builtin_memcpy(&rec->q0, &fp_regs->q[0], sizeof(fp_regs->q));
+}
+
 // 断点触发回调函数
-static inline void sample_hbp_handler(struct pt_regs *regs, struct bp_point *point)
+static inline void sample_hbp_handler(struct pt_regs *regs, struct fp_regs *fp_regs, struct bp_point *point)
 {
     struct bp_record *rec = NULL;
 
-    if (!regs || !point) return;
+    if (!regs || !fp_regs || !point) return;
 
     // 唯一的一次查找：查找当前 PC 是否记录过
     for (int i = 0; i < point->record_count; i++)
@@ -36,11 +68,11 @@ static inline void sample_hbp_handler(struct pt_regs *regs, struct bp_point *poi
         }
     }
     // 如果是新 PC 且空间足够，存储到下一个槽位
-    if (!rec && point->record_count < 0x100)
+    if (!rec && point->record_count < BP_RECORD_MAX)
     {
         rec = &point->records[point->record_count];
         rec->pc = regs->pc;
-        // 新槽位所有寄存器的mask默认读取
+        // 新 PC 只初始化一次，继续使用统一宏，避免掩码布局在这里出现第二套实现。
         for (int i = IDX_PC; i < MAX_REG_COUNT; i++) BP_SET_MASK(rec, i, BP_OP_READ);
         point->record_count++;
     }
@@ -50,6 +82,14 @@ static inline void sample_hbp_handler(struct pt_regs *regs, struct bp_point *poi
     {
 
         rec->hit_count++; // 命中计数
+
+        // 常见的全 READ 模式直接批量保存，避免每次命中执行 71 组掩码提取和条件分支。
+        if (bp_record_reads_all(rec))
+        {
+            bp_record_read_all(rec, regs, fp_regs);
+            return;
+        }
+
         uint8_t op;
 
         // PC
@@ -234,179 +274,179 @@ static inline void sample_hbp_handler(struct pt_regs *regs, struct bp_point *poi
 
         // FPSR
         op = BP_GET_MASK(rec, IDX_FPSR);
-        if (op == BP_OP_READ) rec->fpsr = read_fpsr();
-        else if (op == BP_OP_WRITE) write_fpsr(rec->fpsr);
+        if (op == BP_OP_READ) rec->fpsr = fp_regs->fpsr;
+        else if (op == BP_OP_WRITE) fp_regs->fpsr = rec->fpsr;
 
         // FPCR
         op = BP_GET_MASK(rec, IDX_FPCR);
-        if (op == BP_OP_READ) rec->fpcr = read_fpcr();
-        else if (op == BP_OP_WRITE) write_fpcr(rec->fpcr);
+        if (op == BP_OP_READ) rec->fpcr = fp_regs->fpcr;
+        else if (op == BP_OP_WRITE) fp_regs->fpcr = rec->fpcr;
 
         // Q0
         op = BP_GET_MASK(rec, IDX_Q0);
-        if (op == BP_OP_READ) read_q_reg(0, &rec->q0);
-        else if (op == BP_OP_WRITE) write_q_reg(0, &rec->q0);
+        if (op == BP_OP_READ) rec->q0 = fp_regs->q[0];
+        else if (op == BP_OP_WRITE) fp_regs->q[0] = rec->q0;
 
         // Q1
         op = BP_GET_MASK(rec, IDX_Q1);
-        if (op == BP_OP_READ) read_q_reg(1, &rec->q1);
-        else if (op == BP_OP_WRITE) write_q_reg(1, &rec->q1);
+        if (op == BP_OP_READ) rec->q1 = fp_regs->q[1];
+        else if (op == BP_OP_WRITE) fp_regs->q[1] = rec->q1;
 
         // Q2
         op = BP_GET_MASK(rec, IDX_Q2);
-        if (op == BP_OP_READ) read_q_reg(2, &rec->q2);
-        else if (op == BP_OP_WRITE) write_q_reg(2, &rec->q2);
+        if (op == BP_OP_READ) rec->q2 = fp_regs->q[2];
+        else if (op == BP_OP_WRITE) fp_regs->q[2] = rec->q2;
 
         // Q3
         op = BP_GET_MASK(rec, IDX_Q3);
-        if (op == BP_OP_READ) read_q_reg(3, &rec->q3);
-        else if (op == BP_OP_WRITE) write_q_reg(3, &rec->q3);
+        if (op == BP_OP_READ) rec->q3 = fp_regs->q[3];
+        else if (op == BP_OP_WRITE) fp_regs->q[3] = rec->q3;
 
         // Q4
         op = BP_GET_MASK(rec, IDX_Q4);
-        if (op == BP_OP_READ) read_q_reg(4, &rec->q4);
-        else if (op == BP_OP_WRITE) write_q_reg(4, &rec->q4);
+        if (op == BP_OP_READ) rec->q4 = fp_regs->q[4];
+        else if (op == BP_OP_WRITE) fp_regs->q[4] = rec->q4;
 
         // Q5
         op = BP_GET_MASK(rec, IDX_Q5);
-        if (op == BP_OP_READ) read_q_reg(5, &rec->q5);
-        else if (op == BP_OP_WRITE) write_q_reg(5, &rec->q5);
+        if (op == BP_OP_READ) rec->q5 = fp_regs->q[5];
+        else if (op == BP_OP_WRITE) fp_regs->q[5] = rec->q5;
 
         // Q6
         op = BP_GET_MASK(rec, IDX_Q6);
-        if (op == BP_OP_READ) read_q_reg(6, &rec->q6);
-        else if (op == BP_OP_WRITE) write_q_reg(6, &rec->q6);
+        if (op == BP_OP_READ) rec->q6 = fp_regs->q[6];
+        else if (op == BP_OP_WRITE) fp_regs->q[6] = rec->q6;
 
         // Q7
         op = BP_GET_MASK(rec, IDX_Q7);
-        if (op == BP_OP_READ) read_q_reg(7, &rec->q7);
-        else if (op == BP_OP_WRITE) write_q_reg(7, &rec->q7);
+        if (op == BP_OP_READ) rec->q7 = fp_regs->q[7];
+        else if (op == BP_OP_WRITE) fp_regs->q[7] = rec->q7;
 
         // Q8
         op = BP_GET_MASK(rec, IDX_Q8);
-        if (op == BP_OP_READ) read_q_reg(8, &rec->q8);
-        else if (op == BP_OP_WRITE) write_q_reg(8, &rec->q8);
+        if (op == BP_OP_READ) rec->q8 = fp_regs->q[8];
+        else if (op == BP_OP_WRITE) fp_regs->q[8] = rec->q8;
 
         // Q9
         op = BP_GET_MASK(rec, IDX_Q9);
-        if (op == BP_OP_READ) read_q_reg(9, &rec->q9);
-        else if (op == BP_OP_WRITE) write_q_reg(9, &rec->q9);
+        if (op == BP_OP_READ) rec->q9 = fp_regs->q[9];
+        else if (op == BP_OP_WRITE) fp_regs->q[9] = rec->q9;
 
         // Q10
         op = BP_GET_MASK(rec, IDX_Q10);
-        if (op == BP_OP_READ) read_q_reg(10, &rec->q10);
-        else if (op == BP_OP_WRITE) write_q_reg(10, &rec->q10);
+        if (op == BP_OP_READ) rec->q10 = fp_regs->q[10];
+        else if (op == BP_OP_WRITE) fp_regs->q[10] = rec->q10;
 
         // Q11
         op = BP_GET_MASK(rec, IDX_Q11);
-        if (op == BP_OP_READ) read_q_reg(11, &rec->q11);
-        else if (op == BP_OP_WRITE) write_q_reg(11, &rec->q11);
+        if (op == BP_OP_READ) rec->q11 = fp_regs->q[11];
+        else if (op == BP_OP_WRITE) fp_regs->q[11] = rec->q11;
 
         // Q12
         op = BP_GET_MASK(rec, IDX_Q12);
-        if (op == BP_OP_READ) read_q_reg(12, &rec->q12);
-        else if (op == BP_OP_WRITE) write_q_reg(12, &rec->q12);
+        if (op == BP_OP_READ) rec->q12 = fp_regs->q[12];
+        else if (op == BP_OP_WRITE) fp_regs->q[12] = rec->q12;
 
         // Q13
         op = BP_GET_MASK(rec, IDX_Q13);
-        if (op == BP_OP_READ) read_q_reg(13, &rec->q13);
-        else if (op == BP_OP_WRITE) write_q_reg(13, &rec->q13);
+        if (op == BP_OP_READ) rec->q13 = fp_regs->q[13];
+        else if (op == BP_OP_WRITE) fp_regs->q[13] = rec->q13;
 
         // Q14
         op = BP_GET_MASK(rec, IDX_Q14);
-        if (op == BP_OP_READ) read_q_reg(14, &rec->q14);
-        else if (op == BP_OP_WRITE) write_q_reg(14, &rec->q14);
+        if (op == BP_OP_READ) rec->q14 = fp_regs->q[14];
+        else if (op == BP_OP_WRITE) fp_regs->q[14] = rec->q14;
 
         // Q15
         op = BP_GET_MASK(rec, IDX_Q15);
-        if (op == BP_OP_READ) read_q_reg(15, &rec->q15);
-        else if (op == BP_OP_WRITE) write_q_reg(15, &rec->q15);
+        if (op == BP_OP_READ) rec->q15 = fp_regs->q[15];
+        else if (op == BP_OP_WRITE) fp_regs->q[15] = rec->q15;
 
         // Q16
         op = BP_GET_MASK(rec, IDX_Q16);
-        if (op == BP_OP_READ) read_q_reg(16, &rec->q16);
-        else if (op == BP_OP_WRITE) write_q_reg(16, &rec->q16);
+        if (op == BP_OP_READ) rec->q16 = fp_regs->q[16];
+        else if (op == BP_OP_WRITE) fp_regs->q[16] = rec->q16;
 
         // Q17
         op = BP_GET_MASK(rec, IDX_Q17);
-        if (op == BP_OP_READ) read_q_reg(17, &rec->q17);
-        else if (op == BP_OP_WRITE) write_q_reg(17, &rec->q17);
+        if (op == BP_OP_READ) rec->q17 = fp_regs->q[17];
+        else if (op == BP_OP_WRITE) fp_regs->q[17] = rec->q17;
 
         // Q18
         op = BP_GET_MASK(rec, IDX_Q18);
-        if (op == BP_OP_READ) read_q_reg(18, &rec->q18);
-        else if (op == BP_OP_WRITE) write_q_reg(18, &rec->q18);
+        if (op == BP_OP_READ) rec->q18 = fp_regs->q[18];
+        else if (op == BP_OP_WRITE) fp_regs->q[18] = rec->q18;
 
         // Q19
         op = BP_GET_MASK(rec, IDX_Q19);
-        if (op == BP_OP_READ) read_q_reg(19, &rec->q19);
-        else if (op == BP_OP_WRITE) write_q_reg(19, &rec->q19);
+        if (op == BP_OP_READ) rec->q19 = fp_regs->q[19];
+        else if (op == BP_OP_WRITE) fp_regs->q[19] = rec->q19;
 
         // Q20
         op = BP_GET_MASK(rec, IDX_Q20);
-        if (op == BP_OP_READ) read_q_reg(20, &rec->q20);
-        else if (op == BP_OP_WRITE) write_q_reg(20, &rec->q20);
+        if (op == BP_OP_READ) rec->q20 = fp_regs->q[20];
+        else if (op == BP_OP_WRITE) fp_regs->q[20] = rec->q20;
 
         // Q21
         op = BP_GET_MASK(rec, IDX_Q21);
-        if (op == BP_OP_READ) read_q_reg(21, &rec->q21);
-        else if (op == BP_OP_WRITE) write_q_reg(21, &rec->q21);
+        if (op == BP_OP_READ) rec->q21 = fp_regs->q[21];
+        else if (op == BP_OP_WRITE) fp_regs->q[21] = rec->q21;
 
         // Q22
         op = BP_GET_MASK(rec, IDX_Q22);
-        if (op == BP_OP_READ) read_q_reg(22, &rec->q22);
-        else if (op == BP_OP_WRITE) write_q_reg(22, &rec->q22);
+        if (op == BP_OP_READ) rec->q22 = fp_regs->q[22];
+        else if (op == BP_OP_WRITE) fp_regs->q[22] = rec->q22;
 
         // Q23
         op = BP_GET_MASK(rec, IDX_Q23);
-        if (op == BP_OP_READ) read_q_reg(23, &rec->q23);
-        else if (op == BP_OP_WRITE) write_q_reg(23, &rec->q23);
+        if (op == BP_OP_READ) rec->q23 = fp_regs->q[23];
+        else if (op == BP_OP_WRITE) fp_regs->q[23] = rec->q23;
 
         // Q24
         op = BP_GET_MASK(rec, IDX_Q24);
-        if (op == BP_OP_READ) read_q_reg(24, &rec->q24);
-        else if (op == BP_OP_WRITE) write_q_reg(24, &rec->q24);
+        if (op == BP_OP_READ) rec->q24 = fp_regs->q[24];
+        else if (op == BP_OP_WRITE) fp_regs->q[24] = rec->q24;
 
         // Q25
         op = BP_GET_MASK(rec, IDX_Q25);
-        if (op == BP_OP_READ) read_q_reg(25, &rec->q25);
-        else if (op == BP_OP_WRITE) write_q_reg(25, &rec->q25);
+        if (op == BP_OP_READ) rec->q25 = fp_regs->q[25];
+        else if (op == BP_OP_WRITE) fp_regs->q[25] = rec->q25;
 
         // Q26
         op = BP_GET_MASK(rec, IDX_Q26);
-        if (op == BP_OP_READ) read_q_reg(26, &rec->q26);
-        else if (op == BP_OP_WRITE) write_q_reg(26, &rec->q26);
+        if (op == BP_OP_READ) rec->q26 = fp_regs->q[26];
+        else if (op == BP_OP_WRITE) fp_regs->q[26] = rec->q26;
 
         // Q27
         op = BP_GET_MASK(rec, IDX_Q27);
-        if (op == BP_OP_READ) read_q_reg(27, &rec->q27);
-        else if (op == BP_OP_WRITE) write_q_reg(27, &rec->q27);
+        if (op == BP_OP_READ) rec->q27 = fp_regs->q[27];
+        else if (op == BP_OP_WRITE) fp_regs->q[27] = rec->q27;
 
         // Q28
         op = BP_GET_MASK(rec, IDX_Q28);
-        if (op == BP_OP_READ) read_q_reg(28, &rec->q28);
-        else if (op == BP_OP_WRITE) write_q_reg(28, &rec->q28);
+        if (op == BP_OP_READ) rec->q28 = fp_regs->q[28];
+        else if (op == BP_OP_WRITE) fp_regs->q[28] = rec->q28;
 
         // Q29
         op = BP_GET_MASK(rec, IDX_Q29);
-        if (op == BP_OP_READ) read_q_reg(29, &rec->q29);
-        else if (op == BP_OP_WRITE) write_q_reg(29, &rec->q29);
+        if (op == BP_OP_READ) rec->q29 = fp_regs->q[29];
+        else if (op == BP_OP_WRITE) fp_regs->q[29] = rec->q29;
 
         // Q30
         op = BP_GET_MASK(rec, IDX_Q30);
-        if (op == BP_OP_READ) read_q_reg(30, &rec->q30);
-        else if (op == BP_OP_WRITE) write_q_reg(30, &rec->q30);
+        if (op == BP_OP_READ) rec->q30 = fp_regs->q[30];
+        else if (op == BP_OP_WRITE) fp_regs->q[30] = rec->q30;
 
         // Q31
         op = BP_GET_MASK(rec, IDX_Q31);
-        if (op == BP_OP_READ) read_q_reg(31, &rec->q31);
-        else if (op == BP_OP_WRITE) write_q_reg(31, &rec->q31);
+        if (op == BP_OP_READ) rec->q31 = fp_regs->q[31];
+        else if (op == BP_OP_WRITE) fp_regs->q[31] = rec->q31;
     }
 }
 
-static inline void sample_hbp_handler_entry(void *regs, void *self)
+static inline void sample_hbp_handler_entry(void *regs, void *fp_regs, void *hit_point)
 {
-    sample_hbp_handler((struct pt_regs *)regs, (struct bp_point *)self);
+    sample_hbp_handler((struct pt_regs *)regs, (struct fp_regs *)fp_regs, (struct bp_point *)hit_point);
 }
 
 static inline void prepare_break_point_handlers(struct break_point *info)

@@ -170,18 +170,18 @@ namespace Disasm
         {
             int major = 0, minor = 0;
             cs_version(&major, &minor);
-            printf("[*] Capstone 版本: %d.%d\n", major, minor);
+            LS_LOGI_TAG("Disassembler", "Capstone 版本: %d.%d", major, minor);
 
             if (!cs_support(CS_ARCH_AARCH64))
             {
-                printf("[-] 致命错误: Capstone 库未编译 ARM64/AArch64 支持！\n");
+                LS_LOGE_TAG("Disassembler", "Capstone 库未编译 ARM64/AArch64 支持");
                 return;
             }
 
             cs_err err = cs_open(CS_ARCH_AARCH64, CS_MODE_LITTLE_ENDIAN, &m_handle);
             if (err != CS_ERR_OK)
             {
-                printf("[-] ARM64 初始化失败: %s\n", cs_strerror(err));
+                LS_LOGE_TAG("Disassembler", "ARM64 初始化失败: %s", cs_strerror(err));
                 return;
             }
 
@@ -189,7 +189,7 @@ namespace Disasm
             cs_option(m_handle, CS_OPT_SKIPDATA, CS_OPT_ON);
 
             m_valid = true;
-            printf("[+] 反汇编器初始化成功: ARM64\n");
+            LS_LOGI_TAG("Disassembler", "初始化成功: ARM64");
         }
 
         ~Disassembler()
@@ -220,13 +220,13 @@ namespace Disasm
 
             if (!m_valid)
             {
-                printf("[-] 反汇编器未初始化\n");
+                LS_LOGE_TAG("Disassembler", "反汇编器未初始化");
                 return results;
             }
 
             if (address & 0x3)
             {
-                printf("[-] 错误: 地址未4字节对齐 (0x%llX)\n", (unsigned long long)address);
+                LS_LOGE_TAG("Disassembler", "地址未 4 字节对齐: 0x%llX", (unsigned long long)address);
                 return results;
             }
 
@@ -235,12 +235,12 @@ namespace Disasm
 
             if (count == 0)
             {
-                printf("[-] 反汇编失败: %s\n", cs_strerror(cs_errno(m_handle)));
+                LS_LOGE_TAG("Disassembler", "反汇编失败: %s", cs_strerror(cs_errno(m_handle)));
                 return results;
             }
 
             // 输出反汇编结果
-            if (logInstructions) printf("[*] 反汇编 %zu 条指令:\n", count);
+            if (logInstructions) LS_LOGI_TAG("Disassembler", "反汇编 %zu 条指令", count);
             for (size_t i = 0; i < count; i++)
             {
                 if (!logInstructions) continue;
@@ -257,7 +257,7 @@ namespace Disasm
                 for (char *p = mn; *p; ++p) *p = std::toupper(static_cast<unsigned char>(*p));
                 for (char *p = op; *p; ++p) *p = std::toupper(static_cast<unsigned char>(*p));
 
-                printf("  0x%llX:  %-12s  %-7s %s\n", (unsigned long long)insn[i].address, bytesStr, mn, op);
+                LS_LOGI_TAG("Disassembler", "0x%llX: %-12s %-7s %s", (unsigned long long)insn[i].address, bytesStr, mn, op);
             }
 
             // 填充结果

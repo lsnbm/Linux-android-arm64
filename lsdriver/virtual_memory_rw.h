@@ -144,8 +144,8 @@ static inline void *pte_map_page(phys_addr_t paddr, size_t size, const void *buf
     // 修改 PTE 指向目标物理页
     set_pte(pte_info.pte_address, pfn_pte(pfn, __pgprot(FLAGS)));
 
-    // 刷新该VA的TLB缓存，同步到当前cpu
-    flush_kernel_tlb_addr_all_asid_current_cpu((uint64_t)pte_info.base_address);
+    // 可能跨 CPU 使用，广播刷新对应 VA 的 TLB。
+    flush_tlb_addr_all_asid_all_cpus((uint64_t)pte_info.base_address);
 
     // 刷新该页的 TLB, 内部含：dsb(ish) + TLBI + dsb(ish)+isb(),手写刷新需取消dsbisb注释
     // flush_tlb_kernel_range((uint64_t)pte_info.base_address, (uint64_t)pte_info.base_address + PAGE_SIZE);
@@ -227,14 +227,19 @@ static inline int pte_write_physical(phys_addr_t paddr, const void *buffer, size
 // 硬件mmu翻译
 static inline int mmu_translate_va_to_pa(struct mm_struct *mm, uint64_t va, phys_addr_t *pa)
 {
-    uint64_t pgd_phys;
     int ret;
     uint64_t phys_out;
-    uint64_t tmp_daif, tmp_ttbr, tmp_par, tmp_offset, tmp_ttbr_new;
+    uint64_t tmp_daif, tmp_ttbr, tmp_par, tmp_offset;
 
     if (!mm || !mm->pgd || !pa) return -EINVAL;
 
-    pgd_phys = virt_to_phys(mm->pgd);
+    /*
+    TTBR0_EL1 不能在所有配置下都直接写入 PGD 物理地址：PA52 布局要求把
+    PA[51:48] 编码到 TTBR[5:2]，否则硬件会从错误的物理地址读取页表。
+    这里无条件使用可退化编码；PA48 下 PA[51:48] 为 0，结果与原物理地址相同，
+    因此同一模块无需依赖编译时 CONFIG_ARM64_PA_BITS_52 也能适配两种布局。
+    */
+    uint64_t ttbr_new = phys_to_ttbr(virt_to_phys(mm->pgd));
 
     asm volatile(
 
@@ -243,24 +248,9 @@ static inline int mmu_translate_va_to_pa(struct mm_struct *mm, uint64_t va, phys
         "msr    daifset, #0xf\n" // 关闭所有中断(D/A/I/F)
         "isb\n"
 
-        /*
-        6.12 内核：全面完善并默认启用了 LPA2 特性（支持 4K/16K 页面的 52 位物理地址）。
-            如果系统开启了 LPA2，PAR_EL1 寄存器的格式会发生变化，物理地址可以长达 52 位。
-            原有代码中的 ubfx %[tmp_par], %[tmp_par], #12, #36 强行将物理地址截断在了 48 位（提取 36 位 + 偏移 12 位 = 48 位）。
-            就不能这么写了
-            后续当你用这个被截断的错误物理地址去读写内存时，会触发同步外部中止 (Synchronous External Abort / SError)，引发极其底层的硬件级死机。
-        准备新的 TTBR0 布局 (兼容 LPA2)
-        如果 pgd_phys 超过 48 位 (LPA2 开启)，
-        物理地址的 [51:48] 必须移动到寄存器的 [5:2] 位。
-        如果没开启 LPA2，pgd_phys[51:48] 为 0，此逻辑依然安全（不影响结果）。
-         */
-        "lsr    %[tmp_ttbr_new], %[pgd_phys], #48\n"                       // 提取 PA[51:48]
-        "and    %[tmp_offset], %[pgd_phys], #0xffffffffffff\n"             // 提取 PA[47:0]
-        "orr    %[tmp_ttbr_new], %[tmp_offset], %[tmp_ttbr_new], lsl #2\n" // 组合到新 TTBR 格式
-
         // 切换 TTBR0
         "mrs    %[tmp_ttbr], ttbr0_el1\n"
-        "msr    ttbr0_el1, %[tmp_ttbr_new]\n"
+        "msr    ttbr0_el1, %[ttbr_new]\n"
         "isb\n"
 
         /*
@@ -337,8 +327,8 @@ static inline int mmu_translate_va_to_pa(struct mm_struct *mm, uint64_t va, phys
 
         ".L_end%=:\n"
 
-        : [ret] "=&r"(ret), [phys_out] "=&r"(phys_out), [tmp_daif] "=&r"(tmp_daif), [tmp_ttbr] "=&r"(tmp_ttbr), [tmp_par] "=&r"(tmp_par), [tmp_offset] "=&r"(tmp_offset), [tmp_ttbr_new] "=&r"(tmp_ttbr_new)
-        : [pgd_phys] "r"(pgd_phys), [va] "r"(va), [efault_val] "r"(-EFAULT)
+        : [ret] "=&r"(ret), [phys_out] "=&r"(phys_out), [tmp_daif] "=&r"(tmp_daif), [tmp_ttbr] "=&r"(tmp_ttbr), [tmp_par] "=&r"(tmp_par), [tmp_offset] "=&r"(tmp_offset)
+        : [ttbr_new] "r"(ttbr_new), [va] "r"(va), [efault_val] "r"(-EFAULT)
         : "cc", "memory");
 
     if (ret == 0) *pa = phys_out;

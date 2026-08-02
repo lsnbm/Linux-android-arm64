@@ -1,6 +1,7 @@
 #ifndef SURFACE_CONTROL_MANAGER_H
 #define SURFACE_CONTROL_MANAGER_H
 
+#include "../include/logger.h"
 #include <android/native_window.h>
 #include <android/log.h>
 #include <dlfcn.h>
@@ -19,35 +20,35 @@
 #include <vector>
 
 // 解析符号的宏
-#define ResolveMethod(ClassName, MethodName, Handle, MethodSignature)                                                                                     \
-    ClassName##__##MethodName = reinterpret_cast<decltype(ClassName##__##MethodName)>(symbolMethod.Find(Handle, MethodSignature));                        \
-    if (nullptr == ClassName##__##MethodName)                                                                                                             \
-    {                                                                                                                                                     \
-        __android_log_print(ANDROID_LOG_ERROR, "ImGui", "[-] Method not found (Safety Warning): %s -> %s::%s", MethodSignature, #ClassName, #MethodName); \
+#define ResolveMethod(ClassName, MethodName, Handle, MethodSignature)                                                              \
+    ClassName##__##MethodName = reinterpret_cast<decltype(ClassName##__##MethodName)>(symbolMethod.Find(Handle, MethodSignature)); \
+    if (nullptr == ClassName##__##MethodName)                                                                                      \
+    {                                                                                                                              \
+        LS_LOGE_TAG("Surface", "Method not found: %s -> %s::%s", MethodSignature, #ClassName, #MethodName);                        \
     }
 
 // 如果函数指针为空，直接返回默认值，不崩溃
-#define SAFE_CALL_RET(FuncPtr, DefaultRet, ...)                                                 \
-    if (FuncPtr != nullptr)                                                                     \
-    {                                                                                           \
-        return FuncPtr(__VA_ARGS__);                                                            \
-    }                                                                                           \
-    else                                                                                        \
-    {                                                                                           \
-        __android_log_print(ANDROID_LOG_ERROR, "ImGui", "[-] Skip Call: %s is NULL", #FuncPtr); \
-        return DefaultRet;                                                                      \
+#define SAFE_CALL_RET(FuncPtr, DefaultRet, ...)                    \
+    if (FuncPtr != nullptr)                                        \
+    {                                                              \
+        return FuncPtr(__VA_ARGS__);                               \
+    }                                                              \
+    else                                                           \
+    {                                                              \
+        LS_LOGE_TAG("Surface", "Skip call: %s is null", #FuncPtr); \
+        return DefaultRet;                                         \
     }
 
 // 如果函数指针为空，直接返回，不崩溃（用于void函数）
-#define SAFE_CALL_VOID(FuncPtr, ...)                                                            \
-    if (FuncPtr != nullptr)                                                                     \
-    {                                                                                           \
-        FuncPtr(__VA_ARGS__);                                                                   \
-    }                                                                                           \
-    else                                                                                        \
-    {                                                                                           \
-        __android_log_print(ANDROID_LOG_ERROR, "ImGui", "[-] Skip Call: %s is NULL", #FuncPtr); \
-        return;                                                                                 \
+#define SAFE_CALL_VOID(FuncPtr, ...)                               \
+    if (FuncPtr != nullptr)                                        \
+    {                                                              \
+        FuncPtr(__VA_ARGS__);                                      \
+    }                                                              \
+    else                                                           \
+    {                                                              \
+        LS_LOGE_TAG("Surface", "Skip call: %s is null", #FuncPtr); \
+        return;                                                    \
     }
 
 namespace android
@@ -185,7 +186,7 @@ namespace android
                 systemVersionString.resize(__system_property_get("ro.build.version.release", systemVersionString.data()));
                 if (!systemVersionString.empty()) systemVersion = std::stoi(systemVersionString);
 
-                __android_log_print(ANDROID_LOG_INFO, "ImGui", "[+] Detected Android Version: %zu", systemVersion);
+                LS_LOGD_TAG("Surface", "Android version=%zu", systemVersion);
 
                 static std::unordered_map<size_t, std::unordered_map<void **, const char *>> patchesTable = {
                     {
@@ -249,7 +250,7 @@ namespace android
 
                 if (!libgui || !libutils)
                 {
-                    __android_log_print(ANDROID_LOG_ERROR, "ImGui", "[-] Failed to open libgui or libutils");
+                    LS_LOGE_TAG("Surface", "无法打开 libgui 或 libutils");
                     return;
                 }
 
@@ -298,14 +299,14 @@ namespace android
                         }
                         else
                         {
-                            __android_log_print(ANDROID_LOG_ERROR, "ImGui", "[-] Patch method not found: %s", signature);
+                            LS_LOGE_TAG("Surface", "补丁符号未找到: %s", signature);
                         }
                     }
                 }
                 else if (systemVersion > 16)
                 {
                     // 向前兼容尝试
-                    __android_log_print(ANDROID_LOG_WARN, "ImGui", "[!] Unknown system version %zu, trying to use patch 16", systemVersion);
+                    LS_LOGW_TAG("Surface", "未知 Android 版本 %zu，尝试使用版本 16 补丁", systemVersion);
                     for (const auto &[patchTo, signature] : patchesTable.at(16))
                     {
                         void *foundSym = symbolMethod.Find(libgui, signature);
@@ -566,7 +567,7 @@ namespace android
                     }
                     else
                     {
-                        __android_log_print(ANDROID_LOG_ERROR, "ImGui", "[-] CreateSurface_and9 method missing");
+                        LS_LOGE_TAG("Surface", "CreateSurface_and9 方法缺失");
                     }
                 }
                 else if (f.systemVersion >= 10)
@@ -577,7 +578,7 @@ namespace android
                     }
                     else
                     {
-                        __android_log_print(ANDROID_LOG_ERROR, "ImGui", "[-] CreateSurface method missing");
+                        LS_LOGE_TAG("Surface", "CreateSurface 方法缺失");
                     }
                 }
 
@@ -851,7 +852,7 @@ namespace android
             detail::Surface *rawSurface = surfaceControl.GetSurface();
             if (rawSurface == nullptr)
             {
-                __android_log_print(ANDROID_LOG_ERROR, "ImGui", "[-] Failed to get Surface from SurfaceControl");
+                LS_LOGE_TAG("Surface", "无法从 SurfaceControl 获取 Surface");
                 return nullptr;
             }
 

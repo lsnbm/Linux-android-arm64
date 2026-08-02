@@ -3,7 +3,6 @@
 #include <chrono>
 #include <cstdarg>
 #include <cstdio>
-#include <print>
 #include <thread>
 
 #include "driver.h"
@@ -15,7 +14,7 @@ inline void GnssLog(const char *fmt, ...)
     va_start(args, fmt);
     vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
-    std::println(stdout, "[定位测试] {}", buf);
+    LS_LOGI_TAG("GNSS", "%s", buf);
 }
 
 inline void DoGnssHold(const char *name, int latitude_e7, int longitude_e7, int seconds)

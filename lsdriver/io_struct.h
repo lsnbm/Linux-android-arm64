@@ -34,6 +34,7 @@ struct env_params
 #define BP_OP_READ    0x1 // 01: 读
 #define BP_OP_WRITE   0x2 // 10: 写
 #define BP_CONFIG_MAX 16
+#define BP_RECORD_MAX 0x10
 
 // 设置掩码位的宏，参数1:结构体指针，参数2:寄存器索引，参数3:操作类型
 #define BP_SET_MASK(record, reg, op)                            \
@@ -171,7 +172,7 @@ struct bp_record
     uint64_t lr;        // X30
     uint64_t sp;        // Stack Pointer
     uint64_t orig_x0;   // 原始 X0
-    uint64_t syscallno; // 系统调用号
+    int32_t syscallno;  // 系统调用号
     uint64_t pstate;    // 处理器状态
     uint64_t x0, x1, x2, x3, x4, x5, x6, x7, x8, x9;
     uint64_t x10, x11, x12, x13, x14, x15, x16, x17, x18, x19;
@@ -189,19 +190,18 @@ struct bp_record
 // 单个观点地址结构
 struct bp_point
 {
-    void (*on_hit)(void *regs, void *self); // 触发回调，命中时调用
-    enum bp_type bt;                        // 断点类型
-    enum bp_len bl;                         // 断点长度
-    enum bp_scope bs;                       // 断点作用线程范围
-    uint64_t hit_addr;                      // 监控的地址
-    int record_count;                       // 当前已记录的不同 PC 数量
-    struct bp_record records[0x100];        // 记录不同 PC 触发状态的数组
+    void (*on_hit)(void *regs, void *fp_regs, void *hit_point); // 触发回调，命中时调用
+    enum bp_type bt;                                            // 断点类型
+    enum bp_len bl;                                             // 断点长度
+    enum bp_scope bs;                                           // 断点作用线程范围
+    uint64_t hit_addr;                                          // 监控的地址
+    int record_count;                                           // 当前已记录的不同 PC 数量
+    struct bp_record records[BP_RECORD_MAX];                    // 记录不同 PC 触发状态的数组
 };
 
 // 存储整体命中信息
 struct break_point
 {
-
     uint64_t num_brps;                     // 执行断点的数量
     uint64_t num_wrps;                     // 访问断点的数量
     int tgid;                              // 这个 break_point 属于哪个进程
@@ -314,13 +314,25 @@ enum request_op
 // 将在队列中使用的请求实例结构体
 struct request_obj
 {
-    bool kernel; // 由用户模式设置 true = 内核有待处理的请求, false = 请求已完成
-    bool user;   // 由内核模式设置 true = 用户模式有待处理的请求, false = 请求已完成
+    /*
+    两者都不保证 ARM64 多核间的硬件内存顺序
+    volatile 约束对象的每次访问，防止编译器省略、合并或用寄存器缓存该字段
+    但不会绕过 CPU Cache。对应到硬件屏障就是
+    dsb:数据访问屏障,等读写内存完成 
+    isb:指令执行屏障,CPU流水线重新取址
+    
+    asm volatile("" ::: "memory") 是当前位置的编译器内存屏障，禁止其它内存访问跨越它重排，是编译时防止指令重排
+    但不会绕过硬件指令访问乱序
+    dmb:指令访问顺序屏障,load/store 内存访问指令的约束乱序访问
+   
+    然后dsb,isb,dmb指令操作数都是共享域范围:ish / nsh / osh / ishst
+    */
+    volatile bool kernel;        // 由用户模式设置 true = 内核有待处理的请求, false = 请求已完成
+    volatile bool user;          // 由内核模式设置 true = 用户模式有待处理的请求, false = 请求已完成
+    volatile enum request_op op; // 请求操作类型
+    volatile int status;         // 请求操作状态
 
     int tgid; // 当前派发指定的进程 TGID
-
-    enum request_op op; // 请求操作类型
-    int status;         // 请求操作状态
 
     // 虚拟内存读写信息
     struct virtual_memoryrw vmemrw_info;

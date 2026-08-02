@@ -34,7 +34,7 @@
 // ============================================================================
 class UIStyle
 {
-  public:
+public:
     float scale = 2.0f, margin = 40.0f, opacity = 1.0f;
     constexpr float S(float v) const noexcept
     {
@@ -181,10 +181,10 @@ namespace Colors
 // ============================================================================
 class MainUI
 {
-  private:
+private:
     MemScanner &scanner_ = MemoryTool::Scanner();
     PointerManager &ptrManager_ = MemoryTool::Pointer();
-        SavedAddressManager &savedManager_ = MemoryTool::Saved();
+    SavedAddressManager &savedManager_ = MemoryTool::Saved();
     MemViewer &memViewer_ = MemoryTool::Viewer();
 
     struct ScanParams
@@ -336,7 +336,7 @@ class MainUI
         int flatIndex = 0;
         for (auto &point : info.points)
         {
-            const int recordCount = std::clamp(point.record_count, 0, 0x100);
+            const int recordCount = std::clamp(point.record_count, 0, BP_RECORD_MAX);
             if (recordIndex >= flatIndex && recordIndex < flatIndex + recordCount) return &point.records[recordIndex - flatIndex];
             flatIndex += recordCount;
         }
@@ -554,7 +554,7 @@ class MainUI
         return savedManager_.add(address, *type, kind);
     }
 
-  public:
+public:
     MainUI()
     {
         for (int i = 500; i <= 100000; i += 500)
@@ -588,7 +588,7 @@ class MainUI
         ImGuiFloatingKeyboard::Draw();
     }
 
-  private:
+private:
     // ---- 悬浮按钮 ----
     void drawFloatButton()
     {
@@ -1657,7 +1657,7 @@ class MainUI
         int totalRecordCount = 0;
         for (const auto &point : info.points)
         {
-            const int recordCount = std::clamp(point.record_count, 0, 0x100);
+            const int recordCount = std::clamp(point.record_count, 0, BP_RECORD_MAX);
             if (point.hit_addr) totalPointCount++;
             for (int r = 0; r < recordCount; ++r)
             {
@@ -1670,15 +1670,15 @@ class MainUI
         UI::Text(Colors::WARN, "point数: %d  record数: %d  总命中: %llu", totalPointCount, totalRecordCount, (unsigned long long)totalHits);
         UI::Space(S(6));
 
-        static bool pointExpandState[16] = {};
-        static bool recordsExpandState[16] = {};
-        static bool recordExpandState[16 * 0x100] = {};
+        static bool pointExpandState[BP_CONFIG_MAX] = {};
+        static bool recordsExpandState[BP_CONFIG_MAX] = {};
+        static bool recordExpandState[BP_CONFIG_MAX * BP_RECORD_MAX] = {};
         int flatIndex = 0;
 
-        for (int p = 0; p < 16; ++p)
+        for (int p = 0; p < BP_CONFIG_MAX; ++p)
         {
             const auto &point = info.points[p];
-            const int recordCount = std::clamp(point.record_count, 0, 0x100);
+            const int recordCount = std::clamp(point.record_count, 0, BP_RECORD_MAX);
             const int pointFlatStart = flatIndex;
             if (!point.hit_addr)
             {
@@ -2260,7 +2260,7 @@ int RunMemoryTool()
 
     if (!RenderVK::init(kPreventCapture))
     {
-        std::println(stderr, "[错误] 初始化图形引擎失败。");
+        LS_LOGE_TAG("Main", "初始化图形引擎失败");
         return 1;
     }
 
@@ -2278,12 +2278,12 @@ int RunMemoryTool()
     }
     catch (const std::exception &ex)
     {
-        std::println(stderr, "[错误] 模式2运行异常: {}", ex.what());
+        LS_LOGE_TAG_FMT("Main", "内存工具运行异常: {}", ex.what());
         rc = 1;
     }
     catch (...)
     {
-        std::println(stderr, "[错误] 模式2运行异常: unknown exception");
+        LS_LOGE_TAG("Main", "内存工具运行异常: unknown exception");
         rc = 1;
     }
 
@@ -2345,7 +2345,6 @@ static bool daemonize(const char *log_path)
 
 int main()
 {
-
     std::println(stdout, "请选择启动模式：");
     std::println(stdout, "  0) 停止驱动线程");
     std::println(stdout, "  1) 读写测试");
@@ -2355,6 +2354,7 @@ int main()
     std::println(stdout, "  5) 陀螺仪测试");
     std::println(stdout, "  6) 定位测试");
     std::print(stdout, "请输入 [0/1/2/3/4/5/6]: ");
+    std::fflush(stdout);
 
     int rc = 1;
     int mode = 0;
@@ -2376,6 +2376,8 @@ int main()
         std::println(stderr, "[错误] 后台化失败。");
         return rc;
     }
+
+    LS_LOGI_TAG_FMT("Main", "启动模式: {}", mode);
 
     dr = new Driver((mode == 2 || mode == 3) ? 5 : 0, mode == 5, mode == 6);
 
