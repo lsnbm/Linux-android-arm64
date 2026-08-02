@@ -32,7 +32,10 @@ windows/__pycache__/
 **/.vscode/
 
 # Local ARM64 decoder and executor tests
-lsdriver/arm64_tests/
+lsdriver/arm64_tests/*
+!lsdriver/arm64_tests/arm64_page_reloc_test.c
+!lsdriver/arm64_tests/arm64_encode_test.c
+!lsdriver/arm64_tests/run_tests.sh
 
 
 # Android Studio / Gradle / NDK outputs

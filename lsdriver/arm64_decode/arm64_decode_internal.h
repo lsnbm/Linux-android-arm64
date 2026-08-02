@@ -3,11 +3,11 @@
 
 #include "arm64_decode.h"
 
-static inline arm64_s64 arm64_sign_extend(arm64_u64 value, arm64_u8 bits)
+static inline int64_t arm64_sign_extend(uint64_t value, uint8_t bits)
 {
-    arm64_u64 sign = 1ULL << (bits - 1);
+    uint64_t sign = 1ULL << (bits - 1);
 
-    return (arm64_s64)((value ^ sign) - sign);
+    return (int64_t)((value ^ sign) - sign);
 }
 
 #endif

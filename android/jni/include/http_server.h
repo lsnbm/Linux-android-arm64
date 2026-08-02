@@ -39,7 +39,8 @@ namespace
     // 打印系统错误信息
     void printErrno(std::string_view action)
     {
-        std::println(stderr, "{}，错误码：{}", action, errno);
+        const int error = errno;
+        LS_LOGE_TAG_FMT("HTTP", "{}: errno={} ({})", action, error, std::strerror(error));
     }
 
     bool IsLanInterface(std::string_view interfaceName)
@@ -75,12 +76,12 @@ namespace
             if (std::ranges::find(printedAddresses, address) != printedAddresses.end()) continue;
             printedAddresses.push_back(address);
             found = true;
-            std::println("局域网地址 [{}]：http://{}:{}", interfaceName, address, kServerPort);
-            std::println("局域网 RPC [{}]：http://{}:{}/api/rpc", interfaceName, address, kServerPort);
+            LS_LOGI_TAG_FMT("HTTP", "局域网地址 [{}]: http://{}:{}", interfaceName, address, kServerPort);
+            LS_LOGI_TAG_FMT("HTTP", "局域网 RPC [{}]: http://{}:{}/api/rpc", interfaceName, address, kServerPort);
         }
         freeifaddrs(interfaces);
 
-        if (!found) std::println("未检测到局域网 IPv4 地址，HTTP 服务仍监听 http://0.0.0.0:{}", kServerPort);
+        if (!found) LS_LOGW_TAG_FMT("HTTP", "未检测到局域网 IPv4 地址，HTTP 服务仍监听 http://0.0.0.0:{}", kServerPort);
     }
 
     bool WritePrivateEtcFile(const char *path, std::string_view content)
@@ -200,7 +201,7 @@ namespace
             _exit(127);
         }
 
-        std::println("cloudflared Tunnel 已启动，PID={}，公网地址将写入 /sdcard/log.txt", pid);
+        LS_LOGI_TAG_FMT("HTTP", "cloudflared Tunnel 已启动，PID={}，公网地址将写入 /sdcard/log.txt", pid);
     }
 
     // 去除字符串末尾换行符
@@ -751,7 +752,7 @@ namespace
             {
                 auto &rec = const_cast<Driver::bp_record &>(point.records[i]);
                 MemUtils::HwbpRequestAll(rec);
-                json item = {{"mask", json::array()}, {"hit_count", readHwbp64(rec, Driver::IDX_HIT_COUNT)}, {"pc", readHwbp64(rec, Driver::IDX_PC)}, {"lr", readHwbp64(rec, Driver::IDX_LR)}, {"sp", readHwbp64(rec, Driver::IDX_SP)}, {"orig_x0", readHwbp64(rec, Driver::IDX_ORIG_X0)}, {"syscallno", readHwbp64(rec, Driver::IDX_SYSCALLNO)}, {"pstate", readHwbp64(rec, Driver::IDX_PSTATE)}, {"fpsr", readHwbp32(rec, Driver::IDX_FPSR)}, {"fpcr", readHwbp32(rec, Driver::IDX_FPCR)}};
+                json item = {{"mask", json::array()}, {"hit_count", readHwbp64(rec, Driver::IDX_HIT_COUNT)}, {"pc", readHwbp64(rec, Driver::IDX_PC)}, {"lr", readHwbp64(rec, Driver::IDX_LR)}, {"sp", readHwbp64(rec, Driver::IDX_SP)}, {"orig_x0", readHwbp64(rec, Driver::IDX_ORIG_X0)}, {"syscallno", readHwbp32(rec, Driver::IDX_SYSCALLNO)}, {"pstate", readHwbp64(rec, Driver::IDX_PSTATE)}, {"fpsr", readHwbp32(rec, Driver::IDX_FPSR)}, {"fpcr", readHwbp32(rec, Driver::IDX_FPCR)}};
                 for (int m = 0; m < 18; ++m) item["mask"].push_back(rec.mask[m]);
                 for (int reg = 0; reg < 30; ++reg) item[std::format("x{}", reg)] = readHwbp64(rec, Driver::IDX_X0 + reg);
                 for (int reg = 0; reg < 32; ++reg)
@@ -1810,7 +1811,7 @@ namespace
             return;
         }
 
-        std::println("收到 HTTP 请求：{}:{} {} {}", clientIp, clientPort, method, path);
+        LS_LOGD_TAG_FMT("HTTP", "收到请求: {}:{} {} {}", clientIp, clientPort, method, path);
         if (method == "OPTIONS")
         {
             sendHttpResponse(clientFd, 204, "No Content", "");
@@ -1872,9 +1873,8 @@ int http_server()
         return 1;
     }
 
-    std::println("HTTP 服务端已监听 http://0.0.0.0:{}", kServerPort);
+    LS_LOGI_TAG_FMT("HTTP", "服务端已监听 http://0.0.0.0:{}", kServerPort);
     PrintLanHttpAddresses();
-    std::fflush(stdout);
     StartCloudflared();
 
     for (;;)

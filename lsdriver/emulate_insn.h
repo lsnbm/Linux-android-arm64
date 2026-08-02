@@ -13,6 +13,8 @@ enum emu_insn_result
     EMU_INSN_NOP,
 };
 
+#define EMU_PSTATE_NZCV_MASK ((uint64_t)(PSR_N_BIT | PSR_Z_BIT | PSR_C_BIT | PSR_V_BIT))
+
 /* =========================================================================
  * ARM64 指令执行器
  *
@@ -60,7 +62,7 @@ static inline void addr_reg_write(struct pt_regs *regs, uint32_t n, uint64_t val
 
 static inline void emu_write_nzcv(struct pt_regs *regs, uint64_t nzcv)
 {
-    regs->pstate = (regs->pstate & ~((1ULL << 31) | (1ULL << 30) | (1ULL << 29) | (1ULL << 28))) | (nzcv & ((1ULL << 31) | (1ULL << 30) | (1ULL << 29) | (1ULL << 28)));
+    regs->pstate = (regs->pstate & ~EMU_PSTATE_NZCV_MASK) | (nzcv & EMU_PSTATE_NZCV_MASK);
 }
 
 static inline bool emu_cond_holds_hw(uint64_t pstate, uint32_t cond)
@@ -70,46 +72,46 @@ static inline bool emu_cond_holds_hw(uint64_t pstate, uint32_t cond)
     switch (cond)
     {
     case 0x0:
-        asm volatile("msr nzcv, %1\ncset %w0, eq\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        asm volatile("msr nzcv, %1\ncset %w0, eq\n" : "=r"(take) : "r"(pstate & EMU_PSTATE_NZCV_MASK) : "cc");
         break;
     case 0x1:
-        asm volatile("msr nzcv, %1\ncset %w0, ne\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        asm volatile("msr nzcv, %1\ncset %w0, ne\n" : "=r"(take) : "r"(pstate & EMU_PSTATE_NZCV_MASK) : "cc");
         break;
     case 0x2:
-        asm volatile("msr nzcv, %1\ncset %w0, cs\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        asm volatile("msr nzcv, %1\ncset %w0, cs\n" : "=r"(take) : "r"(pstate & EMU_PSTATE_NZCV_MASK) : "cc");
         break;
     case 0x3:
-        asm volatile("msr nzcv, %1\ncset %w0, cc\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        asm volatile("msr nzcv, %1\ncset %w0, cc\n" : "=r"(take) : "r"(pstate & EMU_PSTATE_NZCV_MASK) : "cc");
         break;
     case 0x4:
-        asm volatile("msr nzcv, %1\ncset %w0, mi\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        asm volatile("msr nzcv, %1\ncset %w0, mi\n" : "=r"(take) : "r"(pstate & EMU_PSTATE_NZCV_MASK) : "cc");
         break;
     case 0x5:
-        asm volatile("msr nzcv, %1\ncset %w0, pl\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        asm volatile("msr nzcv, %1\ncset %w0, pl\n" : "=r"(take) : "r"(pstate & EMU_PSTATE_NZCV_MASK) : "cc");
         break;
     case 0x6:
-        asm volatile("msr nzcv, %1\ncset %w0, vs\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        asm volatile("msr nzcv, %1\ncset %w0, vs\n" : "=r"(take) : "r"(pstate & EMU_PSTATE_NZCV_MASK) : "cc");
         break;
     case 0x7:
-        asm volatile("msr nzcv, %1\ncset %w0, vc\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        asm volatile("msr nzcv, %1\ncset %w0, vc\n" : "=r"(take) : "r"(pstate & EMU_PSTATE_NZCV_MASK) : "cc");
         break;
     case 0x8:
-        asm volatile("msr nzcv, %1\ncset %w0, hi\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        asm volatile("msr nzcv, %1\ncset %w0, hi\n" : "=r"(take) : "r"(pstate & EMU_PSTATE_NZCV_MASK) : "cc");
         break;
     case 0x9:
-        asm volatile("msr nzcv, %1\ncset %w0, ls\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        asm volatile("msr nzcv, %1\ncset %w0, ls\n" : "=r"(take) : "r"(pstate & EMU_PSTATE_NZCV_MASK) : "cc");
         break;
     case 0xA:
-        asm volatile("msr nzcv, %1\ncset %w0, ge\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        asm volatile("msr nzcv, %1\ncset %w0, ge\n" : "=r"(take) : "r"(pstate & EMU_PSTATE_NZCV_MASK) : "cc");
         break;
     case 0xB:
-        asm volatile("msr nzcv, %1\ncset %w0, lt\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        asm volatile("msr nzcv, %1\ncset %w0, lt\n" : "=r"(take) : "r"(pstate & EMU_PSTATE_NZCV_MASK) : "cc");
         break;
     case 0xC:
-        asm volatile("msr nzcv, %1\ncset %w0, gt\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        asm volatile("msr nzcv, %1\ncset %w0, gt\n" : "=r"(take) : "r"(pstate & EMU_PSTATE_NZCV_MASK) : "cc");
         break;
     case 0xD:
-        asm volatile("msr nzcv, %1\ncset %w0, le\n" : "=r"(take) : "r"(pstate & (0xFULL << 28)) : "cc");
+        asm volatile("msr nzcv, %1\ncset %w0, le\n" : "=r"(take) : "r"(pstate & EMU_PSTATE_NZCV_MASK) : "cc");
         break;
     default:
         return true;
@@ -225,7 +227,7 @@ static inline enum emu_insn_result emu_simulate_system_insn(struct pt_regs *regs
             switch (sysreg)
             {
             case EMU_SYSREG_NZCV:
-                val = regs->pstate & (0xFULL << 28);
+                val = regs->pstate & EMU_PSTATE_NZCV_MASK;
                 break;
             case EMU_SYSREG_FPCR:
                 val = read_fpcr();
@@ -4645,7 +4647,7 @@ static inline enum emu_insn_result emu_simulate_data_processing_insn(struct pt_r
         bool op_sub = (decoded->flags & ARM64_INSN_FLAG_SUBTRACT) != 0;
         uint64_t x = reg_read(regs, decoded->rn);
         uint64_t y = reg_read(regs, decoded->rm);
-        uint64_t input_nzcv = regs->pstate & (0xFULL << 28);
+        uint64_t input_nzcv = regs->pstate & EMU_PSTATE_NZCV_MASK;
         uint64_t result, nzcv;
 
         if (sf)

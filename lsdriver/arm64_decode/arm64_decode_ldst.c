@@ -1,6 +1,6 @@
 #include "arm64_decode_internal.h"
 
-static void arm64_decode_ldst_registers(arm64_u32 raw, struct arm64_decoded_insn *decoded)
+static void arm64_decode_ldst_registers(uint32_t raw, struct arm64_decoded_insn *decoded)
 {
     decoded->rt = raw & 0x1F;
     decoded->rn = (raw >> 5) & 0x1F;
@@ -9,7 +9,7 @@ static void arm64_decode_ldst_registers(arm64_u32 raw, struct arm64_decoded_insn
     decoded->rm = decoded->rs;
 }
 
-static void arm64_decode_ldst_fp_flag(arm64_u32 raw, struct arm64_decoded_insn *decoded)
+static void arm64_decode_ldst_fp_flag(uint32_t raw, struct arm64_decoded_insn *decoded)
 {
     if (raw & 0x04000000U) decoded->flags |= ARM64_INSN_FLAG_FP;
 }
@@ -27,7 +27,7 @@ enum arm64_ldst_single_form
 解码访存、原子和独占指令。bits[29:24] 先确定唯一编码 owner，叶子只校验
 本族固定字段和寄存器约束，不依赖宽窄掩码的排列顺序。
 */
-enum arm64_decode_status arm64_decode_ldst(arm64_u32 raw, struct arm64_decoded_insn *decoded)
+enum arm64_decode_status arm64_decode_ldst(uint32_t raw, struct arm64_decoded_insn *decoded)
 {
     switch ((raw >> 24) & 0x3F)
     {
@@ -47,10 +47,10 @@ enum arm64_decode_status arm64_decode_ldst(arm64_u32 raw, struct arm64_decoded_i
             return ARM64_DECODE_OK;
         case 0x00207C00U:
         {
-            arm64_u32 size = (raw >> 30) & 0x3;
-            arm64_u32 op = (raw >> 21) & 0xF;
-            arm64_u32 rs = (raw >> 16) & 0x1F;
-            arm64_u32 rt = raw & 0x1F;
+            uint32_t size = (raw >> 30) & 0x3;
+            uint32_t op = (raw >> 21) & 0xF;
+            uint32_t rs = (raw >> 16) & 0x1F;
+            uint32_t rt = raw & 0x1F;
 
             if (size >= 2 || ((raw >> 10) & 0x1F) != 31 || (op != 1 && op != 3) || ((rs | rt) & 1)) return ARM64_DECODE_UNALLOCATED;
             decoded->opcode = ARM64_OP_CASP;
@@ -68,13 +68,13 @@ enum arm64_decode_status arm64_decode_ldst(arm64_u32 raw, struct arm64_decoded_i
         }
 
         {
-            arm64_u32 size = (raw >> 30) & 0x3;
-            arm64_u32 ordered = (raw >> 23) & 1;
-            arm64_u32 load = (raw >> 22) & 1;
-            arm64_u32 pair = (raw >> 21) & 1;
-            arm64_u32 acquire_release = (raw >> 15) & 1;
-            arm64_u32 rs = (raw >> 16) & 0x1F;
-            arm64_u32 rt2 = (raw >> 10) & 0x1F;
+            uint32_t size = (raw >> 30) & 0x3;
+            uint32_t ordered = (raw >> 23) & 1;
+            uint32_t load = (raw >> 22) & 1;
+            uint32_t pair = (raw >> 21) & 1;
+            uint32_t acquire_release = (raw >> 15) & 1;
+            uint32_t rs = (raw >> 16) & 0x1F;
+            uint32_t rt2 = (raw >> 10) & 0x1F;
 
             if (ordered)
             {
@@ -103,7 +103,7 @@ enum arm64_decode_status arm64_decode_ldst(arm64_u32 raw, struct arm64_decoded_i
     case 0x18:
     case 0x1C:
     {
-        arm64_u32 size = (raw >> 30) & 0x3;
+        uint32_t size = (raw >> 30) & 0x3;
 
         decoded->insn_class = ARM64_INSN_CLASS_LOAD_STORE;
         decoded->opcode = !(raw & 0x04000000U) && size == 3 ? ARM64_OP_PREFETCH_LITERAL : ARM64_OP_LOAD_LITERAL;
@@ -113,7 +113,7 @@ enum arm64_decode_status arm64_decode_ldst(arm64_u32 raw, struct arm64_decoded_i
         if (decoded->flags & ARM64_INSN_FLAG_FP) decoded->operands.load_store.access_bytes = size == 0 ? 4 : size == 1 ? 8 : size == 2 ? 16 : 0;
         else decoded->operands.load_store.access_bytes = size == 0 ? 4 : size == 1 ? 8 : size == 2 ? 4 : 0;
         decoded->operands.load_store.address_mode = ARM64_ADDRESS_LITERAL;
-        decoded->operands.load_store.offset = arm64_sign_extend((arm64_u64)((raw >> 5) & 0x7FFFF) << 2, 21);
+        decoded->operands.load_store.offset = arm64_sign_extend((uint64_t)((raw >> 5) & 0x7FFFF) << 2, 21);
         if (!(decoded->flags & ARM64_INSN_FLAG_FP) && size == 2) decoded->flags |= ARM64_INSN_FLAG_SIGN_EXTEND;
         decoded->operand_width = size == 0 ? 32 : 64;
         if ((decoded->flags & ARM64_INSN_FLAG_FP) && !decoded->operands.load_store.access_bytes) return ARM64_DECODE_UNALLOCATED;
@@ -135,8 +135,8 @@ enum arm64_decode_status arm64_decode_ldst(arm64_u32 raw, struct arm64_decoded_i
         case 0x1920A000U:
         case 0x1920B000U:
         {
-            arm64_u32 rt = raw & 0x1F;
-            arm64_u32 rt2 = (raw >> 16) & 0x1F;
+            uint32_t rt = raw & 0x1F;
+            uint32_t rt2 = (raw >> 16) & 0x1F;
 
             if (rt == 31 || rt2 == 31) return ARM64_DECODE_UNALLOCATED;
             if (rt == rt2) return ARM64_DECODE_UNPREDICTABLE;
@@ -148,8 +148,8 @@ enum arm64_decode_status arm64_decode_ldst(arm64_u32 raw, struct arm64_decoded_i
 
         if ((raw & 0x3F200C00U) == 0x19000000U)
         {
-            arm64_u32 size = (raw >> 30) & 0x3;
-            arm64_u32 opc = (raw >> 22) & 0x3;
+            uint32_t size = (raw >> 30) & 0x3;
+            uint32_t opc = (raw >> 22) & 0x3;
 
             if ((size == 3 && opc > 1) || (size == 2 && opc == 3)) return ARM64_DECODE_UNALLOCATED;
             decoded->opcode = ARM64_OP_RCPC_UNSCALED;
@@ -172,9 +172,9 @@ enum arm64_decode_status arm64_decode_ldst(arm64_u32 raw, struct arm64_decoded_i
     case 0x2C:
     case 0x2D:
     {
-        arm64_u32 mode = (raw >> 23) & 0x3;
-        arm64_u32 opc = (raw >> 30) & 0x3;
-        arm64_u32 load = (raw >> 22) & 1;
+        uint32_t mode = (raw >> 23) & 0x3;
+        uint32_t opc = (raw >> 30) & 0x3;
+        uint32_t load = (raw >> 22) & 1;
 
         decoded->insn_class = ARM64_INSN_CLASS_LOAD_STORE;
         decoded->opcode = ARM64_OP_LOAD_STORE_PAIR;
@@ -218,7 +218,7 @@ enum arm64_decode_status arm64_decode_ldst(arm64_u32 raw, struct arm64_decoded_i
         else if (!(raw & 0x00200000U)) form = ARM64_LDST_SINGLE_IMMEDIATE;
         else
         {
-            arm64_u32 mode = (raw >> 10) & 0x3;
+            uint32_t mode = (raw >> 10) & 0x3;
 
             if (mode == 2) form = ARM64_LDST_SINGLE_REGISTER_OFFSET;
             else if (raw & 0x04000000U) return ARM64_DECODE_UNALLOCATED;
@@ -236,7 +236,7 @@ enum arm64_decode_status arm64_decode_ldst(arm64_u32 raw, struct arm64_decoded_i
 
         if (form == ARM64_LDST_SINGLE_ATOMIC)
         {
-            arm64_u32 operation = (raw >> 12) & 0xF;
+            uint32_t operation = (raw >> 12) & 0xF;
 
             if (operation <= 8)
             {
@@ -310,9 +310,9 @@ enum arm64_decode_status arm64_decode_ldst(arm64_u32 raw, struct arm64_decoded_i
         }
 
         {
-            arm64_u32 size = (raw >> 30) & 0x3;
-            arm64_u32 mode = (raw >> 10) & 0x3;
-            arm64_u32 opc = (raw >> 22) & 0x3;
+            uint32_t size = (raw >> 30) & 0x3;
+            uint32_t mode = (raw >> 10) & 0x3;
+            uint32_t opc = (raw >> 22) & 0x3;
 
             decoded->opcode = !(raw & 0x04000000U) && size == 3 && opc == 2 ? ARM64_OP_PREFETCH : ARM64_OP_LOAD_STORE_SINGLE;
             arm64_decode_ldst_registers(raw, decoded);
@@ -340,7 +340,7 @@ enum arm64_decode_status arm64_decode_ldst(arm64_u32 raw, struct arm64_decoded_i
                 decoded->operands.load_store.address_mode = ARM64_ADDRESS_REGISTER_OFFSET;
                 decoded->operands.load_store.extend_type = (raw >> 13) & 0x7;
                 if (decoded->operands.load_store.extend_type != 2 && decoded->operands.load_store.extend_type != 3 && decoded->operands.load_store.extend_type != 6 && decoded->operands.load_store.extend_type != 7) return ARM64_DECODE_UNALLOCATED;
-                decoded->operands.load_store.shift_amount = (raw & 0x1000U) ? (arm64_u8)__builtin_ctz(decoded->operands.load_store.access_bytes) : 0;
+                decoded->operands.load_store.shift_amount = (raw & 0x1000U) ? (uint8_t)__builtin_ctz(decoded->operands.load_store.access_bytes) : 0;
                 break;
             default:
                 decoded->operands.load_store.offset = arm64_sign_extend((raw >> 12) & 0x1FF, 9);

@@ -329,7 +329,7 @@ static int __attribute__((used, __noinline__)) stepbp_finish_call_step_hook(int 
     unsigned long flags;
     struct bp_point *hit_point = NULL;
     struct break_point *info;
-    void (*hit_callback)(void *regs, void *self) = NULL;
+    void (*hit_callback)(void *regs, void *fp_regs, void *hit_point) = NULL;
     uint64_t hit_addr = 0;
     unsigned long hit_generation = 0;
     bool generation_matches;
@@ -375,7 +375,10 @@ static int __attribute__((used, __noinline__)) stepbp_finish_call_step_hook(int 
         if (!READ_ONCE(g_stepbp_stopping) && READ_ONCE(g_stepbp_generation) == hit_generation)
         {
             STEPBP_LOG_LIMITED(g_stepbp_log_hit, 8, "hit slot=%d pid=%d tgid=%d pc=0x%llx hit_addr=0x%llx record_count=%d\n", hit_slot, current->pid, current->tgid, (unsigned long long)regs->pc, (unsigned long long)hit_addr, READ_ONCE(hit_point->record_count));
-            hit_callback((void *)regs, (void *)hit_point);
+            struct fp_regs fp_regs;
+            read_all_q_regs(&fp_regs);
+            hit_callback(regs, &fp_regs, hit_point);
+            write_all_q_regs(&fp_regs);
         }
         spin_unlock_irqrestore(&g_stepbp_hit_lock, flags);
     }

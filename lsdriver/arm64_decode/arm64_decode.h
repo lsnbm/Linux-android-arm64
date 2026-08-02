@@ -5,11 +5,11 @@
 输入是一条 32 位指令 word，输出是与运行环境无关的结构化语义；
 */
 
-typedef unsigned char arm64_u8;
-typedef unsigned short arm64_u16;
-typedef unsigned int arm64_u32;
-typedef unsigned long long arm64_u64;
-typedef signed long long arm64_s64;
+#ifdef __KERNEL__
+#include <linux/types.h>
+#else
+#include <stdint.h>
+#endif
 
 #define ARM64_SYSREG_KEY(OP0, OP1, CRN, CRM, OP2) ((((OP0) & 0x3) << 14) | (((OP1) & 0x7) << 11) | (((CRN) & 0xF) << 7) | (((CRM) & 0xF) << 3) | ((OP2) & 0x7))
 
@@ -478,52 +478,52 @@ enum arm64_simd_rotation
 struct arm64_branch_operands
 {
     // 直接分支的 PC 字节偏移。
-    arm64_s64 offset;
-    arm64_u8 condition;
-    arm64_u8 test_bit;
+    int64_t offset;
+    uint8_t condition;
+    uint8_t test_bit;
 };
 
 struct arm64_pc_relative_operands
 {
     // ADR 为 PC 字节偏移，ADRP 为相对当前 PC 页基址的字节偏移。
-    arm64_s64 offset;
+    int64_t offset;
 };
 
 struct arm64_system_operands
 {
     enum arm64_system_operation operation;
     // exception immediate 为 imm16；barrier/CLREX 使用低 4 位 option，BTI 使用 arm64_bti_type。
-    arm64_u16 immediate;
-    arm64_u8 option;
-    arm64_u8 op0;
-    arm64_u8 op1;
-    arm64_u8 crn;
-    arm64_u8 crm;
-    arm64_u8 op2;
+    uint16_t immediate;
+    uint8_t option;
+    uint8_t op0;
+    uint8_t op1;
+    uint8_t crn;
+    uint8_t crm;
+    uint8_t op2;
 };
 
 struct arm64_data_operands
 {
     // immediate、wmask 和 tmask 已展开为执行器可以直接使用的值。
-    arm64_u64 immediate;
-    arm64_u64 wmask;
-    arm64_u64 tmask;
-    arm64_u8 shift_type;
-    arm64_u8 shift_amount;
-    arm64_u8 option;
-    arm64_u8 immr;
-    arm64_u8 condition;
-    arm64_u8 nzcv;
+    uint64_t immediate;
+    uint64_t wmask;
+    uint64_t tmask;
+    uint8_t shift_type;
+    uint8_t shift_amount;
+    uint8_t option;
+    uint8_t immr;
+    uint8_t condition;
+    uint8_t nzcv;
 };
 
 struct arm64_load_store_operands
 {
     // offset 始终是字节偏移，access_bytes 是单个元素的访问字节数。
-    arm64_s64 offset;
+    int64_t offset;
     enum arm64_address_mode address_mode;
-    arm64_u8 access_bytes;
-    arm64_u8 extend_type;
-    arm64_u8 shift_amount;
+    uint8_t access_bytes;
+    uint8_t extend_type;
+    uint8_t shift_amount;
 };
 
 struct arm64_simd_operands
@@ -531,38 +531,38 @@ struct arm64_simd_operands
     enum arm64_simd_form form;
     enum arm64_simd_operation operation;
     enum arm64_fp_rounding_mode rounding_mode;
-    arm64_u64 expanded_immediate;
-    arm64_u32 flags;
-    arm64_u8 condition;
-    arm64_u8 immediate;
-    arm64_u8 element_width;
-    arm64_u8 result_element_width;
-    arm64_u8 lane_index;
-    arm64_u8 source_lane_index;
+    uint64_t expanded_immediate;
+    uint32_t flags;
+    uint8_t condition;
+    uint8_t immediate;
+    uint8_t element_width;
+    uint8_t result_element_width;
+    uint8_t lane_index;
+    uint8_t source_lane_index;
 };
 
 struct arm64_decoded_insn
 {
     // raw/status 使调用方可以缓存单个结构，不必另外保存输入和返回状态。
-    arm64_u32 raw;
+    uint32_t raw;
     enum arm64_decode_status status;
 
     // 先按 class 分发，再结合 opcode/operation 解释 union 中的对应成员。
     enum arm64_insn_class insn_class;
     enum arm64_opcode opcode;
     enum arm64_operation operation;
-    arm64_u32 flags;
+    uint32_t flags;
 
     // 寄存器字段按编码位置提取；哪些字段具有语义由 opcode 决定。寄存器 31 按原值返回。
-    arm64_u8 rd;
-    arm64_u8 rn;
-    arm64_u8 rm;
-    arm64_u8 ra;
-    arm64_u8 rt;
-    arm64_u8 rt2;
-    arm64_u8 rs;
+    uint8_t rd;
+    uint8_t rn;
+    uint8_t rm;
+    uint8_t ra;
+    uint8_t rt;
+    uint8_t rt2;
+    uint8_t rs;
     // 标量/GPR 指令通常为 32/64；向量指令为有效向量宽度，归约源可为 32/64/128。
-    arm64_u8 operand_width;
+    uint8_t operand_width;
 
     // union 的有效成员由 insn_class/opcode 决定。
     union
@@ -586,6 +586,6 @@ struct arm64_decoded_insn
 UNSUPPORTED 时只保证已填写的 class/opcode/flags 等识别信息有效；其他失败
 状态下调用方不应执行该指令。
 */
-void arm64_decode_insn(arm64_u32 raw, struct arm64_decoded_insn *decoded);
+void arm64_decode_insn(uint32_t raw, struct arm64_decoded_insn *decoded);
 
 #endif

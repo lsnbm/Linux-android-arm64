@@ -6,7 +6,6 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
-#include <print>
 #include <random>
 #include <unistd.h>
 #include <vector>
@@ -51,12 +50,9 @@ inline int RunReadWriteTest()
     pid_t selfPid = getpid();
     dr->SetGlobalPid(selfPid);
 
-    std::println(stdout, "================================================================");
-    std::println(stdout, "  驱动读写基准测试（连续 {} 轮，每轮 {} 个 int 元素）", ROUND_COUNT, TEST_COUNT);
-    std::println(stdout, "================================================================");
-    std::println(stdout, "目标PID: {}（自身进程）", selfPid);
-    std::println(stdout, "数组容量: {} int（{} 字节）", ARRAY_CAPACITY, ARRAY_CAPACITY * sizeof(int));
-    std::println(stdout, "================================================================\n");
+    LS_LOGI_TAG_FMT("ReadWrite", "驱动读写基准测试: 连续 {} 轮，每轮 {} 个 int 元素", ROUND_COUNT, TEST_COUNT);
+    LS_LOGI_TAG_FMT("ReadWrite", "目标 PID={}（自身进程）", selfPid);
+    LS_LOGI_TAG_FMT("ReadWrite", "数组容量={} int（{} 字节）", ARRAY_CAPACITY, ARRAY_CAPACITY * sizeof(int));
 
     std::vector<int> testArray(ARRAY_CAPACITY, 0);
     uint64_t testAddr = reinterpret_cast<uint64_t>(testArray.data());
@@ -90,9 +86,7 @@ inline int RunReadWriteTest()
     {
         RoundResult &r = results[round];
 
-        std::println(stdout, "------------------------------------------------------------");
-        std::println(stdout, "  第 {:>2}/{} 轮测试", round + 1, ROUND_COUNT);
-        std::println(stdout, "------------------------------------------------------------");
+        LS_LOGI_TAG_FMT("ReadWrite", "第 {:>2}/{} 轮测试", round + 1, ROUND_COUNT);
 
         {
             auto t0 = std::chrono::high_resolution_clock::now();
@@ -175,10 +169,9 @@ inline int RunReadWriteTest()
         r.readOverheadPct = (r.nullIoAvgNs / r.readAvgNs) * 100.0;
         r.writeOverheadPct = (r.nullIoAvgNs / r.writeAvgNs) * 100.0;
 
-        std::println(stdout, "  空IO:  总 {:>10.3f}ms  均 {:>8.2f}ns  吞吐 {:>8.2f}K/s", r.nullIoTotalMs, r.nullIoAvgNs, r.nullIoThroughputK);
-        std::println(stdout, "  读取:  总 {:>10.3f}ms  均 {:>8.2f}ns  净 {:>8.2f}ns  吞吐 {:>8.2f}K/s  带宽 {:>6.2f}MB/s  失败索引 {}", r.readTotalMs, r.readAvgNs, r.readNetAvgNs, r.readThroughputK, r.readBandwidthMB, r.readFailCount);
-        std::println(stdout, "  写入:  总 {:>10.3f}ms  均 {:>8.2f}ns  净 {:>8.2f}ns  吞吐 {:>8.2f}K/s  带宽 {:>6.2f}MB/s  失败索引 {}", r.writeTotalMs, r.writeAvgNs, r.writeNetAvgNs, r.writeThroughputK, r.writeBandwidthMB, r.writeFailCount);
-        std::println(stdout, "");
+        LS_LOGI_TAG_FMT("ReadWrite", "空 IO: 总 {:>10.3f}ms 均 {:>8.2f}ns 吞吐 {:>8.2f}K/s", r.nullIoTotalMs, r.nullIoAvgNs, r.nullIoThroughputK);
+        LS_LOGI_TAG_FMT("ReadWrite", "读取: 总 {:>10.3f}ms 均 {:>8.2f}ns 净 {:>8.2f}ns 吞吐 {:>8.2f}K/s 带宽 {:>6.2f}MB/s 失败索引 {}", r.readTotalMs, r.readAvgNs, r.readNetAvgNs, r.readThroughputK, r.readBandwidthMB, r.readFailCount);
+        LS_LOGI_TAG_FMT("ReadWrite", "写入: 总 {:>10.3f}ms 均 {:>8.2f}ns 净 {:>8.2f}ns 吞吐 {:>8.2f}K/s 带宽 {:>6.2f}MB/s 失败索引 {}", r.writeTotalMs, r.writeAvgNs, r.writeNetAvgNs, r.writeThroughputK, r.writeBandwidthMB, r.writeFailCount);
     }
 
     RoundResult avg{};
@@ -253,51 +246,26 @@ inline int RunReadWriteTest()
         if (results[i].writeAvgNs > results[slowestWrite].writeAvgNs) slowestWrite = i;
     }
 
-    std::println(stdout, "================================================================");
-    std::println(stdout, "  {} 轮测试综合汇总（每轮 {} 个元素，共 {} 个元素）", ROUND_COUNT, TEST_COUNT, static_cast<long long>(ROUND_COUNT) * TEST_COUNT);
-    std::println(stdout, "================================================================");
-
-    std::println(stdout, "\n每轮平均延迟（ns）：");
-    std::println(stdout, "  轮次  |   空IO    |   读取     |   写入");
+    LS_LOGI_TAG_FMT("ReadWrite", "{} 轮测试综合汇总: 每轮 {} 个元素，共 {} 个元素", ROUND_COUNT, TEST_COUNT, static_cast<long long>(ROUND_COUNT) * TEST_COUNT);
+    LS_LOGI_TAG("ReadWrite", "每轮平均延迟（ns）: 轮次 | 空 IO | 读取 | 写入");
     for (int i = 0; i < ROUND_COUNT; ++i)
     {
-        std::println(stdout, "  {:>5} | {:>10.2f} | {:>10.2f} | {:>10.2f}", i + 1, results[i].nullIoAvgNs, results[i].readAvgNs, results[i].writeAvgNs);
+        LS_LOGI_TAG_FMT("ReadWrite", "{:>5} | {:>10.2f} | {:>10.2f} | {:>10.2f}", i + 1, results[i].nullIoAvgNs, results[i].readAvgNs, results[i].writeAvgNs);
     }
 
-    std::println(stdout, "\n平均值：");
-    std::println(stdout, "  空IO:  总 {:>10.3f} ms，均 {:>10.2f} ns，吞吐 {:>10.2f} K/s", avg.nullIoTotalMs, avg.nullIoAvgNs, avg.nullIoThroughputK);
-    std::println(stdout, "  读取:  总 {:>10.3f} ms，均 {:>10.2f} ns，吞吐 {:>10.2f} K/s", avg.readTotalMs, avg.readAvgNs, avg.readThroughputK);
-    std::println(stdout, "  写入:  总 {:>10.3f} ms，均 {:>10.2f} ns，吞吐 {:>10.2f} K/s", avg.writeTotalMs, avg.writeAvgNs, avg.writeThroughputK);
-
-    std::println(stdout, "\n净延迟（去除空IO）：");
-    std::println(stdout, "  读取净均耗: {:.2f} ns", avg.readNetAvgNs);
-    std::println(stdout, "  写入净均耗: {:.2f} ns", avg.writeNetAvgNs);
-
-    std::println(stdout, "\n数据带宽：");
-    std::println(stdout, "  读取平均带宽: {:.2f} MB/s", avg.readBandwidthMB);
-    std::println(stdout, "  写入平均带宽: {:.2f} MB/s", avg.writeBandwidthMB);
-
-    std::println(stdout, "\nIO通信开销占比：");
-    std::println(stdout, "  读取开销占比: {:.2f}%", avg.readOverheadPct);
-    std::println(stdout, "  写入开销占比: {:.2f}%", avg.writeOverheadPct);
-
-    std::println(stdout, "\n稳定性（标准差越小越稳定）：");
-    std::println(stdout, "  空IO: {:.2f} ns", nullIoAvgNsStd);
-    std::println(stdout, "  读取: {:.2f} ns", readAvgNsStd);
-    std::println(stdout, "  写入: {:.2f} ns", writeAvgNsStd);
-
-    std::println(stdout, "\n极值统计：");
-    std::println(stdout, "  空IO: 最快第{}轮 ({:.2f} ns)，最慢第{}轮 ({:.2f} ns)，波动 {:.2f} ns", fastestNullIo + 1, results[fastestNullIo].nullIoAvgNs, slowestNullIo + 1, results[slowestNullIo].nullIoAvgNs, results[slowestNullIo].nullIoAvgNs - results[fastestNullIo].nullIoAvgNs);
-    std::println(stdout, "  读取: 最快第{}轮 ({:.2f} ns)，最慢第{}轮 ({:.2f} ns)，波动 {:.2f} ns", fastestRead + 1, results[fastestRead].readAvgNs, slowestRead + 1, results[slowestRead].readAvgNs, results[slowestRead].readAvgNs - results[fastestRead].readAvgNs);
-    std::println(stdout, "  写入: 最快第{}轮 ({:.2f} ns)，最慢第{}轮 ({:.2f} ns)，波动 {:.2f} ns", fastestWrite + 1, results[fastestWrite].writeAvgNs, slowestWrite + 1, results[slowestWrite].writeAvgNs, results[slowestWrite].writeAvgNs - results[fastestWrite].writeAvgNs);
-
-    std::println(stdout, "\n累计失败统计：");
-    std::println(stdout, "  读取失败索引: {} / {} ({:.6f}%)", totalReadFail, static_cast<long long>(ROUND_COUNT) * TEST_COUNT, totalReadFail * 100.0 / (static_cast<double>(ROUND_COUNT) * TEST_COUNT));
-    std::println(stdout, "  写入失败索引: {} / {} ({:.6f}%)", totalWriteFail, static_cast<long long>(ROUND_COUNT) * TEST_COUNT, totalWriteFail * 100.0 / (static_cast<double>(ROUND_COUNT) * TEST_COUNT));
-
-    std::println(stdout, "\n================================================================");
-    std::println(stdout, "  全部 {} 轮测试完成", ROUND_COUNT);
-    std::println(stdout, "================================================================");
+    LS_LOGI_TAG_FMT("ReadWrite", "平均值 空 IO: 总 {:>10.3f}ms 均 {:>10.2f}ns 吞吐 {:>10.2f}K/s", avg.nullIoTotalMs, avg.nullIoAvgNs, avg.nullIoThroughputK);
+    LS_LOGI_TAG_FMT("ReadWrite", "平均值 读取: 总 {:>10.3f}ms 均 {:>10.2f}ns 吞吐 {:>10.2f}K/s", avg.readTotalMs, avg.readAvgNs, avg.readThroughputK);
+    LS_LOGI_TAG_FMT("ReadWrite", "平均值 写入: 总 {:>10.3f}ms 均 {:>10.2f}ns 吞吐 {:>10.2f}K/s", avg.writeTotalMs, avg.writeAvgNs, avg.writeThroughputK);
+    LS_LOGI_TAG_FMT("ReadWrite", "净延迟: 读取 {:.2f}ns，写入 {:.2f}ns", avg.readNetAvgNs, avg.writeNetAvgNs);
+    LS_LOGI_TAG_FMT("ReadWrite", "平均带宽: 读取 {:.2f}MB/s，写入 {:.2f}MB/s", avg.readBandwidthMB, avg.writeBandwidthMB);
+    LS_LOGI_TAG_FMT("ReadWrite", "IO 通信开销占比: 读取 {:.2f}%，写入 {:.2f}%", avg.readOverheadPct, avg.writeOverheadPct);
+    LS_LOGI_TAG_FMT("ReadWrite", "稳定性标准差: 空 IO {:.2f}ns，读取 {:.2f}ns，写入 {:.2f}ns", nullIoAvgNsStd, readAvgNsStd, writeAvgNsStd);
+    LS_LOGI_TAG_FMT("ReadWrite", "空 IO 极值: 最快第{}轮 ({:.2f}ns)，最慢第{}轮 ({:.2f}ns)，波动 {:.2f}ns", fastestNullIo + 1, results[fastestNullIo].nullIoAvgNs, slowestNullIo + 1, results[slowestNullIo].nullIoAvgNs, results[slowestNullIo].nullIoAvgNs - results[fastestNullIo].nullIoAvgNs);
+    LS_LOGI_TAG_FMT("ReadWrite", "读取极值: 最快第{}轮 ({:.2f}ns)，最慢第{}轮 ({:.2f}ns)，波动 {:.2f}ns", fastestRead + 1, results[fastestRead].readAvgNs, slowestRead + 1, results[slowestRead].readAvgNs, results[slowestRead].readAvgNs - results[fastestRead].readAvgNs);
+    LS_LOGI_TAG_FMT("ReadWrite", "写入极值: 最快第{}轮 ({:.2f}ns)，最慢第{}轮 ({:.2f}ns)，波动 {:.2f}ns", fastestWrite + 1, results[fastestWrite].writeAvgNs, slowestWrite + 1, results[slowestWrite].writeAvgNs, results[slowestWrite].writeAvgNs - results[fastestWrite].writeAvgNs);
+    LS_LOGI_TAG_FMT("ReadWrite", "累计读取失败索引: {} / {} ({:.6f}%)", totalReadFail, static_cast<long long>(ROUND_COUNT) * TEST_COUNT, totalReadFail * 100.0 / (static_cast<double>(ROUND_COUNT) * TEST_COUNT));
+    LS_LOGI_TAG_FMT("ReadWrite", "累计写入失败索引: {} / {} ({:.6f}%)", totalWriteFail, static_cast<long long>(ROUND_COUNT) * TEST_COUNT, totalWriteFail * 100.0 / (static_cast<double>(ROUND_COUNT) * TEST_COUNT));
+    LS_LOGI_TAG_FMT("ReadWrite", "全部 {} 轮测试完成", ROUND_COUNT);
 
     return 0;
 }

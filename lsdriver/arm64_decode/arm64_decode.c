@@ -1,14 +1,14 @@
 #include "arm64_decode.h"
 
-enum arm64_decode_status arm64_decode_data_processing_immediate(arm64_u32 raw, struct arm64_decoded_insn *decoded);
-enum arm64_decode_status arm64_decode_data_processing_register(arm64_u32 raw, struct arm64_decoded_insn *decoded);
-enum arm64_decode_status arm64_decode_ldst(arm64_u32 raw, struct arm64_decoded_insn *decoded);
-enum arm64_decode_status arm64_decode_branch(arm64_u32 raw, struct arm64_decoded_insn *decoded);
-enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_insn *decoded);
-enum arm64_decode_status arm64_decode_sve(arm64_u32 raw, struct arm64_decoded_insn *decoded);
-enum arm64_decode_status arm64_decode_sme(arm64_u32 raw, struct arm64_decoded_insn *decoded);
+enum arm64_decode_status arm64_decode_data_processing_immediate(uint32_t raw, struct arm64_decoded_insn *decoded);
+enum arm64_decode_status arm64_decode_data_processing_register(uint32_t raw, struct arm64_decoded_insn *decoded);
+enum arm64_decode_status arm64_decode_ldst(uint32_t raw, struct arm64_decoded_insn *decoded);
+enum arm64_decode_status arm64_decode_branch(uint32_t raw, struct arm64_decoded_insn *decoded);
+enum arm64_decode_status arm64_decode_simd(uint32_t raw, struct arm64_decoded_insn *decoded);
+enum arm64_decode_status arm64_decode_sve(uint32_t raw, struct arm64_decoded_insn *decoded);
+enum arm64_decode_status arm64_decode_sme(uint32_t raw, struct arm64_decoded_insn *decoded);
 
-void arm64_decode_insn(arm64_u32 raw, struct arm64_decoded_insn *decoded)
+void arm64_decode_insn(uint32_t raw, struct arm64_decoded_insn *decoded)
 {
     enum arm64_decode_status status;
 
@@ -23,7 +23,7 @@ void arm64_decode_insn(arm64_u32 raw, struct arm64_decoded_insn *decoded)
     else
     {
         /* A64 主编码 raw[28:25] 直接确定唯一子解码器。 */
-        arm64_u32 op0 = (raw >> 25) & 0xF;
+        uint32_t op0 = (raw >> 25) & 0xF;
         switch (op0)
         {
         case 0x0:

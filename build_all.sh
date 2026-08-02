@@ -112,6 +112,7 @@ clean_driver_build() {
             -name '*.lds' -o \
             -name '*.S' -o \
             -name '*.s' -o \
+            -path "$DRIVER_SRC/arm64_tests/run_tests.sh" -o \
             -name '*.ko' \
         \) -o \
         -type d -empty \

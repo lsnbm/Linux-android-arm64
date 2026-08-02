@@ -4,7 +4,6 @@
 #include <chrono>
 #include <climits>
 #include <cstdlib>
-#include <print>
 #include <vector>
 
 #include <android/native_window.h>
@@ -156,15 +155,15 @@ namespace RenderVK
 
     inline void shutdown();
 
-#define VK_CHECK(x)                                                                                        \
-    do                                                                                                     \
-    {                                                                                                      \
-        VkResult err = x;                                                                                  \
-        if (err)                                                                                           \
-        {                                                                                                  \
-            std::println(stderr, "[RenderVK Error] VkResult = {} at {}:{}", (int)err, __FILE__, __LINE__); \
-            abort();                                                                                       \
-        }                                                                                                  \
+#define VK_CHECK(x)                                                                   \
+    do                                                                                \
+    {                                                                                 \
+        VkResult err = x;                                                             \
+        if (err)                                                                      \
+        {                                                                             \
+            LS_LOGE_TAG("RenderVK", "VkResult=%d at %s:%d", err, __FILE__, __LINE__); \
+            abort();                                                                  \
+        }                                                                             \
     } while (0)
 
     inline void CleanupSwapchain(bool destroySwapchain = true)
@@ -571,7 +570,7 @@ namespace RenderVK
             return false;
         }
 
-        std::println(stderr, "[RenderVK] Record overlay ready layerStack={} source={}x{} stackRect=({},{}-{},{}), displayRect=({},{}-{},{}), orientation={} extent={}x{} matrix=[{},{};{},{}] pos=({}, {})", target.layerStack, sourceWidth, sourceHeight, target.layerStackRect.left, target.layerStackRect.top, target.layerStackRect.right, target.layerStackRect.bottom, target.displayRect.left, target.displayRect.top, target.displayRect.right, target.displayRect.bottom, target.orientation, s_recordSurface.extent.width, s_recordSurface.extent.height, s_recordSurface.transform.dsdx, s_recordSurface.transform.dtdx, s_recordSurface.transform.dtdy, s_recordSurface.transform.dsdy, s_recordSurface.transform.positionX, s_recordSurface.transform.positionY);
+        LS_LOGI_TAG_FMT("RenderVK", "录屏覆盖层就绪 layerStack={} source={}x{} stackRect=({},{}-{},{}), displayRect=({},{}-{},{}), orientation={} extent={}x{} matrix=[{},{};{},{}] pos=({}, {})", target.layerStack, sourceWidth, sourceHeight, target.layerStackRect.left, target.layerStackRect.top, target.layerStackRect.right, target.layerStackRect.bottom, target.displayRect.left, target.displayRect.top, target.displayRect.right, target.displayRect.bottom, target.orientation, s_recordSurface.extent.width, s_recordSurface.extent.height, s_recordSurface.transform.dsdx, s_recordSurface.transform.dtdx, s_recordSurface.transform.dtdy, s_recordSurface.transform.dsdy, s_recordSurface.transform.positionX, s_recordSurface.transform.positionY);
         return true;
     }
 
@@ -667,10 +666,10 @@ namespace RenderVK
         native_window = android::SurfaceControlManager::Create("Lark", max_side, max_side, preventCapture);
         if (native_window == nullptr)
         {
-            std::println(stderr, "[RenderVK Error] Failed to create ANativeWindow!");
+            LS_LOGE_TAG("RenderVK", "创建 ANativeWindow 失败");
             return false;
         }
-        std::println(stderr, "[RenderVK] Capture policy preventCapture={}", preventCapture);
+        LS_LOGI_TAG_FMT("RenderVK", "截屏策略 preventCapture={}", preventCapture);
         ANativeWindow_acquire(native_window);
 
         const char *instance_extensions[] = {"VK_KHR_surface", "VK_KHR_android_surface"};
@@ -833,7 +832,7 @@ namespace RenderVK
 
         init_info.CheckVkResultFn = [](VkResult err)
         {
-            if (err) std::println(stderr, "[ImGui Vulkan Error] {}", (int)err);
+            if (err) LS_LOGE_TAG("RenderVK", "ImGui Vulkan VkResult=%d", err);
         };
 
         ImGui_ImplVulkan_Init(&init_info);
@@ -846,7 +845,7 @@ namespace RenderVK
 
         if (!Touch_Init())
         {
-            std::println(stderr, "[RenderVK Error] Failed to initialize touch!");
+            LS_LOGE_TAG("RenderVK", "初始化触摸输入失败");
             shutdown();
             return false;
         }

@@ -57,8 +57,8 @@
 #define VGNSS_DOUBLE_EXP_MASK    0x7ff0000000000000ULL
 #define VGNSS_DOUBLE_ABS_MASK    0x7fffffffffffffffULL
 
-typedef u64 vgnss_binder_size_t;
-typedef u64 vgnss_binder_uintptr_t;
+typedef uint64_t vgnss_binder_size_t;
+typedef uint64_t vgnss_binder_uintptr_t;
 
 struct vgnss_binder_write_read
 {
@@ -74,14 +74,14 @@ struct vgnss_binder_transaction_data
 {
     union
     {
-        u32 handle;
+        uint32_t handle;
         vgnss_binder_uintptr_t ptr;
     } target;
     vgnss_binder_uintptr_t cookie;
-    u32 code;
-    u32 flags;
-    s32 sender_pid;
-    u32 sender_euid;
+    uint32_t code;
+    uint32_t flags;
+    int32_t sender_pid;
+    uint32_t sender_euid;
     vgnss_binder_size_t data_size;
     vgnss_binder_size_t offsets_size;
     union
@@ -91,7 +91,7 @@ struct vgnss_binder_transaction_data
             vgnss_binder_uintptr_t buffer;
             vgnss_binder_uintptr_t offsets;
         } ptr;
-        u8 buf[8];
+        uint8_t buf[8];
     } data;
 };
 
@@ -135,42 +135,42 @@ static size_t vgnss_align4(size_t value)
 }
 
 // 从临时缓冲区读取 32 位无符号整数，避免未对齐直接解引用。
-static u32 vgnss_read_u32(const char *buf)
+static uint32_t vgnss_read_u32(const char *buf)
 {
-    u32 value;
+    uint32_t value;
 
     __builtin_memcpy(&value, buf, sizeof(value));
     return value;
 }
 
 // 从临时缓冲区读取 32 位有符号整数，避免未对齐直接解引用。
-static s32 vgnss_read_s32(const char *buf)
+static int32_t vgnss_read_s32(const char *buf)
 {
-    s32 value;
+    int32_t value;
 
     __builtin_memcpy(&value, buf, sizeof(value));
     return value;
 }
 
 // 从临时缓冲区读取 64 位整数，避免未对齐直接解引用。
-static u64 vgnss_read_u64(const char *buf)
+static uint64_t vgnss_read_u64(const char *buf)
 {
-    u64 value;
+    uint64_t value;
 
     __builtin_memcpy(&value, buf, sizeof(value));
     return value;
 }
 
 // 将 64 位整数写入临时缓冲区中的 Parcel 字段。
-static void vgnss_write_u64(char *buf, u64 value)
+static void vgnss_write_u64(char *buf, uint64_t value)
 {
     __builtin_memcpy(buf, &value, sizeof(value));
 }
 
 // 判断 IEEE754 double bit 的绝对值是否在指定范围内，并排除 NaN/Inf。
-static bool vgnss_double_abs_le(u64 bits, u64 limit)
+static bool vgnss_double_abs_le(uint64_t bits, uint64_t limit)
 {
-    u64 abs_bits = bits & VGNSS_DOUBLE_ABS_MASK;
+    uint64_t abs_bits = bits & VGNSS_DOUBLE_ABS_MASK;
 
     if ((abs_bits & VGNSS_DOUBLE_EXP_MASK) == VGNSS_DOUBLE_EXP_MASK) return false;
 
@@ -178,24 +178,24 @@ static bool vgnss_double_abs_le(u64 bits, u64 limit)
 }
 
 // 用纯整数把 e7 经纬度转换为 IEEE754 double bit。
-static u64 vgnss_e7_to_double_bits(int value)
+static uint64_t vgnss_e7_to_double_bits(int value)
 {
-    u64 sign = 0;
-    u64 mag;
+    uint64_t sign = 0;
+    uint64_t mag;
 
     if (value < 0)
     {
         sign = 0x8000000000000000ULL;
-        mag = (u64)(-(s64)value);
+        mag = (uint64_t)(-(int64_t)value);
     }
     else
     {
-        mag = (u64)value;
+        mag = (uint64_t)value;
     }
 
     if (!mag) return sign;
 
-    u64 fixed = ((mag << 32) + (VGNSS_COORD_SCALE_E7 / 2)) / VGNSS_COORD_SCALE_E7;
+    uint64_t fixed = ((mag << 32) + (VGNSS_COORD_SCALE_E7 / 2)) / VGNSS_COORD_SCALE_E7;
     if (!fixed) return sign;
 
     int top = fls64(fixed) - 1;
@@ -203,11 +203,11 @@ static u64 vgnss_e7_to_double_bits(int value)
     if (exp <= 0) return sign;
     if (exp >= 2047) return sign | VGNSS_DOUBLE_EXP_MASK;
 
-    u64 mant;
+    uint64_t mant;
     if (top > 52) mant = fixed >> (top - 52);
     else mant = fixed << (52 - top);
 
-    return sign | ((u64)exp << 52) | (mant & 0x000fffffffffffffULL);
+    return sign | ((uint64_t)exp << 52) | (mant & 0x000fffffffffffffULL);
 }
 
 // 在 UTF-16LE Parcel 字符串中匹配 ASCII interface token。
@@ -219,7 +219,7 @@ static bool vgnss_match_utf16le_ascii(const char *buf, size_t len, size_t pos, c
 
     for (size_t i = 0; i < token_len; i++)
     {
-        if ((u8)buf[pos + i * 2] != (u8)token[i]) return false;
+        if ((uint8_t)buf[pos + i * 2] != (uint8_t)token[i]) return false;
         if (buf[pos + i * 2 + 1] != 0) return false;
     }
 
@@ -251,7 +251,7 @@ static bool vgnss_find_location_token(const char *buf, size_t len, size_t *token
 }
 
 // 粗略校验 Location 的 wall time 和 elapsed realtime 字段是否合理。
-static bool vgnss_time_fields_plausible(u64 time_ms, u64 elapsed_ns)
+static bool vgnss_time_fields_plausible(uint64_t time_ms, uint64_t elapsed_ns)
 {
     if (!time_ms || !elapsed_ns) return false;
     if (time_ms > 4102444800000ULL) return false;
@@ -260,14 +260,14 @@ static bool vgnss_time_fields_plausible(u64 time_ms, u64 elapsed_ns)
 }
 
 // 按 Location Parcelable 布局校验并替换指定位置处的经纬度字段。
-static bool vgnss_patch_location_at(char *buf, size_t len, size_t start, u64 lat_bits, u64 lon_bits)
+static bool vgnss_patch_location_at(char *buf, size_t len, size_t start, uint64_t lat_bits, uint64_t lon_bits)
 {
-    if (start + sizeof(u32) > len) return false;
+    if (start + sizeof(uint32_t) > len) return false;
 
-    s32 provider_len = vgnss_read_s32(buf + start);
+    int32_t provider_len = vgnss_read_s32(buf + start);
     if (provider_len < -1 || provider_len > VGNSS_MAX_PROVIDER_BYTES) return false;
 
-    size_t pos = start + sizeof(u32);
+    size_t pos = start + sizeof(uint32_t);
     if (provider_len >= 0)
     {
         if (pos + (size_t)provider_len + 1 > len) return false;
@@ -275,28 +275,28 @@ static bool vgnss_patch_location_at(char *buf, size_t len, size_t start, u64 lat
         pos = vgnss_align4(pos + (size_t)provider_len + 1);
     }
 
-    if (pos + sizeof(u32) + sizeof(u64) * 2 > len) return false;
+    if (pos + sizeof(uint32_t) + sizeof(uint64_t) * 2 > len) return false;
 
-    u32 fields_mask = vgnss_read_u32(buf + pos);
+    uint32_t fields_mask = vgnss_read_u32(buf + pos);
     if (fields_mask & ~VGNSS_LOCATION_KNOWN_FIELD_MASK) return false;
 
-    pos += sizeof(u32);
-    u64 time_ms = vgnss_read_u64(buf + pos);
-    u64 elapsed_ns = vgnss_read_u64(buf + pos + sizeof(u64));
+    pos += sizeof(uint32_t);
+    uint64_t time_ms = vgnss_read_u64(buf + pos);
+    uint64_t elapsed_ns = vgnss_read_u64(buf + pos + sizeof(uint64_t));
     if (!vgnss_time_fields_plausible(time_ms, elapsed_ns)) return false;
 
-    pos += sizeof(u64) * 2;
-    if (fields_mask & VGNSS_LOCATION_HAS_ELAPSED_REALTIME_UNCERTAINTY_MASK) pos += sizeof(u64);
+    pos += sizeof(uint64_t) * 2;
+    if (fields_mask & VGNSS_LOCATION_HAS_ELAPSED_REALTIME_UNCERTAINTY_MASK) pos += sizeof(uint64_t);
 
-    if (pos + sizeof(u64) * 2 > len) return false;
+    if (pos + sizeof(uint64_t) * 2 > len) return false;
 
-    u64 old_lat = vgnss_read_u64(buf + pos);
-    u64 old_lon = vgnss_read_u64(buf + pos + sizeof(u64));
+    uint64_t old_lat = vgnss_read_u64(buf + pos);
+    uint64_t old_lon = vgnss_read_u64(buf + pos + sizeof(uint64_t));
     if (!vgnss_double_abs_le(old_lat, VGNSS_DOUBLE_ABS_LAT_90)) return false;
     if (!vgnss_double_abs_le(old_lon, VGNSS_DOUBLE_ABS_LON_180)) return false;
 
     vgnss_write_u64(buf + pos, lat_bits);
-    vgnss_write_u64(buf + pos + sizeof(u64), lon_bits);
+    vgnss_write_u64(buf + pos + sizeof(uint64_t), lon_bits);
     return true;
 }
 
@@ -308,8 +308,8 @@ static int vgnss_patch_location_parcel(char *buf, size_t len)
 
     if (!vgnss_find_location_token(buf, len, &token_end)) return 0;
 
-    u64 lat_bits = vgnss_e7_to_double_bits(READ_ONCE(vgps.latitude_e7));
-    u64 lon_bits = vgnss_e7_to_double_bits(READ_ONCE(vgps.longitude_e7));
+    uint64_t lat_bits = vgnss_e7_to_double_bits(READ_ONCE(vgps.latitude_e7));
+    uint64_t lon_bits = vgnss_e7_to_double_bits(READ_ONCE(vgps.longitude_e7));
 
     for (size_t pos = vgnss_align4(token_end); pos + 40 <= len; pos += 4)
     {
@@ -355,11 +355,11 @@ static int vgnss_patch_binder_write_buffer(char *buf, size_t len)
     size_t pos = 0;
     int patched = 0;
 
-    while (pos + sizeof(u32) <= len)
+    while (pos + sizeof(uint32_t) <= len)
     {
-        u32 cmd = vgnss_read_u32(buf + pos);
+        uint32_t cmd = vgnss_read_u32(buf + pos);
 
-        pos += sizeof(u32);
+        pos += sizeof(uint32_t);
         if (cmd == VGNSS_BC_TRANSACTION || cmd == VGNSS_BC_REPLY)
         {
             struct vgnss_binder_transaction_data tr;

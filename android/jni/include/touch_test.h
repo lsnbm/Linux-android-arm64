@@ -5,7 +5,6 @@
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
-#include <print>
 #include <thread>
 
 #include "driver.h"
@@ -48,7 +47,7 @@ inline void Log(const char *fmt, ...)
     va_start(args, fmt);
     vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
-    std::println(stdout, "[触摸测试] {}", buf);
+    LS_LOGI_TAG("TouchTest", "%s", buf);
 }
 
 // 单点连击测试：在 (x,y) 连续点击 taps 次

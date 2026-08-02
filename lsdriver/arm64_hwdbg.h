@@ -1,4 +1,5 @@
 ﻿#include <linux/module.h>
+#include <linux/bitops.h>
 #include <linux/kernel.h>
 #include <linux/kallsyms.h>
 #include <linux/memory.h>
@@ -9,6 +10,8 @@
 #include <linux/sched.h>
 #include <asm/cacheflush.h>
 #include <asm/debug-monitors.h>
+#include <asm/esr.h>
+#include <asm/hw_breakpoint.h>
 #include <asm/insn.h>
 #include <asm/virt.h>
 #include "export_fun.h"
@@ -17,8 +20,6 @@
 #include "lsdriver_log.h"
 #include "io_struct.h"
 #include "emulate_insn.h"
-
-#define ARM64_HWBKPT_ESR_ACCESS_MASK (1U << 6)
 
 /*
 这里用全局变量来传递异常回调和断点写入上下文
@@ -189,8 +190,8 @@ static uint64_t get_distance_from_watchpoint(uint64_t fault_addr, uint64_t watch
     if (!ctrl || !ctrl->len) return ~0ULL;
 
     fault_addr = untagged_addr(fault_addr);
-    uint32_t lens = lowest_set_bit32(ctrl->len);
-    uint32_t lene = highest_set_bit32(ctrl->len);
+    uint32_t lens = __ffs(ctrl->len);
+    uint32_t lene = __fls(ctrl->len);
 
     uint64_t wp_low = watch_addr + lens;
     uint64_t wp_high = watch_addr + lene;
@@ -205,7 +206,7 @@ static bool watchpoint_access_matches(struct arch_hw_breakpoint *info, uint64_t 
 {
     if (!info || info->ctrl.type == ARM_BREAKPOINT_EXECUTE) return false;
 
-    bool is_write = !!(esr & ARM64_HWBKPT_ESR_ACCESS_MASK);
+    bool is_write = !!(esr & ESR_ELx_WNR);
     if (is_write) return !!(info->ctrl.type & ARM_BREAKPOINT_STORE);
 
     return !!(info->ctrl.type & ARM_BREAKPOINT_LOAD);
@@ -310,12 +311,11 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
             // 地址相等、控制码相等且当前槽位启用才派发
             if ((ctrl & 0x1) && ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) == (ctrl & ~0x1ULL)))
             {
-                point->on_hit((void *)regs, (void *)point);
-
                 struct fp_regs fp_regs;
-                for (int qreg = 0; qreg < ARM64_FP_Q_REG_COUNT; qreg++) read_q_reg(qreg, &fp_regs.q[qreg]);
+                read_all_q_regs(&fp_regs);
+                point->on_hit(regs, &fp_regs, point);
                 bool emulated = emulate_insn(regs, &fp_regs, NULL);
-                for (int qreg = 0; qreg < ARM64_FP_Q_REG_COUNT; qreg++) write_q_reg(qreg, &fp_regs.q[qreg]);
+                write_all_q_regs(&fp_regs);
 
                 // 模拟指令步过,失败走禁用进行步过
                 if (!emulated)
@@ -393,12 +393,11 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
 
     if (!hit_point) return 0;
 
-    hit_point->on_hit((void *)regs, (void *)hit_point);
-
     struct fp_regs fp_regs;
-    for (int qreg = 0; qreg < ARM64_FP_Q_REG_COUNT; qreg++) read_q_reg(qreg, &fp_regs.q[qreg]);
+    read_all_q_regs(&fp_regs);
+    hit_point->on_hit(regs, &fp_regs, hit_point);
     bool emulated = emulate_insn(regs, &fp_regs, NULL);
-    for (int qreg = 0; qreg < ARM64_FP_Q_REG_COUNT; qreg++) write_q_reg(qreg, &fp_regs.q[qreg]);
+    write_all_q_regs(&fp_regs);
 
     // 模拟指令步过,失败走禁用进行步过
     if (!emulated)
@@ -532,11 +531,11 @@ static void __attribute__((used, __noinline__)) ret_work_finish_task_switch(void
         {
             if (current->pid == current->tgid)
             {
-                ls_log_tag("hwbp", "目标进程的主线程被切换进来: pid=%d comm=%s cpu=%d\n", current->pid, current->comm, raw_smp_processor_id());
+                //ls_log_tag("hwbp", "目标进程的主线程被切换进来: pid=%d comm=%s cpu=%d\n", current->pid, current->comm, raw_smp_processor_id());
             }
             else
             {
-                ls_log_tag("hwbp", "目标进程的子线程被切换进来: pid=%d comm=%s cpu=%d\n", current->pid, current->comm, raw_smp_processor_id());
+                //ls_log_tag("hwbp", "目标进程的子线程被切换进来: pid=%d comm=%s cpu=%d\n", current->pid, current->comm, raw_smp_processor_id());
             }
 
             enable_hardware_debug_on_cpu(NULL);

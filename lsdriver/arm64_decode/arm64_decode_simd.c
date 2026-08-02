@@ -1,6 +1,6 @@
 #include "arm64_decode.h"
 
-static void arm64_decode_simd_registers(arm64_u32 raw, struct arm64_decoded_insn *decoded)
+static void arm64_decode_simd_registers(uint32_t raw, struct arm64_decoded_insn *decoded)
 {
     decoded->rd = raw & 0x1F;
     decoded->rn = (raw >> 5) & 0x1F;
@@ -8,28 +8,28 @@ static void arm64_decode_simd_registers(arm64_u32 raw, struct arm64_decoded_insn
     decoded->rm = (raw >> 16) & 0x1F;
 }
 
-static arm64_u64 arm64_simd_expand_fp_imm(arm64_u8 immediate, arm64_u8 width)
+static uint64_t arm64_simd_expand_fp_imm(uint8_t immediate, uint8_t width)
 {
-    arm64_u64 sign = (arm64_u64)(immediate >> 7) << (width - 1);
-    arm64_u64 exponent_bit = (immediate >> 6) & 1;
+    uint64_t sign = (uint64_t)(immediate >> 7) << (width - 1);
+    uint64_t exponent_bit = (immediate >> 6) & 1;
 
     if (width == 16)
     {
-        arm64_u64 exponent = ((!exponent_bit) << 4) | ((exponent_bit ? 0x3ULL : 0) << 2) | ((immediate >> 4) & 0x3);
-        return sign | (exponent << 10) | ((arm64_u64)(immediate & 0xF) << 6);
+        uint64_t exponent = ((!exponent_bit) << 4) | ((exponent_bit ? 0x3ULL : 0) << 2) | ((immediate >> 4) & 0x3);
+        return sign | (exponent << 10) | ((uint64_t)(immediate & 0xF) << 6);
     }
 
     if (width == 32)
     {
-        arm64_u64 exponent = ((!exponent_bit) << 7) | ((exponent_bit ? 0x1FULL : 0) << 2) | ((immediate >> 4) & 0x3);
-        return sign | (exponent << 23) | ((arm64_u64)(immediate & 0xF) << 19);
+        uint64_t exponent = ((!exponent_bit) << 7) | ((exponent_bit ? 0x1FULL : 0) << 2) | ((immediate >> 4) & 0x3);
+        return sign | (exponent << 23) | ((uint64_t)(immediate & 0xF) << 19);
     }
 
-    arm64_u64 exponent = ((!exponent_bit) << 10) | ((exponent_bit ? 0xFFULL : 0) << 2) | ((immediate >> 4) & 0x3);
-    return sign | (exponent << 52) | ((arm64_u64)(immediate & 0xF) << 48);
+    uint64_t exponent = ((!exponent_bit) << 10) | ((exponent_bit ? 0xFFULL : 0) << 2) | ((immediate >> 4) & 0x3);
+    return sign | (exponent << 52) | ((uint64_t)(immediate & 0xF) << 48);
 }
 
-static arm64_u8 arm64_simd_scalar_fp_width(arm64_u32 type)
+static uint8_t arm64_simd_scalar_fp_width(uint32_t type)
 {
     switch (type)
     {
@@ -44,9 +44,9 @@ static arm64_u8 arm64_simd_scalar_fp_width(arm64_u32 type)
     }
 }
 
-static arm64_u64 arm64_simd_expand_modified_imm(arm64_u8 immediate, arm64_u8 cmode, arm64_u8 op)
+static uint64_t arm64_simd_expand_modified_imm(uint8_t immediate, uint8_t cmode, uint8_t op)
 {
-    arm64_u64 value = immediate;
+    uint64_t value = immediate;
 
     switch (cmode)
     {
@@ -80,7 +80,7 @@ static arm64_u64 arm64_simd_expand_modified_imm(arm64_u8 immediate, arm64_u8 cmo
             return value | (value << 32);
         }
         value = 0;
-        for (arm64_u8 index = 0; index < 8; index++)
+        for (uint8_t index = 0; index < 8; index++)
             if (immediate & (1U << index)) value |= 0xFFULL << (index * 8);
         return value;
     default:
@@ -97,7 +97,7 @@ static arm64_u64 arm64_simd_expand_modified_imm(arm64_u8 immediate, arm64_u8 cmo
 所有 FP/AdvSIMD 编码签名只在本文件内匹配；对外只返回稳定的 group 和
 arm64_simd_operation，调用方不需要了解原始 opcode/signature。
 */
-enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_insn *decoded)
+enum arm64_decode_status arm64_decode_simd(uint32_t raw, struct arm64_decoded_insn *decoded)
 {
     decoded->insn_class = ARM64_INSN_CLASS_DATA_PROCESSING_SIMD_FP;
     decoded->opcode = ARM64_OP_FP_SIMD;
@@ -106,9 +106,9 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
 
     if ((raw & 0xFF201FE0U) == 0x1E201000U)
     {
-        arm64_u8 immediate = (raw >> 13) & 0xFF;
-        arm64_u32 type = (raw >> 22) & 0x3;
-        arm64_u8 width = arm64_simd_scalar_fp_width(type);
+        uint8_t immediate = (raw >> 13) & 0xFF;
+        uint32_t type = (raw >> 22) & 0x3;
+        uint8_t width = arm64_simd_scalar_fp_width(type);
         if (!width) return ARM64_DECODE_UNALLOCATED;
         decoded->operands.simd.form = ARM64_SIMD_FORM_SCALAR_FP_IMMEDIATE;
         decoded->operands.simd.operation = ARM64_SIMD_OP_FMOV;
@@ -121,9 +121,9 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
 
     if ((raw & 0x9FF80C00U) == 0x0F000400U)
     {
-        arm64_u8 cmode = (raw >> 12) & 0xF;
-        arm64_u8 immediate = (((raw >> 16) & 0x7) << 5) | ((raw >> 5) & 0x1F);
-        arm64_u8 op = (raw >> 29) & 1;
+        uint8_t cmode = (raw >> 12) & 0xF;
+        uint8_t immediate = (((raw >> 16) & 0x7) << 5) | ((raw >> 5) & 0x1F);
+        uint8_t op = (raw >> 29) & 1;
 
         decoded->operands.simd.form = ARM64_SIMD_FORM_VECTOR_IMMEDIATE;
         decoded->operands.simd.immediate = immediate;
@@ -150,10 +150,10 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
 
     if ((raw & 0xFFE0FC00U) == 0x5E000400U)
     {
-        arm64_u8 imm5 = (raw >> 16) & 0x1F;
+        uint8_t imm5 = (raw >> 16) & 0x1F;
 
         if (!imm5) return ARM64_DECODE_UNALLOCATED;
-        arm64_u8 size = (arm64_u8)__builtin_ctz(imm5);
+        uint8_t size = (uint8_t)__builtin_ctz(imm5);
         if (size > 3) return ARM64_DECODE_UNALLOCATED;
 
         decoded->operands.simd.form = ARM64_SIMD_FORM_SCALAR_COPY;
@@ -166,12 +166,12 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
 
     if ((raw & 0x9FE08400U) == 0x0E000400U)
     {
-        arm64_u8 imm5 = (raw >> 16) & 0x1F;
-        arm64_u8 imm4 = (raw >> 11) & 0xF;
-        arm64_u8 q = (raw >> 30) & 1;
+        uint8_t imm5 = (raw >> 16) & 0x1F;
+        uint8_t imm4 = (raw >> 11) & 0xF;
+        uint8_t q = (raw >> 30) & 1;
 
         if (!imm5) return ARM64_DECODE_UNALLOCATED;
-        arm64_u8 size = (arm64_u8)__builtin_ctz(imm5);
+        uint8_t size = (uint8_t)__builtin_ctz(imm5);
         if (size > 3) return ARM64_DECODE_UNALLOCATED;
 
         decoded->operands.simd.form = ARM64_SIMD_FORM_VECTOR_COPY;
@@ -222,9 +222,9 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
 
     if ((raw & 0xBF208C00U) == 0x0E000800U)
     {
-        arm64_u8 opcode = (raw >> 12) & 0x7;
-        arm64_u8 size = (raw >> 22) & 0x3;
-        arm64_u8 q = (raw >> 30) & 1;
+        uint8_t opcode = (raw >> 12) & 0x7;
+        uint8_t size = (raw >> 22) & 0x3;
+        uint8_t q = (raw >> 30) & 1;
 
         switch (opcode)
         {
@@ -259,8 +259,8 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
 
     if ((raw & 0xBF20E400U) == 0x2E00C400U || (raw & 0xBF20EC00U) == 0x2E00E400U)
     {
-        arm64_u8 q = (raw >> 30) & 1;
-        arm64_u8 size = (raw >> 22) & 0x3;
+        uint8_t q = (raw >> 30) & 1;
+        uint8_t size = (raw >> 22) & 0x3;
 
         if ((raw & 0xBF20E400U) == 0x2E00C400U)
         {
@@ -282,10 +282,10 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
 
     if ((raw & 0x9F208400U) == 0x0E008400U)
     {
-        arm64_u8 q = (raw >> 30) & 1;
-        arm64_u8 u = (raw >> 29) & 1;
-        arm64_u8 size = (raw >> 22) & 0x3;
-        arm64_u8 opcode = (raw >> 11) & 0x1F;
+        uint8_t q = (raw >> 30) & 1;
+        uint8_t u = (raw >> 29) & 1;
+        uint8_t size = (raw >> 22) & 0x3;
+        uint8_t opcode = (raw >> 11) & 0x1F;
         enum arm64_simd_operation operation = ARM64_SIMD_OP_NONE;
 
         decoded->operand_width = q ? 128 : 64;
@@ -367,14 +367,14 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
     }
 
     {
-        arm64_u8 fp16 = (raw & 0x9F60C400U) == 0x0E400400U;
+        uint8_t fp16 = (raw & 0x9F60C400U) == 0x0E400400U;
 
         if (fp16 || (raw & 0x9F200400U) == 0x0E200400U)
         {
-            arm64_u8 q = (raw >> 30) & 1;
-            arm64_u8 u = (raw >> 29) & 1;
-            arm64_u8 size = (raw >> 22) & 0x3;
-            arm64_u8 opcode = (raw >> 11) & 0x1F;
+            uint8_t q = (raw >> 30) & 1;
+            uint8_t u = (raw >> 29) & 1;
+            uint8_t size = (raw >> 22) & 0x3;
+            uint8_t opcode = (raw >> 11) & 0x1F;
             enum arm64_simd_operation operation;
 
             decoded->operand_width = q ? 128 : 64;
@@ -414,7 +414,7 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
 
             if (!fp16 && opcode < 24)
             {
-                arm64_u8 valid_sizes = 0;
+                uint8_t valid_sizes = 0;
 
                 switch ((u << 5) | opcode)
                 {
@@ -729,14 +729,14 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
     }
 
     {
-        arm64_u8 fp16 = (raw & 0xDF60C400U) == 0x5E400400U;
-        arm64_u8 extra = (raw & 0xDF208400U) == 0x5E008400U;
+        uint8_t fp16 = (raw & 0xDF60C400U) == 0x5E400400U;
+        uint8_t extra = (raw & 0xDF208400U) == 0x5E008400U;
 
         if (extra)
         {
-            arm64_u8 u = (raw >> 29) & 1;
-            arm64_u8 size = (raw >> 22) & 0x3;
-            arm64_u8 opcode = (raw >> 11) & 0x1F;
+            uint8_t u = (raw >> 29) & 1;
+            uint8_t size = (raw >> 22) & 0x3;
+            uint8_t opcode = (raw >> 11) & 0x1F;
 
             if (!u || size == 0 || size == 3 || (opcode & 0x1E) != 0x10) return ARM64_DECODE_UNALLOCATED;
             decoded->operands.simd.form = ARM64_SIMD_FORM_SCALAR_SIMD_3REG;
@@ -748,9 +748,9 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
 
         if (fp16 || (raw & 0xDF200400U) == 0x5E200400U)
         {
-            arm64_u8 u = (raw >> 29) & 1;
-            arm64_u8 size = (raw >> 22) & 0x3;
-            arm64_u8 opcode = (raw >> 11) & 0x1F;
+            uint8_t u = (raw >> 29) & 1;
+            uint8_t size = (raw >> 22) & 0x3;
+            uint8_t opcode = (raw >> 11) & 0x1F;
             enum arm64_simd_operation operation = ARM64_SIMD_OP_NONE;
 
             if (fp16)
@@ -917,14 +917,14 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
 
     if ((raw & 0xDF000400U) == 0x0F000000U || (raw & 0xDF000400U) == 0x4F000000U || (raw & 0xDF000400U) == 0x5F000000U)
     {
-        arm64_u8 size = (raw >> 22) & 0x3;
-        arm64_u8 opcode = (raw >> 12) & 0xF;
-        arm64_u8 scalar = (raw >> 28) & 1;
-        arm64_u8 q = (raw >> 30) & 1;
-        arm64_u8 u = (raw >> 29) & 1;
-        arm64_u8 h = (raw >> 11) & 1;
-        arm64_u8 l = (raw >> 21) & 1;
-        arm64_u8 m = (raw >> 20) & 1;
+        uint8_t size = (raw >> 22) & 0x3;
+        uint8_t opcode = (raw >> 12) & 0xF;
+        uint8_t scalar = (raw >> 28) & 1;
+        uint8_t q = (raw >> 30) & 1;
+        uint8_t u = (raw >> 29) & 1;
+        uint8_t h = (raw >> 11) & 1;
+        uint8_t l = (raw >> 21) & 1;
+        uint8_t m = (raw >> 20) & 1;
 
         if (u && (opcode == 13 || opcode == 15))
         {
@@ -1058,9 +1058,9 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
 
     if ((raw & 0x9F800000U) == 0x0F000000U && ((raw >> 19) & 0xF) != 0)
     {
-        arm64_u8 immh = (raw >> 19) & 0xF;
-        arm64_u8 immb = (raw >> 16) & 0x7;
-        arm64_u8 opcode = (raw >> 11) & 0x1F;
+        uint8_t immh = (raw >> 19) & 0xF;
+        uint8_t immb = (raw >> 16) & 0x7;
+        uint8_t opcode = (raw >> 11) & 0x1F;
         enum arm64_simd_operation operation = ARM64_SIMD_OP_NONE;
 
         if (opcode == 0 && (raw & (1U << 10))) operation = raw & (1U << 29) ? ARM64_SIMD_OP_USHR : ARM64_SIMD_OP_SSHR;
@@ -1075,8 +1075,8 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
 
         if (operation != ARM64_SIMD_OP_NONE)
         {
-            arm64_u8 element_width = 8U << (31 - __builtin_clz(immh));
-            arm64_u8 encoded_immediate = (immh << 3) | immb;
+            uint8_t element_width = 8U << (31 - __builtin_clz(immh));
+            uint8_t encoded_immediate = (immh << 3) | immb;
 
             decoded->operand_width = raw & (1U << 30) ? 128 : 64;
             if (decoded->operand_width == 64 && element_width == 64) return ARM64_DECODE_UNALLOCATED;
@@ -1090,11 +1090,11 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
 
     if ((raw & 0x8F000C00U) == 0x0E000800U)
     {
-        arm64_u32 shape = raw & 0x00FF0000U;
-        arm64_u32 relation = raw & 0x2000F000U;
-        arm64_u8 scalar = (raw >> 28) & 1;
-        arm64_u8 q = (raw >> 30) & 1;
-        arm64_u8 element_width = 0;
+        uint32_t shape = raw & 0x00FF0000U;
+        uint32_t relation = raw & 0x2000F000U;
+        uint8_t scalar = (raw >> 28) & 1;
+        uint8_t q = (raw >> 30) & 1;
+        uint8_t element_width = 0;
         enum arm64_simd_operation operation = ARM64_SIMD_OP_NONE;
 
         if (shape == 0x00F80000U) element_width = 16;
@@ -1256,9 +1256,9 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
 
         if ((raw & 0x7F20FC00U) == 0x1E200000U && ((raw >> 22) & 0x3) <= 1)
         {
-            arm64_u32 rounding = (raw >> 19) & 0x3;
-            arm64_u32 opcode = (raw >> 16) & 0x7;
-            arm64_u8 valid = 1;
+            uint32_t rounding = (raw >> 19) & 0x3;
+            uint32_t opcode = (raw >> 16) & 0x7;
+            uint8_t valid = 1;
 
             if (opcode <= 1)
             {
@@ -1291,11 +1291,11 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
         }
     }
 
-    arm64_u32 type = (raw >> 22) & 0x3;
+    uint32_t type = (raw >> 22) & 0x3;
     if ((raw & 0xFF200C00U) == 0x1E200800U)
     {
-        arm64_u32 opcode = (raw >> 12) & 0xF;
-        arm64_u8 width = arm64_simd_scalar_fp_width(type);
+        uint32_t opcode = (raw >> 12) & 0xF;
+        uint8_t width = arm64_simd_scalar_fp_width(type);
 
         if (!width) return ARM64_DECODE_UNALLOCATED;
         if (opcode > 8) return ARM64_DECODE_UNSUPPORTED;
@@ -1337,8 +1337,8 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
 
     if ((raw & 0xFF207C00U) == 0x1E204000U)
     {
-        arm64_u32 opcode = (raw >> 15) & 0x3F;
-        arm64_u8 width = arm64_simd_scalar_fp_width(type);
+        uint32_t opcode = (raw >> 15) & 0x3F;
+        uint8_t width = arm64_simd_scalar_fp_width(type);
 
         if (!width) return ARM64_DECODE_UNALLOCATED;
         decoded->operands.simd.form = ARM64_SIMD_FORM_SCALAR_FP_UNARY;
@@ -1394,7 +1394,7 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
 
     if ((raw & 0xFF000000U) == 0x1F000000U)
     {
-        arm64_u8 width = arm64_simd_scalar_fp_width(type);
+        uint8_t width = arm64_simd_scalar_fp_width(type);
 
         if (!width) return ARM64_DECODE_UNALLOCATED;
         decoded->operands.simd.form = ARM64_SIMD_FORM_SCALAR_FP_TERNARY;
@@ -1420,7 +1420,7 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
 
     if ((raw & 0xFF20FC00U) == 0x1E202000U)
     {
-        arm64_u32 zero = (raw >> 3) & 1;
+        uint32_t zero = (raw >> 3) & 1;
 
         if (type == 2 || (raw & 0x7)) return ARM64_DECODE_UNALLOCATED;
         decoded->operands.simd.form = ARM64_SIMD_FORM_SCALAR_COMPARE;
@@ -1432,7 +1432,7 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
 
     if ((raw & 0xFF200C00U) == 0x1E200400U)
     {
-        arm64_u8 width = arm64_simd_scalar_fp_width(type);
+        uint8_t width = arm64_simd_scalar_fp_width(type);
 
         if (!width) return ARM64_DECODE_UNALLOCATED;
         decoded->operands.simd.form = ARM64_SIMD_FORM_SCALAR_CONDITIONAL_COMPARE;
@@ -1446,7 +1446,7 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
 
     if ((raw & 0xFF200C00U) == 0x1E200C00U)
     {
-        arm64_u8 width = arm64_simd_scalar_fp_width(type);
+        uint8_t width = arm64_simd_scalar_fp_width(type);
 
         if (!width) return ARM64_DECODE_UNALLOCATED;
         decoded->operands.simd.form = ARM64_SIMD_FORM_SCALAR_SELECT;
@@ -1459,7 +1459,7 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
 
     if ((raw & 0x7FBEFC00U) == 0x1E260000U)
     {
-        arm64_u32 sf = (raw >> 31) & 1;
+        uint32_t sf = (raw >> 31) & 1;
 
         if (((raw >> 22) & 1) != sf) return ARM64_DECODE_UNALLOCATED;
         decoded->operands.simd.form = ARM64_SIMD_FORM_FP_GPR_TRANSFER;
@@ -1479,9 +1479,9 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
     }
 
     {
-        arm64_u32 shape = raw & 0x00FE0000U;
-        arm64_u32 signature = raw & 0xBF01FC00U;
-        arm64_u8 q = (raw >> 30) & 1;
+        uint32_t shape = raw & 0x00FE0000U;
+        uint32_t signature = raw & 0xBF01FC00U;
+        uint8_t q = (raw >> 30) & 1;
         enum arm64_simd_operation operation = ARM64_SIMD_OP_NONE;
 
         if (shape == 0x00F80000U) decoded->operands.simd.element_width = 16;
@@ -1509,7 +1509,7 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
     }
 
     {
-        arm64_u32 size = (raw >> 22) & 0x3;
+        uint32_t size = (raw >> 22) & 0x3;
         enum arm64_simd_operation operation = ARM64_SIMD_OP_NONE;
 
         switch (raw & 0xBF3FFC00U)
@@ -1541,8 +1541,8 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
     }
 
     {
-        arm64_u32 size = (raw >> 22) & 0x3;
-        arm64_u8 scalar = (raw >> 28) & 1;
+        uint32_t size = (raw >> 22) & 0x3;
+        uint8_t scalar = (raw >> 28) & 1;
         enum arm64_simd_operation operation = ARM64_SIMD_OP_NONE;
 
         if (scalar)
@@ -1610,7 +1610,7 @@ enum arm64_decode_status arm64_decode_simd(arm64_u32 raw, struct arm64_decoded_i
     }
 
     {
-        arm64_u32 size = (raw >> 22) & 0x3;
+        uint32_t size = (raw >> 22) & 0x3;
         enum arm64_simd_operation operation = ARM64_SIMD_OP_NONE;
 
         switch (raw & 0xBF3FFC00U)

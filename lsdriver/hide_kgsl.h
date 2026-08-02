@@ -165,7 +165,7 @@ static bool kobj_under_kgsl(struct kobject *kobj)
 // ARM64：伪造 -ENOMEM 并跳过函数体
 static void fake_enomem_and_return(struct pt_regs *regs)
 {
-    regs->regs[0] = (u64)(long)(-ENOMEM);
+    regs->regs[0] = (uint64_t)(long)(-ENOMEM);
     regs->pc = regs->regs[30]; /* LR -> 返回调用者 */
 }
 
