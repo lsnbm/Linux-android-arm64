@@ -1,0 +1,732 @@
+#include <linux/module.h>
+#include <linux/bitops.h>
+#include <linux/kernel.h>
+#include <linux/kallsyms.h>
+#include <linux/memory.h>
+#include <linux/percpu.h>
+#include <linux/smp.h>
+#include <linux/stop_machine.h>
+#include <linux/version.h>
+#include <linux/sched.h>
+#include <asm/cacheflush.h>
+#include <asm/debug-monitors.h>
+#include <asm/esr.h>
+#include <asm/hw_breakpoint.h>
+#include <asm/insn.h>
+#include <asm/virt.h>
+#include "export_fun.h"
+#include "arm64_reg.h"
+#include "inline_hook_frame.h"
+#include "lsdriver_log.h"
+#include "bp_types.h"
+#include "emulate_insn.h"
+
+/*
+??????????????????????
+???????????????????,????????
+????????????????,??????????,????inline hook????????
+?????????????,??<??>??????????,????????
+?????????????
+*/
+struct break_point *g_bp_info;
+int num_brps, num_wrps; // ???????????
+static struct perf_event * __percpu * bp_on_reg;
+static struct perf_event * __percpu * wp_on_reg;
+static void (*fn_perf_bp_event)(struct perf_event *event, void *data);
+
+// ????????????????????
+static bool hwbp_point_is_active(struct bp_point *point)
+{
+    return point && point->hit_addr != 0 && point->on_hit;
+}
+
+// ???? break_point ????????????????
+static bool hwbp_info_has_active_point(struct break_point *info)
+{
+    if (!info || info->tgid <= 0) return false;
+
+    for (int point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
+    {
+        if (hwbp_point_is_active(&info->points[point_slot])) return true;
+    }
+
+    return false;
+}
+
+// ???? break_point ???????????? TGID ??????
+static bool hwbp_info_has_tgid(struct break_point *info, pid_t tgid)
+{
+    if (!info || tgid <= 0 || info->tgid != tgid) return false;
+
+    return hwbp_info_has_active_point(info);
+}
+
+/*
+??????????ARM??????,???????/???
+??????????(EL0)???
+?32??task?per-cpu ?????compat??,?=0
+*/
+static int hw_breakpoint_parse(struct bp_point *point, bool is_compat, struct arch_hw_breakpoint *hw)
+{
+    if (!point || !hw) return -EINVAL;
+
+    memset(hw, 0, sizeof(*hw));
+
+    // ????:?? arch_build_bp_info()
+    switch (point->bt)
+    {
+    case BP_BREAKPOINT_X:
+        hw->ctrl.type = ARM_BREAKPOINT_EXECUTE;
+        break;
+    case BP_BREAKPOINT_R:
+        hw->ctrl.type = ARM_BREAKPOINT_LOAD;
+        break;
+    case BP_BREAKPOINT_W:
+        hw->ctrl.type = ARM_BREAKPOINT_STORE;
+        break;
+    case BP_BREAKPOINT_RW:
+        hw->ctrl.type = ARM_BREAKPOINT_LOAD | ARM_BREAKPOINT_STORE;
+        break;
+    default:
+        return -EINVAL;
+    }
+
+    // ????:?? arch_build_bp_info()
+    switch (point->bl)
+    {
+    case BP_BREAKPOINT_LEN_1:
+        hw->ctrl.len = ARM_BREAKPOINT_LEN_1;
+        break;
+    case BP_BREAKPOINT_LEN_2:
+        hw->ctrl.len = ARM_BREAKPOINT_LEN_2;
+        break;
+    case BP_BREAKPOINT_LEN_3:
+        hw->ctrl.len = ARM_BREAKPOINT_LEN_3;
+        break;
+    case BP_BREAKPOINT_LEN_4:
+        hw->ctrl.len = ARM_BREAKPOINT_LEN_4;
+        break;
+    case BP_BREAKPOINT_LEN_5:
+        hw->ctrl.len = ARM_BREAKPOINT_LEN_5;
+        break;
+    case BP_BREAKPOINT_LEN_6:
+        hw->ctrl.len = ARM_BREAKPOINT_LEN_6;
+        break;
+    case BP_BREAKPOINT_LEN_7:
+        hw->ctrl.len = ARM_BREAKPOINT_LEN_7;
+        break;
+    case BP_BREAKPOINT_LEN_8:
+        hw->ctrl.len = ARM_BREAKPOINT_LEN_8;
+        break;
+    default:
+        return -EINVAL;
+    }
+
+    // ????/??????????:?? arch_build_bp_info()
+    if (hw->ctrl.type == ARM_BREAKPOINT_EXECUTE)
+    {
+        if (is_compat)
+        {
+            if (hw->ctrl.len != ARM_BREAKPOINT_LEN_2 && hw->ctrl.len != ARM_BREAKPOINT_LEN_4) return -EINVAL;
+        }
+        else
+        {
+            // AArch64 ??????? 4 ??????????????,????? 4?
+            if (hw->ctrl.len != ARM_BREAKPOINT_LEN_4) hw->ctrl.len = ARM_BREAKPOINT_LEN_4;
+        }
+    }
+
+    // ?????:?? arch_build_bp_info()
+    hw->address = point->hit_addr;
+
+    // ??:?????????
+    hw->ctrl.privilege = AARCH64_BREAKPOINT_EL0;
+    hw->ctrl.enabled = 1;
+
+    // ???????:?????? hw_breakpoint_arch_parse()
+    uint64_t alignment_mask;
+    uint64_t offset;
+    if (is_compat)
+    {
+
+        if (hw->ctrl.len == ARM_BREAKPOINT_LEN_8) alignment_mask = 0x7;
+        else alignment_mask = 0x3;
+
+        offset = hw->address & alignment_mask;
+
+        switch (offset)
+        {
+        case 0:
+            break;
+        case 1:
+        case 2:
+            if (hw->ctrl.len == ARM_BREAKPOINT_LEN_2) break;
+            fallthrough;
+        case 3:
+            if (hw->ctrl.len == ARM_BREAKPOINT_LEN_1) break;
+            fallthrough;
+        default:
+            return -EINVAL;
+        }
+    }
+    else
+    {
+        if (hw->ctrl.type == ARM_BREAKPOINT_EXECUTE) alignment_mask = 0x3;
+        else alignment_mask = 0x7;
+
+        offset = hw->address & alignment_mask;
+    }
+
+    // ??????????????
+    hw->address &= ~alignment_mask;
+    hw->ctrl.len <<= offset;
+
+    return 0;
+}
+
+// ARM64 watchpoint ???? watched bytes ?????;????????
+static uint64_t get_distance_from_watchpoint(uint64_t fault_addr, uint64_t watch_addr, struct arch_hw_breakpoint_ctrl *ctrl)
+{
+    if (!ctrl || !ctrl->len) return ~0ULL;
+
+    fault_addr = untagged_addr(fault_addr);
+    uint32_t lens = __ffs(ctrl->len);
+    uint32_t lene = __fls(ctrl->len);
+
+    uint64_t wp_low = watch_addr + lens;
+    uint64_t wp_high = watch_addr + lene;
+
+    if (fault_addr < wp_low) return wp_low - fault_addr;
+    if (fault_addr > wp_high) return fault_addr - wp_high;
+    return 0;
+}
+
+// ESR bit 6 ????????:0 ??,1 ???
+static bool watchpoint_access_matches(struct arch_hw_breakpoint *info, uint64_t esr)
+{
+    if (!info || info->ctrl.type == ARM_BREAKPOINT_EXECUTE) return false;
+
+    bool is_write = !!(esr & ESR_ELx_WNR);
+    if (is_write) return !!(info->ctrl.type & ARM_BREAKPOINT_STORE);
+
+    return !!(info->ctrl.type & ARM_BREAKPOINT_LOAD);
+}
+
+// ?????????????
+static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
+{
+    struct break_point *bp_info = g_bp_info;
+    struct pt_regs *regs = (struct pt_regs *)hook_regs->regs[2];
+
+    if (!bp_info || bp_info->tgid != current->tgid) return 0;
+
+    /*
+   ?????????????????
+       ??????????????????cpu???????cpu???????,???????????????,??????????task?
+       ???????????????????????,?????????????,?????????????!
+
+       ???????????????,?????????????
+       while (1){a++;}
+       ??????!????!????70%??????????,??????
+       ??????????????,????????????????????????
+
+       ??????100%???????,????????????,???????task?????????????????????
+       1.????????,           ?????;                             sleep() / nanosleep() / msleep()...
+       2.?? IO ??,               ???,    ???????????????;  printf()/ read() / recv() / send() / connect() / accept()....
+       3.????????,           ?????, ??????????????;                  std::mutex / std::shared_mutex / std::spinlock...
+       4.?????CFS ??,         ???,     ????????,???????,??????
+       5.??????????????,???,    ???????,???????
+       6.????,                   ???,    ?????????????????,?????????
+       7.page fault ??,            ????,  ?????????????????????,?????????,??????
+       8.?task??,                 ?????,?????????
+       9.????????,            ?????,opengl/vulkan ???????
+       10.??????,?????????
+       ?????????????
+       */
+
+    /*
+    ?????????????????,?????bit 0 enabled?????
+    ????????????
+        ???????perf??,????? debug ?????????????len/type/privilege
+        ?? BCR/WCR ???,??? debug ???????? BVR/BCR ? WVR/WCR ???
+        ??? perf_event owner,?????? perf_bp_event() ???disable + single-step + restore ???????
+        ??debug??????????????
+      ???:??debug???????,? perf???????????????????,??????????
+
+    ??:????????????????????,????????????perf???
+    ???????????????,??????????
+    ????????enable?,????????????????
+
+    perf ??????? CPU ?? perf ????????,??? BVR/WVR + BCR/WCR;
+    ??????? debug_info ?????,???? BCR/WCR ? enable ?
+    */
+
+    for (int slot = 0; slot < num_brps; slot++)
+    {
+        // ????cpu????????
+        uint64_t addr = read_wb_reg(AARCH64_DBG_REG_BVR, slot);
+        uint64_t ctrl = read_wb_reg(AARCH64_DBG_REG_BCR, slot);
+
+        // ????????
+        for (int j = 0; j < BP_CONFIG_MAX; j++)
+        {
+            struct bp_point *point = &bp_info->points[j];
+            struct arch_hw_breakpoint info;
+
+            // ???????
+            if (!hwbp_point_is_active(point) || hw_breakpoint_parse(point, 0, &info) || info.address != addr) continue;
+
+            /*
+                ???
+                point0 ???? = 0x71B5654190
+                point1 ???? = 0x71B5653A68
+                point2 ???? = 0x71B5655590
+
+                ??????????:
+                BVR0 = 0x71B5654190
+                BVR1 = 0x71B5653A68
+                BVR2 = 0x71B5655590
+
+                ?????:
+                PC = 0x71B5655590
+
+                CPU ?? debug exception,?????? slot2?
+
+                ?????,? slot0 ???:
+                slot0:addr = read_bvr(0);  // 0x71B5654190
+
+                point0:info.address = 0x71B5654190
+
+                if (info.address == addr)?? point0
+
+                bug ?:
+                ????? point0 ??? slot0,
+                ???????? slot0 ???
+
+                ?????? slot2,? point0 ?????,
+                ?? point0.records ???? record.pc = 0x71B5655590?
+                */
+            if (info.address != (regs->pc & ~0x3ULL)) continue;
+
+            // ????????????????????
+            if ((ctrl & 0x1) && ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) == (ctrl & ~0x1ULL)))
+            {
+                struct fp_regs fp_regs;
+                read_all_q_regs(&fp_regs);
+                point->on_hit(regs, &fp_regs, point);
+                bool emulated = emulate_insn(regs, &fp_regs, NULL);
+                write_all_q_regs(&fp_regs);
+
+                // ??????,?????????
+                if (!emulated)
+                {
+                    // ?? enable ?,?????????,?????????
+                    write_wb_reg(AARCH64_DBG_REG_BCR, slot, ctrl & ~0x1);
+                }
+
+                /*
+                ????????????????,????perf????????
+                ??????????????? breakpoint_handler:?????????? perf?
+                ???????,???? slots ???? perf ???????
+                */
+                // slots = this_cpu_ptr(bp_on_reg);
+                // if (slot >= 0 && slot < num_brps)
+                // {
+                //     bp = READ_ONCE(slots[slot]);
+                //     if (bp)
+                //         fn_perf_bp_event(bp, regs);
+                // }
+                // hook_regs->regs[0] = 0;// ? breakpoint_handler?? 0,???????
+                // return 1;     // ?hook????1,???????
+                return 0;
+            }
+        }
+    }
+    return 0;
+}
+
+// ?????????????
+static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
+{
+    int hit_slot = -1;
+    uint64_t hit_ctrl = 0;
+    uint64_t fault_addr = hook_regs->regs[0];
+    uint64_t esr = hook_regs->regs[1];
+    struct break_point *bp_info = g_bp_info;
+    struct bp_point *hit_point = NULL;
+    struct pt_regs *regs = (struct pt_regs *)hook_regs->regs[2];
+
+    if (!bp_info || bp_info->tgid != current->tgid) return 0;
+    pr_info("bp: wp handler tgid=%d far=0x%llx esr=0x%llx\n", current->tgid, (unsigned long long)fault_addr, (unsigned long long)esr);
+
+    /*
+    watchpoint_handler ??? (addr, esr, regs)???? addr ???????????,
+    ? esr ??????,????? point ????? WRP ??????
+    */
+    for (int slot = 0; slot < num_wrps && !hit_point; slot++)
+    {
+        uint64_t addr = read_wb_reg(AARCH64_DBG_REG_WVR, slot);
+        uint64_t ctrl = read_wb_reg(AARCH64_DBG_REG_WCR, slot);
+
+        if (!(ctrl & 0x1)) continue;
+
+        for (int j = 0; j < BP_CONFIG_MAX; j++)
+        {
+            struct bp_point *point = &bp_info->points[j];
+            struct arch_hw_breakpoint info;
+
+            if (!hwbp_point_is_active(point) || hw_breakpoint_parse(point, 0, &info) || info.address != addr || ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) != (ctrl & ~0x1ULL)) || !watchpoint_access_matches(&info, esr)) { pr_info("bp: wp miss j=%d active=%d parse=%d addr=%llx/%llx ctrl=%llx/%llx wm=%d\n", j, hwbp_point_is_active(point), hw_breakpoint_parse(point,0,&info) ? 1:0, (unsigned long long)info.address, (unsigned long long)addr, (unsigned long long)encode_ctrl_reg(info.ctrl), (unsigned long long)ctrl, watchpoint_access_matches(&info, esr) ? 1 : 0); continue; }
+
+            /*
+            ?? perf ?????????????? watchpoint ??;
+            ??????????,??????????????????,?????
+            */
+            uint64_t dist = get_distance_from_watchpoint(fault_addr, addr, &info.ctrl);
+            if (dist != 0) continue;
+
+            hit_point = point;
+            hit_slot = slot;
+            hit_ctrl = ctrl;
+
+            break;
+        }
+    }
+
+    if (!hit_point) return 0;
+
+    struct fp_regs fp_regs;
+    read_all_q_regs(&fp_regs);
+    hit_point->on_hit(regs, &fp_regs, hit_point);
+    bool emulated = emulate_insn(regs, &fp_regs, NULL);
+    write_all_q_regs(&fp_regs);
+
+    // ??????,?????????
+    if (!emulated)
+    {
+        // ?? enable ?,?????????,?????????
+        write_wb_reg(AARCH64_DBG_REG_WCR, hit_slot, hit_ctrl & ~0x1);
+    }
+
+    // slots = this_cpu_ptr(wp_on_reg);
+    // if (hit_slot >= 0 && hit_slot < num_wrps)
+    // {
+    //     bp = READ_ONCE(slots[hit_slot]);
+    //     if (bp)
+    //         fn_perf_bp_event(bp, regs);
+    // }
+    // hook_regs->regs[0] = 0;
+    // return 1;
+    return 0;
+}
+
+// ???????? hook ?
+static struct hook_entry g_debug_exception_hooks[] = {
+    HOOK_ENTRY("breakpoint_handler", work_trampoline_breakpoint),
+    HOOK_ENTRY("watchpoint_handler", work_trampoline_watchpoint),
+};
+
+// ????hook ??
+static void __attribute__((used, __noinline__)) ret_work_finish_task_switch(void);
+__attribute__((naked, used)) void ret_trampoline_finish_task_switch(void)
+{
+    asm volatile("str x0, [sp, #8]\n"
+                 "bl ret_work_finish_task_switch\n"
+                 "ldp x16, x0, [sp], #304\n"
+                 "ret x16\n");
+}
+
+// ??? CPU ???????/???????
+static void install_hwbp_regs_on_cpu(struct break_point *bp_info)
+{
+    int brp_slot = 0;
+    int wrp_slot = 0;
+    pr_info("bp: install tgid=%d\n", bp_info ? bp_info->tgid : -1);
+
+    if (!bp_info) return;
+
+    for (int j = 0; j < BP_CONFIG_MAX; j++)
+    {
+        struct bp_point *point = &bp_info->points[j];
+        struct arch_hw_breakpoint info;
+        int reg_slot;
+
+        if (!hwbp_point_is_active(point)) continue;
+
+        if (hw_breakpoint_parse(point, 0, &info)) continue;
+
+        if (info.ctrl.type == ARM_BREAKPOINT_EXECUTE)
+        {
+            if (brp_slot >= num_brps) continue;
+
+            reg_slot = brp_slot++;
+            write_wb_reg(AARCH64_DBG_REG_BVR, reg_slot, info.address);
+            write_wb_reg(AARCH64_DBG_REG_BCR, reg_slot, encode_ctrl_reg(info.ctrl) | 0x1);
+        }
+        else
+        {
+            if (wrp_slot >= num_wrps) continue;
+
+            reg_slot = wrp_slot++;
+            pr_info("bp: install WVR%d=0x%llx ctrl=0x%llx\n", reg_slot, (unsigned long long)info.address, (unsigned long long)(encode_ctrl_reg(info.ctrl) | 0x1));
+            write_wb_reg(AARCH64_DBG_REG_WVR, reg_slot, info.address);
+            write_wb_reg(AARCH64_DBG_REG_WCR, reg_slot, encode_ctrl_reg(info.ctrl) | 0x1);
+        }
+    }
+}
+
+// ???? CPU ??????/????????,???????
+static void clear_hwbp_regs_on_cpu(void *data)
+{
+    int brp_slot = 0;
+    int wrp_slot = 0;
+    struct break_point *bp_info = g_bp_info;
+
+    (void)data;
+
+    if (!bp_info) return;
+
+    for (int point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
+    {
+        struct bp_point *point = &bp_info->points[point_slot];
+        struct arch_hw_breakpoint info;
+
+        if (!hwbp_point_is_active(point) || hw_breakpoint_parse(point, 0, &info)) continue;
+
+        uint32_t expected_ctrl = encode_ctrl_reg(info.ctrl);
+        if (info.ctrl.type == ARM_BREAKPOINT_EXECUTE)
+        {
+            if (brp_slot >= num_brps) continue;
+
+            uint64_t addr = read_wb_reg(AARCH64_DBG_REG_BVR, brp_slot);
+            uint32_t ctrl = read_wb_reg(AARCH64_DBG_REG_BCR, brp_slot);
+
+            if ((ctrl & 0x1) && info.address == addr && ((expected_ctrl & ~0x1) == (ctrl & ~0x1)))
+            {
+                write_wb_reg(AARCH64_DBG_REG_BCR, brp_slot, ctrl & ~0x1);
+            }
+
+            brp_slot++;
+        }
+        else
+        {
+            if (wrp_slot >= num_wrps) continue;
+
+            uint64_t addr = read_wb_reg(AARCH64_DBG_REG_WVR, wrp_slot);
+            uint32_t ctrl = read_wb_reg(AARCH64_DBG_REG_WCR, wrp_slot);
+
+            if ((ctrl & 0x1) && info.address == addr && ((expected_ctrl & ~0x1) == (ctrl & ~0x1)))
+            {
+                write_wb_reg(AARCH64_DBG_REG_WCR, wrp_slot, ctrl & ~0x1);
+            }
+
+            wrp_slot++;
+        }
+    }
+}
+
+static void __attribute__((used, __noinline__)) ret_work_finish_task_switch(void)
+{
+    struct break_point *bp_info = g_bp_info;
+
+    if (bp_info)
+    {
+        if (hwbp_info_has_tgid(bp_info, current->tgid))
+        {
+            if (current->pid == current->tgid)
+            {
+                //ls_log_tag("hwbp", "?????????????: pid=%d comm=%s cpu=%d\n", current->pid, current->comm, raw_smp_processor_id());
+            }
+            else
+            {
+                //ls_log_tag("hwbp", "?????????????: pid=%d comm=%s cpu=%d\n", current->pid, current->comm, raw_smp_processor_id());
+            }
+
+            enable_hardware_debug_on_cpu(NULL);
+            install_hwbp_regs_on_cpu(bp_info);
+        }
+        else
+        {
+            clear_hwbp_regs_on_cpu(NULL);
+            // disable_hardware_debug_on_cpu(NULL);
+        }
+    }
+}
+
+// finish_task_switch(prev) ?? hook:???????? perf ???????????
+static int work_trampoline_finish_task_switch(struct pt_regs *hook_regs)
+{
+    if (!g_bp_info) return 0;
+
+    *(unsigned long *)(hook_regs->sp = (unsigned long)hook_frame_metadata(hook_regs)) = hook_regs->regs[30];
+    hook_regs->regs[30] = (unsigned long)ret_trampoline_finish_task_switch;
+
+    return 0;
+}
+
+static struct hook_entry g_finish_task_switch_ret_hooks[] = {
+    /*
+      __schedule() ??????:
+
+      __schedule()
+        prev = current;
+        next = pick_next_task(...);
+
+        if (prev != next) {
+          -> trace_sched_switch(..., prev, next, prev_state)
+             register_trace_sched_switch() ??? sched_switch tracepoint ???????
+
+          -> context_switch(rq, prev, next, &rf)
+             -> prepare_task_switch(rq, prev, next)
+             -> arch_start_context_switch(prev)
+             -> switch_mm_irqs_off(..., next)
+             -> prepare_lock_switch(rq, next, rf)
+
+             -> switch_to(prev, next, prev)
+                -> __switch_to(prev, next)
+                   -> fpsimd_thread_switch(next)
+                   -> tls_thread_switch(next)
+                   -> hw_breakpoint_thread_switch(next) // ???? perf ??????
+                   -> contextidr_thread_switch(next)
+                   -> entry_task_switch(next)
+                   -> cpu_switch_to(prev, next)
+
+             -> finish_task_switch(prev)
+                -> vtime_task_switch(prev)
+                -> perf_event_task_sched_in(prev, current)
+                -> finish_task(prev)
+
+                5.10:
+                  -> finish_lock_switch(rq)
+                  -> finish_arch_post_lock_switch()
+                  -> kcov_finish_switch(current)
+                  -> fire_sched_in_preempt_notifiers(current)
+                  -> tick_nohz_task_switch()
+
+                5.15 / 6.1 / 6.6 / 6.12:
+                  -> tick_nohz_task_switch()
+                  -> finish_lock_switch(rq)
+                     -> __balance_callbacks(rq)
+                  -> finish_arch_post_lock_switch()
+                  -> kcov_finish_switch(current)
+                  -> fire_sched_in_preempt_notifiers(current)
+        } else {
+          5.10:
+            -> rq_unlock_irq(rq, &rf)
+
+          5.15 / 6.1 / 6.6 / 6.12:
+            -> rq_unpin_lock(rq, &rf)
+            -> __balance_callbacks(rq)
+           -> raw_spin_rq_unlock_irq(rq)
+       }
+
+       5.10:
+         -> balance_callback(rq)
+
+     ??????? register_trace_sched_switch() ?? sched_switch tracepoint ??,
+      ?? hook __switch_to / cpu_switch_to ??,?????????????
+      finish_task_switch(prev) -> perf_event_task_sched_in(prev, current) ??,
+      ??? perf_event_task_sched_in(prev, current) ?????????????????????
+      ???? perf ???????,5.15+ ???? __balance_callbacks(rq);
+      5.10 ?????????????,???? finish_task_switch ?? hook?
+ ???????perf????????2???:
+        ??1?task : ??????????? task ???(?????????)
+            ??????????????? task ???? perf_event ????????? task ? perf_event_context??
+            ????????? CPU ????????,task????????,task ???? CPU,???????????? CPU ??????
+            ??? 8 ? CPU??? CPU ? 6 ????????,?????? 48 ???????,??? CPU ???????? 6 ??
+            ,
+            ???????ptrace?__NR_perf_event_open,?????????register_hw_breakpoint??API????????
+            ??????perf_event_create_kernel_counter,?????????? perf ??????? perf_event
+            ?????? perf ??????? perf_event,???? event ???????,
+            ???????????????????????,????? PERF_TYPE_BREAKPOINT ??,?????perf_breakpoint PMU ??,???????????
+            ?? task ?????,???? event ????? task ? perf_event_context ?
+            ??????? task ?:perf??? ???? perf_event_context ??? perf_event ????, ???? CPU ?????????????;
+            ? task ???:???? perf_event ????,???/???? CPU ??????????????
+        ??2:?????????cpu(?????)
+            ????,???????task???????????????,????????????cpu????????,
+            ??0x7000000000???cpu7
+            ?????cpu7????task,??????0x7000000000,???????,???????????????
+
+   */
+    HOOK_ENTRY("finish_task_switch", work_trampoline_finish_task_switch),
+};
+
+// ???????? hook ? finish_task_switch return hook,????
+static int start_task_run_monitor(struct break_point *bp_info)
+{
+    int ret;
+
+    if (!bp_info || !hwbp_info_has_active_point(bp_info))
+    {
+        ls_log_tag("hwbp", "breakpoint info error\n");
+        return -EINVAL;
+    }
+
+    if (g_bp_info)
+    {
+        g_bp_info = bp_info;
+        num_brps = get_brps_num();
+        num_wrps = get_wrps_num();
+        bp_info->num_brps = num_brps;
+        bp_info->num_wrps = num_wrps;
+        ls_log_tag("hwbp", "monitor config updated\n");
+        return 0;
+    }
+
+    // ??????????,????????????????????
+    g_bp_info = bp_info;
+
+    // ??????????
+    num_brps = get_brps_num();
+    num_wrps = get_wrps_num();
+    bp_on_reg = (struct perf_event * __percpu *)generic_kallsyms_lookup_name("bp_on_reg");
+    wp_on_reg = (struct perf_event * __percpu *)generic_kallsyms_lookup_name("wp_on_reg");
+    fn_perf_bp_event = (void (*)(struct perf_event *, void *))generic_kallsyms_lookup_name("perf_bp_event");
+    if (!bp_on_reg || !wp_on_reg || !fn_perf_bp_event)
+    {
+        ls_log_tag("hwbp", "lookup bp_on_reg/wp_on_reg/perf_bp_event failed\n");
+        g_bp_info = NULL;
+        return -ENOENT;
+    }
+    bp_info->num_brps = num_brps;
+    bp_info->num_wrps = num_wrps;
+
+    // ??inline hook????
+    ret = inline_hook_install(g_debug_exception_hooks);
+    if (ret)
+    {
+        ls_log_tag("hwbp", "inline_hook_install debug exception hooks failed: %d\n", ret);
+        g_bp_info = NULL;
+        return ret;
+    }
+
+    // ?? finish_task_switch return hook
+    ret = inline_hook_install(g_finish_task_switch_ret_hooks);
+    if (ret)
+    {
+        ls_log_tag("hwbp", "inline_hook_install finish_task_switch return hook failed: %d\n", ret);
+        g_bp_info = NULL;
+        inline_hook_remove(g_debug_exception_hooks);
+        return ret;
+    }
+    ls_log_tag("hwbp", "finish_task_switch return hook installed\n");
+    ls_log_tag("hwbp", "monitor start\n");
+    return 0;
+}
+
+// ?? hook,????
+static void stop_task_run_monitor(void)
+{
+    struct break_point *info = READ_ONCE(g_bp_info);
+    int cpu;
+
+    if (!info) return;
+
+    // ?????? CPU,?????
+    for_each_online_cpu(cpu) smp_call_function_single(cpu, clear_hwbp_regs_on_cpu, NULL, 1);
+
+    inline_hook_remove(g_finish_task_switch_ret_hooks);
+    inline_hook_remove(g_debug_exception_hooks);
+    WRITE_ONCE(g_bp_info, NULL);
+    __builtin_memset(info, 0, sizeof(*info));
+    ls_log_tag("hwbp", "monitor stop\n");
+}
