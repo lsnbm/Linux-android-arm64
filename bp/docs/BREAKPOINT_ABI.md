@@ -74,21 +74,21 @@ byte-identical).
 
 ## Known limitations
 
-- QEMU virt: STEP single-step hit delivery may surface a user-visible
-  SIGTRAP. Root cause identified: stepdbg arms the step via TIF_SINGLESTEP
-  + PSTATE.SS, which relies on the kernel's do_notify_resume path to set
-  MDSCR_EL1.SS before ERET, but TIF_SINGLESTEP is outside _TIF_WORK_MASK so
-  that path is not reached; setting MDSCR_EL1.SS directly from the enable
-  site instead triggers EL1 single-step storms (every kernel instruction
-  raises a debug exception). A correct fix requires arming MDSCR_EL1.SS
-  immediately before ERET (as ptrace does). The stop path clears
-  MDSCR_EL1.SS on the current CPU. The kernel-side counters are
-  authoritative and the hit path is intended for real-hardware validation.
+- STEP single-step: arm64 SS is now armed by also setting TIF_NOTIFY_RESUME
+  (inside _TIF_WORK_MASK) so do_notify_resume runs and calls
+  user_enable_single_step right before ERET (ptrace path). Verified:
+  without it mdscr_el1.ss stays 0 after enable; with it the hardware step
+  fires (no EL1 storm), but the call_step_hook hit takeover is still
+  incomplete - a SIGTRAP reaches userspace (QEMU and the 5.15.180 device).
+  The stop path clears MDSCR_EL1.SS on the current CPU.
 - Mapping invalidation: an mmu-notifier (`invalidate_range_start`) fails the
-  PTE monitor closed on 5.15+ / 6.2+ targets. 5.10 and 6.1 keep the
-  hit-time PTE-match fail-closed fallback because concurrent re-arm races
-  the notifier lifecycle on those series.
-- Real device 5.15.180 (PLZ110, serial d312a252): the first validation
-  round passed load/INFO/err/rmmod; a PTE-hit stall observed on that build
-  is under investigation (later on-device re-tests were blocked by the
-  device-side module-load policy).
+  PTE monitor closed on 6.2+ targets. 5.10/5.15/6.1 keep the hit-time
+  PTE-match fail-closed fallback: 5.15 GKI devices (verified on 5.15.180) do
+  not export mmu_notifier_register (module load fails with unknown-symbol
+  ENOENT), and 5.15/6.1 callback signatures differ.
+- Real device 5.15.180 (PLZ110, serial d312a252): full chain PASS after the
+  mmu-notifier symbols were removed from the 5.15 build (load, INFO, err,
+  PTE S0 write-back, HWBP, exit auto-clean, 4x500 concurrent cycles, 2s hit
+  storm with 10.7M hits, 50x fork/arm/exit, rmmod). The first-round PTE-hit
+  stall is resolved. Loading is blocked only when the 6.2+ notifier path is
+  compiled in (5.15.180 does not export mmu_notifier_register).

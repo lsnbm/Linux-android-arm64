@@ -38,10 +38,12 @@
 #include <linux/version.h>
 #include <linux/time.h>
 #include <linux/mmu_notifier.h>
-/* mmu-notifier is wired on 5.15+ except the 6.1 API-transition series where
- * concurrent re-arm races the notifier lifecycle (6.1-only); 5.10 and 6.1
- * keep the hit-time PTE match fail-closed fallback. */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0) &&     !(LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0) &&       LINUX_VERSION_CODE < KERNEL_VERSION(6, 2, 0))
+/* mmu-notifier (new invalidate_range_start signature) is wired on 6.2+
+ * targets only: 5.15 GKI devices do not export mmu_notifier_register
+ * (verified on 5.15.180: module load fails with unknown-symbol ENOENT),
+ * and the 5.15/6.1 callback signatures differ, so those series keep the
+ * hit-time PTE-match fail-closed fallback. */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 #define BP_MMU_NOTIFIER 1
 #endif
 

@@ -125,6 +125,11 @@ static inline void stepbp_enable_task_single_step(struct task_struct *task)
     // TIF_SINGLESTEP 是线程级状态，必须对每个目标 task 单独设置。
     // ret_to_user 看到该 flag 后会打开当前 CPU 的 MDSCR.SS。
     set_ti_thread_flag(task_thread_info(task), TIF_SINGLESTEP);
+    /* TIF_SINGLESTEP is outside _TIF_WORK_MASK, so exit_to_user_mode never
+     * runs do_notify_resume on its own and MDSCR_EL1.SS is never armed.
+     * Setting TIF_NOTIFY_RESUME (inside the mask) forces do_notify_resume,
+     * which arms the hardware single step right before ERET (ptrace path). */
+    set_ti_thread_flag(task_thread_info(task), TIF_NOTIFY_RESUME);
     stepbp_set_regs_single_step(task_pt_regs(task));
 }
 
