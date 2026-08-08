@@ -1,0 +1,12 @@
+config BP
+    tristate "bp: ARM64 breakpoint driver (HWBP/PTEBP/STEPBP)"
+    default m
+    help
+      ARM64 breakpoint driver providing three families through a stable
+      ioctl ABI on /dev/bp:
+        - PTEBP: PTE UXN execute breakpoints with in-kernel instruction
+          emulation and S0 write-back on precise hits.
+        - HWBP:  hardware breakpoints/watchpoints with per-register
+          2-bit masks and hit records.
+        - STEPBP: single-step PC breakpoints with generation tracking.
+      Build with: make -C <KDIR> M=$PWD/bp/kernel ARCH=arm64 LLVM=1 modules
