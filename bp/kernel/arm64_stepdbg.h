@@ -134,6 +134,10 @@ static inline void stepbp_disable_task_single_step(struct task_struct *task)
 
     clear_ti_thread_flag(task_thread_info(task), TIF_SINGLESTEP);
     stepbp_clear_regs_single_step(task_pt_regs(task));
+    /* clear the per-CPU hardware-step enable when the task stops stepping
+     * or is switched away; otherwise a foreign task triggers EL1 SS storms */
+    write_sysreg(read_sysreg(mdscr_el1) & ~DBG_MDSCR_SS, mdscr_el1);
+    isb();
 }
 
 static inline void stepbp_disable_current_hardware_step(struct pt_regs *regs)

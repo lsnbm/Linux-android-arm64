@@ -75,7 +75,14 @@ byte-identical).
 ## Known limitations
 
 - QEMU virt: STEP single-step hit delivery may surface a user-visible
-  SIGTRAP (ptrace pseudo-step semantics); the kernel-side counters are
+  SIGTRAP. Root cause identified: stepdbg arms the step via TIF_SINGLESTEP
+  + PSTATE.SS, which relies on the kernel's do_notify_resume path to set
+  MDSCR_EL1.SS before ERET, but TIF_SINGLESTEP is outside _TIF_WORK_MASK so
+  that path is not reached; setting MDSCR_EL1.SS directly from the enable
+  site instead triggers EL1 single-step storms (every kernel instruction
+  raises a debug exception). A correct fix requires arming MDSCR_EL1.SS
+  immediately before ERET (as ptrace does). The stop path clears
+  MDSCR_EL1.SS on the current CPU. The kernel-side counters are
   authoritative and the hit path is intended for real-hardware validation.
 - Mapping invalidation: an mmu-notifier (`invalidate_range_start`) fails the
   PTE monitor closed on 5.15+ / 6.2+ targets. 5.10 and 6.1 keep the
