@@ -347,11 +347,6 @@ static int __attribute__((used, __noinline__)) stepbp_finish_call_step_hook(int 
     struct pt_regs *regs;
 
     regs = frame->regs;
-    pr_info("bp: step finish native=%d frame=%p pc=0x%llx gen=%llu/%llu\n",
-            native_result, (void *)frame,
-            regs ? (unsigned long long)regs->pc : 0ULL,
-            (unsigned long long)frame->generation,
-            (unsigned long long)g_stepbp_generation);
     spin_lock_irqsave(&g_stepbp_lock, flags);
     generation_matches = frame->generation == g_stepbp_generation;
     if (generation_matches)
@@ -382,9 +377,6 @@ static int __attribute__((used, __noinline__)) stepbp_finish_call_step_hook(int 
     spin_unlock_irqrestore(&g_stepbp_lock, flags);
 
     if (!generation_matches || target_task) result = DBG_HOOK_HANDLED;
-    pr_info("bp: step finish result=%d gen_match=%d target=%d hitslot=%d\n",
-            result, generation_matches ? 1 : 0, target_task ? 1 : 0, hit_slot);
-
     if (generation_matches && target_task && !stopping && native_result != DBG_HOOK_HANDLED && hit_point && hit_callback)
     {
         spin_lock_irqsave(&g_stepbp_hit_lock, flags);
@@ -412,49 +404,73 @@ static int __attribute__((used, __noinline__)) stepbp_finish_call_step_hook(int 
     return result;
 }
 
-// Hook call_step_hook: on 5.15 GKI the symbol exists but has no callers
-// (inlined into single_step_handler), so the hit path is not taken on this
-// series; the hook is kept for kernels where call_step_hook is live.
-// Hit takeover would need the debug-exception return-value semantics to be
-// preserved across the inline-hook trampoline, which is not possible for a
-// generic trampoline; tracked as a known limitation.
+// Hook do_debug_exception(addr, esr, regs) directly and gate on the
+// software-step ESR class. call_step_hook has no callers on 5.15 GKI
+// (inlined), and the debug-hook chain return value cannot survive a
+// generic inline-hook trampoline; hooking do_debug_exception itself lets
+// us skip the whole handler for the target SS exception - its vector
+// caller does not check a return value, so the SIGTRAP is swallowed.
 static int work_trampoline_stepbp_single_step(struct pt_regs *hook_regs)
 {
     unsigned long flags;
-    unsigned long generation;
     bool target_task;
-    struct stepbp_return_frame *frame;
+    struct bp_point *hit_point = NULL;
     struct pt_regs *regs;
     struct break_point *info;
 
     if (!hook_regs) return 0;
 
-    regs = (struct pt_regs *)hook_regs->regs[0];
-    if (!regs) return 0;
+    /* do_debug_exception(addr, esr, regs); only handle EL0 software step */
+    {
+        unsigned int esr = (unsigned int)hook_regs->regs[1];
+        unsigned int ec = (esr >> ESR_ELx_EC_SHIFT) & 0x3F;
+        if (ec != ESR_ELx_EC_SOFTSTP_LOW)
+            return 0;
+    }
 
-    // user_mode() 判断异常现场是否来自 EL0；STEPBP 只接管用户态单步，不碰 EL1 内核态异常。
-    if (!user_mode(regs)) return 0;
+    regs = (struct pt_regs *)hook_regs->regs[2];
+    if (!regs || !user_mode(regs)) return 0;
 
     spin_lock_irqsave(&g_stepbp_lock, flags);
     info = g_stepbp_info;
-    target_task = stepbp_info_targets_task(info, current) && (g_stepbp_stopping || stepbp_info_matches_task(info, current));
-    generation = g_stepbp_generation;
-    if (target_task)
+    target_task = stepbp_info_targets_task(info, current) &&
+                  (g_stepbp_stopping || stepbp_info_matches_task(info, current));
+    if (target_task && !g_stepbp_stopping && info)
     {
-        frame = hook_frame_metadata(hook_regs);
-        frame->return_addr = hook_regs->regs[30];
-        frame->generation = generation;
-        frame->regs = regs;
-        atomic_inc(&g_stepbp_returns_inflight);
-        hook_regs->sp = (unsigned long)frame;
-        hook_regs->regs[30] = (unsigned long)ret_trampoline_stepbp_call_step_hook;
+        for (int point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
+        {
+            struct bp_point *point = &info->points[point_slot];
+            uint64_t point_hit_addr;
+
+            if (!stepbp_point_matches_task(point, current)) continue;
+            point_hit_addr = READ_ONCE(point->hit_addr);
+            if ((point_hit_addr & ~0x3ULL) != (regs->pc & ~0x3ULL)) continue;
+            hit_point = point;
+            break;
+        }
     }
     spin_unlock_irqrestore(&g_stepbp_lock, flags);
-    return 0;
+
+    if (!target_task) return 0;
+
+    if (!g_stepbp_stopping && hit_point && hit_point->on_hit)
+    {
+        struct fp_regs fp_regs;
+        read_all_q_regs(&fp_regs);
+        hit_point->on_hit(regs, &fp_regs, hit_point);
+        write_all_q_regs(&fp_regs);
+    }
+
+    if (!g_stepbp_stopping)
+        stepbp_enable_task_single_step(current);
+    else
+        stepbp_disable_current_hardware_step(regs);
+
+    return 1; /* skip do_debug_exception: swallow the single-step exception */
 }
 
 static struct hook_entry g_stepbp_required_hooks[] = {
-    HOOK_ENTRY("call_step_hook", work_trampoline_stepbp_single_step),
+    HOOK_ENTRY("do_debug_exception", work_trampoline_stepbp_single_step),
     HOOK_ENTRY("syscall_trace_exit", work_trampoline_stepbp_syscall_trace_exit),
 };
 
