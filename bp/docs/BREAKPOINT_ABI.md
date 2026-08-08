@@ -74,13 +74,16 @@ byte-identical).
 
 ## Known limitations
 
-- STEP single-step: arm64 SS is now armed by also setting TIF_NOTIFY_RESUME
+- STEP single-step: arm64 SS is armed by also setting TIF_NOTIFY_RESUME
   (inside _TIF_WORK_MASK) so do_notify_resume runs and calls
-  user_enable_single_step right before ERET (ptrace path). Verified:
-  without it mdscr_el1.ss stays 0 after enable; with it the hardware step
-  fires (no EL1 storm), but the call_step_hook hit takeover is still
-  incomplete - a SIGTRAP reaches userspace (QEMU and the 5.15.180 device).
-  The stop path clears MDSCR_EL1.SS on the current CPU.
+  user_enable_single_step right before ERET (verified: mdscr_el1.ss goes
+  0->1, the hardware step fires without EL1 storms). Hit takeover is not
+  possible on 5.15 GKI: call_step_hook has no callers there (inlined into
+  single_step_handler, verified by disassembly), and the debug-exception
+  return-value semantics cannot be preserved across a generic inline-hook
+  trampoline (it restores the caller register file on return 1, losing the
+  HANDLED result). A SIGTRAP therefore reaches userspace on QEMU and the
+  5.15.180 device. The stop path clears MDSCR_EL1.SS on the current CPU.
 - Mapping invalidation: an mmu-notifier (`invalidate_range_start`) fails the
   PTE monitor closed on 6.2+ targets. 5.10/5.15/6.1 keep the hit-time
   PTE-match fail-closed fallback: 5.15 GKI devices (verified on 5.15.180) do

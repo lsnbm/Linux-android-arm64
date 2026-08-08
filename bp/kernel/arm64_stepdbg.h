@@ -347,6 +347,11 @@ static int __attribute__((used, __noinline__)) stepbp_finish_call_step_hook(int 
     struct pt_regs *regs;
 
     regs = frame->regs;
+    pr_info("bp: step finish native=%d frame=%p pc=0x%llx gen=%llu/%llu\n",
+            native_result, (void *)frame,
+            regs ? (unsigned long long)regs->pc : 0ULL,
+            (unsigned long long)frame->generation,
+            (unsigned long long)g_stepbp_generation);
     spin_lock_irqsave(&g_stepbp_lock, flags);
     generation_matches = frame->generation == g_stepbp_generation;
     if (generation_matches)
@@ -377,6 +382,8 @@ static int __attribute__((used, __noinline__)) stepbp_finish_call_step_hook(int 
     spin_unlock_irqrestore(&g_stepbp_lock, flags);
 
     if (!generation_matches || target_task) result = DBG_HOOK_HANDLED;
+    pr_info("bp: step finish result=%d gen_match=%d target=%d hitslot=%d\n",
+            result, generation_matches ? 1 : 0, target_task ? 1 : 0, hit_slot);
 
     if (generation_matches && target_task && !stopping && native_result != DBG_HOOK_HANDLED && hit_point && hit_callback)
     {
@@ -405,7 +412,12 @@ static int __attribute__((used, __noinline__)) stepbp_finish_call_step_hook(int 
     return result;
 }
 
-// call_step_hook 入口只安装返回后处理；原生 uprobe/perf step hook 先完整执行。
+// Hook call_step_hook: on 5.15 GKI the symbol exists but has no callers
+// (inlined into single_step_handler), so the hit path is not taken on this
+// series; the hook is kept for kernels where call_step_hook is live.
+// Hit takeover would need the debug-exception return-value semantics to be
+// preserved across the inline-hook trampoline, which is not possible for a
+// generic trampoline; tracked as a known limitation.
 static int work_trampoline_stepbp_single_step(struct pt_regs *hook_regs)
 {
     unsigned long flags;
