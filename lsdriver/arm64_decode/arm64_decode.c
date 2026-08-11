@@ -8,7 +8,7 @@ enum arm64_decode_status arm64_decode_simd(uint32_t raw, struct arm64_decoded_in
 enum arm64_decode_status arm64_decode_sve(uint32_t raw, struct arm64_decoded_insn *decoded);
 enum arm64_decode_status arm64_decode_sme(uint32_t raw, struct arm64_decoded_insn *decoded);
 
-void arm64_decode_insn(uint32_t raw, struct arm64_decoded_insn *decoded)
+enum arm64_decode_status arm64_decode_insn(uint32_t raw, struct arm64_decoded_insn *decoded)
 {
     enum arm64_decode_status status;
 
@@ -24,9 +24,17 @@ void arm64_decode_insn(uint32_t raw, struct arm64_decoded_insn *decoded)
     case 0x2:
         status = arm64_decode_sve(raw, decoded);
         break;
+    case 0x4:
+        status = arm64_decode_ldst(raw, decoded);
+        break;
     case 0x5:
-    case 0xD:
         status = arm64_decode_data_processing_register(raw, decoded);
+        break;
+    case 0x6:
+        status = arm64_decode_ldst(raw, decoded);
+        break;
+    case 0x7:
+        status = arm64_decode_simd(raw, decoded);
         break;
     case 0x8:
     case 0x9:
@@ -36,13 +44,15 @@ void arm64_decode_insn(uint32_t raw, struct arm64_decoded_insn *decoded)
     case 0xB:
         status = arm64_decode_branch(raw, decoded);
         break;
-    case 0x4:
-    case 0x6:
     case 0xC:
+        status = arm64_decode_ldst(raw, decoded);
+        break;
+    case 0xD:
+        status = arm64_decode_data_processing_register(raw, decoded);
+        break;
     case 0xE:
         status = arm64_decode_ldst(raw, decoded);
         break;
-    case 0x7:
     case 0xF:
         status = arm64_decode_simd(raw, decoded);
         break;
@@ -51,5 +61,5 @@ void arm64_decode_insn(uint32_t raw, struct arm64_decoded_insn *decoded)
         break;
     }
 
-    decoded->status = status;
+    return status;
 }

@@ -37,6 +37,10 @@ int main(void)
     uint32_t jump[6];
 
     EXPECT_ENCODE("nop", 0xD503201F, arm64_encode_nop(&instruction));
+    EXPECT_ENCODE("bti c", 0xD503245F, arm64_encode_bti_c(&instruction));
+    EXPECT_ENCODE("brk #0", 0xD4200000, arm64_encode_brk(0, &instruction));
+    EXPECT_ENCODE("brk #4", 0xD4200080, arm64_encode_brk(4, &instruction));
+    EXPECT_ENCODE("brk #65535", 0xD43FFFE0, arm64_encode_brk(0xFFFF, &instruction));
     EXPECT_ENCODE("b forward", 0x14000040, arm64_encode_b(0x1000, 0x1100, &instruction));
     EXPECT_ENCODE("bl backward", 0x97FFFFC0, arm64_encode_bl(0x1100, 0x1000, &instruction));
     EXPECT_ENCODE("b.eq", 0x54000440, arm64_encode_b_cond(29 * 4, 63 * 4, 0, &instruction));
@@ -62,6 +66,7 @@ int main(void)
 
     expect_status("unaligned b", arm64_encode_b(0x1000, 0x1002, &instruction), -EINVAL);
     expect_status("b out of range", arm64_encode_b(0, 1ULL << 27, &instruction), -ERANGE);
+    expect_status("brk immediate out of range", arm64_encode_brk(0x10000, &instruction), -ERANGE);
     expect_status("invalid register", arm64_encode_ret(32, &instruction), -EINVAL);
     expect_status("misaligned pair", arm64_encode_load_store_pair_x(true, 0, 1, 2, 4, &instruction), -EINVAL);
 

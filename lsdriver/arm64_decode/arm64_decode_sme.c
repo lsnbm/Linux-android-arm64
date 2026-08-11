@@ -8,6 +8,5 @@ enum arm64_decode_status arm64_decode_sme(uint32_t raw, struct arm64_decoded_ins
     if (!(raw & 0x80000000U)) return ARM64_DECODE_UNALLOCATED;
 
     decoded->insn_class = ARM64_INSN_CLASS_SME;
-    decoded->opcode = ARM64_OP_SME;
     return ARM64_DECODE_UNSUPPORTED;
 }

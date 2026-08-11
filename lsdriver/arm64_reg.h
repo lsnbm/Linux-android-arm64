@@ -222,18 +222,14 @@ struct fp_regs
 #define QREG(n) q##n
 #define VREG(n) v##n
 
-#define READ_Q_REG_CASE(N, DST)                                        \
-    case N:                                                            \
-        asm volatile(".arch_extension fp\n.arch_extension simd\n"      \
-                     "str " __stringify(QREG(N)) ", [%0]\n" ::"r"(DST) \
-                     : "memory");                                      \
+#define READ_Q_REG_CASE(N, DST)                                                     \
+    case N:                                                                         \
+        asm volatile("str " __stringify(QREG(N)) ", [%0]\n" ::"r"(DST) : "memory"); \
         break
 
-#define WRITE_Q_REG_CASE(N, SRC)                                       \
-    case N:                                                            \
-        asm volatile(".arch_extension fp\n.arch_extension simd\n"      \
-                     "ldr " __stringify(QREG(N)) ", [%0]\n" ::"r"(SRC) \
-                     : "memory", __stringify(VREG(N)));                \
+#define WRITE_Q_REG_CASE(N, SRC)                                                                          \
+    case N:                                                                                               \
+        asm volatile("ldr " __stringify(QREG(N)) ", [%0]\n" ::"r"(SRC) : "memory", __stringify(VREG(N))); \
         break
 
 #define GEN_READ_Q_REG_CASES(DST) \
@@ -325,14 +321,16 @@ static inline void write_q_reg(int n, const void *src)
         break;
     }
 }
+/*
+  FPCR 控制浮点运算“怎么计算”，例如舍入模式、FZ/DN 和异常陷阱使能；
+  FPSR 记录浮点运算“发生了什么”，例如累计异常标志和 QC 状态。
+*/
 
 // 读取当前 FPCR 控制配置，用于保存浮点运算环境。
 static inline uint32_t read_fpcr(void)
 {
     uint64_t v;
-    asm volatile(".arch_extension fp\n"
-                 "mrs %0, fpcr"
-                 : "=r"(v));
+    asm volatile("mrs %0, fpcr" : "=r"(v));
     return (uint32_t)v;
 }
 
@@ -340,19 +338,14 @@ static inline uint32_t read_fpcr(void)
 static inline void write_fpcr(uint32_t val)
 {
     uint64_t v = val;
-    asm volatile(".arch_extension fp\n"
-                 "msr fpcr, %0"
-                 :
-                 : "r"(v));
+    asm volatile("msr fpcr, %0" : : "r"(v));
 }
 
 // 读取当前 FPSR 状态标志，用于保存浮点运算结果状态。
 static inline uint32_t read_fpsr(void)
 {
     uint64_t v;
-    asm volatile(".arch_extension fp\n"
-                 "mrs %0, fpsr"
-                 : "=r"(v));
+    asm volatile("mrs %0, fpsr" : "=r"(v));
     return (uint32_t)v;
 }
 
@@ -360,18 +353,13 @@ static inline uint32_t read_fpsr(void)
 static inline void write_fpsr(uint32_t val)
 {
     uint64_t v = val;
-    asm volatile(".arch_extension fp\n"
-                 "msr fpsr, %0"
-                 :
-                 : "r"(v));
+    asm volatile("msr fpsr, %0" : : "r"(v));
 }
 
 // 批量读取 Q0-Q31、FPCR 和 FPSR，输出到 regs 指向的软件现场。
 static inline void read_all_q_regs(struct fp_regs *regs)
 {
-    asm volatile(".arch_extension fp\n"
-                 ".arch_extension simd\n"
-                 "stp q0, q1, [%0, #0]\n"
+    asm volatile("stp q0, q1, [%0, #0]\n"
                  "stp q2, q3, [%0, #32]\n"
                  "stp q4, q5, [%0, #64]\n"
                  "stp q6, q7, [%0, #96]\n"
@@ -397,9 +385,7 @@ static inline void read_all_q_regs(struct fp_regs *regs)
 // 从 regs 指向的软件现场批量写入 Q0-Q31、FPCR 和 FPSR。
 static inline void write_all_q_regs(const struct fp_regs *regs)
 {
-    asm volatile(".arch_extension fp\n"
-                 ".arch_extension simd\n"
-                 "ldp q0, q1, [%0, #0]\n"
+    asm volatile("ldp q0, q1, [%0, #0]\n"
                  "ldp q2, q3, [%0, #32]\n"
                  "ldp q4, q5, [%0, #64]\n"
                  "ldp q6, q7, [%0, #96]\n"
@@ -422,10 +408,78 @@ static inline void write_all_q_regs(const struct fp_regs *regs)
     write_fpsr(regs->fpsr);
 }
 
-/*
-  FPCR 控制浮点运算“怎么计算”，例如舍入模式、FZ/DN 和异常陷阱使能；
-  FPSR 记录浮点运算“发生了什么”，例如累计异常标志和 QC 状态。
-*/
+// ========== 系统寄存器访问与 CPU 能力查询 ==========
+
+static inline void arm64_write_tpidr_el0(uint64_t value)
+{
+    write_sysreg(value, tpidr_el0);
+}
+
+static inline uint64_t arm64_read_tpidr_el0(void)
+{
+    return read_sysreg(tpidr_el0);
+}
+
+static inline uint64_t arm64_read_tpidrro_el0(void)
+{
+    return read_sysreg(tpidrro_el0);
+}
+
+static inline uint64_t arm64_read_cntvct_el0(void)
+{
+    return read_sysreg(cntvct_el0);
+}
+
+static inline bool arm64_current_cpu_has_rdm(void)
+{
+    return cpuid_feature_extract_unsigned_field(read_sysreg(id_aa64isar0_el1), 28) >= 1;
+}
+
+static inline bool arm64_current_cpu_has_dotprod(void)
+{
+    return cpuid_feature_extract_unsigned_field(read_sysreg(id_aa64isar0_el1), 44) >= 1;
+}
+
+static inline bool arm64_current_cpu_has_fhm(void)
+{
+    return cpuid_feature_extract_unsigned_field(read_sysreg(id_aa64isar0_el1), 48) >= 1;
+}
+
+static inline bool arm64_current_cpu_has_fcma(void)
+{
+    return cpuid_feature_extract_unsigned_field(read_sysreg(id_aa64isar1_el1), 16) >= 1;
+}
+
+static inline bool arm64_current_cpu_has_bf16(void)
+{
+    return cpuid_feature_extract_unsigned_field(read_sysreg(id_aa64isar1_el1), 44) >= 1;
+}
+
+static inline bool arm64_current_cpu_has_i8mm(void)
+{
+    return cpuid_feature_extract_unsigned_field(read_sysreg(id_aa64isar1_el1), 52) >= 1;
+}
+
+static inline bool arm64_current_cpu_has_fp16(void)
+{
+    return ((read_sysreg(id_aa64pfr0_el1) >> 20) & 0xFULL) == 1;
+}
+
+static inline bool arm64_current_cpu_has_faminmax(void)
+{
+    uint64_t value;
+
+    asm volatile("mrs %0, S3_0_C0_C6_3" : "=r"(value));
+    return ((value >> 4) & 0xFULL) >= 1;
+}
+
+static inline bool arm64_current_cpu_has_f8cvt(void)
+{
+    uint64_t value;
+
+    asm volatile("mrs %0, S3_0_C0_C4_7" : "=r"(value));
+    return value & (1ULL << 31);
+}
 
 // 读取 CurrentEL
 static inline unsigned int read_current_el(void)

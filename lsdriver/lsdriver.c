@@ -344,20 +344,23 @@ static const char *exit_fault_code_name(unsigned int signal, int code)
     return "UNKNOWN";
 }
 
-#define EXIT_KERNEL_CHAIN_DEPTH 8
-
 struct exit_kernel_frame_record
 {
     unsigned long previous_fp;
     unsigned long return_address;
 };
-
+//去掉 ARM64 内核返回地址中的指针认证码（PAC）
 static inline unsigned long exit_strip_kernel_pac(unsigned long address)
 {
 #ifdef CONFIG_ARM64_PTR_AUTH_KERNEL
     register unsigned long stripped_address asm("x30") = address;
 
-    asm("hint #7" : "+r"(stripped_address));
+    /*
+    xpaci x0    // 移除任意寄存器中“指令指针”类型的 PAC
+    xpacd x0    // 移除任意寄存器中“数据指针”类型的 PAC
+    xpaclri     // 专门移除 x30/LR 中的指令 PAC
+    */
+    asm("hint #7" : "+r"(stripped_address)); //XPACLRI指令
     return stripped_address;
 #else
     return address;
@@ -374,7 +377,7 @@ static void log_exit_kernel_chain(const char *tag, const struct pt_regs *regs)
 
     if (address) ls_log_always_tag(tag, "frame=%02u address=%pS\n", depth++, (void *)address);
 
-    while (depth < EXIT_KERNEL_CHAIN_DEPTH)
+    while (depth < sizeof(uint64_t))
     {
         const struct exit_kernel_frame_record *frame;
         unsigned long previous_fp;
@@ -516,14 +519,22 @@ static void hide_myself(void)
     list_del_init(&THIS_MODULE->list);
     // 摘除kobj，/sys/modules/中不可见。
     kobject_del(&THIS_MODULE->mkobj.kobj);
-    // 摘除依赖关系，本例中nf_conntrack的holder中不可见。
-    list_for_each_entry_safe(use, tmp, &THIS_MODULE->target_list, target_list)
-    {
-        list_del(&use->source_list);
-        list_del(&use->target_list);
-        sysfs_remove_link(use->target->holders_dir, THIS_MODULE->name);
-        kfree(use);
-    }
+
+    /*
+    这个部分平板设备死机，特别是小米的平板，
+    原因是编译后的机器码从结构体固定偏移位置取链表节点，这个结构体节点偏移在不同内核中不是固定的
+    
+    
+    把当前驱动依赖的其他内核模块，从它们的 holders 目录中移除，并同时破坏当前驱动与这些模块之间的依赖记录
+    这里THIS_MODULE->target_list遍历的是当前模块依赖哪些模块，source_list哪些模块依赖当前模块
+    */
+    // list_for_each_entry_safe(use, tmp, &THIS_MODULE->target_list, target_list)
+    // {
+    //     list_del(&use->source_list);
+    //     list_del(&use->target_list);
+    //     sysfs_remove_link(use->target->holders_dir, THIS_MODULE->name);
+    //     kfree(use);
+    // }
 }
 
 static int __init lsdriver_init(void)

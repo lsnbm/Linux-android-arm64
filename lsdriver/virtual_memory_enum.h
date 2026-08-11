@@ -98,12 +98,22 @@ static inline bool module_is_anon_rwx(const struct module_info *m)
 static inline const char *get_vma_anon_label(struct vm_area_struct *vma)
 {
 #ifdef CONFIG_ANON_VMA_NAME
-    return vma->anon_name ? vma->anon_name->name : NULL;
-#else
-    return NULL;
-#endif
-}
+    /*
+    部分 Android 12 5.10 内核，厂商会将 anon_name 存储为
+    const char __user * 而不是 struct anon_vma_name *。
+    特别是小米平板设备
+    该指针指向目标进程的地址空间
+    因此不能将其解引用为内核 anon_vma_name 对象。
+    access_ok()不能使用原因是:语义“这个地址范围是否允许当前线程作为一次 uaccess 参数”，不是“这个指针在数值上属于用户空间还是内核空间”。
+    这里用页表基址寄存器判断
+    */
+    struct anon_vma_name *anon_name = READ_ONCE(vma->anon_name);
 
+    /* 只有当 anon_name 存在，且明确处于内核空间 (TTBR1) 时才允许解引用 */
+    if (anon_name && is_ttbr1_addr((unsigned long)anon_name)) return anon_name->name;
+#endif
+    return NULL;
+}
 static inline int find_or_add_module(struct module_info *modules, int *module_count, const uint8_t *name)
 {
     for (int i = 0; i < *module_count; i++)

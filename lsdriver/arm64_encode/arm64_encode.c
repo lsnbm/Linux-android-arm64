@@ -81,77 +81,6 @@ static int arm64_encode_pc_address(uint32_t base, uint8_t rd, int64_t immediate,
     return 0;
 }
 
-static int arm64_encode_literal_base(enum arm64_encode_load_store_kind kind, uint32_t *base, uint8_t *access_bytes)
-{
-    if (!base || !access_bytes) return -EINVAL;
-
-    switch (kind)
-    {
-    case ARM64_ENCODE_LS_GPR32:
-        *base = 0x18000000U;
-        *access_bytes = 4;
-        return 0;
-    case ARM64_ENCODE_LS_GPR64:
-        *base = 0x58000000U;
-        *access_bytes = 8;
-        return 0;
-    case ARM64_ENCODE_LS_LDRSW:
-        *base = 0x98000000U;
-        *access_bytes = 4;
-        return 0;
-    case ARM64_ENCODE_LS_FP32:
-        *base = 0x1C000000U;
-        *access_bytes = 4;
-        return 0;
-    case ARM64_ENCODE_LS_FP64:
-        *base = 0x5C000000U;
-        *access_bytes = 8;
-        return 0;
-    case ARM64_ENCODE_LS_FP128:
-        *base = 0x9C000000U;
-        *access_bytes = 16;
-        return 0;
-    default:
-        return -EINVAL;
-    }
-}
-
-static int arm64_encode_unsigned_base(bool load, enum arm64_encode_load_store_kind kind, uint32_t *base, uint8_t *access_bytes)
-{
-    if (!base || !access_bytes) return -EINVAL;
-
-    switch (kind)
-    {
-    case ARM64_ENCODE_LS_GPR32:
-        *base = load ? 0xB9400000U : 0xB9000000U;
-        *access_bytes = 4;
-        return 0;
-    case ARM64_ENCODE_LS_GPR64:
-        *base = load ? 0xF9400000U : 0xF9000000U;
-        *access_bytes = 8;
-        return 0;
-    case ARM64_ENCODE_LS_LDRSW:
-        if (!load) return -EINVAL;
-        *base = 0xB9800000U;
-        *access_bytes = 4;
-        return 0;
-    case ARM64_ENCODE_LS_FP32:
-        *base = load ? 0xBD400000U : 0xBD000000U;
-        *access_bytes = 4;
-        return 0;
-    case ARM64_ENCODE_LS_FP64:
-        *base = load ? 0xFD400000U : 0xFD000000U;
-        *access_bytes = 8;
-        return 0;
-    case ARM64_ENCODE_LS_FP128:
-        *base = load ? 0x3DC00000U : 0x3D800000U;
-        *access_bytes = 16;
-        return 0;
-    default:
-        return -EINVAL;
-    }
-}
-
 static int arm64_encode_system_register(uint32_t base, uint8_t rt, uint8_t op0, uint8_t op1, uint8_t crn, uint8_t crm, uint8_t op2, uint32_t *instruction)
 {
     if (!instruction || !arm64_encode_valid_reg(rt) || op0 > 3 || op1 > 7 || crn > 15 || crm > 15 || op2 > 7) return -EINVAL;
@@ -164,6 +93,22 @@ int arm64_encode_nop(uint32_t *instruction)
 {
     if (!instruction) return -EINVAL;
     *instruction = ARM64_NOP;
+    return 0;
+}
+
+int arm64_encode_bti_c(uint32_t *instruction)
+{
+    if (!instruction) return -EINVAL;
+    *instruction = 0xD503245FU;
+    return 0;
+}
+
+int arm64_encode_brk(uint32_t immediate, uint32_t *instruction)
+{
+    if (!instruction) return -EINVAL;
+    if (immediate > 0xFFFFU) return -ERANGE;
+
+    *instruction = 0xD4200000U | (immediate << 5);
     return 0;
 }
 
@@ -275,8 +220,36 @@ int arm64_encode_load_store_unsigned(bool load, enum arm64_encode_load_store_kin
 
     uint32_t base;
     uint8_t access_bytes;
-    int status = arm64_encode_unsigned_base(load, kind, &base, &access_bytes);
-    if (status) return status;
+    switch (kind)
+    {
+    case ARM64_ENCODE_LS_GPR32:
+        base = load ? 0xB9400000U : 0xB9000000U;
+        access_bytes = 4;
+        break;
+    case ARM64_ENCODE_LS_GPR64:
+        base = load ? 0xF9400000U : 0xF9000000U;
+        access_bytes = 8;
+        break;
+    case ARM64_ENCODE_LS_LDRSW:
+        if (!load) return -EINVAL;
+        base = 0xB9800000U;
+        access_bytes = 4;
+        break;
+    case ARM64_ENCODE_LS_FP32:
+        base = load ? 0xBD400000U : 0xBD000000U;
+        access_bytes = 4;
+        break;
+    case ARM64_ENCODE_LS_FP64:
+        base = load ? 0xFD400000U : 0xFD000000U;
+        access_bytes = 8;
+        break;
+    case ARM64_ENCODE_LS_FP128:
+        base = load ? 0x3DC00000U : 0x3D800000U;
+        access_bytes = 16;
+        break;
+    default:
+        return -EINVAL;
+    }
     if (byte_offset % access_bytes) return -EINVAL;
 
     uint32_t immediate = byte_offset / access_bytes;
@@ -314,13 +287,32 @@ int arm64_encode_ldr_literal(enum arm64_encode_load_store_kind kind, uint8_t rt,
     if (!arm64_encode_valid_reg(rt)) return -EINVAL;
 
     uint32_t base;
-    uint8_t access_bytes;
-    int status = arm64_encode_literal_base(kind, &base, &access_bytes);
-    if (status) return status;
-    (void)access_bytes;
+    switch (kind)
+    {
+    case ARM64_ENCODE_LS_GPR32:
+        base = 0x18000000U;
+        break;
+    case ARM64_ENCODE_LS_GPR64:
+        base = 0x58000000U;
+        break;
+    case ARM64_ENCODE_LS_LDRSW:
+        base = 0x98000000U;
+        break;
+    case ARM64_ENCODE_LS_FP32:
+        base = 0x1C000000U;
+        break;
+    case ARM64_ENCODE_LS_FP64:
+        base = 0x5C000000U;
+        break;
+    case ARM64_ENCODE_LS_FP128:
+        base = 0x9C000000U;
+        break;
+    default:
+        return -EINVAL;
+    }
 
     int64_t offset;
-    status = arm64_encode_pc_delta(pc, target, &offset);
+    int status = arm64_encode_pc_delta(pc, target, &offset);
     if (status) return status;
     return arm64_encode_scaled_imm(base | rt, offset, 19, 5, instruction);
 }

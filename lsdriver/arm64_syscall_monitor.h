@@ -91,10 +91,31 @@ static const char *syscall_monitor_name(long scno)
     return entry->fn_name + sizeof("sys_") - 1;
 }
 
+// 在不补页、不睡眠的前提下，按用户页分段复制字符串，并在遇到 NUL 时立即停止。
+static long strncpy_user_nofault(char *dst, const char __user *src, size_t count)
+{
+    size_t copied = 0;
+
+    while (copied < count)
+    {
+        unsigned long user_addr = (unsigned long)src + copied;
+        size_t chunk = min_t(size_t, count - copied, PAGE_SIZE - offset_in_page(user_addr));
+
+        if (user_addr < (unsigned long)src || copy_from_user_inatomic_nofault(dst + copied, (const void __user *)(uintptr_t)user_addr, chunk)) return -EFAULT;
+
+        for (size_t index = 0; index < chunk; index++)
+            if (!dst[copied + index]) return copied + index;
+        copied += chunk;
+    }
+
+    return copied;
+}
+
 /*
 从当前进程用户地址空间复制一个 NUL 结尾字符串到日志。
-strncpy_from_user 会安全处理不可访问的用户地址；失败时仅输出 <fault>，
-不会直接用 %s 解引用用户指针。控制字符替换为 '.'，避免伪造多行内核日志。
+复制过程使用 nofault uaccess，不会在 syscall hook 中主动补页或睡眠；
+失败时仅输出 <fault>，不会直接用 %s 解引用用户指针。
+控制字符替换为 '.'，避免伪造多行内核日志。
 */
 static void syscall_monitor_append_user_string(char *text, size_t size, size_t *pos, const char *label, unsigned long addr)
 {
@@ -107,7 +128,7 @@ static void syscall_monitor_append_user_string(char *text, size_t size, size_t *
         return;
     }
 
-    long copied = strncpy_from_user(value, (const char __user *)(uintptr_t)addr, sizeof(value) - 1);
+    long copied = strncpy_user_nofault(value, (const char __user *)(uintptr_t)addr, sizeof(value) - 1);
     if (copied < 0)
     {
         *pos += scnprintf(text + *pos, size - *pos, " %s=<fault>", label);
@@ -123,8 +144,8 @@ static void syscall_monitor_append_user_string(char *text, size_t size, size_t *
 
 /*
 预览 write/pwrite64/sendto 等 syscall 的输入缓冲区。
-入口时这些数据已经由用户态准备好，可以安全复制；只复制固定上限，
-既控制 hook 延迟，也避免大块 I/O 生成同等大小的 printk 日志。
+入口时这些数据已经由用户态准备好；使用 nofault uaccess 只复制固定上限，
+既避免在 syscall hook 中主动补页或睡眠，也避免大块 I/O 生成同等大小的 printk 日志。
 */
 static void syscall_monitor_append_data(char *text, size_t size, size_t *pos, const char *label, unsigned long addr, size_t length)
 {
@@ -137,7 +158,7 @@ static void syscall_monitor_append_data(char *text, size_t size, size_t *pos, co
         *pos += scnprintf(text + *pos, size - *pos, " %s=NULL", label);
         return;
     }
-    if (copy_from_user(data, (const void __user *)(uintptr_t)addr, preview))
+    if (copy_from_user_inatomic_nofault(data, (const void __user *)(uintptr_t)addr, preview))
     {
         *pos += scnprintf(text + *pos, size - *pos, " %s=<fault>", label);
         return;

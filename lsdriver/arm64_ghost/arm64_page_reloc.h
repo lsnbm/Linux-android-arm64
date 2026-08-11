@@ -23,6 +23,8 @@
 
 模块同时保存源页与幽灵页的基地址，提供两个页面之间同偏移程序计数器的双向转换。
 
+decoder 未返回 ARM64_DECODE_OK 的指令不参与重定位，调用方必须处理返回的错误。
+
 本模块只处理地址计算和机器码重编码，不查找或安装幽灵页，不操作目标进程页表，不写入 BRK，
 也不负责机器码缓存同步；监控点替换和输出机器码的实际安装由调用者决定。
 */
@@ -97,17 +99,25 @@ static inline int arm64_page_reloc_load_store_kind(const struct arm64_decoded_in
 {
     if (!decoded || !kind) return -EINVAL;
 
-    if (decoded->operands.load_store.register_kind == ARM64_MEMORY_REGISTER_FP_SIMD)
+    switch (decoded->instruction)
     {
-        if (decoded->operands.load_store.access_bytes == 4) *kind = ARM64_ENCODE_LS_FP32;
-        else if (decoded->operands.load_store.access_bytes == 8) *kind = ARM64_ENCODE_LS_FP64;
-        else if (decoded->operands.load_store.access_bytes == 16) *kind = ARM64_ENCODE_LS_FP128;
+    case ARM64_INSN_LDR_LITERAL_GPR:
+        if (decoded->operand_width == 32) *kind = ARM64_ENCODE_LS_GPR32;
+        else if (decoded->operand_width == 64) *kind = ARM64_ENCODE_LS_GPR64;
         else return -EINVAL;
+        break;
+    case ARM64_INSN_LDRSW_LITERAL:
+        *kind = ARM64_ENCODE_LS_LDRSW;
+        break;
+    case ARM64_INSN_LDR_LITERAL_FP_SIMD:
+        if (decoded->access_bytes == 4) *kind = ARM64_ENCODE_LS_FP32;
+        else if (decoded->access_bytes == 8) *kind = ARM64_ENCODE_LS_FP64;
+        else if (decoded->access_bytes == 16) *kind = ARM64_ENCODE_LS_FP128;
+        else return -EINVAL;
+        break;
+    default:
+        return -EINVAL;
     }
-    else if (decoded->operands.load_store.extension == ARM64_MEMORY_EXTENSION_SIGN) *kind = ARM64_ENCODE_LS_LDRSW;
-    else if (decoded->operands.load_store.access_bytes == 4) *kind = ARM64_ENCODE_LS_GPR32;
-    else if (decoded->operands.load_store.access_bytes == 8) *kind = ARM64_ENCODE_LS_GPR64;
-    else return -EINVAL;
 
     return 0;
 }
@@ -115,18 +125,18 @@ static inline int arm64_page_reloc_load_store_kind(const struct arm64_decoded_in
 // 使用解码结果重新编码同一种直接分支。
 static inline int arm64_page_reloc_encode_branch(const struct arm64_decoded_insn *decoded, uint64_t pc, uint64_t target, uint32_t *instruction)
 {
-    switch (decoded->opcode)
+    switch (decoded->instruction)
     {
-    case ARM64_OP_B:
+    case ARM64_INSN_B:
         return arm64_encode_b(pc, target, instruction);
-    case ARM64_OP_B_COND:
-        return arm64_encode_b_cond(pc, target, decoded->operands.branch.condition, instruction);
-    case ARM64_OP_CBZ:
-    case ARM64_OP_CBNZ:
-        return arm64_encode_cbz(pc, target, decoded->opcode == ARM64_OP_CBNZ, decoded->operand_width == 64, decoded->rt, instruction);
-    case ARM64_OP_TBZ:
-    case ARM64_OP_TBNZ:
-        return arm64_encode_tbz(pc, target, decoded->opcode == ARM64_OP_TBNZ, decoded->operands.branch.test_bit, decoded->rt, instruction);
+    case ARM64_INSN_B_COND:
+        return arm64_encode_b_cond(pc, target, decoded->condition, instruction);
+    case ARM64_INSN_CBZ:
+    case ARM64_INSN_CBNZ:
+        return arm64_encode_cbz(pc, target, decoded->instruction == ARM64_INSN_CBNZ, decoded->operand_width == 64, decoded->rt, instruction);
+    case ARM64_INSN_TBZ:
+    case ARM64_INSN_TBNZ:
+        return arm64_encode_tbz(pc, target, decoded->instruction == ARM64_INSN_TBNZ, decoded->test_bit, decoded->rt, instruction);
     default:
         return -EINVAL;
     }
@@ -135,10 +145,10 @@ static inline int arm64_page_reloc_encode_branch(const struct arm64_decoded_insn
 // 重编码直接分支；超出原分支范围时跳到近端绝对跳转槽。返回 1 表示占用了当前槽。
 static inline int arm64_page_reloc_branch(const struct arm64_page_relocation *relocation, const struct arm64_decoded_insn *decoded, uint64_t source_pc, uint64_t ghost_pc, uint32_t *instruction, uint64_t slot_pc, uint32_t *slot)
 {
-    uint64_t target = source_pc + decoded->operands.branch.offset;
+    uint64_t target = source_pc + decoded->offset;
     if (target >= relocation->source_page && target < relocation->source_page + PAGE_SIZE) target = relocation->ghost_page + (target - relocation->source_page);
 
-    if (decoded->opcode == ARM64_OP_BL) return arm64_page_reloc_call(source_pc, ghost_pc, target, instruction, slot_pc, slot);
+    if (decoded->instruction == ARM64_INSN_BL) return arm64_page_reloc_call(source_pc, ghost_pc, target, instruction, slot_pc, slot);
 
     int status = arm64_page_reloc_encode_branch(decoded, ghost_pc, target, instruction);
     if (status != -ERANGE) return status;
@@ -154,9 +164,9 @@ static inline int arm64_page_reloc_branch(const struct arm64_page_relocation *re
 // 重编码 ADR/ADRP；超出范围时在回放槽装载原始绝对目标地址。返回 1 表示占用了当前槽。
 static inline int arm64_page_reloc_pc_address(const struct arm64_decoded_insn *decoded, uint64_t source_pc, uint64_t ghost_pc, uint32_t *instruction, uint64_t slot_pc, uint32_t *slot)
 {
-    bool page_relative = decoded->opcode == ARM64_OP_ADRP;
+    bool page_relative = decoded->instruction == ARM64_INSN_ADRP;
     uint64_t source_base = page_relative ? source_pc & ~0xFFFULL : source_pc;
-    uint64_t target = source_base + decoded->operands.pc_relative.offset;
+    uint64_t target = source_base + decoded->offset;
 
     int status = page_relative ? arm64_encode_adrp(decoded->rd, ghost_pc, target, instruction) : arm64_encode_adr(decoded->rd, ghost_pc, target, instruction);
     if (status != -ERANGE) return status;
@@ -177,10 +187,10 @@ static inline int arm64_page_reloc_pc_address(const struct arm64_decoded_insn *d
 // 重编码字面量访问；超出范围时在回放槽按原访问宽度和目标寄存器执行。返回 1 表示占用了当前槽。
 static inline int arm64_page_reloc_literal(const struct arm64_decoded_insn *decoded, uint64_t source_pc, uint64_t ghost_pc, uint32_t *instruction, uint64_t slot_pc, uint32_t *slot)
 {
-    uint64_t target = source_pc + decoded->operands.load_store.offset;
+    uint64_t target = source_pc + decoded->offset;
     int status;
 
-    if (decoded->opcode == ARM64_OP_PREFETCH_LITERAL) status = arm64_encode_prfm_literal(decoded->rt, ghost_pc, target, instruction);
+    if (decoded->instruction == ARM64_INSN_PRFM_LITERAL) status = arm64_encode_prfm_literal(decoded->prefetch_operation, ghost_pc, target, instruction);
     else
     {
         enum arm64_encode_load_store_kind kind;
@@ -191,7 +201,7 @@ static inline int arm64_page_reloc_literal(const struct arm64_decoded_insn *deco
     if (status != -ERANGE) return status;
 
     // PRFM 是可被实现忽略的预取提示，超范围时用 NOP 保持无架构可见副作用。
-    if (decoded->opcode == ARM64_OP_PREFETCH_LITERAL) return arm64_encode_nop(instruction);
+    if (decoded->instruction == ARM64_INSN_PRFM_LITERAL) return arm64_encode_nop(instruction);
 
     status = arm64_encode_b(ghost_pc, slot_pc, instruction);
     if (status) return status;
@@ -204,7 +214,7 @@ static inline int arm64_page_reloc_literal(const struct arm64_decoded_insn *deco
     status = arm64_page_reloc_load_store_kind(decoded, &kind);
     if (status) return status;
 
-    if (decoded->opcode == ARM64_OP_LOAD_LITERAL && decoded->operands.load_store.register_kind == ARM64_MEMORY_REGISTER_GPR && decoded->rt != 31)
+    if ((decoded->instruction == ARM64_INSN_LDR_LITERAL_GPR || decoded->instruction == ARM64_INSN_LDRSW_LITERAL) && decoded->rt != 31)
     {
         status = arm64_encode_ldr_literal(ARM64_ENCODE_LS_GPR64, decoded->rt, slot_pc, slot_pc + 6 * sizeof(uint32_t), &slot[0]);
         if (status) return status;
@@ -229,22 +239,42 @@ static inline int arm64_page_reloc_literal(const struct arm64_decoded_insn *deco
 // 按 PC 相对指令语义选择目标地址并重编码；返回 1 表示使用槽，非 PC 相对指令返回 0。
 static inline int arm64_page_reloc_instruction(const struct arm64_page_relocation *relocation, const struct arm64_decoded_insn *decoded, uint64_t source_pc, uint64_t ghost_pc, uint32_t *instruction, uint64_t slot_pc, uint32_t *slot)
 {
-    switch (decoded->opcode)
+    switch (decoded->insn_class)
     {
-    case ARM64_OP_ADR:
-    case ARM64_OP_ADRP:
-        return arm64_page_reloc_pc_address(decoded, source_pc, ghost_pc, instruction, slot_pc, slot);
-    case ARM64_OP_LOAD_LITERAL:
-    case ARM64_OP_PREFETCH_LITERAL:
-        return arm64_page_reloc_literal(decoded, source_pc, ghost_pc, instruction, slot_pc, slot);
-    case ARM64_OP_B:
-    case ARM64_OP_BL:
-    case ARM64_OP_B_COND:
-    case ARM64_OP_CBZ:
-    case ARM64_OP_CBNZ:
-    case ARM64_OP_TBZ:
-    case ARM64_OP_TBNZ:
-        return arm64_page_reloc_branch(relocation, decoded, source_pc, ghost_pc, instruction, slot_pc, slot);
+    case ARM64_INSN_CLASS_DATA_PROCESSING_IMMEDIATE:
+        switch (decoded->instruction)
+        {
+        case ARM64_INSN_ADR:
+        case ARM64_INSN_ADRP:
+            return arm64_page_reloc_pc_address(decoded, source_pc, ghost_pc, instruction, slot_pc, slot);
+        default:
+            return 0;
+        }
+    case ARM64_INSN_CLASS_LOAD_STORE:
+        switch (decoded->instruction)
+        {
+        case ARM64_INSN_LDR_LITERAL_GPR:
+        case ARM64_INSN_LDRSW_LITERAL:
+        case ARM64_INSN_LDR_LITERAL_FP_SIMD:
+        case ARM64_INSN_PRFM_LITERAL:
+            return arm64_page_reloc_literal(decoded, source_pc, ghost_pc, instruction, slot_pc, slot);
+        default:
+            return 0;
+        }
+    case ARM64_INSN_CLASS_BRANCH_EXCEPTION_SYSTEM:
+        switch (decoded->instruction)
+        {
+        case ARM64_INSN_B:
+        case ARM64_INSN_BL:
+        case ARM64_INSN_B_COND:
+        case ARM64_INSN_CBZ:
+        case ARM64_INSN_CBNZ:
+        case ARM64_INSN_TBZ:
+        case ARM64_INSN_TBNZ:
+            return arm64_page_reloc_branch(relocation, decoded, source_pc, ghost_pc, instruction, slot_pc, slot);
+        default:
+            return 0;
+        }
     default:
         return 0;
     }
@@ -290,10 +320,14 @@ static inline int arm64_page_relocate(uint64_t source_page, uint64_t ghost_page,
         uint64_t slot_pc = ghost_page + (uint64_t)slot_index * sizeof(uint32_t);
         struct arm64_decoded_insn decoded;
 
-        arm64_decode_insn(source[source_index], &decoded);
-        output[source_index] = source[source_index];
+        enum arm64_decode_status decode_status = arm64_decode_insn(source[source_index], &decoded);
+        if (decode_status != ARM64_DECODE_OK)
+        {
+            __builtin_memset(relocation, 0, sizeof(*relocation));
+            return -EOPNOTSUPP;
+        }
 
-        if (decoded.status == ARM64_DECODE_OK)
+        output[source_index] = source[source_index];
         {
             int status = arm64_page_reloc_instruction(relocation, &decoded, source_pc, ghost_pc, &output[source_index], slot_pc, &output[slot_index]);
 

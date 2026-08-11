@@ -20,8 +20,22 @@ $(obj)/lsdriver_main.o: $(src)/lsdriver.c FORCE
 #O3
 ccflags-y += -O3
 
-# FP16 模拟使用 Armv8.2-A 半精度浮点算术指令。
-ccflags-y += -march=armv8.2-a+fp16
+# 模拟器和 arm64_reg.h 在 lsdriver_main.o 中显式使用 FP/SIMD/FP16、LSE、RCpc 和 CRC 内联汇编。
+# 统一启用对应指令集后，汇编字符串无需再重复声明局部架构扩展(.arch_extension)。
+# 让 Clang 集成汇编器识别这些指令助记符。
+#常规 FP/Advanced SIMD 指令使用助记符，下面扩展指令这个是clang6.0支持的，某些很新扩展指令集，在clang19才支持，cpu支持下直接写机器码就行了
+ccflags-y += -march=armv8.2-a+fp16+lse+rcpc+crc
+
+# ARM64 Kbuild 默认添加 -mgeneral-regs-only，它也会禁止显式 FP/SIMD 内联汇编；
+# 仅从包含模拟器代码的 lsdriver_main.o 中移除此限制，不影响模块的其他目标文件。
+CFLAGS_REMOVE_lsdriver_main.o += -mgeneral-regs-only
+
+# 移除 -mgeneral-regs-only 后，仍禁止编译器自动生成或自动向量化为 FP/SIMD 指令；
+# FP/SIMD 寄存器只允许由源码中可审计的显式内联汇编使用。
+CFLAGS_lsdriver_main.o += -mno-implicit-float
+
+
+
 
 # 将所有警告降级，不再视为错误
 ccflags-y += -Wno-error

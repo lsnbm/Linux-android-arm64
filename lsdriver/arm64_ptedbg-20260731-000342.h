@@ -413,7 +413,7 @@ static int ptebp_handle_brk(struct pt_regs *hook_regs)
             */
             struct fp_regs fp_regs;
             for (int qreg = 0; qreg < ARM64_FP_Q_REG_COUNT; qreg++) read_q_reg(qreg, &fp_regs.q[qreg]);
-            bool emulated = emulate_insn(regs, &fp_regs, &orig_insn);
+            bool emulated = emulate_insn(regs, &fp_regs, orig_insn);
             for (int qreg = 0; qreg < ARM64_FP_Q_REG_COUNT; qreg++) write_q_reg(qreg, &fp_regs.q[qreg]);
             if (!emulated && page) ptebp_disable_from_handler();
         }

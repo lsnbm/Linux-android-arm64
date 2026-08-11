@@ -314,7 +314,7 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
                 struct fp_regs fp_regs;
                 read_all_q_regs(&fp_regs);
                 point->on_hit(regs, &fp_regs, point);
-                bool emulated = emulate_insn(regs, &fp_regs, NULL);
+                bool emulated = emulate_insn(regs, &fp_regs, 0);
                 write_all_q_regs(&fp_regs);
 
                 // 模拟指令步过,失败走禁用进行步过
@@ -396,7 +396,7 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
     struct fp_regs fp_regs;
     read_all_q_regs(&fp_regs);
     hit_point->on_hit(regs, &fp_regs, hit_point);
-    bool emulated = emulate_insn(regs, &fp_regs, NULL);
+    bool emulated = emulate_insn(regs, &fp_regs, 0);
     write_all_q_regs(&fp_regs);
 
     // 模拟指令步过,失败走禁用进行步过

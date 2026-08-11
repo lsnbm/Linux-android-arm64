@@ -10,6 +10,7 @@
 #include <linux/sched.h>
 #include <linux/sched/mm.h>
 #include <linux/sched/task.h>
+#include <linux/uaccess.h>
 #include <linux/vmalloc.h>
 #include <asm/cacheflush.h>
 #include <asm/cpufeature.h>
@@ -60,8 +61,19 @@ int (*fn_aarch64_insn_patch_text)(void *addrs[], uint32_t insns[], int cnt);
 感谢https://github.com/wangchuan2009(忘川)，bypass_cfi处理运行时5系的集中校验函数,patch为ret来过5系cfi
 
 2026/7/25 22:23 !!!!!!
-后续我实机测试发现部分内核有间接调用__cfi_slowpath或__cfi_slowpath_diag或_cfi_slowpath,
-直接patch为ret后cfi倒是过了，但是部分内核部分函数间接调用cfi检查函数下 BTI直接导致内核panic
+实机one plus 13 5.15发现部分内核有间接调用__cfi_slowpath_diag
+函数序言是
+bti  c   //直接patch为ret后cfi倒是过了，但是部分内核部分函数间接调用cfi检查函数下 BTI直接导致内核panic
+...                 //所以在实际patch+4可以解决
+
+
+2026/8/9 17:01
+实机k60测试，部分5.10 __cfi_slowpath是pac认证
+函数序言是
+paciasp              // 既可作为 BTI landing pad，又用 SP 给 LR 签名
+stp x29, x30, [sp, #-...]! //不能直接patch为ret
+...
+
 */
 
 __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
@@ -85,18 +97,49 @@ __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
 
     if (!fn_aarch64_insn_patch_text) return false;
 
-    //  依次查找各个版本的 CFI slowpath 函数
-    uint64_t cfi_addr = generic_kallsyms_lookup_name("__cfi_slowpath");            // 5.10
-    if (!cfi_addr) cfi_addr = generic_kallsyms_lookup_name("__cfi_slowpath_diag"); // 5.15
-    if (!cfi_addr) cfi_addr = generic_kallsyms_lookup_name("_cfi_slowpath");       // 5.4
+    /*
+    查找各个版本的 CFI slowpath 函数
+    需要注意一个边界问题:
+    __cfi_slowpath 与 __cfi_slowpath_diag 在部分 5.x 内核可能同时存在，所以只找到一个进行patch可能会出漏过
+    这里把所有能找到的都patch了
+    */
+    static const char *const cfi_symbols[] = {
+        "__cfi_slowpath",      // 5.10
+        "__cfi_slowpath_diag", // 5.15
+        "_cfi_slowpath",       // 5.4
+    };
 
-    if (!cfi_addr) return false;
+    /*
+      2026/7/25 22:23实机测试 修复
+      不同cfi函数不同序言
+      统一把入口patch 为
+      bti c
+      ret
+      消除bti c 和pac认证的2者差异
+    */
+    void *patch_addrs[ARRAY_SIZE(cfi_symbols) * 2];
+    uint32_t patch_insns[ARRAY_SIZE(cfi_symbols) * 2];
+    uint32_t bti_c_insn;
+    uint32_t ret_insn;
+    int patch_count = 0;
 
-    // 2026/7/25 22:23实机测试 修复，保留入口第 1 条 BTI 指令，固定将第 2 条指令 Patch 成 RET。
-    void *patch_addrs[1] = {(void *)(cfi_addr + 4)};
-    uint32_t patch_insns[1];
-    if (arm64_encode_ret(30, patch_insns)) return false;
-    if (fn_aarch64_insn_patch_text(patch_addrs, patch_insns, 1) != 0) return false;
+    if (arm64_encode_bti_c(&bti_c_insn)) return false;
+    if (arm64_encode_ret(30, &ret_insn)) return false;
+
+    for (int symbol_index = 0; symbol_index < ARRAY_SIZE(cfi_symbols); symbol_index++)
+    {
+        unsigned long cfi_addr = generic_kallsyms_lookup_name(cfi_symbols[symbol_index]);
+
+        if (!cfi_addr) continue;
+
+        patch_addrs[patch_count] = (void *)cfi_addr;                      // 补丁地址：CFI 函数入口。
+        patch_insns[patch_count++] = bti_c_insn;                          // 补丁指令：BTI C；记录完成后 patch_count 加 1。
+        patch_addrs[patch_count] = (void *)(cfi_addr + sizeof(uint32_t)); // 补丁地址：函数入口后的下一条 ARM64 指令，即入口加 4 字节。
+        patch_insns[patch_count++] = ret_insn;                            // 补丁指令：RET X30；记录完成后 patch_count 加 1。
+    }
+
+    if (!patch_count) return false;
+    if (fn_aarch64_insn_patch_text(patch_addrs, patch_insns, patch_count) != 0) return false;
 
     is_cfi_bypassed = true;
     return true;
@@ -422,66 +465,6 @@ static inline int write_user_pte_value(struct mm_struct *mm, uint64_t addr, ptev
     return 0;
 }
 
-/*
-编码一条b指令
-
-在各个内核源码链接：
-Android 12 / 5.10
-MODULES_VSIZE = SZ_128M
-https://android.googlesource.com/kernel/common/+/refs/heads/android12-5.10/arch/arm64/include/asm/memory.h
-
-Android 13 / 5.15
-MODULES_VSIZE = SZ_128M
-https://android.googlesource.com/kernel/common/+/refs/heads/android13-5.15/arch/arm64/include/asm/memory.h
-
-Android 14 / 6.1
-MODULES_VSIZE = SZ_128M
-https://android.googlesource.com/kernel/common/+/refs/heads/android14-6.1/arch/arm64/include/asm/memory.h
-
-Android 15 / 6.6
-MODULES_VSIZE = SZ_2G
-https://android.googlesource.com/kernel/common/+/refs/heads/android15-6.6/arch/arm64/include/asm/memory.h
-
-Android 16 / 6.12
-MODULES_VSIZE = SZ_2G
-https://android.googlesource.com/kernel/common/+/refs/heads/android16-6.12/arch/arm64/include/asm/memory.h
-
-也就是说，外部内核模块加载时所在的内存区域是每个版本的内核不一样
-5系和6.1是128M不用看了符合B指令跳转范围
-
-6.6处理内核模块源码路径
-https://android.googlesource.com/kernel/common/+/refs/heads/android15-6.6/arch/arm64/kernel/module.c
-module_alloc() 优先从 128M  区分配
-if (module_direct_base) {
-    p = __vmalloc_node_range(size, MODULE_ALIGN,module_direct_base, module_direct_base + SZ_128M,...);
-}
-如果失败，再从 2G PLT 区分配：
-if (!p && module_plt_base) {
-    p = __vmalloc_node_range(size, MODULE_ALIGN, module_plt_base,module_plt_base + SZ_2G,...);
-}
-模块里调用内核 API，编译后常见就是 bl symbol，对应:
-R_AARCH64_CALL26
-R_AARCH64_JUMP26
-loader 先尝试直接把目标地址写进 26-bit branch immediate：
-
-ovf = reloc_insn_imm(RELOC_OP_PREL, loc, val, 2, 26, AARCH64_INSN_IMM_26);
-如果超出 ±128M：
-if (ovf == -ERANGE) {
-    val = module_emit_plt_entry(...);
-    ...
-    ovf = reloc_insn_imm(... loc, val, 2, 26, ...);
-}
-意思是：原本 bl 内核API 跳不到内核 API，就在模块自己的 .plt 里生成一个近处跳板，然后把 bl 改成跳这个 .plt entry。
-
-PLT entry 在 arch/arm64/kernel/module-plts.c：
-
-plt = __get_adrp_add_pair(dst, (u64)pc, AARCH64_INSN_REG_16);
-plt.br = cpu_to_le32(br);
-也就是类似：
-adrp x16, target_page
-add  x16, x16, target_pageoff
-br   x16
-*/
 // 释放一批通过GUP获取的page *;避免使用 put_page() 把 page_pinner 拉进来。
 static void release_gup_pages(struct page **pages, int nr)
 {
@@ -572,8 +555,99 @@ static void execmem_free(void *ptr)
     vfree(ptr);
 }
 
+/*
+copy_from_user_nofault() 虽在 common kernel 源码中写了 EXPORT_SYMBOL_GPL但 Android GKI 会按 KMI 符号列表裁剪导出。
+源码里声明导出，不代表具体设备的 __ksymtab 一定包含它
+这里用pagefault_disable+__copy_from_user_inatomic实现于copy_from_user_nofault()一样的效果
+不主动补页、不睡眠、读取失败立即返回 -EFAULT
+,
+__copy_from_user_inatomic它本身是头文件内联， 实际依赖的是根据ARM64 宏  raw_copy_from_user()进行展开为 ARM64 的 __arch_copy_from_user
+*/
+static __always_inline int copy_from_user_inatomic_nofault(void *dst, const void __user *src, size_t size)
+{
+    unsigned long not_copied;
+
+    if (!access_ok(src, size)) return -EFAULT;
+
+    pagefault_disable();
+    not_copied = __copy_from_user_inatomic(dst, src, size);
+    pagefault_enable();
+    return not_copied ? -EFAULT : 0;
+}
+
+static __always_inline int copy_to_user_inatomic_nofault(void __user *dst, const void *src, size_t size)
+{
+    unsigned long not_copied;
+
+    if (!access_ok(dst, size)) return -EFAULT;
+
+    pagefault_disable();
+    not_copied = __copy_to_user_inatomic(dst, src, size);
+    pagefault_enable();
+    return not_copied ? -EFAULT : 0;
+}
+
 #endif /* _EXPORT_FUN_H_ */
 
+/*
+
+在各个内核源码链接：
+Android 12 / 5.10
+MODULES_VSIZE = SZ_128M
+https://android.googlesource.com/kernel/common/+/refs/heads/android12-5.10/arch/arm64/include/asm/memory.h
+
+Android 13 / 5.15
+MODULES_VSIZE = SZ_128M
+https://android.googlesource.com/kernel/common/+/refs/heads/android13-5.15/arch/arm64/include/asm/memory.h
+
+Android 14 / 6.1
+MODULES_VSIZE = SZ_128M
+https://android.googlesource.com/kernel/common/+/refs/heads/android14-6.1/arch/arm64/include/asm/memory.h
+
+Android 15 / 6.6
+MODULES_VSIZE = SZ_2G
+https://android.googlesource.com/kernel/common/+/refs/heads/android15-6.6/arch/arm64/include/asm/memory.h
+
+Android 16 / 6.12
+MODULES_VSIZE = SZ_2G
+https://android.googlesource.com/kernel/common/+/refs/heads/android16-6.12/arch/arm64/include/asm/memory.h
+
+也就是说，外部内核模块加载时所在的内存区域是每个版本的内核不一样
+5系和6.1是128M不用看了符合B指令跳转范围
+
+6.6处理内核模块源码路径
+https://android.googlesource.com/kernel/common/+/refs/heads/android15-6.6/arch/arm64/kernel/module.c
+module_alloc() 优先从 128M  区分配
+if (module_direct_base) {
+    p = __vmalloc_node_range(size, MODULE_ALIGN,module_direct_base, module_direct_base + SZ_128M,...);
+}
+如果失败，再从 2G PLT 区分配：
+if (!p && module_plt_base) {
+    p = __vmalloc_node_range(size, MODULE_ALIGN, module_plt_base,module_plt_base + SZ_2G,...);
+}
+模块里调用内核 API，编译后常见就是 bl symbol，对应:
+R_AARCH64_CALL26
+R_AARCH64_JUMP26
+loader 先尝试直接把目标地址写进 26-bit branch immediate：
+
+ovf = reloc_insn_imm(RELOC_OP_PREL, loc, val, 2, 26, AARCH64_INSN_IMM_26);
+如果超出 ±128M：
+if (ovf == -ERANGE) {
+    val = module_emit_plt_entry(...);
+    ...
+    ovf = reloc_insn_imm(... loc, val, 2, 26, ...);
+}
+意思是：原本 bl 内核API 跳不到内核 API，就在模块自己的 .plt 里生成一个近处跳板，然后把 bl 改成跳这个 .plt entry。
+
+PLT entry 在 arch/arm64/kernel/module-plts.c：
+
+plt = __get_adrp_add_pair(dst, (u64)pc, AARCH64_INSN_REG_16);
+plt.br = cpu_to_le32(br);
+也就是类似：
+adrp x16, target_page
+add  x16, x16, target_pageoff
+br   x16
+*/
 /*
  6系内核就不用这个宏了，可以直接拿着函数指针调用
 

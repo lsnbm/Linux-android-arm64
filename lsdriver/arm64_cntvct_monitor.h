@@ -10,7 +10,6 @@
 #include <linux/sched.h>
 #include <linux/sched/signal.h>
 #include <linux/smp.h>
-#include <linux/uaccess.h>
 #include <clocksource/arm_arch_timer.h>
 #include <asm/esr.h>
 #include <asm/ptrace.h>
@@ -59,7 +58,7 @@ static void cntvct_monitor_log_user_callchain(const struct pt_regs *regs)
         struct cntvct_monitor_user_frame frame;
 
         if (!frame_pointer || (frame_pointer & 0xf) || frame_pointer >= task_size || task_size - frame_pointer < sizeof(frame)) break;
-        if (copy_from_user_nofault(&frame, (const void __user *)(uintptr_t)frame_pointer, sizeof(frame))) break;
+        if (copy_from_user_inatomic_nofault(&frame, (const void __user *)(uintptr_t)frame_pointer, sizeof(frame))) break;
 
         unsigned long return_address = frame.lr & address_mask;
         pos += scnprintf(text + pos, sizeof(text) - pos, " #%u=0x%lx", depth, return_address);

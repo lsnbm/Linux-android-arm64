@@ -28,6 +28,8 @@ enum arm64_encode_load_store_kind
 };
 
 int arm64_encode_nop(uint32_t *instruction);
+int arm64_encode_bti_c(uint32_t *instruction);
+int arm64_encode_brk(uint32_t immediate, uint32_t *instruction);
 int arm64_encode_b(uint64_t pc, uint64_t target, uint32_t *instruction);
 int arm64_encode_bl(uint64_t pc, uint64_t target, uint32_t *instruction);
 int arm64_encode_b_cond(uint64_t pc, uint64_t target, uint8_t condition, uint32_t *instruction);

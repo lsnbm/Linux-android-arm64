@@ -16,8 +16,39 @@
 #include "emulate_insn.h"
 #include "lsdriver_log.h"
 
-// 单次取指异常中连续模拟的最大指令数量，避免页内循环长期占用异常上下文。
-#define PTEBP_BATCH_INSN_LIMIT 4096
+/*
+单次取指异常中连续模拟的最大指令数量，避免页内循环长期占用异常上下文。
+也不建议改小，定义为0x1或其他小范围
+
+原因就是，这种类似的典型指令
+retry:
+    ldxr x14, [x9]        // 读取，并建立 CPU 本地独占监视
+    eor  x14, x14, x11
+    stxr w15, x14, [x9]   // 使用前面的独占监视尝试写入
+    cbnz w15, retry
+LDXR 本身只执行一次，STXR 也只执行一次；但二者需要尽量在同一段连续执行流中完成。
+CPU在执行 LDXR 后保存的 reservation 不在 pt_regs 里，异常进入/返回可能清除它。
+因此，
+为0x1时的整体错误处理异常流程
+    用户态准备执行 LDXR
+        | UXN取指异常
+    EL1模拟 LDXR，PC推进到 EOR
+        | ERET返回用户态
+    用户态准备取 EOR，还没执行
+        | UXN取指异常
+    EL1模拟 EOR，PC推进到 STXR
+        | ERET返回用户态
+    用户态准备取 STXR，还没执行
+        | UXN取指异常
+    EL1模拟 STXR，但独占监视已经失效，CPU在执行 LDXR 后保存的 reservation 不在 pt_regs 里，异常边界导致独占监视失效(异常进入/返回可能清除它)，会使 STXR 反复返回失败状态。
+        |
+    w15 = 1，PC推进到 CBNZ
+        | ERET返回用户态
+    用户态准备取 CBNZ
+        | UXN取指异常
+    EL1模拟 CBNZ，因为 w15 != 0(是STXR失败状态导致)，跳回 LDXR
+*/
+#define PTEBP_BATCH_INSN_LIMIT 0x10000
 
 // 保存页面的原始 PTE，以便撤销 UXN 监控时准确恢复。
 struct ptebp_page
@@ -176,10 +207,10 @@ static int ptebp_handle_exec_fault(struct pt_regs *hook_regs)
     bool managed_page = false;
     bool stopping = false;
 
-    // 寄存器现场为空，交回原函数处理。
+    // 内核态软件寄存器现场 为空，交回原函数处理。
     if (!hook_regs) return 0;
 
-    // el0t_64_sync_handler(regs) 的唯一参数位于 x0。
+    // 用户态软件寄存器现场 el0t_64_sync_handler(regs) 的唯一参数位于 x0。
     struct pt_regs *regs = (struct pt_regs *)hook_regs->regs[0];
 
     // IABT_LOW 已经确认异常来自 EL0；这里只需验证真实寄存器现场和用户地址空间。
@@ -251,7 +282,7 @@ out_unlock:
         uint64_t old_pc = regs->pc;
 
         // emulate_insn 同时更新 regs 和软件 FP/SIMD 现场；不支持的指令或 PC 未推进都使本批不再安全。
-        bool emulated = emulate_insn(regs, &fp_regs, NULL);
+        bool emulated = emulate_insn(regs, &fp_regs, 0);
         if (!emulated || regs->pc == old_pc)
         {
             batch_ok = false;

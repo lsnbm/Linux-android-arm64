@@ -61,6 +61,7 @@ static void test_page_relative_relocation(void)
     expect_status("source adr", arm64_encode_adr(7, source_page + 16, source_page + 0x234, &source[4]), 0);
     expect_status("source adrp", arm64_encode_adrp(8, source_page + 20, source_page + 0x9000, &source[5]), 0);
     expect_status("source literal", arm64_encode_ldr_literal(ARM64_ENCODE_LS_GPR64, 9, source_page + 24, source_page + 0x300, &source[6]), 0);
+    expect_status("source prfm", arm64_encode_prfm_literal(3, source_page + 28, source_page + 0x340, &source[7]), 0);
 
     expect_status("relocate page relative", arm64_page_relocate(source_page, ghost_page, source, output, ARM64_PAGE_RELOC_MAX_BYTES, &relocation), 0);
     if (relocation.slot_count != 0 || relocation.code_size != ARM64_PAGE_RELOC_BASE_BYTES)
@@ -83,6 +84,8 @@ static void test_page_relative_relocation(void)
     expect_word("page adrp", output[5], expected);
     expect_status("expected literal", arm64_encode_ldr_literal(ARM64_ENCODE_LS_GPR64, 9, ghost_page + 24, source_page + 0x300, &expected), 0);
     expect_word("page literal", output[6], expected);
+    expect_status("expected prfm", arm64_encode_prfm_literal(3, ghost_page + 28, source_page + 0x340, &expected), 0);
+    expect_word("page prfm", output[7], expected);
     expect_status("page return", arm64_encode_b(ghost_page + PAGE_SIZE, source_page + PAGE_SIZE, &expected), 0);
     expect_word("page return branch", output[ARM64_PAGE_RELOC_SOURCE_WORDS], expected);
     expect_word("page return padding 1", output[ARM64_PAGE_RELOC_SOURCE_WORDS + 1], 0xD503201F);
@@ -149,9 +152,25 @@ static void test_far_slots(void)
     free(output);
 }
 
+static void test_reject_unsupported(void)
+{
+    const uint64_t source_page = 0x10000000ULL;
+    const uint64_t ghost_page = 0x10080000ULL;
+    uint32_t source[ARM64_PAGE_RELOC_SOURCE_WORDS];
+    uint32_t *output = calloc(ARM64_PAGE_RELOC_MAX_WORDS, sizeof(*output));
+    struct arm64_page_relocation relocation;
+
+    if (!output) exit(1);
+    clear_source(source);
+    source[0] = 0x54000010U;
+    expect_status("reject unsupported relocation", arm64_page_relocate(source_page, ghost_page, source, output, ARM64_PAGE_RELOC_MAX_BYTES, &relocation), -EOPNOTSUPP);
+    free(output);
+}
+
 int main(void)
 {
     test_page_relative_relocation();
     test_far_slots();
+    test_reject_unsupported();
     return 0;
 }
