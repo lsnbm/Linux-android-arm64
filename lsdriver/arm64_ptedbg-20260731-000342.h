@@ -18,9 +18,9 @@
 #include <asm/memory.h>
 #include <asm/ptrace.h>
 
-#include "arm64_ghost_region.h"
-#include "arm64_page_reloc.h"
-#include "emulate_insn.h"
+#include "arm64_ghost/arm64_ghost_region.h"
+#include "arm64_ghost/arm64_page_reloc.h"
+#include "arm64_emulate/emulate_insn.h"
 #include "inline_hook_frame.h"
 #include "io_struct.h"
 #include "lsdriver_log.h"
@@ -65,12 +65,6 @@ static DEFINE_MUTEX(g_ptebp_mutex);                         //实例生命周期
 static atomic_t g_ptebp_handlers_inflight = ATOMIC_INIT(0); //原子计数,记录还有多少异常处理函数正在执行
 static DECLARE_WAIT_QUEUE_HEAD(g_ptebp_handler_wait);       //让调用停止函数的线程睡眠，直到原子计数归零唤醒继续清理
 static bool g_ptebp_stopping;                               //阻止停止期间继续产生正常监控行为
-
-// 判断断点配置项是否为已启用的执行断点。
-static __always_inline bool ptebp_active(const struct bp_point *point)
-{
-    return point && READ_ONCE(point->hit_addr) && READ_ONCE(point->bt) == BP_BREAKPOINT_X;
-}
 
 // 判断机器码是否属于 ARM64 BRK 指令族。
 static __always_inline bool ptebp_is_brk(uint32_t instruction)
@@ -388,7 +382,9 @@ static int ptebp_handle_brk(struct pt_regs *hook_regs)
     映射到下一条幽灵指令。回调若主动修改 regs->pc，就表示它接管了后续控制流。
     */
     regs->pc = source_pc;
-    if (hit_point && hit_point->on_hit) hit_point->on_hit((void *)regs, (void *)hit_point);
+    struct fp_regs fp_regs __attribute__((__uninitialized__));
+    read_all_q_regs(&fp_regs);
+    if (hit_point && hit_point->on_hit) hit_point->on_hit(regs, &fp_regs, hit_point);
 
     bool pass_to_original = false;
 
@@ -411,13 +407,11 @@ static int ptebp_handle_brk(struct pt_regs *hook_regs)
             模拟器可能读写 SIMD/FP 寄存器，因此先快照 Q0-Q31，模拟后再将完整现场写回硬件。
             若原指令无法模拟，则进入紧急停止模式并恢复源页执行权限，避免线程反复命中同一 BRK。
             */
-            struct fp_regs fp_regs;
-            for (int qreg = 0; qreg < ARM64_FP_Q_REG_COUNT; qreg++) read_q_reg(qreg, &fp_regs.q[qreg]);
             bool emulated = emulate_insn(regs, &fp_regs, orig_insn);
-            for (int qreg = 0; qreg < ARM64_FP_Q_REG_COUNT; qreg++) write_q_reg(qreg, &fp_regs.q[qreg]);
             if (!emulated && page) ptebp_disable_from_handler();
         }
     }
+    write_all_q_regs(&fp_regs);
 
     /*
     人工插入的监控 BRK 已被回调和原指令模拟完整消费；回调修改 PC 时也视为已接管。
@@ -474,14 +468,12 @@ static void ptebp_forget_resources(void)
 }
 
 // 在 PTEBP 互斥锁已持有时停止监控，只恢复源页执行权限。权限恢复后自然跑完就会回到原页，不在进入幽灵页
-static void ptebp_stop_locked(struct break_point *preserve_info)
+static void ptebp_stop_locked(void)
 {
-    struct break_point *info;
     struct mm_struct *mm;
     {
         unsigned long flags;
         spin_lock_irqsave(&g_ptebp_lock, flags);
-        info = g_ptebp_info;
         mm = g_ptebp_mm;
         g_ptebp_stopping = true;
         spin_unlock_irqrestore(&g_ptebp_lock, flags);
@@ -507,7 +499,6 @@ static void ptebp_stop_locked(struct break_point *preserve_info)
 
     ptebp_forget_resources();
     if (mm) mmput(mm);
-    if (info && info != preserve_info) __builtin_memset(info, 0, sizeof(*info));
 
     {
         unsigned long flags;
@@ -615,11 +606,11 @@ static int ptebp_prepare_page(struct break_point *info, struct mm_struct *mm, ui
         arm64_ghost_region_destroy(&page->ghost);
     }
 
-    for (size_t point_index = 0; point_index < ARRAY_SIZE(info->points); point_index++)
+    size_t next_slot = 0;
+    struct bp_point *point;
+    while ((point = bp_info_find_configured_type(info, BP_BREAKPOINT_X, &next_slot)))
     {
-        struct bp_point *point = &info->points[point_index];
-        if (!ptebp_active(point)) continue;
-
+        size_t point_index = point - info->points;
         uint64_t source_pc = untagged_addr(READ_ONCE(point->hit_addr)) & ~0x3ULL;
         if ((source_pc & PAGE_MASK) != source_page) continue;
 
@@ -658,36 +649,30 @@ out:
 // 校验监控点地址、类型和唯一性，并要求至少存在一个有效执行断点。
 static int ptebp_validate_points(struct break_point *info, struct mm_struct *mm)
 {
-    bool active = false;
+    if (!bp_info_find_configured_type(info, BP_BREAKPOINT_X, NULL)) return -EINVAL;
 
-    for (size_t point_index = 0; point_index < ARRAY_SIZE(info->points); point_index++)
+    size_t next_slot = 0;
+    struct bp_point *point;
+    while ((point = bp_info_find_configured_type(info, BP_BREAKPOINT_X, &next_slot)))
     {
-        struct bp_point *point = &info->points[point_index];
-        if (!ptebp_active(point)) continue;
-
-        active = true;
         uint64_t source_pc = untagged_addr(READ_ONCE(point->hit_addr)) & ~0x3ULL;
         uint64_t task_size = READ_ONCE(mm->task_size);
         if (!source_pc || source_pc >= task_size || sizeof(uint32_t) > task_size - source_pc) return -EFAULT;
 
-        for (size_t previous = 0; previous < point_index; previous++)
-        {
-            struct bp_point *candidate = &info->points[previous];
-            if (ptebp_active(candidate) && (untagged_addr(READ_ONCE(candidate->hit_addr)) & ~0x3ULL) == source_pc) return -EEXIST;
-        }
+        struct bp_point *duplicate_point = bp_info_find_point_by_pc(info, source_pc);
+        if (duplicate_point != point) return -EEXIST;
     }
 
-    return active ? 0 : -EINVAL;
+    return 0;
 }
 
 // 按监控点涉及的不同源页逐页准备幽灵页执行环境。
 static int ptebp_prepare_pages(struct break_point *info, struct mm_struct *mm)
 {
-    for (size_t point_index = 0; point_index < ARRAY_SIZE(info->points); point_index++)
+    size_t next_slot = 0;
+    struct bp_point *point;
+    while ((point = bp_info_find_configured_type(info, BP_BREAKPOINT_X, &next_slot)))
     {
-        struct bp_point *point = &info->points[point_index];
-        if (!ptebp_active(point)) continue;
-
         uint64_t source_page = untagged_addr(READ_ONCE(point->hit_addr)) & PAGE_MASK;
         if (ptebp_find_source_page(source_page)) continue;
 
@@ -754,10 +739,10 @@ static int ptebp_arm_pages(struct mm_struct *mm)
 // 停止旧实例并为断点配置启动新的 PTEBP 幽灵页监控。
 static inline int start_ptebp_monitor(struct break_point *info)
 {
-    if (!info || READ_ONCE(info->tgid) <= 0) return -EINVAL;
+    if (!bp_info_is_valid(info)) return -EINVAL;
 
     mutex_lock(&g_ptebp_mutex);
-    ptebp_stop_locked(info);
+    ptebp_stop_locked();
 
     struct mm_struct *mm = get_mm_by_pid(info->tgid);
     int status;
@@ -788,7 +773,7 @@ static inline int start_ptebp_monitor(struct break_point *info)
     status = ptebp_arm_pages(mm);
     if (status)
     {
-        ptebp_stop_locked(info);
+        ptebp_stop_locked();
         goto out_unlock;
     }
 
@@ -809,7 +794,7 @@ out_unlock:
 static inline void stop_ptebp_monitor(void)
 {
     mutex_lock(&g_ptebp_mutex);
-    ptebp_stop_locked(NULL);
+    ptebp_stop_locked();
     mutex_unlock(&g_ptebp_mutex);
 }
 

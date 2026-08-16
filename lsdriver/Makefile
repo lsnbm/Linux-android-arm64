@@ -9,127 +9,147 @@ lsdriver-y := lsdriver_main.o \
 			  arm64_decode/arm64_decode_branch.o \
 			  arm64_decode/arm64_decode_simd.o \
 			  arm64_decode/arm64_decode_sve.o \
-			  arm64_decode/arm64_decode_sme.o
+			  arm64_decode/arm64_decode_sme.o \
+			  arm64_emulate/arm64_emulate.o \
+			  arm64_emulate/arm64_emulate_branch.o \
+			  arm64_emulate/arm64_emulate_ldst.o \
+			  arm64_emulate/arm64_emulate_simd.o \
+			  arm64_emulate/arm64_emulate_immediate.o \
+			  arm64_emulate/arm64_emulate_register.o
 
 $(obj)/lsdriver_main.o: $(src)/lsdriver.c FORCE
 	$(call if_changed_dep,cc_o_c)
 
-# 开启debug输出，有pr_debug输出
-#ccflags-y += -DDEBUG
-
-#O3
+#O3优化:启用更积极的内联、循环变换、指令调度和常量传播。
 ccflags-y += -O3
 
-# 模拟器和 arm64_reg.h 在 lsdriver_main.o 中显式使用 FP/SIMD/FP16、LSE、RCpc 和 CRC 内联汇编。
+# Full LTO：让主驱动与 decoder/encoder 在统一模块视图中进行跨文件内联和常量传播。
+ccflags-y += -flto
+
+
+# 开启 debug 输出；需要 pr_debug 时手动启用。
+# ccflags-y += -DDEBUG
+
+# 全模块统一启用模板显式汇编需要的 ARMv8.6、FP16、LSE、RCpc、CRC、
+# Dot Product、FP16FML、FCMA、BF16 和 I8MM，让 Clang 集成汇编器识别对应助记符。
 # 统一启用对应指令集后，汇编字符串无需再重复声明局部架构扩展(.arch_extension)。
-# 让 Clang 集成汇编器识别这些指令助记符。
-#常规 FP/Advanced SIMD 指令使用助记符，下面扩展指令这个是clang6.0支持的，某些很新扩展指令集，在clang19才支持，cpu支持下直接写机器码就行了
-ccflags-y += -march=armv8.2-a+fp16+lse+rcpc+crc
+# Clang 12 仍无法识别的更新指令继续在模板中使用机器码。
+ccflags-y += -march=armv8.6-a+bf16+i8mm+fp16fml+fp16+lse+rcpc+crc
+
+# 禁止优化器从普通 C 循环和基本块主动生成 Advanced SIMD 向量代码。
+# 移除 -mgeneral-regs-only 的对象还会额外使用 -mno-implicit-float。
+ccflags-y += -fno-vectorize -fno-slp-vectorize
 
 # ARM64 Kbuild 默认添加 -mgeneral-regs-only，它也会禁止显式 FP/SIMD 内联汇编；
-# 仅从包含模拟器代码的 lsdriver_main.o 中移除此限制，不影响模块的其他目标文件。
+# 仅从显式使用 FP/SIMD 汇编的目标中移除此限制，不影响模块的其他目标文件。
 CFLAGS_REMOVE_lsdriver_main.o += -mgeneral-regs-only
+CFLAGS_REMOVE_arm64_emulate/arm64_emulate.o += -mgeneral-regs-only
+CFLAGS_REMOVE_arm64_emulate/arm64_emulate_ldst.o += -mgeneral-regs-only
+CFLAGS_REMOVE_arm64_emulate/arm64_emulate_simd.o += -mgeneral-regs-only
+CFLAGS_REMOVE_arm64_emulate/arm64_emulate_immediate.o += -mgeneral-regs-only
+CFLAGS_REMOVE_arm64_emulate/arm64_emulate_register.o += -mgeneral-regs-only
 
 # 移除 -mgeneral-regs-only 后，仍禁止编译器自动生成或自动向量化为 FP/SIMD 指令；
 # FP/SIMD 寄存器只允许由源码中可审计的显式内联汇编使用。
 CFLAGS_lsdriver_main.o += -mno-implicit-float
+CFLAGS_arm64_emulate/arm64_emulate.o += -mno-implicit-float
+CFLAGS_arm64_emulate/arm64_emulate_ldst.o += -mno-implicit-float
+CFLAGS_arm64_emulate/arm64_emulate_simd.o += -mno-implicit-float
+CFLAGS_arm64_emulate/arm64_emulate_immediate.o += -mno-implicit-float
+CFLAGS_arm64_emulate/arm64_emulate_register.o += -mno-implicit-float
 
 
 
 
-# 将所有警告降级，不再视为错误
+# 将所有警告降级，不再视为错误。
 ccflags-y += -Wno-error
 
 # 驱动源码使用 C99 使用点声明与 for 初始化子句变量；旧内核默认 GNU89，需显式启用现代 GNU C 方言。
 ccflags-y += -std=gnu11
 
-#禁用栈溢出保护
+# 关闭栈保护器：移除函数入口 canary 装载和返回前 canary 校验。
 ccflags-y += -fno-stack-protector
 
-# 废弃帧指针,释放 FP (x29) 寄存器作为通用计算寄存器，减少压栈动作
+# 省略帧指针：释放 x29 并减少函数入口和返回路径的压栈、出栈操作。
 ccflags-y += -fomit-frame-pointer
 
-# 循环展开: 牺牲二进制体积，减少 while/for 循环的跳转和判断开销
+# 尾调用优化：将函数末尾的 call + ret 合并为直接跳转，减少一次返回地址保存与恢复。
+ccflags-y += -foptimize-sibling-calls
+
+# 关闭 BTI 和返回地址指针认证：移除间接分支目标处的 BTI、函数入口 PACIASP 与返回前 AUTIASP。
+ccflags-y += -mbranch-protection=none
+
+# 关闭自动局部变量清零：避免编译器在函数入口为未初始化栈对象插入 memset/零存储。
+# 代码必须自行保证所有局部变量在首次读取前已完成初始化，否则会暴露真实的未初始化读取。
+ccflags-y += -ftrivial-auto-var-init=uninitialized
+
+# 循环展开：用代码体积换取更少的循环回边、比较和分支指令。
 ccflags-y += -funroll-loops
 
-
-
-# 严格别名优化: 允许编译器假设不同类型的指针指向不同内存，从而进行更激进的指令重排
+# 严格别名优化：允许编译器基于类型别名规则进行更积极的加载消除和指令重排。
 ccflags-y += -fstrict-aliasing
 
+# 关闭 KASAN 编译插桩：避免内存访问周围生成地址检查。
+KASAN_SANITIZE := n
+
+# 关闭 UBSAN 编译插桩：避免算术、数组边界等操作生成运行时检查。
+UBSAN_SANITIZE := n
+
+# 关闭 KCSAN 编译插桩：避免并发访问周围生成采样和竞争检查。
+KCSAN_SANITIZE := n
+
+# 关闭 KMSAN 编译插桩：避免值传播路径生成未初始化状态跟踪。
+KMSAN_SANITIZE := n
+
+# 关闭 GCOV 覆盖率插桩：避免基本块计数器更新。
+GCOV_PROFILE := n
+
+# 关闭 KCOV 覆盖率插桩：避免边覆盖记录和回调。
+KCOV_INSTRUMENT := n
+
+# 保留 KCFI：启用 KCFI 的内核会间接调用模块回调，移除类型哈希会导致校验异常。
 
 
-# 死代码消除辅助: 将每个函数和数据放入独立段，配合链接器剔除无用代码
-ccflags-y += -ffunction-sections -fdata-sections
 
 
+# 删除空指针检查：覆盖内核默认的保守语义，可能破坏依赖空指针检查的内核代码，禁止启用。
+# ccflags-y += -fdelete-null-pointer-checks
 
+# 严格有符号溢出：允许编译器假设有符号溢出永不发生，与内核默认语义冲突，禁止启用。
+# ccflags-y += -fstrict-overflow
 
-
-#下面编译配置如果使用会出现意外，按需注释
-
-
-# # 强制内联: 消除函数调用 (call/ret) 和参数压栈的开销
+# 强制内联：-O3 已默认启用同类内联策略，单独添加通常不会继续提高内联强度，暂不启用。
 # ccflags-y += -finline-functions
 
-
-# # 彻底关闭针对该模块的内存杀毒软件 (KASAN) 和未定义行为检查 (UBSAN)
-# KASAN_SANITIZE := n
-# UBSAN_SANITIZE := n
-# KCSAN_SANITIZE := n
-
-# # 关闭针对该模块的代码覆盖率统计和性能追踪
-# GCOV_PROFILE := n
-# KCOV_INSTRUMENT := n
-
-# # 剔除 Ftrace (函数调用追踪) 插桩
-# CFLAGS_REMOVE_lsdriver.o += $(CC_FLAGS_FTRACE)
-
-# # 强制 64 字节对齐 (适配 ARM64 的 Cache Line)用 NOP 指令填充空白，确保 CPU 抓取关键循环时绝不跨越缓存行，零等待
-# ccflags-y += -falign-functions=64
-# ccflags-y += -falign-loops=64
-
-
-# # 暴力循环展开与内联 (Clang 参数)
-# ccflags-y += -funroll-loops
-# ccflags-y += -finline-functions
-# # 强行拉高 LLVM 的内联和展开阈值 (让函数扁平化)
+# 极高内联阈值：实测提高 LTO 内联阈值会明显放大代码且未消除目标热路径调用，暂不启用。
 # ccflags-y += -mllvm -inline-threshold=10000
+
+# 极高循环展开阈值：会绕过正常成本模型并显著增加 I-cache 压力，暂不启用。
 # ccflags-y += -mllvm -unroll-threshold=10000
 
 
 
-#下面编译配置使用会90%会出现意外，请注释!!!
-
-
-# # 关闭影子调用栈 
-# # 原理：现代安卓内核默认开启 SCS。每次函数调用都会额外操作 x18 寄存器去备份返回地址。
-# # 关闭后：每个函数砍掉 2 条内存操作指令，释放 x18 寄存器，极大降低函数调用开销。
-# ccflags-y += -fno-sanitize=shadow-call-stack
-
-# # 关闭指针身份验证与分支目标识别
-# # 原理：ARMv8.3+ 以上默认开启。函数开头会有 paciasp/bti c，结尾有 autiasp，用于防 ROP 攻击。
-# # 关闭后：剥离所有密码学签名校验指令，函数真正做到“纯逻辑直通”。
-# ccflags-y += -mbranch-protection=none
-
-# # 关闭幽灵漏洞的跳转表防御 
-# # 原理：内核为了防 Spectre V2，会把普通的汇编 jmp/call 变成极其极其极其低效的 thunk 蹦床跳。
-# # 关闭后：恢复 CPU 原生的间接跳转分支预测，switch-case 和函数指针调用速度起飞。
-# ccflags-y += -fno-jump-tables
-
-
-# #  强制隐藏内部符号可见性
-# # 原理：内核模块对外暴露 API 依赖 EXPORT_SYMBOL 宏，不需要标准的 ELF 全局符号可见性。
-# # 开启后：编译器确信所有没加 EXPORT_SYMBOL 的函数全是你内部私有的，会进行极其暴力的过程间优化 (IPO) 和寄存器传参优化。
+# 隐藏符号可见性：实测未改善运行时代码，并会把 init_module/cleanup_module 标记为 HIDDEN，暂不启用。
 # ccflags-y += -fvisibility=hidden
 
-# # 禁用 PLT 表调用
-# # 原理：彻底不生成过程链接表。
-# # 开启后：所有外部函数调用直接用相对地址/绝对地址硬编码计算，减少一次内存中转。
+# 禁用 PLT：内核模块调用由重定位直接处理，当前目标未观察到运行时收益，暂不启用。
 # ccflags-y += -fno-plt
 
 
+# 禁用跳转表：会把 switch 降为比较分支链，通常增加分派开销，暂不启用。
+# ccflags-y += -fno-jump-tables
 
-# 后面不写了，有多个 .c 文件可以使用内部 LTO
+# 关闭影子调用栈：当前外部模块实际编译命令没有 shadow-call-stack 插桩，添加后不会产生收益。
+# ccflags-y += -fno-sanitize=shadow-call-stack
+
+# 关闭 KCFI：内核会通过间接调用进入模块回调，移除模块类型哈希可能触发运行时 CFI 异常，禁止启用。
+# ccflags-y += -fno-sanitize=kcfi
+
+# 移除 Ftrace：需先在实际编译命令中确认存在 Ftrace 插桩，再按具体目标文件移除，当前暂不启用。
+# CFLAGS_REMOVE_lsdriver.o += $(CC_FLAGS_FTRACE)
+
+# Cortex-X2 调度模型：按 Cortex-X2 的流水线延迟和吞吐特征安排指令，不扩大 -march 允许使用的指令集。
+# 该模块固定用于 Cortex-X2 或调度特征相近的核心；若更换目标 CPU，需要同步修改此值并重新验证机器码性能。
+#ccflags-y += -mtune=cortex-x2
 
 

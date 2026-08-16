@@ -48,57 +48,6 @@ struct stepbp_return_frame
     struct pt_regs *regs;
 };
 
-static inline bool stepbp_info_targets_task(const struct break_point *info, struct task_struct *task)
-{
-    return info && task && READ_ONCE(info->tgid) > 0 && READ_ONCE(info->tgid) == task->tgid;
-}
-
-static inline bool stepbp_point_is_active(const struct bp_point *point)
-{
-    return point && READ_ONCE(point->hit_addr) != 0 && READ_ONCE(point->bt) == BP_BREAKPOINT_X && READ_ONCE(point->bs) >= BP_SCOPE_MAIN_THREAD && READ_ONCE(point->bs) <= BP_SCOPE_ALL_THREADS;
-}
-
-static inline bool stepbp_point_matches_task(const struct bp_point *point, struct task_struct *task)
-{
-    if (!stepbp_point_is_active(point) || !task) return false;
-
-    switch (READ_ONCE(point->bs))
-    {
-    case BP_SCOPE_MAIN_THREAD:
-        return thread_group_leader(task);
-    case BP_SCOPE_OTHER_THREADS:
-        return !thread_group_leader(task);
-    case BP_SCOPE_ALL_THREADS:
-        return true;
-    default:
-        return false;
-    }
-}
-
-static inline bool stepbp_info_matches_task(const struct break_point *info, struct task_struct *task)
-{
-    if (!stepbp_info_targets_task(info, task)) return false;
-
-    for (int point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
-    {
-        if (stepbp_point_matches_task(&info->points[point_slot], task)) return true;
-    }
-
-    return false;
-}
-
-static bool stepbp_info_has_active_point(const struct break_point *info)
-{
-    if (!info || READ_ONCE(info->tgid) <= 0) return false;
-
-    for (int point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
-    {
-        if (stepbp_point_is_active(&info->points[point_slot])) return true;
-    }
-
-    return false;
-}
-
 static inline void stepbp_publish_monitor(struct break_point *info, bool stopping)
 {
     g_stepbp_generation++;
@@ -160,9 +109,9 @@ static void stepbp_update_current_cpu(void *data)
 {
     struct stepbp_cpu_update *update = data;
 
-    if (!stepbp_info_targets_task(update->info, current)) return;
+    if (!bp_info_targets_task(update->info, current)) return;
 
-    if (update->enable && stepbp_info_matches_task(update->info, current)) stepbp_enable_task_single_step(current);
+    if (update->enable && bp_info_find_type_for_task(update->info, BP_BREAKPOINT_X, current)) stepbp_enable_task_single_step(current);
     else stepbp_disable_current_hardware_step(task_pt_regs(current));
 }
 
@@ -178,10 +127,8 @@ static int stepbp_apply_info_tasks(struct break_point *info, bool enable)
     pid_t target_tgid;
     int touched_count = 0;
 
-    if (!info) return 0;
-
+    if (!bp_info_is_valid(info)) return 0;
     target_tgid = READ_ONCE(info->tgid);
-    if (target_tgid <= 0) return 0;
 
     rcu_read_lock();
     target_task = find_task_by_vpid(target_tgid);
@@ -189,8 +136,8 @@ static int stepbp_apply_info_tasks(struct break_point *info, bool enable)
     {
         for_each_process_thread(process, task)
         {
-            if (!stepbp_info_targets_task(info, task)) continue;
-            stepbp_apply_task_single_step(task, enable && stepbp_info_matches_task(info, task));
+            if (!bp_info_targets_task(info, task)) continue;
+            stepbp_apply_task_single_step(task, enable && bp_info_find_type_for_task(info, BP_BREAKPOINT_X, task));
             touched_count++;
         }
         goto out_unlock;
@@ -198,17 +145,17 @@ static int stepbp_apply_info_tasks(struct break_point *info, bool enable)
 
     if (target_task->tgid == target_tgid)
     {
-        stepbp_apply_task_single_step(target_task, enable && stepbp_info_matches_task(info, target_task));
+        stepbp_apply_task_single_step(target_task, enable && bp_info_find_type_for_task(info, BP_BREAKPOINT_X, target_task));
         touched_count++;
         for_each_thread(target_task, task)
         {
-            stepbp_apply_task_single_step(task, enable && stepbp_info_matches_task(info, task));
+            stepbp_apply_task_single_step(task, enable && bp_info_find_type_for_task(info, BP_BREAKPOINT_X, task));
             touched_count++;
         }
     }
     else
     {
-        stepbp_apply_task_single_step(target_task, enable && stepbp_info_matches_task(info, target_task));
+        stepbp_apply_task_single_step(target_task, enable && bp_info_find_type_for_task(info, BP_BREAKPOINT_X, target_task));
         touched_count = 1;
     }
 
@@ -237,7 +184,7 @@ static void __attribute__((used, __noinline__)) stepbp_finish_syscall_trace_exit
     if (frame->generation == g_stepbp_generation)
     {
         info = g_stepbp_info;
-        if (info && !g_stepbp_stopping && stepbp_info_matches_task(info, current)) stepbp_enable_task_single_step(current);
+        if (!g_stepbp_stopping && bp_info_find_type_for_task(info, BP_BREAKPOINT_X, current)) stepbp_enable_task_single_step(current);
         else stepbp_disable_current_hardware_step(frame->regs);
     }
     spin_unlock_irqrestore(&g_stepbp_lock, flags);
@@ -265,7 +212,7 @@ static int work_trampoline_stepbp_syscall_trace_exit(struct pt_regs *hook_regs)
 
     spin_lock_irqsave(&g_stepbp_lock, flags);
     info = g_stepbp_info;
-    target_task = stepbp_info_targets_task(info, current) && (g_stepbp_stopping || stepbp_info_matches_task(info, current));
+    target_task = g_stepbp_stopping ? bp_info_targets_task(info, current) : !!bp_info_find_type_for_task(info, BP_BREAKPOINT_X, current);
     generation = g_stepbp_generation;
     if (target_task && test_thread_flag(TIF_SINGLESTEP))
     {
@@ -300,10 +247,10 @@ static int work_trampoline_stepbp_switch(struct pt_regs *hook_regs)
     next = (struct task_struct *)hook_regs->regs[1];
     spin_lock_irqsave(&g_stepbp_lock, flags);
     info = g_stepbp_info;
-    if (info && !g_stepbp_stopping && stepbp_info_targets_task(info, next))
+    if (!g_stepbp_stopping && bp_info_targets_task(info, next))
     {
         target_tgid = READ_ONCE(info->tgid);
-        enable = stepbp_info_matches_task(info, next);
+        enable = !!bp_info_find_type_for_task(info, BP_BREAKPOINT_X, next);
     }
     spin_unlock_irqrestore(&g_stepbp_lock, flags);
 
@@ -324,7 +271,7 @@ __attribute__((naked, used)) void ret_trampoline_stepbp_call_step_hook(void)
 
 static int __attribute__((used, __noinline__)) stepbp_finish_call_step_hook(int native_result, struct stepbp_return_frame *frame)
 {
-    int hit_slot = -1;
+    size_t hit_slot = 0;
     int result = native_result;
     unsigned long flags;
     struct bp_point *hit_point = NULL;
@@ -344,24 +291,16 @@ static int __attribute__((used, __noinline__)) stepbp_finish_call_step_hook(int 
     {
         info = g_stepbp_info;
         stopping = g_stepbp_stopping;
-        target_task = stepbp_info_targets_task(info, current) && (stopping || stepbp_info_matches_task(info, current));
+        target_task = stopping ? bp_info_targets_task(info, current) : !!bp_info_find_type_for_task(info, BP_BREAKPOINT_X, current);
         if (target_task && !stopping && native_result != DBG_HOOK_HANDLED)
         {
-            for (int point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
+            hit_point = bp_info_find_point_by_pc_for_task(info, regs->pc, current);
+            if (hit_point)
             {
-                struct bp_point *point = &info->points[point_slot];
-                uint64_t point_hit_addr;
-
-                if (!stepbp_point_matches_task(point, current)) continue;
-                point_hit_addr = READ_ONCE(point->hit_addr);
-                if ((point_hit_addr & ~0x3ULL) != (regs->pc & ~0x3ULL)) continue;
-
-                hit_point = point;
-                hit_callback = READ_ONCE(point->on_hit);
-                hit_addr = point_hit_addr;
+                hit_slot = hit_point - info->points;
+                hit_callback = READ_ONCE(hit_point->on_hit);
+                hit_addr = READ_ONCE(hit_point->hit_addr);
                 hit_generation = g_stepbp_generation;
-                hit_slot = point_slot;
-                break;
             }
         }
     }
@@ -374,8 +313,8 @@ static int __attribute__((used, __noinline__)) stepbp_finish_call_step_hook(int 
         spin_lock_irqsave(&g_stepbp_hit_lock, flags);
         if (!READ_ONCE(g_stepbp_stopping) && READ_ONCE(g_stepbp_generation) == hit_generation)
         {
-            STEPBP_LOG_LIMITED(g_stepbp_log_hit, 8, "hit slot=%d pid=%d tgid=%d pc=0x%llx hit_addr=0x%llx record_count=%d\n", hit_slot, current->pid, current->tgid, (unsigned long long)regs->pc, (unsigned long long)hit_addr, READ_ONCE(hit_point->record_count));
-            struct fp_regs fp_regs;
+            STEPBP_LOG_LIMITED(g_stepbp_log_hit, 8, "hit slot=%zu pid=%d tgid=%d pc=0x%llx hit_addr=0x%llx record_count=%d\n", hit_slot, current->pid, current->tgid, (unsigned long long)regs->pc, (unsigned long long)hit_addr, READ_ONCE(hit_point->record_count));
+            struct fp_regs fp_regs __attribute__((__uninitialized__));
             read_all_q_regs(&fp_regs);
             hit_callback(regs, &fp_regs, hit_point);
             write_all_q_regs(&fp_regs);
@@ -387,7 +326,7 @@ static int __attribute__((used, __noinline__)) stepbp_finish_call_step_hook(int 
     if (frame->generation == g_stepbp_generation)
     {
         info = g_stepbp_info;
-        if (info && !g_stepbp_stopping && stepbp_info_matches_task(info, current)) stepbp_enable_task_single_step(current);
+        if (!g_stepbp_stopping && bp_info_find_type_for_task(info, BP_BREAKPOINT_X, current)) stepbp_enable_task_single_step(current);
         else stepbp_disable_current_hardware_step(frame->regs);
     }
     spin_unlock_irqrestore(&g_stepbp_lock, flags);
@@ -416,7 +355,7 @@ static int work_trampoline_stepbp_single_step(struct pt_regs *hook_regs)
 
     spin_lock_irqsave(&g_stepbp_lock, flags);
     info = g_stepbp_info;
-    target_task = stepbp_info_targets_task(info, current) && (g_stepbp_stopping || stepbp_info_matches_task(info, current));
+    target_task = g_stepbp_stopping ? bp_info_targets_task(info, current) : !!bp_info_find_type_for_task(info, BP_BREAKPOINT_X, current);
     generation = g_stepbp_generation;
     if (target_task)
     {
@@ -516,8 +455,6 @@ static void stepbp_stop_monitor_locked(void)
     spin_lock_irqsave(&g_stepbp_lock, flags);
     stepbp_publish_monitor(NULL, false);
     spin_unlock_irqrestore(&g_stepbp_lock, flags);
-
-    if (info) __builtin_memset(info, 0, sizeof(*info));
 }
 
 // 停止 STEPBP：串行化安装/卸载，避免并发替换 hook 和全局配置。
@@ -534,8 +471,10 @@ static inline int start_stepbp_monitor(struct break_point *info)
     pid_t target_tgid;
     int status;
     unsigned long flags;
+    struct bp_point *first_point;
 
-    if (!stepbp_info_has_active_point(info))
+    first_point = bp_info_find_configured_scoped_type(info, BP_BREAKPOINT_X);
+    if (!first_point)
     {
         ls_log_tag("stepbp", "start rejected tgid=%d no active execute point\n", info ? READ_ONCE(info->tgid) : -1);
         return -EINVAL;
@@ -566,7 +505,7 @@ static inline int start_stepbp_monitor(struct break_point *info)
     status = stepbp_apply_info_tasks(info, true);
     STEPBP_LOG_LIMITED(g_stepbp_log_enable, 2, "enable tgid=%d armed_tasks=%d current pid=%d tgid=%d comm=%s\n", target_tgid, status, current->pid, current->tgid, current->comm);
 
-    ls_log_tag("stepbp", "start ok tgid=%d first_addr=0x%llx bt=0x%x bs=0x%x\n", target_tgid, (unsigned long long)READ_ONCE(info->points[0].hit_addr), READ_ONCE(info->points[0].bt), READ_ONCE(info->points[0].bs));
+    ls_log_tag("stepbp", "start ok tgid=%d first_addr=0x%llx bt=0x%x bs=0x%x\n", target_tgid, (unsigned long long)READ_ONCE(first_point->hit_addr), READ_ONCE(first_point->bt), READ_ONCE(first_point->bs));
     status = 0;
 
 out_unlock:

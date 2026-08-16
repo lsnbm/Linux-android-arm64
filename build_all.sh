@@ -95,28 +95,33 @@ package_driver() {
     bash "$packer"
 }
 
-# 清理驱动源码目录下的编译缓存，保留源码和所有 .ko
+# 清理 Kbuild 中间文件，保留源码、构建脚本和所有 .ko
 clean_driver_build() {
     if [[ ! -d "$DRIVER_SRC" ]]; then
         log_error "driver source directory not found: $DRIVER_SRC"
         return 1
     fi
 
-    # 保留源码/构建定义文件和所有已生成的 .ko，其余全部视为生成物清理掉
-    find "$DRIVER_SRC" -mindepth 1 \( \
-        -type f ! \( \
-            -name 'Makefile' -o \
-            -name 'Kconfig' -o \
-            -name '*.c' -o \
-            -name '*.h' -o \
-            -name '*.lds' -o \
-            -name '*.S' -o \
-            -name '*.s' -o \
-            -path "$DRIVER_SRC/arm64_tests/run_tests.sh" -o \
-            -name '*.ko' \
-        \) -o \
-        -type d -empty \
+    find "$DRIVER_SRC" -type f \( \
+        -name '*.o' -o \
+        -name '*.o.d' -o \
+        -name '*.mod' -o \
+        -name '*.mod.c' -o \
+        -name '*.order' -o \
+        -name '*.symvers' -o \
+        -name '*.cmd' -o \
+        -name '*.usyms' \
     \) -delete
+
+    find "$DRIVER_SRC" -type d -name '.tmp_versions' -prune -exec rm -rf -- {} +
+}
+
+cleanup_driver_build_on_exit() {
+    local status=$?
+
+    trap - EXIT
+    clean_driver_build || true
+    exit "$status"
 }
 
 # 处理编译产物: 剥离符号 / 复制 / 重命名
@@ -239,6 +244,7 @@ build_kernel() {
             ARCH=arm64 \
             LLVM=1 \
             LLVM_IAS=1 \
+            CONFIG_DEBUG_INFO_BTF_MODULES= \
             CROSS_COMPILE="$cross_prefix" \
             $extra_params \
             $modpost_warn_param \
@@ -255,6 +261,7 @@ build_kernel() {
                 ARCH=arm64 \
                 LLVM=1 \
                 LLVM_IAS=1 \
+                CONFIG_DEBUG_INFO_BTF_MODULES= \
                 CROSS_COMPILE="$cross_prefix" \
                 $extra_params \
                 $modpost_warn_param \
@@ -271,10 +278,14 @@ build_kernel() {
 
     if [[ $make_status -ne 0 ]]; then
         BUILD_RESULTS+=("$version: ❌ 编译失败")
+        clean_driver_build
         return "$make_status"
     fi
 
-    handle_output "$version" "$clang_path"
+    local output_status=0
+    handle_output "$version" "$clang_path" || output_status=$?
+    clean_driver_build
+    return "$output_status"
 }
 
 # ======================== Legacy 构建 ========================
@@ -348,6 +359,7 @@ build_legacy_kernel() {
         ARCH=arm64 \
         LLVM=1 \
         LLVM_IAS=1 \
+        CONFIG_DEBUG_INFO_BTF_MODULES= \
         CROSS_COMPILE=aarch64-linux-gnu- \
         HOSTCC=clang \
         HOSTCXX=clang++ \
@@ -403,6 +415,7 @@ build_legacy_kernel() {
             ARCH=arm64 \
             LLVM=1 \
             LLVM_IAS=1 \
+            CONFIG_DEBUG_INFO_BTF_MODULES= \
             CROSS_COMPILE=aarch64-linux-gnu- \
             HOSTCC=clang \
             HOSTCXX=clang++ \
@@ -421,11 +434,14 @@ build_legacy_kernel() {
 
     if [[ $make_status -ne 0 ]]; then
         BUILD_RESULTS+=("$version: ❌ 编译失败")
+        clean_driver_build
         return "$make_status"
     fi
 
-
-    handle_output "$version" "$legacy_clang"
+    local output_status=0
+    handle_output "$version" "$legacy_clang" || output_status=$?
+    clean_driver_build
+    return "$output_status"
 }
 
 
@@ -434,6 +450,8 @@ build_legacy_kernel() {
 
 main() {
     local requested_versions=("$@")
+
+    trap cleanup_driver_build_on_exit EXIT
 
     log_warn "是否需要剥离(strip)符号？"
     echo -e "  输入 ${GREEN}'y'${NC} 进行剥离 (减小体积)"

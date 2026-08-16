@@ -19,8 +19,177 @@
 
 #include "io_struct.h"
 
-// 18 字节掩码拆成 16+2 字节加载，将所有差异聚合后只判断一次；最后一个字节的高位不对应任何寄存器，需要忽略。
-static __always_inline bool bp_record_reads_all(const struct bp_record *rec)
+// 校验断点配置存在，并且目标线程组 ID 有效。
+static inline bool bp_info_is_valid(const struct break_point *info)
+{
+    return info && READ_ONCE(info->tgid) > 0;
+}
+
+// 判断断点配置是否属于指定线程组。
+static inline bool bp_info_targets_tgid(const struct break_point *info, pid_t tgid)
+{
+    return bp_info_is_valid(info) && tgid > 0 && READ_ONCE(info->tgid) == tgid;
+}
+
+// 判断断点配置是否属于指定任务所在的线程组。
+static inline bool bp_info_targets_task(const struct break_point *info, struct task_struct *task)
+{
+    return task && bp_info_targets_tgid(info, READ_ONCE(task->tgid));
+}
+
+// 判断断点槽位是否配置了非零命中地址。
+static inline bool bp_point_is_configured(const struct bp_point *point)
+{
+    return point && READ_ONCE(point->hit_addr) != 0;
+}
+
+// 判断断点槽位是否已经配置并安装了命中回调。
+static inline bool bp_point_is_active(const struct bp_point *point)
+{
+    return bp_point_is_configured(point) && READ_ONCE(point->on_hit);
+}
+
+// 判断断点槽位是否已经配置且类型匹配。
+static inline bool bp_point_is_configured_type(const struct bp_point *point, enum bp_type type)
+{
+    return bp_point_is_configured(point) && READ_ONCE(point->bt) == type;
+}
+
+// 判断指定类型断点的线程作用域是否覆盖当前任务。
+static inline bool bp_point_type_matches_task(const struct bp_point *point, enum bp_type type, struct task_struct *task)
+{
+    if (!bp_point_is_configured_type(point, type) || !task) return false;
+
+    switch (READ_ONCE(point->bs))
+    {
+    case BP_SCOPE_MAIN_THREAD:
+        return thread_group_leader(task);
+    case BP_SCOPE_OTHER_THREADS:
+        return !thread_group_leader(task);
+    case BP_SCOPE_ALL_THREADS:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// 查找下一个已配置断点；next_slot 非空时由函数自动推进迭代位置。
+static inline struct bp_point *bp_info_find_configured_point(struct break_point *info, size_t *next_slot)
+{
+    if (!bp_info_is_valid(info)) return NULL;
+
+    for (size_t slot = next_slot ? *next_slot : 0; slot < BP_CONFIG_MAX; slot++)
+    {
+        if (!bp_point_is_configured(&info->points[slot])) continue;
+        if (next_slot) *next_slot = slot + 1;
+        return &info->points[slot];
+    }
+
+    return NULL;
+}
+
+// 查找下一个已安装命中回调的活动断点；next_slot 非空时由函数自动推进迭代位置。
+static inline struct bp_point *bp_info_find_active_point(struct break_point *info, size_t *next_slot)
+{
+    if (!bp_info_is_valid(info)) return NULL;
+
+    for (size_t slot = next_slot ? *next_slot : 0; slot < BP_CONFIG_MAX; slot++)
+    {
+        if (!bp_point_is_active(&info->points[slot])) continue;
+        if (next_slot) *next_slot = slot + 1;
+        return &info->points[slot];
+    }
+
+    return NULL;
+}
+
+// 查找下一个指定类型的已配置断点；next_slot 非空时由函数自动推进迭代位置。
+static inline struct bp_point *bp_info_find_configured_type(struct break_point *info, enum bp_type type, size_t *next_slot)
+{
+    if (!bp_info_is_valid(info)) return NULL;
+
+    for (size_t slot = next_slot ? *next_slot : 0; slot < BP_CONFIG_MAX; slot++)
+    {
+        if (!bp_point_is_configured_type(&info->points[slot], type)) continue;
+        if (next_slot) *next_slot = slot + 1;
+        return &info->points[slot];
+    }
+
+    return NULL;
+}
+
+// 查找指定类型且线程作用域配置有效的断点。
+static inline struct bp_point *bp_info_find_configured_scoped_type(struct break_point *info, enum bp_type type)
+{
+    if (!bp_info_is_valid(info)) return NULL;
+
+    for (size_t slot = 0; slot < BP_CONFIG_MAX; slot++)
+    {
+        enum bp_scope scope = READ_ONCE(info->points[slot].bs);
+
+        if (!bp_point_is_configured_type(&info->points[slot], type) || scope < BP_SCOPE_MAIN_THREAD || scope > BP_SCOPE_ALL_THREADS) continue;
+        return &info->points[slot];
+    }
+
+    return NULL;
+}
+
+// 查找指定类型且线程作用域覆盖目标任务的断点。
+static inline struct bp_point *bp_info_find_type_for_task(struct break_point *info, enum bp_type type, struct task_struct *task)
+{
+    if (!bp_info_targets_task(info, task)) return NULL;
+
+    for (size_t slot = 0; slot < BP_CONFIG_MAX; slot++)
+    {
+        if (!bp_point_type_matches_task(&info->points[slot], type, task)) continue;
+        return &info->points[slot];
+    }
+
+    return NULL;
+}
+
+// 按规范化 PC 查找执行断点配置。
+static inline struct bp_point *bp_info_find_point_by_pc(struct break_point *info, uint64_t raw_pc)
+{
+    uint64_t pc;
+
+    if (!bp_info_is_valid(info)) return NULL;
+    pc = untagged_addr(raw_pc) & ~0x3ULL;
+
+    for (size_t slot = 0; slot < BP_CONFIG_MAX; slot++)
+    {
+        struct bp_point *point = &info->points[slot];
+
+        if (!bp_point_is_configured_type(point, BP_BREAKPOINT_X)) continue;
+        if ((untagged_addr(READ_ONCE(point->hit_addr)) & ~0x3ULL) != pc) continue;
+        return point;
+    }
+
+    return NULL;
+}
+
+// 按规范化 PC 查找线程作用域覆盖目标任务的执行断点配置。
+static inline struct bp_point *bp_info_find_point_by_pc_for_task(struct break_point *info, uint64_t raw_pc, struct task_struct *task)
+{
+    uint64_t pc;
+
+    if (!bp_info_targets_task(info, task)) return NULL;
+    pc = untagged_addr(raw_pc) & ~0x3ULL;
+
+    for (size_t slot = 0; slot < BP_CONFIG_MAX; slot++)
+    {
+        struct bp_point *point = &info->points[slot];
+
+        if (!bp_point_type_matches_task(point, BP_BREAKPOINT_X, task)) continue;
+        if ((untagged_addr(READ_ONCE(point->hit_addr)) & ~0x3ULL) != pc) continue;
+        return point;
+    }
+
+    return NULL;
+}
+
+// 判断记录掩码是否要求读取全部寄存器；18 字节掩码拆成 16+2 字节后一次聚合比较。
+static inline bool bp_record_reads_all(const struct bp_record *rec)
 {
     uint64_t mask0;
     uint64_t mask1;
@@ -36,8 +205,8 @@ static __always_inline bool bp_record_reads_all(const struct bp_record *rec)
     return ((mask0 ^ read_mask_word) | (mask1 ^ read_mask_word) | ((mask_tail ^ read_mask_word) & tail_valid_mask)) == 0;
 }
 
-// bp_record 的 x0-x29、q0-q31 与对应软件现场均连续存放，全 READ 模式可分别一次性复制。
-static __always_inline void bp_record_read_all(struct bp_record *rec, const struct pt_regs *regs, const struct fp_regs *fp_regs)
+// 在全 READ 模式下批量保存通用寄存器、系统调用现场和 FP/SIMD 寄存器。
+static inline void bp_record_read_all(struct bp_record *rec, const struct pt_regs *regs, const struct fp_regs *fp_regs)
 {
     rec->pc = regs->pc;
     rec->lr = regs->regs[30];
@@ -451,11 +620,12 @@ static inline void sample_hbp_handler_entry(void *regs, void *fp_regs, void *hit
 
 static inline void prepare_break_point_handlers(struct break_point *info)
 {
-    if (!info || info->tgid <= 0) return;
+    size_t point_slot = 0;
+    struct bp_point *point;
 
-    for (int point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
+    while ((point = bp_info_find_configured_point(info, &point_slot)))
     {
-        if (info->points[point_slot].hit_addr != 0) info->points[point_slot].on_hit = sample_hbp_handler_entry;
+        point->on_hit = sample_hbp_handler_entry;
     }
 }
 
@@ -474,10 +644,14 @@ static inline int set_process_hwbp(struct break_point *info)
 
 static inline void remove_process_hwbp(void)
 {
+    struct break_point *info = READ_ONCE(g_bp_info);
+
     stop_task_run_monitor();
+    if (info) __builtin_memset(info, 0, sizeof(*info));
 }
 
-#include "arm64_ptedbg.h"
+//#include "arm64_ptedbg.h"
+#include "arm64_ptedbg-20260709-000359.h"
 static inline int set_process_ptebp(struct break_point *info)
 {
     if (!info) return -EINVAL;
@@ -489,7 +663,10 @@ static inline int set_process_ptebp(struct break_point *info)
 
 static inline void remove_process_ptebp(void)
 {
+    struct break_point *info = g_ptebp_info;
+
     stop_ptebp_monitor();
+    if (info) __builtin_memset(info, 0, sizeof(*info));
 }
 
 #include "arm64_stepdbg.h"
@@ -504,6 +681,9 @@ static inline int set_process_stepbp(struct break_point *info)
 
 static inline void remove_process_stepbp(void)
 {
+    struct break_point *info = g_stepbp_info;
+
     stop_stepbp_monitor();
+    if (info) __builtin_memset(info, 0, sizeof(*info));
 }
 #endif // BREAK_POINT_H

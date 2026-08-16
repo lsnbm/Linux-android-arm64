@@ -4,6 +4,9 @@
 #include <linux/kallsyms.h>
 #include <linux/memory.h>
 #include <linux/percpu.h>
+#include <linux/perf_event.h>
+#include <linux/cpu.h>
+#include <linux/rcupdate.h>
 #include <linux/smp.h>
 #include <linux/stop_machine.h>
 #include <linux/version.h>
@@ -19,7 +22,7 @@
 #include "inline_hook_frame.h"
 #include "lsdriver_log.h"
 #include "io_struct.h"
-#include "emulate_insn.h"
+#include "arm64_emulate/emulate_insn.h"
 
 /*
 这里用全局变量来传递异常回调和断点写入上下文
@@ -33,33 +36,6 @@ int num_brps, num_wrps; // 硬件执行和访问槽位总数
 static struct perf_event * __percpu * bp_on_reg;
 static struct perf_event * __percpu * wp_on_reg;
 static void (*fn_perf_bp_event)(struct perf_event *event, void *data);
-
-// 判断单个断点点位是否具备安装和派发条件。
-static bool hwbp_point_is_active(struct bp_point *point)
-{
-    return point && point->hit_addr != 0 && point->on_hit;
-}
-
-// 判断一个 break_point 配置中是否至少存在一个有效点位。
-static bool hwbp_info_has_active_point(struct break_point *info)
-{
-    if (!info || info->tgid <= 0) return false;
-
-    for (int point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
-    {
-        if (hwbp_point_is_active(&info->points[point_slot])) return true;
-    }
-
-    return false;
-}
-
-// 判断一个 break_point 配置中是否包含指定线程组 TGID 的有效点位。
-static bool hwbp_info_has_tgid(struct break_point *info, pid_t tgid)
-{
-    if (!info || tgid <= 0 || info->tgid != tgid) return false;
-
-    return hwbp_info_has_active_point(info);
-}
 
 /*
 把外部断点参数转换成ARM架构内部格式，并完成基础检测/修正。
@@ -218,7 +194,7 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
     struct break_point *bp_info = g_bp_info;
     struct pt_regs *regs = (struct pt_regs *)hook_regs->regs[2];
 
-    if (!bp_info || bp_info->tgid != current->tgid) return 0;
+    if (!bp_info_targets_task(bp_info, current)) return 0;
 
     /*
    这里说明一下为何可以这么做进行步过
@@ -266,15 +242,16 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
         // 获取当前cpu的指定槽位寄存器
         uint64_t addr = read_wb_reg(AARCH64_DBG_REG_BVR, slot);
         uint64_t ctrl = read_wb_reg(AARCH64_DBG_REG_BCR, slot);
+        size_t point_slot = 0;
+        struct bp_point *point;
 
         // 根据不同观点派发
-        for (int j = 0; j < BP_CONFIG_MAX; j++)
+        while ((point = bp_info_find_active_point(bp_info, &point_slot)))
         {
-            struct bp_point *point = &bp_info->points[j];
             struct arch_hw_breakpoint info;
 
             // 地址不相等跳过
-            if (!hwbp_point_is_active(point) || hw_breakpoint_parse(point, 0, &info) || info.address != addr) continue;
+            if (hw_breakpoint_parse(point, 0, &info) || info.address != addr) continue;
 
             /*
                 上案例
@@ -311,7 +288,7 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
             // 地址相等、控制码相等且当前槽位启用才派发
             if ((ctrl & 0x1) && ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) == (ctrl & ~0x1ULL)))
             {
-                struct fp_regs fp_regs;
+                struct fp_regs fp_regs __attribute__((__uninitialized__));
                 read_all_q_regs(&fp_regs);
                 point->on_hit(regs, &fp_regs, point);
                 bool emulated = emulate_insn(regs, &fp_regs, 0);
@@ -356,7 +333,7 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
     struct bp_point *hit_point = NULL;
     struct pt_regs *regs = (struct pt_regs *)hook_regs->regs[2];
 
-    if (!bp_info || bp_info->tgid != current->tgid) return 0;
+    if (!bp_info_targets_task(bp_info, current)) return 0;
 
     /*
     watchpoint_handler 原型是 (addr, esr, regs)。这里用 addr 判断真实命中的访问地址，
@@ -366,15 +343,16 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
     {
         uint64_t addr = read_wb_reg(AARCH64_DBG_REG_WVR, slot);
         uint64_t ctrl = read_wb_reg(AARCH64_DBG_REG_WCR, slot);
+        size_t point_slot = 0;
+        struct bp_point *point;
 
         if (!(ctrl & 0x1)) continue;
 
-        for (int j = 0; j < BP_CONFIG_MAX; j++)
+        while ((point = bp_info_find_active_point(bp_info, &point_slot)))
         {
-            struct bp_point *point = &bp_info->points[j];
             struct arch_hw_breakpoint info;
 
-            if (!hwbp_point_is_active(point) || hw_breakpoint_parse(point, 0, &info) || info.address != addr || ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) != (ctrl & ~0x1ULL)) || !watchpoint_access_matches(&info, esr)) continue;
+            if (hw_breakpoint_parse(point, 0, &info) || info.address != addr || ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) != (ctrl & ~0x1ULL)) || !watchpoint_access_matches(&info, esr)) continue;
 
             /*
             内核 perf 可以在没有精确命中时选择最近 watchpoint 兜底；
@@ -393,7 +371,7 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
 
     if (!hit_point) return 0;
 
-    struct fp_regs fp_regs;
+    struct fp_regs fp_regs __attribute__((__uninitialized__));
     read_all_q_regs(&fp_regs);
     hit_point->on_hit(regs, &fp_regs, hit_point);
     bool emulated = emulate_insn(regs, &fp_regs, 0);
@@ -439,16 +417,13 @@ static void install_hwbp_regs_on_cpu(struct break_point *bp_info)
 {
     int brp_slot = 0;
     int wrp_slot = 0;
+    size_t point_slot = 0;
+    struct bp_point *point;
 
-    if (!bp_info) return;
-
-    for (int j = 0; j < BP_CONFIG_MAX; j++)
+    while ((point = bp_info_find_active_point(bp_info, &point_slot)))
     {
-        struct bp_point *point = &bp_info->points[j];
         struct arch_hw_breakpoint info;
         int reg_slot;
-
-        if (!hwbp_point_is_active(point)) continue;
 
         if (hw_breakpoint_parse(point, 0, &info)) continue;
 
@@ -477,17 +452,16 @@ static void clear_hwbp_regs_on_cpu(void *data)
     int brp_slot = 0;
     int wrp_slot = 0;
     struct break_point *bp_info = g_bp_info;
+    size_t point_slot = 0;
+    struct bp_point *point;
 
     (void)data;
 
-    if (!bp_info) return;
-
-    for (int point_slot = 0; point_slot < BP_CONFIG_MAX; point_slot++)
+    while ((point = bp_info_find_active_point(bp_info, &point_slot)))
     {
-        struct bp_point *point = &bp_info->points[point_slot];
         struct arch_hw_breakpoint info;
 
-        if (!hwbp_point_is_active(point) || hw_breakpoint_parse(point, 0, &info)) continue;
+        if (hw_breakpoint_parse(point, 0, &info)) continue;
 
         uint32_t expected_ctrl = encode_ctrl_reg(info.ctrl);
         if (info.ctrl.type == ARM_BREAKPOINT_EXECUTE)
@@ -527,7 +501,7 @@ static void __attribute__((used, __noinline__)) ret_work_finish_task_switch(void
 
     if (bp_info)
     {
-        if (hwbp_info_has_tgid(bp_info, current->tgid))
+        if (bp_info_targets_task(bp_info, current) && bp_info_find_active_point(bp_info, NULL))
         {
             if (current->pid == current->tgid)
             {
@@ -647,12 +621,50 @@ static struct hook_entry g_finish_task_switch_ret_hooks[] = {
     HOOK_ENTRY("finish_task_switch", work_trampoline_finish_task_switch),
 };
 
+/*
+bp_on_reg/wp_on_reg 不是全局断点配置表，而是 perf 对各 CPU 硬件槽位的当前软件记录：
+槽位中的 perf_event 表示 perf 认为该配置已经安装到对应 CPU 的 BRP/WRP 寄存器。
+按 task 注册的断点会随 task 调度进出 CPU 而安装/卸载，因此不同 CPU 的槽位内容可以不同；
+按 CPU 注册的断点只会出现在绑定 CPU 的槽位中。
+
+*/
+static void dump_perf_breakpoint_slots(void)
+{
+    int cpu;
+
+    rcu_read_lock();
+    for_each_online_cpu(cpu)
+    {
+        struct perf_event **breakpoint_slots = per_cpu_ptr(bp_on_reg, cpu);
+        struct perf_event **watchpoint_slots = per_cpu_ptr(wp_on_reg, cpu);
+
+        for (int slot = 0; slot < num_brps; slot++)
+        {
+            struct perf_event *event = READ_ONCE(breakpoint_slots[slot]);
+            if (!event) continue;
+
+            struct arch_hw_breakpoint *info = &event->hw.info;
+            ls_log_always_tag("hwbp-perf", "cpu=%d kind=bp slot=%d addr=0x%llx len=%llu type=0x%x disabled=%u arch_addr=0x%llx enabled=%u privilege=%u type=0x%x len=0x%x ctrl=0x%x\n", cpu, slot, (unsigned long long)event->attr.bp_addr, (unsigned long long)event->attr.bp_len, event->attr.bp_type, event->attr.disabled, (unsigned long long)info->address, info->ctrl.enabled, info->ctrl.privilege, info->ctrl.type, info->ctrl.len, encode_ctrl_reg(info->ctrl));
+        }
+
+        for (int slot = 0; slot < num_wrps; slot++)
+        {
+            struct perf_event *event = READ_ONCE(watchpoint_slots[slot]);
+            if (!event) continue;
+
+            struct arch_hw_breakpoint *info = &event->hw.info;
+            ls_log_always_tag("hwbp-perf", "cpu=%d kind=wp slot=%d addr=0x%llx len=%llu type=0x%x disabled=%u arch_addr=0x%llx enabled=%u privilege=%u type=0x%x len=0x%x ctrl=0x%x\n", cpu, slot, (unsigned long long)event->attr.bp_addr, (unsigned long long)event->attr.bp_len, event->attr.bp_type, event->attr.disabled, (unsigned long long)info->address, info->ctrl.enabled, info->ctrl.privilege, info->ctrl.type, info->ctrl.len, encode_ctrl_reg(info->ctrl));
+        }
+    }
+    rcu_read_unlock();
+}
+
 // 安装硬件调试异常 hook 和 finish_task_switch return hook，开始监听
 static int start_task_run_monitor(struct break_point *bp_info)
 {
     int ret;
 
-    if (!bp_info || !hwbp_info_has_active_point(bp_info))
+    if (!bp_info_find_active_point(bp_info, NULL))
     {
         ls_log_tag("hwbp", "breakpoint info error\n");
         return -EINVAL;
@@ -686,6 +698,8 @@ static int start_task_run_monitor(struct break_point *bp_info)
     }
     bp_info->num_brps = num_brps;
     bp_info->num_wrps = num_wrps;
+
+    dump_perf_breakpoint_slots();
 
     // 安装inline hook接管异常
     ret = inline_hook_install(g_debug_exception_hooks);
@@ -724,6 +738,5 @@ static void stop_task_run_monitor(void)
     inline_hook_remove(g_finish_task_switch_ret_hooks);
     inline_hook_remove(g_debug_exception_hooks);
     WRITE_ONCE(g_bp_info, NULL);
-    __builtin_memset(info, 0, sizeof(*info));
     ls_log_tag("hwbp", "monitor stop\n");
 }
