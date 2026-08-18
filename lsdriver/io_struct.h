@@ -322,10 +322,14 @@ struct request_obj
     isb:指令执行屏障,CPU流水线重新取址
     
     asm volatile("" ::: "memory") 是当前位置的编译器内存屏障，禁止其它内存访问跨越它重排，是编译时防止指令重排
-    但不会绕过硬件指令访问乱序
+    实际看汇编发现，这个编译器屏障作用并不大
+    C/C++ 语句本身有执行顺序，编译器必须保证最终程序符合 C/C++ 抽象的可观察行为。它不会无依据地改变程序语义。
+    并且kernel/user/op/status 被声明为 volatile，编译器不能把访问删除合并，优化时不会对volatile的访问进行重排
+    但不会绕过硬件指令访问乱序，对应到硬件屏障就是
     dmb:指令访问顺序屏障,load/store 内存访问指令的约束乱序访问
    
     然后dsb,isb,dmb指令操作数都是共享域范围:ish / nsh / osh / ishst
+    现在轮询标志位kernel和user的方式互相通知完美运行极速低功耗无任何问题，也有一种sev和wfe指令可以用于互相唤醒通知，暂时不变
     */
     volatile bool kernel;        // 由用户模式设置 true = 内核有待处理的请求, false = 请求已完成
     volatile bool user;          // 由内核模式设置 true = 用户模式有待处理的请求, false = 请求已完成

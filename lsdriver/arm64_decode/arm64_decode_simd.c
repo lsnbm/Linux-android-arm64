@@ -1,6 +1,6 @@
 #include "arm64_decode.h"
 
-static int arm64_normalize_simd_registers(struct arm64_decoded_insn *decoded)
+static int arm64_decode_simd_normalize_registers(struct arm64_decoded_instruction *decoded)
 {
     int use_rd = 1;
     int use_rn = 0;
@@ -334,7 +334,7 @@ static int arm64_normalize_simd_registers(struct arm64_decoded_insn *decoded)
     if (!use_ra) decoded->ra = 0;
     return 1;
 }
-static uint64_t arm64_simd_expand_fp_imm(uint8_t immediate, uint8_t width)
+static uint64_t arm64_decode_simd_expand_fp_immediate(uint8_t immediate, uint8_t width)
 {
     uint64_t sign = (uint64_t)(immediate >> 7) << (width - 1);
     uint64_t exponent_bit = (immediate >> 6) & 1;
@@ -355,7 +355,7 @@ static uint64_t arm64_simd_expand_fp_imm(uint8_t immediate, uint8_t width)
     return sign | (exponent << 52) | ((uint64_t)(immediate & 0xF) << 48);
 }
 
-static uint8_t arm64_simd_scalar_fp_width(uint32_t type)
+static uint8_t arm64_decode_simd_scalar_fp_width(uint32_t type)
 {
     switch (type)
     {
@@ -370,7 +370,7 @@ static uint8_t arm64_simd_scalar_fp_width(uint32_t type)
     }
 }
 
-static enum arm64_decode_status arm64_decode_simd_modified_imm(uint32_t raw, struct arm64_decoded_insn *decoded)
+static enum arm64_decode_status arm64_decode_simd_modified_imm(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
     uint8_t immediate = (((raw >> 16) & 0x7) << 5) | ((raw >> 5) & 0x1F);
     uint8_t cmode = (raw >> 12) & 0xF;
@@ -462,7 +462,7 @@ static enum arm64_decode_status arm64_decode_simd_modified_imm(uint32_t raw, str
     case 0x0F:
         decoded->instruction = ARM64_INSN_FMOV_VECTOR_IMMEDIATE;
         decoded->element_width = 32;
-        value = arm64_simd_expand_fp_imm(immediate, 32);
+        value = arm64_decode_simd_expand_fp_immediate(immediate, 32);
         decoded->expanded_immediate = value | (value << 32);
         break;
     case 0x10:
@@ -547,7 +547,7 @@ static enum arm64_decode_status arm64_decode_simd_modified_imm(uint32_t raw, str
         if (decoded->operand_width != 128) return ARM64_DECODE_UNALLOCATED;
         decoded->instruction = ARM64_INSN_FMOV_VECTOR_IMMEDIATE;
         decoded->element_width = 64;
-        decoded->expanded_immediate = arm64_simd_expand_fp_imm(immediate, 64);
+        decoded->expanded_immediate = arm64_decode_simd_expand_fp_immediate(immediate, 64);
         break;
     default:
         return ARM64_DECODE_UNALLOCATED;
@@ -556,7 +556,7 @@ static enum arm64_decode_status arm64_decode_simd_modified_imm(uint32_t raw, str
     return ARM64_DECODE_OK;
 }
 
-static enum arm64_decode_status arm64_decode_simd_vector_integer_3reg(struct arm64_decoded_insn *decoded, enum arm64_instruction instruction, uint8_t q, uint8_t size, uint8_t valid_sizes)
+static enum arm64_decode_status arm64_decode_simd_vector_integer_3reg(struct arm64_decoded_instruction *decoded, enum arm64_instruction instruction, uint8_t q, uint8_t size, uint8_t valid_sizes)
 {
     if (!(valid_sizes & (1U << size)) || (!q && size == 3)) return ARM64_DECODE_UNALLOCATED;
 
@@ -566,7 +566,7 @@ static enum arm64_decode_status arm64_decode_simd_vector_integer_3reg(struct arm
     return ARM64_DECODE_OK;
 }
 
-static enum arm64_decode_status arm64_decode_simd_vector_logical(struct arm64_decoded_insn *decoded, enum arm64_instruction instruction, uint8_t q)
+static enum arm64_decode_status arm64_decode_simd_vector_logical(struct arm64_decoded_instruction *decoded, enum arm64_instruction instruction, uint8_t q)
 {
     decoded->instruction = instruction;
     decoded->element_width = 8;
@@ -574,7 +574,7 @@ static enum arm64_decode_status arm64_decode_simd_vector_logical(struct arm64_de
     return ARM64_DECODE_OK;
 }
 
-static enum arm64_decode_status arm64_decode_simd_vector_fp_3reg(struct arm64_decoded_insn *decoded, enum arm64_instruction instruction, uint8_t q, uint8_t size)
+static enum arm64_decode_status arm64_decode_simd_vector_fp_3reg(struct arm64_decoded_instruction *decoded, enum arm64_instruction instruction, uint8_t q, uint8_t size)
 {
     decoded->element_width = 32U << (size & 1);
     if (!q && decoded->element_width == 64) return ARM64_DECODE_UNALLOCATED;
@@ -583,7 +583,7 @@ static enum arm64_decode_status arm64_decode_simd_vector_fp_3reg(struct arm64_de
     return ARM64_DECODE_OK;
 }
 
-static enum arm64_decode_status arm64_decode_simd_vector_fhm(struct arm64_decoded_insn *decoded, enum arm64_instruction instruction, uint8_t q, uint8_t size)
+static enum arm64_decode_status arm64_decode_simd_vector_fhm(struct arm64_decoded_instruction *decoded, enum arm64_instruction instruction, uint8_t q, uint8_t size)
 {
     if (size & 1) return ARM64_DECODE_UNALLOCATED;
 
@@ -593,7 +593,7 @@ static enum arm64_decode_status arm64_decode_simd_vector_fhm(struct arm64_decode
     return ARM64_DECODE_OK;
 }
 
-static enum arm64_decode_status arm64_decode_simd_vector_fp16_3reg(uint32_t raw, struct arm64_decoded_insn *decoded)
+static enum arm64_decode_status arm64_decode_simd_vector_fp16_3reg(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
     enum arm64_instruction instruction;
 
@@ -690,7 +690,7 @@ static enum arm64_decode_status arm64_decode_simd_vector_fp16_3reg(uint32_t raw,
     return ARM64_DECODE_OK;
 }
 
-static enum arm64_decode_status arm64_decode_simd_vector_3same(uint32_t raw, struct arm64_decoded_insn *decoded)
+static enum arm64_decode_status arm64_decode_simd_vector_3same(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
     /* 路由表索引依次对应 raw 的 u[29]、size[23] 和 opcode[15:11]。size[22]
     只决定 FP 元素宽度，整数有效尺寸仍由 valid_sizes 统一校验。 */
@@ -744,7 +744,7 @@ static enum arm64_decode_status arm64_decode_simd_vector_3same(uint32_t raw, str
     return arm64_decode_simd_vector_fp_3reg(decoded, instruction, q, size);
 }
 
-static enum arm64_decode_status arm64_decode_simd_scalar_integer_3reg(struct arm64_decoded_insn *decoded, enum arm64_instruction instruction, uint8_t size, uint8_t valid_sizes)
+static enum arm64_decode_status arm64_decode_simd_scalar_integer_3reg(struct arm64_decoded_instruction *decoded, enum arm64_instruction instruction, uint8_t size, uint8_t valid_sizes)
 {
     if (!(valid_sizes & (1U << size))) return ARM64_DECODE_UNALLOCATED;
 
@@ -754,7 +754,7 @@ static enum arm64_decode_status arm64_decode_simd_scalar_integer_3reg(struct arm
     return ARM64_DECODE_OK;
 }
 
-static enum arm64_decode_status arm64_decode_simd_scalar_fp_3reg(struct arm64_decoded_insn *decoded, enum arm64_instruction instruction, uint8_t element_width)
+static enum arm64_decode_status arm64_decode_simd_scalar_fp_3reg(struct arm64_decoded_instruction *decoded, enum arm64_instruction instruction, uint8_t element_width)
 {
     decoded->instruction = instruction;
     decoded->element_width = element_width;
@@ -762,7 +762,7 @@ static enum arm64_decode_status arm64_decode_simd_scalar_fp_3reg(struct arm64_de
     return ARM64_DECODE_OK;
 }
 
-static enum arm64_decode_status arm64_decode_simd_scalar_fp16_3reg(uint32_t raw, struct arm64_decoded_insn *decoded)
+static enum arm64_decode_status arm64_decode_simd_scalar_fp16_3reg(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
     enum arm64_instruction instruction;
 
@@ -802,15 +802,15 @@ static enum arm64_decode_status arm64_decode_simd_scalar_fp16_3reg(uint32_t raw,
     return arm64_decode_simd_scalar_fp_3reg(decoded, instruction, 16);
 }
 
-static enum arm64_decode_status arm64_decode_simd_scalar_3same(uint32_t raw, struct arm64_decoded_insn *decoded)
+static enum arm64_decode_status arm64_decode_simd_scalar_3same(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
-    struct arm64_simd_scalar_3same_route
+    struct arm64_decode_simd_scalar_3same_route
     {
         enum arm64_instruction instruction;
         uint8_t valid_sizes;
     };
     /* 子表依次对应 raw 的 u[29]、size[23] 和 opcode[15:11]。 */
-    static const struct arm64_simd_scalar_3same_route integer_routes[2][2][24] = {
+    static const struct arm64_decode_simd_scalar_3same_route integer_routes[2][2][24] = {
         {
             {
                 [1] = {ARM64_INSN_SQADD_SCALAR, 0xF},
@@ -895,10 +895,10 @@ static enum arm64_decode_status arm64_decode_simd_scalar_3same(uint32_t raw, str
     return arm64_decode_simd_scalar_fp_3reg(decoded, instruction, 32U << (size & 1));
 }
 
-#define ARM64_SIMD_BY_ELEMENT_SELECTOR(scalar, u, opcode, size) (((u) << 7) | ((scalar) << 6) | ((size) << 4) | (opcode))
-#define ARM64_SIMD_EXTENDED_3REG_SELECTOR(u, opcode, size)      (((u) << 6) | ((size) << 4) | ((opcode) & 0xF))
+#define ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(scalar, u, opcode, size) (((u) << 7) | ((scalar) << 6) | ((size) << 4) | (opcode))
+#define ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(u, opcode, size)      (((u) << 6) | ((size) << 4) | ((opcode) & 0xF))
 
-static enum arm64_decode_status arm64_decode_simd_rdm_by_element(uint32_t raw, struct arm64_decoded_insn *decoded, enum arm64_instruction instruction, uint8_t operand_width, uint8_t size)
+static enum arm64_decode_status arm64_decode_simd_rdm_by_element(uint32_t raw, struct arm64_decoded_instruction *decoded, enum arm64_instruction instruction, uint8_t operand_width, uint8_t size)
 {
     uint8_t h = (raw >> 11) & 1;
     uint8_t l = (raw >> 21) & 1;
@@ -918,7 +918,7 @@ static enum arm64_decode_status arm64_decode_simd_rdm_by_element(uint32_t raw, s
     return ARM64_DECODE_OK;
 }
 
-static enum arm64_decode_status arm64_decode_simd_dot_by_element(uint32_t raw, struct arm64_decoded_insn *decoded, enum arm64_instruction instruction, uint8_t q, uint8_t size, uint8_t element_width)
+static enum arm64_decode_status arm64_decode_simd_dot_by_element(uint32_t raw, struct arm64_decoded_instruction *decoded, enum arm64_instruction instruction, uint8_t q, uint8_t size, uint8_t element_width)
 {
     if (size != 2) return ARM64_DECODE_UNALLOCATED;
 
@@ -929,7 +929,7 @@ static enum arm64_decode_status arm64_decode_simd_dot_by_element(uint32_t raw, s
     return ARM64_DECODE_OK;
 }
 
-static enum arm64_decode_status arm64_decode_simd_bfmlal_by_element(uint32_t raw, struct arm64_decoded_insn *decoded, uint8_t q)
+static enum arm64_decode_status arm64_decode_simd_bfmlal_by_element(uint32_t raw, struct arm64_decoded_instruction *decoded, uint8_t q)
 {
     decoded->instruction = q ? ARM64_INSN_BFMLALT_VECTOR_BY_ELEMENT : ARM64_INSN_BFMLALB_VECTOR_BY_ELEMENT;
     decoded->element_width = 16;
@@ -939,7 +939,7 @@ static enum arm64_decode_status arm64_decode_simd_bfmlal_by_element(uint32_t raw
     return ARM64_DECODE_OK;
 }
 
-static enum arm64_decode_status arm64_decode_simd_fcmla_by_element(uint32_t raw, struct arm64_decoded_insn *decoded, uint8_t q, uint8_t size)
+static enum arm64_decode_status arm64_decode_simd_fcmla_by_element(uint32_t raw, struct arm64_decoded_instruction *decoded, uint8_t q, uint8_t size)
 {
     uint8_t h = (raw >> 11) & 1;
     uint8_t l = (raw >> 21) & 1;
@@ -956,7 +956,7 @@ static enum arm64_decode_status arm64_decode_simd_fcmla_by_element(uint32_t raw,
     return ARM64_DECODE_OK;
 }
 
-static enum arm64_decode_status arm64_decode_simd_fhm_by_element(uint32_t raw, struct arm64_decoded_insn *decoded, enum arm64_instruction instruction, uint8_t q, uint8_t size)
+static enum arm64_decode_status arm64_decode_simd_fhm_by_element(uint32_t raw, struct arm64_decoded_instruction *decoded, enum arm64_instruction instruction, uint8_t q, uint8_t size)
 {
     if (size != 2) return ARM64_DECODE_UNALLOCATED;
 
@@ -968,7 +968,7 @@ static enum arm64_decode_status arm64_decode_simd_fhm_by_element(uint32_t raw, s
     return ARM64_DECODE_OK;
 }
 
-static enum arm64_decode_status arm64_decode_simd_fp_by_element(uint32_t raw, struct arm64_decoded_insn *decoded, enum arm64_instruction instruction, uint8_t operand_width, uint8_t size)
+static enum arm64_decode_status arm64_decode_simd_fp_by_element(uint32_t raw, struct arm64_decoded_instruction *decoded, enum arm64_instruction instruction, uint8_t operand_width, uint8_t size)
 {
     uint8_t h = (raw >> 11) & 1;
     uint8_t l = (raw >> 21) & 1;
@@ -988,7 +988,7 @@ static enum arm64_decode_status arm64_decode_simd_fp_by_element(uint32_t raw, st
     return ARM64_DECODE_OK;
 }
 
-static enum arm64_decode_status arm64_decode_simd_vector_reverse(uint32_t raw, struct arm64_decoded_insn *decoded, enum arm64_instruction instruction, uint8_t valid_sizes)
+static enum arm64_decode_status arm64_decode_simd_vector_reverse(uint32_t raw, struct arm64_decoded_instruction *decoded, enum arm64_instruction instruction, uint8_t valid_sizes)
 {
     uint8_t size = (raw >> 22) & 0x3;
 
@@ -999,7 +999,7 @@ static enum arm64_decode_status arm64_decode_simd_vector_reverse(uint32_t raw, s
     return ARM64_DECODE_OK;
 }
 
-static enum arm64_decode_status arm64_decode_simd_vector_integer_reduce(uint32_t raw, struct arm64_decoded_insn *decoded, enum arm64_instruction instruction)
+static enum arm64_decode_status arm64_decode_simd_vector_integer_reduce(uint32_t raw, struct arm64_decoded_instruction *decoded, enum arm64_instruction instruction)
 {
     uint8_t q = (raw >> 30) & 1;
     uint8_t size = (raw >> 22) & 0x3;
@@ -1011,32 +1011,32 @@ static enum arm64_decode_status arm64_decode_simd_vector_integer_reduce(uint32_t
     return ARM64_DECODE_OK;
 }
 
-static int arm64_simd_is_modified_imm_owner(uint32_t raw)
+static int arm64_decode_simd_is_modified_imm_owner(uint32_t raw)
 {
     return (raw & 0x9FF80C00U) == 0x0F000400U;
 }
 
-static int arm64_simd_is_vector_fp16_3same_owner(uint32_t raw)
+static int arm64_decode_simd_is_vector_fp16_3same_owner(uint32_t raw)
 {
     return (raw & 0x9F60C400U) == 0x0E400400U;
 }
 
-static int arm64_simd_is_scalar_fp16_3same_owner(uint32_t raw)
+static int arm64_decode_simd_is_scalar_fp16_3same_owner(uint32_t raw)
 {
     return (raw & 0xDF60C400U) == 0x5E400400U;
 }
 
-static int arm64_simd_is_vector_permute_owner(uint32_t raw)
+static int arm64_decode_simd_is_vector_permute_owner(uint32_t raw)
 {
     return (raw & 0xBF208C00U) == 0x0E000800U;
 }
 
-static int arm64_simd_is_vector_complex_owner(uint32_t raw)
+static int arm64_decode_simd_is_vector_complex_owner(uint32_t raw)
 {
     return (raw & 0xBF20E400U) == 0x2E00C400U || (raw & 0xBF20EC00U) == 0x2E00E400U;
 }
 
-static int arm64_simd_is_by_element_shift_owner(uint32_t raw)
+static int arm64_decode_simd_is_by_element_shift_owner(uint32_t raw)
 {
     if ((raw & 0x9F800400U) != 0x0F000000U || ((raw >> 19) & 0xF) == 0) return 0;
 
@@ -1052,7 +1052,7 @@ static int arm64_simd_is_by_element_shift_owner(uint32_t raw)
     return size >= 2 && (opcode == 8 || opcode == 12);
 }
 
-static int arm64_simd_is_compare_zero_owner(uint32_t raw)
+static int arm64_decode_simd_is_compare_zero_owner(uint32_t raw)
 {
     if ((raw & 0x8F000C00U) != 0x0E000800U) return 0;
 
@@ -1065,7 +1065,7 @@ static int arm64_simd_is_compare_zero_owner(uint32_t raw)
     return !(raw & (1U << 28)) || raw & (1U << 30);
 }
 
-static int arm64_simd_is_vector_unary_owner(uint32_t raw)
+static int arm64_decode_simd_is_vector_unary_owner(uint32_t raw)
 {
     uint32_t shape = raw & 0x00FE0000U;
     if (shape != 0x00F80000U && shape != 0x00A00000U && shape != 0x00E00000U) return 0;
@@ -1074,7 +1074,7 @@ static int arm64_simd_is_vector_unary_owner(uint32_t raw)
     return signature == 0x0E00F800U || signature == 0x2E00F800U || signature == 0x2E01F800U;
 }
 
-static int arm64_simd_is_convert_owner(uint32_t raw)
+static int arm64_decode_simd_is_convert_owner(uint32_t raw)
 {
     switch (raw & 0xFFFFFC00U)
     {
@@ -1117,22 +1117,22 @@ static int arm64_simd_is_convert_owner(uint32_t raw)
 所有 FP/AdvSIMD 编码签名只在本文件内匹配；成功分支直接选择具体 instruction，
 随后填写该 instruction 对应的真实操作数。
 */
-static enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, struct arm64_decoded_insn *decoded)
+static enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
-    decoded->insn_class = ARM64_INSN_CLASS_DATA_PROCESSING_SIMD_FP;
+    decoded->instruction_class = ARM64_INSTRUCTION_CLASS_DATA_PROCESSING_SIMD_FP;
     decoded->rd = raw & 0x1F;
     decoded->rn = (raw >> 5) & 0x1F;
     decoded->ra = (raw >> 10) & 0x1F;
     decoded->rm = (raw >> 16) & 0x1F;
 
-    if (arm64_simd_is_modified_imm_owner(raw))
+    if (arm64_decode_simd_is_modified_imm_owner(raw))
     {
         return arm64_decode_simd_modified_imm(raw, decoded);
     }
 
     if ((raw & 0xFF000000U) == 0x1F000000U)
     {
-        uint8_t width = arm64_simd_scalar_fp_width((raw >> 22) & 0x3);
+        uint8_t width = arm64_decode_simd_scalar_fp_width((raw >> 22) & 0x3);
 
         if (!width) return ARM64_DECODE_UNALLOCATED;
         switch ((((raw >> 21) & 1) << 1) | ((raw >> 15) & 1))
@@ -1155,10 +1155,10 @@ static enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, struct arm6
         return ARM64_DECODE_OK;
     }
 
-    if ((raw & 0xFF200C00U) == 0x1E200800U && !arm64_simd_is_compare_zero_owner(raw) && !arm64_simd_is_convert_owner(raw))
+    if ((raw & 0xFF200C00U) == 0x1E200800U && !arm64_decode_simd_is_compare_zero_owner(raw) && !arm64_decode_simd_is_convert_owner(raw))
     {
         uint32_t opcode = (raw >> 12) & 0xF;
-        uint8_t width = arm64_simd_scalar_fp_width((raw >> 22) & 0x3);
+        uint8_t width = arm64_decode_simd_scalar_fp_width((raw >> 22) & 0x3);
 
         if (!width) return ARM64_DECODE_UNALLOCATED;
         switch (opcode)
@@ -1201,18 +1201,18 @@ static enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, struct arm6
     if ((raw & 0xFF201FE0U) == 0x1E201000U)
     {
         uint8_t immediate = (raw >> 13) & 0xFF;
-        uint8_t width = arm64_simd_scalar_fp_width((raw >> 22) & 0x3);
+        uint8_t width = arm64_decode_simd_scalar_fp_width((raw >> 22) & 0x3);
 
         if (!width) return ARM64_DECODE_UNALLOCATED;
         decoded->instruction = ARM64_INSN_FMOV_SCALAR_IMMEDIATE;
         decoded->immediate = immediate;
         decoded->operand_width = width;
         decoded->element_width = width;
-        decoded->expanded_immediate = arm64_simd_expand_fp_imm(immediate, width);
+        decoded->expanded_immediate = arm64_decode_simd_expand_fp_immediate(immediate, width);
         return ARM64_DECODE_OK;
     }
 
-    if (arm64_simd_is_vector_permute_owner(raw))
+    if (arm64_decode_simd_is_vector_permute_owner(raw))
     {
         uint8_t opcode = (raw >> 12) & 0x7;
         uint8_t size = (raw >> 22) & 0x3;
@@ -1303,9 +1303,9 @@ static enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, struct arm6
         return ARM64_DECODE_OK;
     }
 
-    if ((raw & 0x9F200400U) == 0x0E200400U && !arm64_simd_is_vector_fp16_3same_owner(raw)) return arm64_decode_simd_vector_3same(raw, decoded);
+    if ((raw & 0x9F200400U) == 0x0E200400U && !arm64_decode_simd_is_vector_fp16_3same_owner(raw)) return arm64_decode_simd_vector_3same(raw, decoded);
 
-    if (!arm64_simd_is_compare_zero_owner(raw)) switch (raw & 0xBF3FFC00U)
+    if (!arm64_decode_simd_is_compare_zero_owner(raw)) switch (raw & 0xBF3FFC00U)
         {
         case 0x0E200800U:
             return arm64_decode_simd_vector_reverse(raw, decoded, ARM64_INSN_REV64_VECTOR, 0x7);
@@ -1331,7 +1331,7 @@ static enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, struct arm6
             break;
         }
 
-    if (!arm64_simd_is_compare_zero_owner(raw))
+    if (!arm64_decode_simd_is_compare_zero_owner(raw))
     {
         uint32_t size = (raw >> 22) & 0x3;
 
@@ -1395,7 +1395,7 @@ static enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, struct arm6
         }
     }
 
-    if (!arm64_simd_is_compare_zero_owner(raw))
+    if (!arm64_decode_simd_is_compare_zero_owner(raw))
     {
         switch (raw & 0xFFFFFC00U)
         {
@@ -1544,7 +1544,7 @@ static enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, struct arm6
         }
     }
 
-    if (!arm64_simd_is_compare_zero_owner(raw))
+    if (!arm64_decode_simd_is_compare_zero_owner(raw))
     {
         enum arm64_instruction instruction = ARM64_INSN_UNKNOWN;
 
@@ -1584,9 +1584,9 @@ static enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, struct arm6
         }
     }
 
-    if (arm64_simd_is_vector_fp16_3same_owner(raw)) return arm64_decode_simd_vector_fp16_3reg(raw, decoded);
+    if (arm64_decode_simd_is_vector_fp16_3same_owner(raw)) return arm64_decode_simd_vector_fp16_3reg(raw, decoded);
 
-    if ((raw & 0x9F208400U) == 0x0E008400U && !arm64_simd_is_vector_complex_owner(raw))
+    if ((raw & 0x9F208400U) == 0x0E008400U && !arm64_decode_simd_is_vector_complex_owner(raw))
     {
         uint8_t q = (raw >> 30) & 1;
         uint8_t u = (raw >> 29) & 1;
@@ -1595,115 +1595,115 @@ static enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, struct arm6
         enum arm64_instruction instruction = ARM64_INSN_UNKNOWN;
 
         decoded->operand_width = q ? 128 : 64;
-        switch (ARM64_SIMD_EXTENDED_3REG_SELECTOR(u, opcode, size))
+        switch (ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(u, opcode, size))
         {
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(0, 2, 0):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(0, 2, 0):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(0, 3, 0):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(0, 3, 0):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(0, 4, 0):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(0, 4, 0):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(0, 5, 0):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(0, 5, 0):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(0, 2, 1):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(0, 2, 1):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(0, 3, 1):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(0, 3, 1):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(0, 4, 1):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(0, 4, 1):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(0, 5, 1):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(0, 5, 1):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(0, 2, 2):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(0, 2, 2):
             instruction = ARM64_INSN_SDOT_VECTOR;
             decoded->element_width = 8;
             break;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(0, 3, 2):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(0, 3, 2):
             instruction = ARM64_INSN_USDOT_VECTOR;
             decoded->element_width = 8;
             break;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(0, 4, 2):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(0, 4, 2):
             if (!q) return ARM64_DECODE_UNALLOCATED;
             instruction = ARM64_INSN_SMMLA_VECTOR;
             decoded->element_width = 8;
             break;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(0, 5, 2):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(0, 5, 2):
             if (!q) return ARM64_DECODE_UNALLOCATED;
             instruction = ARM64_INSN_USMMLA_VECTOR;
             decoded->element_width = 8;
             break;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(0, 2, 3):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(0, 2, 3):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(0, 3, 3):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(0, 3, 3):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(0, 4, 3):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(0, 4, 3):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(0, 5, 3):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(0, 5, 3):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(1, 0, 0):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(1, 0, 0):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(1, 1, 0):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(1, 1, 0):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(1, 2, 0):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(1, 2, 0):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(1, 4, 0):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(1, 4, 0):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(1, 13, 0):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(1, 13, 0):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(1, 15, 0):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(1, 15, 0):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(1, 0, 1):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(1, 0, 1):
             instruction = ARM64_INSN_SQRDMLAH_VECTOR;
             decoded->element_width = 8U << size;
             break;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(1, 1, 1):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(1, 1, 1):
             instruction = ARM64_INSN_SQRDMLSH_VECTOR;
             decoded->element_width = 8U << size;
             break;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(1, 2, 1):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(1, 2, 1):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(1, 4, 1):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(1, 4, 1):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(1, 13, 1):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(1, 13, 1):
             if (!q) return ARM64_DECODE_UNALLOCATED;
             instruction = ARM64_INSN_BFMMLA_VECTOR;
             decoded->element_width = 16;
             break;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(1, 15, 1):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(1, 15, 1):
             instruction = ARM64_INSN_BFDOT_VECTOR;
             decoded->element_width = 16;
             break;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(1, 0, 2):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(1, 0, 2):
             instruction = ARM64_INSN_SQRDMLAH_VECTOR;
             decoded->element_width = 8U << size;
             break;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(1, 1, 2):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(1, 1, 2):
             instruction = ARM64_INSN_SQRDMLSH_VECTOR;
             decoded->element_width = 8U << size;
             break;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(1, 2, 2):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(1, 2, 2):
             instruction = ARM64_INSN_UDOT_VECTOR;
             decoded->element_width = 8;
             break;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(1, 4, 2):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(1, 4, 2):
             if (!q) return ARM64_DECODE_UNALLOCATED;
             instruction = ARM64_INSN_UMMLA_VECTOR;
             decoded->element_width = 8;
             break;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(1, 13, 2):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(1, 13, 2):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(1, 15, 2):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(1, 15, 2):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(1, 0, 3):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(1, 0, 3):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(1, 1, 3):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(1, 1, 3):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(1, 2, 3):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(1, 2, 3):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(1, 4, 3):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(1, 4, 3):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(1, 13, 3):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(1, 13, 3):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_EXTENDED_3REG_SELECTOR(1, 15, 3):
+        case ARM64_DECODE_SIMD_EXTENDED_3REG_SELECTOR(1, 15, 3):
             instruction = q ? ARM64_INSN_BFMLALT_VECTOR : ARM64_INSN_BFMLALB_VECTOR;
             decoded->operand_width = 128;
             decoded->element_width = 16;
@@ -1719,7 +1719,7 @@ static enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, struct arm6
         }
     }
 
-    if (arm64_simd_is_compare_zero_owner(raw) && !arm64_simd_is_vector_permute_owner(raw))
+    if (arm64_decode_simd_is_compare_zero_owner(raw) && !arm64_decode_simd_is_vector_permute_owner(raw))
     {
         uint32_t shape = raw & 0x00FF0000U;
         uint32_t relation = raw & 0x2000F000U;
@@ -1771,7 +1771,7 @@ static enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, struct arm6
         }
     }
 
-    if (arm64_simd_is_vector_unary_owner(raw) && !arm64_simd_is_compare_zero_owner(raw))
+    if (arm64_decode_simd_is_vector_unary_owner(raw) && !arm64_decode_simd_is_compare_zero_owner(raw))
     {
         uint32_t shape = raw & 0x00FE0000U;
         uint32_t signature = raw & 0xBF01FC00U;
@@ -1819,190 +1819,190 @@ static enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, struct arm6
         uint8_t q = (raw >> 30) & 1;
         uint8_t u = (raw >> 29) & 1;
 
-        switch (ARM64_SIMD_BY_ELEMENT_SELECTOR(scalar, u, opcode, size))
+        switch (ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(scalar, u, opcode, size))
         {
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 0, 1, 0):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 0, 1, 0):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMLA_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 0, 5, 0):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 0, 5, 0):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMLS_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 0, 9, 0):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 0, 9, 0):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMUL_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 0, 14, 0):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 0, 14, 0):
             return arm64_decode_simd_dot_by_element(raw, decoded, ARM64_INSN_SDOT_VECTOR_BY_ELEMENT, q, size, 8);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 0, 15, 0):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 0, 15, 0):
             return arm64_decode_simd_dot_by_element(raw, decoded, ARM64_INSN_SUDOT_VECTOR_BY_ELEMENT, q, 2, 8);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 0, 1, 1):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 0, 1, 1):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMLA_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 0, 5, 1):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 0, 5, 1):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMLS_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 0, 9, 1):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 0, 9, 1):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMUL_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 0, 14, 1):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 0, 14, 1):
             return arm64_decode_simd_dot_by_element(raw, decoded, ARM64_INSN_SDOT_VECTOR_BY_ELEMENT, q, size, 8);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 0, 15, 1):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 0, 15, 1):
             return arm64_decode_simd_dot_by_element(raw, decoded, ARM64_INSN_BFDOT_VECTOR_BY_ELEMENT, q, 2, 16);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 0, 0, 2):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 0, 0, 2):
             return arm64_decode_simd_fhm_by_element(raw, decoded, ARM64_INSN_FMLAL_VECTOR_BY_ELEMENT, q, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 0, 1, 2):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 0, 1, 2):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMLA_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 0, 4, 2):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 0, 4, 2):
             return arm64_decode_simd_fhm_by_element(raw, decoded, ARM64_INSN_FMLSL_VECTOR_BY_ELEMENT, q, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 0, 5, 2):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 0, 5, 2):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMLS_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 0, 9, 2):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 0, 9, 2):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMUL_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 0, 14, 2):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 0, 14, 2):
             return arm64_decode_simd_dot_by_element(raw, decoded, ARM64_INSN_SDOT_VECTOR_BY_ELEMENT, q, size, 8);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 0, 15, 2):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 0, 15, 2):
             return arm64_decode_simd_dot_by_element(raw, decoded, ARM64_INSN_USDOT_VECTOR_BY_ELEMENT, q, 2, 8);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 0, 0, 3):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 0, 0, 3):
             return arm64_decode_simd_fhm_by_element(raw, decoded, ARM64_INSN_FMLAL_VECTOR_BY_ELEMENT, q, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 0, 1, 3):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 0, 1, 3):
             if (!q) return ARM64_DECODE_UNALLOCATED;
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMLA_VECTOR_BY_ELEMENT, 128, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 0, 4, 3):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 0, 4, 3):
             return arm64_decode_simd_fhm_by_element(raw, decoded, ARM64_INSN_FMLSL_VECTOR_BY_ELEMENT, q, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 0, 5, 3):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 0, 5, 3):
             if (!q) return ARM64_DECODE_UNALLOCATED;
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMLS_VECTOR_BY_ELEMENT, 128, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 0, 9, 3):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 0, 9, 3):
             if (!q) return ARM64_DECODE_UNALLOCATED;
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMUL_VECTOR_BY_ELEMENT, 128, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 0, 14, 3):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 0, 14, 3):
             return arm64_decode_simd_dot_by_element(raw, decoded, ARM64_INSN_SDOT_VECTOR_BY_ELEMENT, q, size, 8);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 0, 15, 3):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 0, 15, 3):
             return arm64_decode_simd_bfmlal_by_element(raw, decoded, q);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 0, 1, 0):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 0, 1, 0):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMLA_SCALAR_BY_ELEMENT, 16, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 0, 5, 0):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 0, 5, 0):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMLS_SCALAR_BY_ELEMENT, 16, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 0, 9, 0):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 0, 9, 0):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMUL_SCALAR_BY_ELEMENT, 16, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 0, 1, 1):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 0, 1, 1):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMLA_SCALAR_BY_ELEMENT, 16, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 0, 5, 1):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 0, 5, 1):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMLS_SCALAR_BY_ELEMENT, 16, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 0, 9, 1):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 0, 9, 1):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMUL_SCALAR_BY_ELEMENT, 16, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 0, 0, 2):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 0, 0, 2):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 0, 1, 2):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 0, 1, 2):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMLA_SCALAR_BY_ELEMENT, 32, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 0, 4, 2):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 0, 4, 2):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 0, 5, 2):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 0, 5, 2):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMLS_SCALAR_BY_ELEMENT, 32, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 0, 9, 2):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 0, 9, 2):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMUL_SCALAR_BY_ELEMENT, 32, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 0, 0, 3):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 0, 0, 3):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 0, 1, 3):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 0, 1, 3):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMLA_SCALAR_BY_ELEMENT, 64, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 0, 4, 3):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 0, 4, 3):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 0, 5, 3):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 0, 5, 3):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMLS_SCALAR_BY_ELEMENT, 64, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 0, 9, 3):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 0, 9, 3):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMUL_SCALAR_BY_ELEMENT, 64, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 1, 0):
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 3, 0):
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 5, 0):
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 7, 0):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 1, 0):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 3, 0):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 5, 0):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 7, 0):
             return arm64_decode_simd_fcmla_by_element(raw, decoded, q, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 9, 0):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 9, 0):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMULX_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 13, 0):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 13, 0):
             return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INSN_SQRDMLAH_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 14, 0):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 14, 0):
             return arm64_decode_simd_dot_by_element(raw, decoded, ARM64_INSN_UDOT_VECTOR_BY_ELEMENT, q, size, 8);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 15, 0):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 15, 0):
             return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INSN_SQRDMLSH_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 1, 1):
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 3, 1):
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 5, 1):
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 7, 1):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 1, 1):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 3, 1):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 5, 1):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 7, 1):
             return arm64_decode_simd_fcmla_by_element(raw, decoded, q, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 9, 1):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 9, 1):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMULX_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 13, 1):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 13, 1):
             return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INSN_SQRDMLAH_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 14, 1):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 14, 1):
             return arm64_decode_simd_dot_by_element(raw, decoded, ARM64_INSN_UDOT_VECTOR_BY_ELEMENT, q, size, 8);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 15, 1):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 15, 1):
             return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INSN_SQRDMLSH_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 1, 2):
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 3, 2):
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 5, 2):
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 7, 2):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 1, 2):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 3, 2):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 5, 2):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 7, 2):
             return arm64_decode_simd_fcmla_by_element(raw, decoded, q, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 8, 2):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 8, 2):
             return arm64_decode_simd_fhm_by_element(raw, decoded, ARM64_INSN_FMLAL2_VECTOR_BY_ELEMENT, q, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 9, 2):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 9, 2):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMULX_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 12, 2):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 12, 2):
             return arm64_decode_simd_fhm_by_element(raw, decoded, ARM64_INSN_FMLSL2_VECTOR_BY_ELEMENT, q, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 13, 2):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 13, 2):
             return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INSN_SQRDMLAH_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 14, 2):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 14, 2):
             return arm64_decode_simd_dot_by_element(raw, decoded, ARM64_INSN_UDOT_VECTOR_BY_ELEMENT, q, size, 8);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 15, 2):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 15, 2):
             return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INSN_SQRDMLSH_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 1, 3):
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 3, 3):
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 5, 3):
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 7, 3):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 1, 3):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 3, 3):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 5, 3):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 7, 3):
             return arm64_decode_simd_fcmla_by_element(raw, decoded, q, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 8, 3):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 8, 3):
             return arm64_decode_simd_fhm_by_element(raw, decoded, ARM64_INSN_FMLAL2_VECTOR_BY_ELEMENT, q, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 9, 3):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 9, 3):
             if (!q) return ARM64_DECODE_UNALLOCATED;
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMULX_VECTOR_BY_ELEMENT, 128, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 12, 3):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 12, 3):
             return arm64_decode_simd_fhm_by_element(raw, decoded, ARM64_INSN_FMLSL2_VECTOR_BY_ELEMENT, q, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 13, 3):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 13, 3):
             return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INSN_SQRDMLAH_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 14, 3):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 14, 3):
             return arm64_decode_simd_dot_by_element(raw, decoded, ARM64_INSN_UDOT_VECTOR_BY_ELEMENT, q, size, 8);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(0, 1, 15, 3):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(0, 1, 15, 3):
             return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INSN_SQRDMLSH_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 1, 9, 0):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 1, 9, 0):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMULX_SCALAR_BY_ELEMENT, 16, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 1, 13, 0):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 1, 13, 0):
             return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INSN_SQRDMLAH_SCALAR_BY_ELEMENT, 8U << size, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 1, 15, 0):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 1, 15, 0):
             return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INSN_SQRDMLSH_SCALAR_BY_ELEMENT, 8U << size, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 1, 9, 1):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 1, 9, 1):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMULX_SCALAR_BY_ELEMENT, 16, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 1, 13, 1):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 1, 13, 1):
             return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INSN_SQRDMLAH_SCALAR_BY_ELEMENT, 8U << size, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 1, 15, 1):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 1, 15, 1):
             return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INSN_SQRDMLSH_SCALAR_BY_ELEMENT, 8U << size, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 1, 8, 2):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 1, 8, 2):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 1, 9, 2):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 1, 9, 2):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMULX_SCALAR_BY_ELEMENT, 32, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 1, 12, 2):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 1, 12, 2):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 1, 13, 2):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 1, 13, 2):
             return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INSN_SQRDMLAH_SCALAR_BY_ELEMENT, 8U << size, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 1, 15, 2):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 1, 15, 2):
             return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INSN_SQRDMLSH_SCALAR_BY_ELEMENT, 8U << size, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 1, 8, 3):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 1, 8, 3):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 1, 9, 3):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 1, 9, 3):
             return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INSN_FMULX_SCALAR_BY_ELEMENT, 64, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 1, 12, 3):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 1, 12, 3):
             return ARM64_DECODE_UNALLOCATED;
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 1, 13, 3):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 1, 13, 3):
             return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INSN_SQRDMLAH_SCALAR_BY_ELEMENT, 8U << size, size);
-        case ARM64_SIMD_BY_ELEMENT_SELECTOR(1, 1, 15, 3):
+        case ARM64_DECODE_SIMD_BY_ELEMENT_SELECTOR(1, 1, 15, 3):
             return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INSN_SQRDMLSH_SCALAR_BY_ELEMENT, 8U << size, size);
         default:
             break;
         }
     }
 
-    if ((raw & 0x9F800000U) == 0x0F000000U && ((raw >> 19) & 0xF) != 0 && !arm64_simd_is_modified_imm_owner(raw) && !arm64_simd_is_by_element_shift_owner(raw))
+    if ((raw & 0x9F800000U) == 0x0F000000U && ((raw >> 19) & 0xF) != 0 && !arm64_decode_simd_is_modified_imm_owner(raw) && !arm64_decode_simd_is_by_element_shift_owner(raw))
     {
         uint8_t immh = (raw >> 19) & 0xF;
         uint8_t immb = (raw >> 16) & 0x7;
@@ -2036,7 +2036,7 @@ static enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, struct arm6
     uint32_t type = (raw >> 22) & 0x3;
     if ((raw & 0xFF200C00U) == 0x1E200400U)
     {
-        uint8_t width = arm64_simd_scalar_fp_width(type);
+        uint8_t width = arm64_decode_simd_scalar_fp_width(type);
 
         if (!width) return ARM64_DECODE_UNALLOCATED;
         decoded->instruction = (raw & (1U << 4)) ? ARM64_INSN_FCCMPE_SCALAR : ARM64_INSN_FCCMP_SCALAR;
@@ -2049,7 +2049,7 @@ static enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, struct arm6
 
     if ((raw & 0xFF200C00U) == 0x1E200C00U)
     {
-        uint8_t width = arm64_simd_scalar_fp_width(type);
+        uint8_t width = arm64_decode_simd_scalar_fp_width(type);
 
         if (!width) return ARM64_DECODE_UNALLOCATED;
         decoded->instruction = ARM64_INSN_FCSEL_SCALAR;
@@ -2070,10 +2070,10 @@ static enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, struct arm6
         return ARM64_DECODE_OK;
     }
 
-    if ((raw & 0xFF207C00U) == 0x1E204000U && !arm64_simd_is_compare_zero_owner(raw) && !arm64_simd_is_convert_owner(raw))
+    if ((raw & 0xFF207C00U) == 0x1E204000U && !arm64_decode_simd_is_compare_zero_owner(raw) && !arm64_decode_simd_is_convert_owner(raw))
     {
         uint32_t opcode = (raw >> 15) & 0x3F;
-        uint8_t width = arm64_simd_scalar_fp_width(type);
+        uint8_t width = arm64_decode_simd_scalar_fp_width(type);
 
         if (!width) return ARM64_DECODE_UNALLOCATED;
         switch (opcode)
@@ -2119,7 +2119,7 @@ static enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, struct arm6
         return ARM64_DECODE_OK;
     }
 
-    if ((raw & 0x7FBEFC00U) == 0x1E260000U && !arm64_simd_is_convert_owner(raw))
+    if ((raw & 0x7FBEFC00U) == 0x1E260000U && !arm64_decode_simd_is_convert_owner(raw))
     {
         uint32_t sf = (raw >> 31) & 1;
 
@@ -2129,7 +2129,7 @@ static enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, struct arm6
         return ARM64_DECODE_OK;
     }
 
-    if ((raw & 0xBFE08400U) == 0x2E000000U && !arm64_simd_is_compare_zero_owner(raw))
+    if ((raw & 0xBFE08400U) == 0x2E000000U && !arm64_decode_simd_is_compare_zero_owner(raw))
     {
         decoded->instruction = ARM64_INSN_EXT_VECTOR;
         decoded->immediate = (raw >> 11) & 0xF;
@@ -2138,7 +2138,7 @@ static enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, struct arm6
         return ARM64_DECODE_OK;
     }
 
-    if (!arm64_simd_is_compare_zero_owner(raw))
+    if (!arm64_decode_simd_is_compare_zero_owner(raw))
     {
         enum arm64_instruction instruction = ARM64_INSN_UNKNOWN;
         uint8_t immediate = 0;
@@ -2183,9 +2183,9 @@ static enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, struct arm6
         return ARM64_DECODE_OK;
     }
 
-    if ((raw & 0xDF200400U) == 0x5E200400U && !arm64_simd_is_scalar_fp16_3same_owner(raw)) return arm64_decode_simd_scalar_3same(raw, decoded);
+    if ((raw & 0xDF200400U) == 0x5E200400U && !arm64_decode_simd_is_scalar_fp16_3same_owner(raw)) return arm64_decode_simd_scalar_3same(raw, decoded);
 
-    if ((raw & 0xDFBFFC00U) == 0x5E30D800U && !arm64_simd_is_compare_zero_owner(raw))
+    if ((raw & 0xDFBFFC00U) == 0x5E30D800U && !arm64_decode_simd_is_compare_zero_owner(raw))
     {
         if (!(raw & (1U << 29)))
         {
@@ -2201,7 +2201,7 @@ static enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, struct arm6
         return ARM64_DECODE_OK;
     }
 
-    if (arm64_simd_is_scalar_fp16_3same_owner(raw)) return arm64_decode_simd_scalar_fp16_3reg(raw, decoded);
+    if (arm64_decode_simd_is_scalar_fp16_3same_owner(raw)) return arm64_decode_simd_scalar_fp16_3reg(raw, decoded);
 
     switch (raw & 0xFF208400U)
     {
@@ -2222,12 +2222,12 @@ static enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, struct arm6
         break;
     }
 
-    if ((raw & 0x40FE0000U) == 0x00E00000U && !arm64_simd_is_compare_zero_owner(raw)) return ARM64_DECODE_UNALLOCATED;
+    if ((raw & 0x40FE0000U) == 0x00E00000U && !arm64_decode_simd_is_compare_zero_owner(raw)) return ARM64_DECODE_UNALLOCATED;
 
     return ARM64_DECODE_UNSUPPORTED;
 }
 
-enum arm64_decode_status arm64_decode_simd(uint32_t raw, struct arm64_decoded_insn *decoded)
+enum arm64_decode_status arm64_decode_simd_fp(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
     enum arm64_decode_status status = arm64_decode_simd_impl(raw, decoded);
 
@@ -2237,6 +2237,6 @@ enum arm64_decode_status arm64_decode_simd(uint32_t raw, struct arm64_decoded_in
         return status;
     }
     if (decoded->instruction == ARM64_INSN_UNKNOWN) return ARM64_DECODE_UNSUPPORTED;
-    if (!arm64_normalize_simd_registers(decoded)) return ARM64_DECODE_UNSUPPORTED;
+    if (!arm64_decode_simd_normalize_registers(decoded)) return ARM64_DECODE_UNSUPPORTED;
     return ARM64_DECODE_OK;
 }

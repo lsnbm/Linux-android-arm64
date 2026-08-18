@@ -77,7 +77,13 @@ ccflags-y += -fomit-frame-pointer
 ccflags-y += -foptimize-sibling-calls
 
 # 关闭 BTI 和返回地址指针认证：移除间接分支目标处的 BTI、函数入口 PACIASP 与返回前 AUTIASP。
-ccflags-y += -mbranch-protection=none
+# 这个不要进行关闭，讲一下原因
+# 真正的 C 函数 init_module;sub sp, sp, #0xd0;也就是驱动的c入口正常，没有BTI/PAC
+# 由于目标内核启用了 CFI/LTO，模块的 init 指针被规范化到 CFI jump table：init_module.cfi_jt: b init_module;
+# 由于编译配置显式使用 -mbranch-protection=none 关闭了 ARM64 BTI/PAC 保护，
+# 生成的 init_module.cfi_jt 跳板入口只有 b init_module 而缺少内核间接调用要求的 bti c
+# 导致内核通过 BLR 加载驱动时触发同步终止异常(BTI) 并最终 kernel panic。
+#ccflags-y += -mbranch-protection=none
 
 # 关闭自动局部变量清零：避免编译器在函数入口为未初始化栈对象插入 memset/零存储。
 # 代码必须自行保证所有局部变量在首次读取前已完成初始化，否则会暴露真实的未初始化读取。

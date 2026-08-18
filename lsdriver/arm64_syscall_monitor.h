@@ -50,23 +50,11 @@ static const struct syscall_monitor_name g_syscall_monitor_names[__NR_syscalls] 
 #undef __SYSCALL
 #define __SYSCALL(nr, call)
 
-// 判断 syscall 监控表是否还有目标，空表时可卸载 do_el0_svc hook。
-static bool syscall_monitor_has_pid(void)
-{
-    for (int i = 0; i < ARM_SYSCALL_MONITOR_MAX_PIDS; i++)
-        if (READ_ONCE(g_syscall_monitor_pids[i])) return true;
-    return false;
-}
-
 // 判断当前 task 是否属于需要监控 syscall 的目标进程。
 static bool syscall_monitor_should_trace(void)
 {
     for (int i = 0; i < ARM_SYSCALL_MONITOR_MAX_PIDS; i++)
-    {
-        pid_t target_tgid = READ_ONCE(g_syscall_monitor_pids[i]);
-
-        if (target_tgid && current->tgid == target_tgid) return true;
-    }
+        if (READ_ONCE(g_syscall_monitor_pids[i]) == current->tgid) return true;
     return false;
 }
 
@@ -79,12 +67,8 @@ static const char *syscall_monitor_name(long scno)
     if (!entry->fn_name) return "unknown";
 
     // 这两个 64 位兼容包装的处理函数名与用户态 syscall 名不同。
-#ifdef __NR_fstat
     if (scno == __NR_fstat) return "fstat";
-#endif
-#ifdef __NR_fadvise64
     if (scno == __NR_fadvise64) return "fadvise64";
-#endif
 
     if (entry->nr_name[0] == '_') return entry->nr_name + (entry->nr_name[4] == '_' ? sizeof("__NR_") - 1 : sizeof("__NR3264_") - 1);
 
@@ -169,15 +153,21 @@ static void syscall_monitor_append_data(char *text, size_t size, size_t *pos, co
     if (preview < length && *pos < size) *pos += scnprintf(text + *pos, size - *pos, "...");
 }
 
+struct syscall_monitor_log
+{
+    char text[SYSCALL_MONITOR_LOG_SIZE];
+    size_t pos;
+};
+
 // 各大类都复用这几个格式化动作，但 syscall 识别和控制流保留在各自函数内。
-#define SM_ADD(fmt, ...)                                                                              \
-    do                                                                                                \
-    {                                                                                                 \
-        if (pos < sizeof(text)) pos += scnprintf(text + pos, sizeof(text) - pos, fmt, ##__VA_ARGS__); \
+#define SM_ADD(fmt, ...)                                                                                                                 \
+    do                                                                                                                                   \
+    {                                                                                                                                    \
+        if (log->pos < sizeof(log->text)) log->pos += scnprintf(log->text + log->pos, sizeof(log->text) - log->pos, fmt, ##__VA_ARGS__); \
     } while (0)
 #define SM_ARG(label, reg)               SM_ADD(" %s=0x%llx", label, (unsigned long long)regs->regs[reg])
-#define SM_STR(label, reg)               syscall_monitor_append_user_string(text, sizeof(text), &pos, label, regs->regs[reg])
-#define SM_DATA(label, ptr_reg, len_reg) syscall_monitor_append_data(text, sizeof(text), &pos, label, regs->regs[ptr_reg], regs->regs[len_reg])
+#define SM_STR(label, reg)               syscall_monitor_append_user_string(log->text, sizeof(log->text), &log->pos, label, regs->regs[reg])
+#define SM_DATA(label, ptr_reg, len_reg) syscall_monitor_append_data(log->text, sizeof(log->text), &log->pos, label, regs->regs[ptr_reg], regs->regs[len_reg])
 
 static void syscall_monitor_emit(struct task_struct *task, long scno, const char *text)
 {
@@ -185,45 +175,33 @@ static void syscall_monitor_emit(struct task_struct *task, long scno, const char
 }
 
 // 文件和普通 I/O：路径、偏移、输入数据预览均在本函数内完成。
-static bool syscall_monitor_handle_file(struct task_struct *task, struct pt_regs *regs, long scno)
+static bool syscall_monitor_handle_file(struct syscall_monitor_log *log, struct pt_regs *regs, long scno)
 {
-    char text[SYSCALL_MONITOR_LOG_SIZE] = {0};
-    size_t pos = 0;
-
     switch (scno)
     {
-#ifdef __NR_read
     case __NR_read:
         SM_ARG("fd", 0);
         SM_ARG("buf", 1);
         SM_ARG("count", 2);
         SM_ADD(" output=available_on_exit");
         break;
-#endif
-#ifdef __NR_write
     case __NR_write:
         SM_ARG("fd", 0);
         SM_ARG("buf", 1);
         SM_ARG("count", 2);
         SM_DATA("data", 1, 2);
         break;
-#endif
-#ifdef __NR_readv
     case __NR_readv:
         SM_ARG("fd", 0);
         SM_ARG("iov", 1);
         SM_ARG("iovcnt", 2);
         SM_ADD(" output=available_on_exit");
         break;
-#endif
-#ifdef __NR_writev
     case __NR_writev:
         SM_ARG("fd", 0);
         SM_ARG("iov", 1);
         SM_ARG("iovcnt", 2);
         break;
-#endif
-#ifdef __NR_pread64
     case __NR_pread64:
         SM_ARG("fd", 0);
         SM_ARG("buf", 1);
@@ -231,8 +209,6 @@ static bool syscall_monitor_handle_file(struct task_struct *task, struct pt_regs
         SM_ARG("offset", 3);
         SM_ADD(" output=available_on_exit");
         break;
-#endif
-#ifdef __NR_pwrite64
     case __NR_pwrite64:
         SM_ARG("fd", 0);
         SM_ARG("buf", 1);
@@ -240,8 +216,6 @@ static bool syscall_monitor_handle_file(struct task_struct *task, struct pt_regs
         SM_ARG("offset", 3);
         SM_DATA("data", 1, 2);
         break;
-#endif
-#ifdef __NR_openat
     case __NR_openat:
         SM_ARG("dfd", 0);
         SM_ARG("filename", 1);
@@ -249,13 +223,9 @@ static bool syscall_monitor_handle_file(struct task_struct *task, struct pt_regs
         SM_ARG("mode", 3);
         SM_STR("path", 1);
         break;
-#endif
-#ifdef __NR_close
     case __NR_close:
         SM_ARG("fd", 0);
         break;
-#endif
-#ifdef __NR_lseek
     case __NR_lseek:
     {
         const char *whence = regs->regs[2] == 0 ? "SEEK_SET" : regs->regs[2] == 1 ? "SEEK_CUR" : regs->regs[2] == 2 ? "SEEK_END" : "unknown";
@@ -266,22 +236,16 @@ static bool syscall_monitor_handle_file(struct task_struct *task, struct pt_regs
         SM_ADD(" offset_signed=%lld whence_name=%s", (long long)regs->regs[1], whence);
         break;
     }
-#endif
-#ifdef __NR_ioctl
     case __NR_ioctl:
         SM_ARG("fd", 0);
         SM_ARG("cmd", 1);
         SM_ARG("arg", 2);
         break;
-#endif
-#ifdef __NR_fstat
     case __NR_fstat:
         SM_ARG("fd", 0);
         SM_ARG("statbuf", 1);
         SM_ADD(" output=available_on_exit");
         break;
-#endif
-#ifdef __NR_newfstatat
     case __NR_newfstatat:
         SM_ARG("dfd", 0);
         SM_ARG("filename", 1);
@@ -290,24 +254,18 @@ static bool syscall_monitor_handle_file(struct task_struct *task, struct pt_regs
         SM_STR("path", 1);
         SM_ADD(" output=available_on_exit");
         break;
-#endif
-#ifdef __NR_getdents64
     case __NR_getdents64:
         SM_ARG("fd", 0);
         SM_ARG("dirent", 1);
         SM_ARG("count", 2);
         SM_ADD(" output=available_on_exit");
         break;
-#endif
-#ifdef __NR_unlinkat
     case __NR_unlinkat:
         SM_ARG("dfd", 0);
         SM_ARG("pathname", 1);
         SM_ARG("flags", 2);
         SM_STR("path", 1);
         break;
-#endif
-#ifdef __NR_renameat
     case __NR_renameat:
         SM_ARG("olddfd", 0);
         SM_ARG("oldname", 1);
@@ -316,8 +274,6 @@ static bool syscall_monitor_handle_file(struct task_struct *task, struct pt_regs
         SM_STR("oldpath", 1);
         SM_STR("newpath", 3);
         break;
-#endif
-#ifdef __NR_renameat2
     case __NR_renameat2:
         SM_ARG("olddfd", 0);
         SM_ARG("oldname", 1);
@@ -327,24 +283,18 @@ static bool syscall_monitor_handle_file(struct task_struct *task, struct pt_regs
         SM_STR("oldpath", 1);
         SM_STR("newpath", 3);
         break;
-#endif
     default:
         return false;
     }
 
-    syscall_monitor_emit(task, scno, text);
     return true;
 }
 
 // 内存：只解释地址、长度和策略；输出型跨进程读取留待 syscall 退出处理。
-static bool syscall_monitor_handle_memory(struct task_struct *task, struct pt_regs *regs, long scno)
+static bool syscall_monitor_handle_memory(struct syscall_monitor_log *log, struct pt_regs *regs, long scno)
 {
-    char text[SYSCALL_MONITOR_LOG_SIZE] = {0};
-    size_t pos = 0;
-
     switch (scno)
     {
-#ifdef __NR_mmap
     case __NR_mmap:
         SM_ARG("addr", 0);
         SM_ARG("length", 1);
@@ -353,21 +303,15 @@ static bool syscall_monitor_handle_memory(struct task_struct *task, struct pt_re
         SM_ARG("fd", 4);
         SM_ARG("offset", 5);
         break;
-#endif
-#ifdef __NR_munmap
     case __NR_munmap:
         SM_ARG("addr", 0);
         SM_ARG("length", 1);
         break;
-#endif
-#ifdef __NR_mprotect
     case __NR_mprotect:
         SM_ARG("addr", 0);
         SM_ARG("length", 1);
         SM_ARG("prot", 2);
         break;
-#endif
-#ifdef __NR_mremap
     case __NR_mremap:
         SM_ARG("old_addr", 0);
         SM_ARG("old_size", 1);
@@ -375,20 +319,14 @@ static bool syscall_monitor_handle_memory(struct task_struct *task, struct pt_re
         SM_ARG("flags", 3);
         SM_ARG("new_addr", 4);
         break;
-#endif
-#ifdef __NR_brk
     case __NR_brk:
         SM_ARG("addr", 0);
         break;
-#endif
-#ifdef __NR_madvise
     case __NR_madvise:
         SM_ARG("addr", 0);
         SM_ARG("length", 1);
         SM_ARG("advice", 2);
         break;
-#endif
-#ifdef __NR_futex
     case __NR_futex:
         SM_ARG("uaddr", 0);
         SM_ARG("op", 1);
@@ -397,8 +335,6 @@ static bool syscall_monitor_handle_memory(struct task_struct *task, struct pt_re
         SM_ARG("uaddr2", 4);
         SM_ARG("val3", 5);
         break;
-#endif
-#ifdef __NR_process_vm_readv
     case __NR_process_vm_readv:
         SM_ARG("pid", 0);
         SM_ARG("lvec", 1);
@@ -408,8 +344,6 @@ static bool syscall_monitor_handle_memory(struct task_struct *task, struct pt_re
         SM_ARG("flags", 5);
         SM_ADD(" output=available_on_exit");
         break;
-#endif
-#ifdef __NR_process_vm_writev
     case __NR_process_vm_writev:
         SM_ARG("pid", 0);
         SM_ARG("lvec", 1);
@@ -418,24 +352,18 @@ static bool syscall_monitor_handle_memory(struct task_struct *task, struct pt_re
         SM_ARG("riovcnt", 4);
         SM_ARG("flags", 5);
         break;
-#endif
     default:
         return false;
     }
 
-    syscall_monitor_emit(task, scno, text);
     return true;
 }
 
 // 进程：创建、执行、信号和进程控制在一个直线 switch 中处理。
-static bool syscall_monitor_handle_process(struct task_struct *task, struct pt_regs *regs, long scno)
+static bool syscall_monitor_handle_process(struct syscall_monitor_log *log, struct pt_regs *regs, long scno)
 {
-    char text[SYSCALL_MONITOR_LOG_SIZE] = {0};
-    size_t pos = 0;
-
     switch (scno)
     {
-#ifdef __NR_clone
     case __NR_clone:
         SM_ARG("flags", 0);
         SM_ARG("newsp", 1);
@@ -443,22 +371,16 @@ static bool syscall_monitor_handle_process(struct task_struct *task, struct pt_r
         SM_ARG("child_tid", 3);
         SM_ARG("tls", 4);
         break;
-#endif
-#ifdef __NR_clone3
     case __NR_clone3:
         SM_ARG("args", 0);
         SM_ARG("size", 1);
         break;
-#endif
-#ifdef __NR_execve
     case __NR_execve:
         SM_ARG("filename", 0);
         SM_ARG("argv", 1);
         SM_ARG("envp", 2);
         SM_STR("path", 0);
         break;
-#endif
-#ifdef __NR_execveat
     case __NR_execveat:
         SM_ARG("dfd", 0);
         SM_ARG("filename", 1);
@@ -467,29 +389,21 @@ static bool syscall_monitor_handle_process(struct task_struct *task, struct pt_r
         SM_ARG("flags", 4);
         SM_STR("path", 1);
         break;
-#endif
-#ifdef __NR_kill
     case __NR_kill:
         SM_ARG("pid", 0);
         SM_ARG("sig", 1);
         break;
-#endif
-#ifdef __NR_tgkill
     case __NR_tgkill:
         SM_ARG("tgid", 0);
         SM_ARG("pid", 1);
         SM_ARG("sig", 2);
         break;
-#endif
-#ifdef __NR_ptrace
     case __NR_ptrace:
         SM_ARG("request", 0);
         SM_ARG("pid", 1);
         SM_ARG("addr", 2);
         SM_ARG("data", 3);
         break;
-#endif
-#ifdef __NR_prctl
     case __NR_prctl:
         SM_ARG("option", 0);
         SM_ARG("arg2", 1);
@@ -497,31 +411,23 @@ static bool syscall_monitor_handle_process(struct task_struct *task, struct pt_r
         SM_ARG("arg4", 3);
         SM_ARG("arg5", 4);
         break;
-#endif
     default:
         return false;
     }
 
-    syscall_monitor_emit(task, scno, text);
     return true;
 }
 
 // 网络：发送缓冲区可在入口预览，接收缓冲区只标记为退出后可用。
-static bool syscall_monitor_handle_network(struct task_struct *task, struct pt_regs *regs, long scno)
+static bool syscall_monitor_handle_network(struct syscall_monitor_log *log, struct pt_regs *regs, long scno)
 {
-    char text[SYSCALL_MONITOR_LOG_SIZE] = {0};
-    size_t pos = 0;
-
     switch (scno)
     {
-#ifdef __NR_socket
     case __NR_socket:
         SM_ARG("domain", 0);
         SM_ARG("type", 1);
         SM_ARG("protocol", 2);
         break;
-#endif
-#ifdef __NR_socketpair
     case __NR_socketpair:
         SM_ARG("domain", 0);
         SM_ARG("type", 1);
@@ -529,36 +435,26 @@ static bool syscall_monitor_handle_network(struct task_struct *task, struct pt_r
         SM_ARG("sv", 3);
         SM_ADD(" output=available_on_exit");
         break;
-#endif
-#ifdef __NR_bind
     case __NR_bind:
         SM_ARG("fd", 0);
         SM_ARG("addr", 1);
         SM_ARG("addrlen", 2);
         break;
-#endif
-#ifdef __NR_connect
     case __NR_connect:
         SM_ARG("fd", 0);
         SM_ARG("addr", 1);
         SM_ARG("addrlen", 2);
         break;
-#endif
-#ifdef __NR_listen
     case __NR_listen:
         SM_ARG("fd", 0);
         SM_ARG("backlog", 1);
         break;
-#endif
-#ifdef __NR_accept
     case __NR_accept:
         SM_ARG("fd", 0);
         SM_ARG("addr", 1);
         SM_ARG("addrlen", 2);
         SM_ADD(" output=available_on_exit");
         break;
-#endif
-#ifdef __NR_accept4
     case __NR_accept4:
         SM_ARG("fd", 0);
         SM_ARG("addr", 1);
@@ -566,8 +462,6 @@ static bool syscall_monitor_handle_network(struct task_struct *task, struct pt_r
         SM_ARG("flags", 3);
         SM_ADD(" output=available_on_exit");
         break;
-#endif
-#ifdef __NR_sendto
     case __NR_sendto:
         SM_ARG("fd", 0);
         SM_ARG("buf", 1);
@@ -577,8 +471,6 @@ static bool syscall_monitor_handle_network(struct task_struct *task, struct pt_r
         SM_ARG("addrlen", 5);
         SM_DATA("data", 1, 2);
         break;
-#endif
-#ifdef __NR_recvfrom
     case __NR_recvfrom:
         SM_ARG("fd", 0);
         SM_ARG("buf", 1);
@@ -588,53 +480,39 @@ static bool syscall_monitor_handle_network(struct task_struct *task, struct pt_r
         SM_ARG("addrlen", 5);
         SM_ADD(" output=available_on_exit");
         break;
-#endif
-#ifdef __NR_sendmsg
     case __NR_sendmsg:
         SM_ARG("fd", 0);
         SM_ARG("msg", 1);
         SM_ARG("flags", 2);
         break;
-#endif
-#ifdef __NR_recvmsg
     case __NR_recvmsg:
         SM_ARG("fd", 0);
         SM_ARG("msg", 1);
         SM_ARG("flags", 2);
         SM_ADD(" output=available_on_exit");
         break;
-#endif
-#ifdef __NR_shutdown
     case __NR_shutdown:
         SM_ARG("fd", 0);
         SM_ARG("how", 1);
         break;
-#endif
     default:
         return false;
     }
 
-    syscall_monitor_emit(task, scno, text);
     return true;
 }
 
 // 内核模块：模块名、参数字符串和有限镜像预览均在此处完成。
-static bool syscall_monitor_handle_module(struct task_struct *task, struct pt_regs *regs, long scno)
+static bool syscall_monitor_handle_module(struct syscall_monitor_log *log, struct pt_regs *regs, long scno)
 {
-    char text[SYSCALL_MONITOR_LOG_SIZE] = {0};
-    size_t pos = 0;
-
     switch (scno)
     {
-#ifdef __NR_finit_module
     case __NR_finit_module:
         SM_ARG("fd", 0);
         SM_ARG("params", 1);
         SM_ARG("flags", 2);
         SM_STR("params_text", 1);
         break;
-#endif
-#ifdef __NR_init_module
     case __NR_init_module:
         SM_ARG("image", 0);
         SM_ARG("length", 1);
@@ -642,19 +520,15 @@ static bool syscall_monitor_handle_module(struct task_struct *task, struct pt_re
         SM_DATA("image_preview", 0, 1);
         SM_STR("params_text", 2);
         break;
-#endif
-#ifdef __NR_delete_module
     case __NR_delete_module:
         SM_ARG("name", 0);
         SM_ARG("flags", 1);
         SM_STR("module", 0);
         break;
-#endif
     default:
         return false;
     }
 
-    syscall_monitor_emit(task, scno, text);
     return true;
 }
 
@@ -662,6 +536,17 @@ static bool syscall_monitor_handle_module(struct task_struct *task, struct pt_re
 #undef SM_STR
 #undef SM_ARG
 #undef SM_ADD
+
+// 已识别 syscall 输出语义化参数；未识别项由入口统一回退到原始 x0-x5。
+static bool syscall_monitor_handle_known(struct task_struct *task, struct pt_regs *regs, long scno)
+{
+    struct syscall_monitor_log log = {0};
+
+    if (!syscall_monitor_handle_file(&log, regs, scno) && !syscall_monitor_handle_memory(&log, regs, scno) && !syscall_monitor_handle_process(&log, regs, scno) && !syscall_monitor_handle_network(&log, regs, scno) && !syscall_monitor_handle_module(&log, regs, scno)) return false;
+
+    syscall_monitor_emit(task, scno, log.text);
+    return true;
+}
 
 /*
 do_el0_svc 入口 hook：hook_regs 是 do_el0_svc 函数入口的寄存器快照，
@@ -671,9 +556,7 @@ do_el0_svc 入口 hook：hook_regs 是 do_el0_svc 函数入口的寄存器快照
 */
 static int syscall_monitor_do_el0_svc_hook_work(struct pt_regs *hook_regs)
 {
-    if (!syscall_monitor_should_trace()) return 0;
-
-    if (!hook_regs) return 0;
+    if (!hook_regs || !syscall_monitor_should_trace()) return 0;
 
     // do_el0_svc(struct pt_regs *regs) 的 x0 指向用户态异常现场。
     struct pt_regs *sys_regs = (struct pt_regs *)(uintptr_t)hook_regs->regs[0];
@@ -687,7 +570,7 @@ static int syscall_monitor_do_el0_svc_hook_work(struct pt_regs *hook_regs)
     struct task_struct *task = current;
     long scno = (long)sys_regs->regs[8];
 
-    if (syscall_monitor_handle_file(task, sys_regs, scno) || syscall_monitor_handle_memory(task, sys_regs, scno) || syscall_monitor_handle_process(task, sys_regs, scno) || syscall_monitor_handle_network(task, sys_regs, scno) || syscall_monitor_handle_module(task, sys_regs, scno)) return 0;
+    if (syscall_monitor_handle_known(task, sys_regs, scno)) return 0;
 
     ls_log_always_tag("sysmon",
                       "tgid=%d pid=%d comm=%s syscall=%ld(%s) "
@@ -705,31 +588,37 @@ static struct hook_entry g_syscall_monitor_hooks[] = {
 // 安装 syscall 监控并添加目标进程 tgid；tgid 表示进程组，能覆盖该进程的所有线程。
 static int syscall_monitor_install(pid_t target_tgid)
 {
-    int ret;
+    int ret = 0;
     int empty = -1;
+    bool has_monitored_pid = false;
 
     if (target_tgid <= 0) return -EINVAL;
 
     mutex_lock(&g_syscall_monitor_lock);
-    ret = inline_hook_install(g_syscall_monitor_hooks);
-    if (!ret)
+
+    for (int i = 0; i < ARM_SYSCALL_MONITOR_MAX_PIDS; i++)
     {
-        for (int i = 0; i < ARM_SYSCALL_MONITOR_MAX_PIDS; i++)
-        {
-            pid_t monitored_tgid = READ_ONCE(g_syscall_monitor_pids[i]);
+        pid_t monitored_tgid = READ_ONCE(g_syscall_monitor_pids[i]);
 
-            if (monitored_tgid == target_tgid) goto out_unlock;
-            if (!monitored_tgid && empty < 0) empty = i;
-        }
-
-        if (empty < 0)
-        {
-            ret = -ENOSPC;
-            goto out_unlock;
-        }
-
-        WRITE_ONCE(g_syscall_monitor_pids[empty], target_tgid);
+        if (monitored_tgid == target_tgid) goto out_unlock;
+        if (monitored_tgid) has_monitored_pid = true;
+        else if (empty < 0) empty = i;
     }
+
+    if (empty < 0)
+    {
+        ret = -ENOSPC;
+        goto out_unlock;
+    }
+
+    if (!has_monitored_pid)
+    {
+        ret = inline_hook_install(g_syscall_monitor_hooks);
+        if (ret) goto out_unlock;
+    }
+
+    // 先安装 hook，再发布目标 tgid，避免监控表生效但入口未拦截。
+    WRITE_ONCE(g_syscall_monitor_pids[empty], target_tgid);
 
 out_unlock:
     mutex_unlock(&g_syscall_monitor_lock);
@@ -740,15 +629,25 @@ out_unlock:
 // 删除指定目标进程 tgid；如果监控表空了，就卸载 do_el0_svc hook。
 static void syscall_monitor_remove(pid_t target_tgid)
 {
+    bool has_monitored_pid = false;
+    bool removed = false;
+
     if (target_tgid <= 0) return;
 
     mutex_lock(&g_syscall_monitor_lock);
     for (int i = 0; i < ARM_SYSCALL_MONITOR_MAX_PIDS; i++)
     {
-        if (READ_ONCE(g_syscall_monitor_pids[i]) == target_tgid) WRITE_ONCE(g_syscall_monitor_pids[i], 0);
+        pid_t monitored_tgid = READ_ONCE(g_syscall_monitor_pids[i]);
+
+        if (monitored_tgid == target_tgid)
+        {
+            WRITE_ONCE(g_syscall_monitor_pids[i], 0);
+            removed = true;
+        }
+        else if (monitored_tgid) has_monitored_pid = true;
     }
 
-    if (!syscall_monitor_has_pid()) inline_hook_remove(g_syscall_monitor_hooks);
+    if (removed && !has_monitored_pid) inline_hook_remove(g_syscall_monitor_hooks);
     mutex_unlock(&g_syscall_monitor_lock);
 }
 

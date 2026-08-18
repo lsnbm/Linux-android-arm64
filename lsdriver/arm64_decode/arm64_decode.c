@@ -16,7 +16,7 @@
 struct arm64_decode_cache_bucket
 {
     uint32_t tags[ARM64_DECODE_CACHE_WAYS] __attribute__((aligned(64)));
-    struct arm64_decoded_insn payloads[ARM64_DECODE_CACHE_WAYS];
+    struct arm64_decoded_instruction payloads[ARM64_DECODE_CACHE_WAYS];
 };
 
 /*
@@ -36,7 +36,7 @@ static inline uint32_t arm64_decode_cache_hash(uint32_t raw)
 /*
 无 NEON 的纯 GPR 查找路径，每轮并行读取和比较 4 个 tag。
  */
-static int arm64_decode_cache_lookup(uint32_t raw, struct arm64_decoded_insn *decoded)
+static int arm64_decode_cache_lookup(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
     uint32_t bucket_idx = arm64_decode_cache_hash(raw);
     const struct arm64_decode_cache_bucket *bucket = &g_arm64_decode_cache[bucket_idx];
@@ -96,7 +96,7 @@ hit:
 使用 CAS 抢占空槽并通过 release store 发布。bucket 满时放弃缓存，
 调用方仍会正常返回本次解码结果，后续相同指令继续走常规解码路径。
  */
-static void arm64_decode_cache_insert(uint32_t raw, const struct arm64_decoded_insn *decoded)
+static void arm64_decode_cache_insert(uint32_t raw, const struct arm64_decoded_instruction *decoded)
 {
     if (__builtin_expect(raw == TAG_EMPTY || raw == TAG_BUSY, 0)) return;
 
@@ -130,15 +130,15 @@ static void arm64_decode_cache_insert(uint32_t raw, const struct arm64_decoded_i
     __atomic_store_n(&bucket->tags[empty_way], raw, __ATOMIC_RELEASE);
 }
 
-enum arm64_decode_status arm64_decode_data_processing_immediate(uint32_t raw, struct arm64_decoded_insn *decoded);
-enum arm64_decode_status arm64_decode_data_processing_register(uint32_t raw, struct arm64_decoded_insn *decoded);
-enum arm64_decode_status arm64_decode_ldst(uint32_t raw, struct arm64_decoded_insn *decoded);
-enum arm64_decode_status arm64_decode_branch(uint32_t raw, struct arm64_decoded_insn *decoded);
-enum arm64_decode_status arm64_decode_simd(uint32_t raw, struct arm64_decoded_insn *decoded);
-enum arm64_decode_status arm64_decode_sve(uint32_t raw, struct arm64_decoded_insn *decoded);
-enum arm64_decode_status arm64_decode_sme(uint32_t raw, struct arm64_decoded_insn *decoded);
+enum arm64_decode_status arm64_decode_data_processing_immediate(uint32_t raw, struct arm64_decoded_instruction *decoded);
+enum arm64_decode_status arm64_decode_data_processing_register(uint32_t raw, struct arm64_decoded_instruction *decoded);
+enum arm64_decode_status arm64_decode_load_store(uint32_t raw, struct arm64_decoded_instruction *decoded);
+enum arm64_decode_status arm64_decode_branch_exception_system(uint32_t raw, struct arm64_decoded_instruction *decoded);
+enum arm64_decode_status arm64_decode_simd_fp(uint32_t raw, struct arm64_decoded_instruction *decoded);
+enum arm64_decode_status arm64_decode_sve(uint32_t raw, struct arm64_decoded_instruction *decoded);
+enum arm64_decode_status arm64_decode_sme(uint32_t raw, struct arm64_decoded_instruction *decoded);
 
-enum arm64_decode_status arm64_decode_insn(uint32_t raw, struct arm64_decoded_insn *decoded)
+enum arm64_decode_status arm64_decode_instruction(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
     enum arm64_decode_status status;
 
@@ -157,16 +157,16 @@ enum arm64_decode_status arm64_decode_insn(uint32_t raw, struct arm64_decoded_in
         status = arm64_decode_sve(raw, decoded);
         break;
     case 0x4:
-        status = arm64_decode_ldst(raw, decoded);
+        status = arm64_decode_load_store(raw, decoded);
         break;
     case 0x5:
         status = arm64_decode_data_processing_register(raw, decoded);
         break;
     case 0x6:
-        status = arm64_decode_ldst(raw, decoded);
+        status = arm64_decode_load_store(raw, decoded);
         break;
     case 0x7:
-        status = arm64_decode_simd(raw, decoded);
+        status = arm64_decode_simd_fp(raw, decoded);
         break;
     case 0x8:
     case 0x9:
@@ -174,19 +174,19 @@ enum arm64_decode_status arm64_decode_insn(uint32_t raw, struct arm64_decoded_in
         break;
     case 0xA:
     case 0xB:
-        status = arm64_decode_branch(raw, decoded);
+        status = arm64_decode_branch_exception_system(raw, decoded);
         break;
     case 0xC:
-        status = arm64_decode_ldst(raw, decoded);
+        status = arm64_decode_load_store(raw, decoded);
         break;
     case 0xD:
         status = arm64_decode_data_processing_register(raw, decoded);
         break;
     case 0xE:
-        status = arm64_decode_ldst(raw, decoded);
+        status = arm64_decode_load_store(raw, decoded);
         break;
     case 0xF:
-        status = arm64_decode_simd(raw, decoded);
+        status = arm64_decode_simd_fp(raw, decoded);
         break;
     default:
         status = ARM64_DECODE_UNALLOCATED;

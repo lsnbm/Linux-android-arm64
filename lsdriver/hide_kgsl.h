@@ -130,14 +130,6 @@ KGSL 快照和故障节点：
 static pid_t g_hide_kgsl_pids[HIDE_KGSL_MAX_PIDS];
 static DEFINE_MUTEX(g_hide_kgsl_lock);
 
-// 快速判断 KGSL 隐藏表是否还有目标，空表时可卸载 hook。
-static bool hide_kgsl_has_pid(void)
-{
-    for (int i = 0; i < HIDE_KGSL_MAX_PIDS; i++)
-        if (READ_ONCE(g_hide_kgsl_pids[i])) return true;
-    return false;
-}
-
 // 判断当前 task 是否属于需要隐藏 KGSL 节点的目标进程。
 static bool should_hide(void)
 {
@@ -162,39 +154,26 @@ static bool kobj_under_kgsl(struct kobject *kobj)
     return false;
 }
 
-// ARM64：伪造 -ENOMEM 并跳过函数体
-static void fake_enomem_and_return(struct pt_regs *regs)
+// ARM64：伪造 -ENOMEM，跳过原函数。
+static int fake_enomem_and_skip(struct pt_regs *regs)
 {
     regs->regs[0] = (uint64_t)(long)(-ENOMEM);
     regs->pc = regs->regs[30]; /* LR -> 返回调用者 */
+    return 1;                  /* 非零：恢复现场后不执行原函数 */
 }
 
 // kgsl_process_init_sysfs / kgsl_process_init_debugfs inline hook 工作函数
 static int kgsl_process_init_hook_work(struct pt_regs *regs)
 {
-    if (should_hide())
-    {
-        fake_enomem_and_return(regs);
-        return 1; /* 非零：恢复现场后不执行原函数 */
-    }
-    return 0;
+    return should_hide() ? fake_enomem_and_skip(regs) : 0;
 }
 
 static int sysfs_create_group_hook_work(struct pt_regs *regs)
 {
     struct kobject *kobj = (struct kobject *)regs->regs[0];
 
-    if (!kobj || !kobj->name) return 0;
-
-    if (!kobj_under_kgsl(kobj)) return 0;
-
-    if (should_hide())
-    {
-        regs->regs[0] = -ENOMEM;
-        regs->pc = regs->regs[30];
-        return 1;
-    }
-    return 0;
+    if (!kobj || !kobj->name || !kobj_under_kgsl(kobj)) return 0;
+    return should_hide() ? fake_enomem_and_skip(regs) : 0;
 }
 
 static struct hook_entry g_kgsl_hooks[] = {
@@ -209,26 +188,19 @@ int hide_kgsl_install(pid_t pid)
 {
     int ret = 0;
     int empty = -1;
+    bool has_hidden_pid = false;
 
     if (pid <= 0) return -EINVAL;
 
     mutex_lock(&g_hide_kgsl_lock);
 
-    ret = inline_hook_install(g_kgsl_hooks);
-    if (ret)
-    {
-        ls_log_tag("kgsl_hide", "inline hook install failed: %d\n", ret);
-        goto out_unlock;
-    }
-    ls_log_tag("kgsl_hide", "inline hook installed\n");
-
-    // hook 安装成功后再写隐藏表，避免表里有 PID 但拦截点没生效。
     for (int i = 0; i < HIDE_KGSL_MAX_PIDS; i++)
     {
         pid_t hidden_pid = READ_ONCE(g_hide_kgsl_pids[i]);
 
         if (hidden_pid == pid) goto out_unlock;
-        if (!hidden_pid && empty < 0) empty = i;
+        if (hidden_pid) has_hidden_pid = true;
+        else if (empty < 0) empty = i;
     }
 
     if (empty < 0)
@@ -237,6 +209,18 @@ int hide_kgsl_install(pid_t pid)
         goto out_unlock;
     }
 
+    if (!has_hidden_pid)
+    {
+        ret = inline_hook_install(g_kgsl_hooks);
+        if (ret)
+        {
+            ls_log_tag("kgsl_hide", "inline hook install failed: %d\n", ret);
+            goto out_unlock;
+        }
+        ls_log_tag("kgsl_hide", "inline hook installed\n");
+    }
+
+    // 先安装 hook，再写隐藏表，避免表里有 PID 但拦截点没生效。
     WRITE_ONCE(g_hide_kgsl_pids[empty], pid);
     ls_log_tag("kgsl_hide", "hidden PID %d\n", pid);
 
@@ -248,15 +232,25 @@ out_unlock:
 // 删除指定目标 PID；如果隐藏表空了，就卸载 KGSL hooks。
 void hide_kgsl_remove(pid_t pid)
 {
+    bool has_hidden_pid = false;
+    bool removed = false;
+
     if (pid <= 0) return;
 
     mutex_lock(&g_hide_kgsl_lock);
     for (int i = 0; i < HIDE_KGSL_MAX_PIDS; i++)
     {
-        if (READ_ONCE(g_hide_kgsl_pids[i]) == pid) WRITE_ONCE(g_hide_kgsl_pids[i], 0);
+        pid_t hidden_pid = READ_ONCE(g_hide_kgsl_pids[i]);
+
+        if (hidden_pid == pid)
+        {
+            WRITE_ONCE(g_hide_kgsl_pids[i], 0);
+            removed = true;
+        }
+        else if (hidden_pid) has_hidden_pid = true;
     }
 
-    if (!hide_kgsl_has_pid()) inline_hook_remove(g_kgsl_hooks);
+    if (removed && !has_hidden_pid) inline_hook_remove(g_kgsl_hooks);
     mutex_unlock(&g_hide_kgsl_lock);
 }
 

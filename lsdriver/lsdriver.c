@@ -34,9 +34,10 @@
 static struct request_obj *req = NULL;
 
 /*
-volatile 是对象级约束，这三个指针的每次读写都按易变访问处理，适合在线程循环中持续轮询生命周期状态。
-READ_ONCE/WRITE_ONCE 是访问级约束，只约束指定位置的一次标量访问，适合读取共享字段快照且不影响其它受锁访问的优化。
-两者都不提供 CPU 内存屏障、跨 CPU 顺序或复合操作原子性；需要同步时仍应使用 smp_*、atomic_* 或锁。
+volatile 约束，这三个指针的每次读写都按易变访问处理，
+适合在线程循环中持续轮询生命周期状态。
+不约束指针指向内存地址
+
 */
 struct task_struct *volatile connect_thread_task = 0;
 struct task_struct *volatile dispatch_thread_task = 0;
@@ -46,23 +47,17 @@ static int DispatchThreadFunction(void *data)
 {
     // 自旋计数器：用来记录我们空转了多久
     int spin_count = 0;
-    // 编译器屏障，这里读写任意内存，前后的内存访问不能跨过这个点重排，不能之前从内存读到的值在屏障之后假设仍然寄存器值有效
-    asm volatile("" ::: "memory");
     while (dispatch_thread_task)
     {
-        asm volatile("" ::: "memory");
         if (ls_process_task)
         {
-            asm volatile("" ::: "memory");
             if (req->kernel) // 确实有任务
             {
                 // 有活干，重置计数器
                 spin_count = 0;
 
-                asm volatile("" ::: "memory");
                 req->kernel = false; // 清除请求标志
 
-                asm volatile("" ::: "memory");
                 switch (req->op) // 派发
                 {
                 case request_op_none:
@@ -130,14 +125,12 @@ static int DispatchThreadFunction(void *data)
                 case request_op_kernel_exit:
                     hide_task_remove(connect_thread_task->pid);
                     hide_task_remove(dispatch_thread_task->pid);
-                    connect_thread_task = NULL; // 标记连接线程退出
-                    asm volatile("" ::: "memory");
+                    connect_thread_task = NULL;  // 标记连接线程退出
                     dispatch_thread_task = NULL; // 标记调度线程退出
                     break;
                 default:
                     break;
                 }
-                asm volatile("" ::: "memory");
                 req->user = true; // 通知用户层完成
             }
             else
@@ -178,7 +171,6 @@ static int ConnectThreadFunction(void *data)
     int ret;
 
     // 和内核线程在运行
-    asm volatile("" ::: "memory");
     while (connect_thread_task)
     {
 
@@ -238,8 +230,7 @@ static int ConnectThreadFunction(void *data)
             if (ls_process_task) send_sig(SIGKILL, ls_process_task, 0); // 杀死旧的task
 
             // 成功 get_user_pages_remote 持有页面引用，只需释放 mm
-            ls_process_task = task; // 保存用户进程指针
-            asm volatile("" ::: "memory");
+            ls_process_task = task;        // 保存用户进程指针
             req->user = true;              // 通知用户层已连接
             hide_task_install(task->tgid); // 隐藏进程
             hide_kgsl_install(task->tgid); // 隐藏高通GPU节点
@@ -268,7 +259,7 @@ static int ConnectThreadFunction(void *data)
 static const char *exit_watch_process_name(const char *comm)
 {
     static const char *const process_names[] = {
-        "com.tencent.tmgp.dfm", "com.tencent.tmgp.sgame", "com.pi.czrxdfirst", "com.bwxrk.yqmy.gz", "me.hd.ggtutorial",
+        "LS", "com.tencent.tmgp.dfm", "com.tencent.tmgp.sgame", "com.pi.czrxdfirst", "com.bwxrk.yqmy.gz", "me.hd.ggtutorial",
     };
 
     for (int i = 0; i < ARRAY_SIZE(process_names); i++)

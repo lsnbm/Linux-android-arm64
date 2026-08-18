@@ -109,21 +109,21 @@ static void arm64_executor_cache_insert(uint32_t raw, const struct arm64_executo
 
 /* ======================== 已解码指令：构建不可变执行器条目 ======================== */
 
-bool emu_build_executor_entry(const struct arm64_decoded_insn *decoded, struct arm64_executor_entry *entry)
+bool emu_build_executor_entry(const struct arm64_decoded_instruction *decoded, struct arm64_executor_entry *entry)
 {
     __builtin_memset(entry, 0, sizeof(*entry));
 
-    switch (decoded->insn_class)
+    switch (decoded->instruction_class)
     {
-    case ARM64_INSN_CLASS_LOAD_STORE:
+    case ARM64_INSTRUCTION_CLASS_LOAD_STORE:
         return emu_build_ldst_executor(decoded, entry);
-    case ARM64_INSN_CLASS_DATA_PROCESSING_REGISTER:
+    case ARM64_INSTRUCTION_CLASS_DATA_PROCESSING_REGISTER:
         return emu_build_register_executor(decoded, entry);
-    case ARM64_INSN_CLASS_DATA_PROCESSING_SIMD_FP:
+    case ARM64_INSTRUCTION_CLASS_DATA_PROCESSING_SIMD_FP:
         return emu_build_simd_executor(decoded, entry);
-    case ARM64_INSN_CLASS_DATA_PROCESSING_IMMEDIATE:
+    case ARM64_INSTRUCTION_CLASS_DATA_PROCESSING_IMMEDIATE:
         return emu_build_immediate_executor(decoded, entry);
-    case ARM64_INSN_CLASS_BRANCH_EXCEPTION_SYSTEM:
+    case ARM64_INSTRUCTION_CLASS_BRANCH_EXCEPTION_SYSTEM:
         return emu_build_branch_executor(decoded, entry);
     default:
         return false;
@@ -152,7 +152,7 @@ COW:当前进程准备写入一个仍与其他进程或映射共享的物理页�
 // clang-format off
 bool emulate_insn(struct pt_regs *regs, struct fp_regs *fp_regs, uint32_t specified_insn)
 {
-    struct arm64_decoded_insn decoded __attribute__((__uninitialized__));
+    struct arm64_decoded_instruction decoded __attribute__((__uninitialized__));
     struct arm64_executor_entry local_entry __attribute__((__uninitialized__));
     const struct arm64_executor_entry *entry;
     uint64_t pc = regs->pc;
@@ -177,7 +177,7 @@ bool emulate_insn(struct pt_regs *regs, struct fp_regs *fp_regs, uint32_t specif
     {
         result = emu_execute_executor_entry(regs, fp_regs, entry);
     }
-    else if (arm64_decode_insn(insn, &decoded) == ARM64_DECODE_OK && emu_build_executor_entry(&decoded, &local_entry))
+    else if (arm64_decode_instruction(insn, &decoded) == ARM64_DECODE_OK && emu_build_executor_entry(&decoded, &local_entry))
     {
         result = emu_execute_executor_entry(regs, fp_regs, &local_entry);
         if (result == EMU_INSN_HANDLED) arm64_executor_cache_insert(insn, &local_entry);

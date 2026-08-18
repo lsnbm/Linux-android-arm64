@@ -3,7 +3,7 @@
 
 #include "arm64_decode.h"
 
-static inline int64_t arm64_sign_extend(uint64_t value, uint8_t bits)
+static inline int64_t arm64_decode_sign_extend(uint64_t value, uint8_t bits)
 {
     uint64_t sign = 1ULL << (bits - 1);
 

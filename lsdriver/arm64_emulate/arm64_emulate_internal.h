@@ -26,14 +26,14 @@ struct arm64_executor_entry
 
 _Static_assert(sizeof(struct arm64_executor_entry) == 32, "arm64 executor cache entry must remain 32 bytes");
 
-bool emu_build_executor_entry(const struct arm64_decoded_insn *decoded, struct arm64_executor_entry *entry);
+bool emu_build_executor_entry(const struct arm64_decoded_instruction *decoded, struct arm64_executor_entry *entry);
 __nocfi enum emu_insn_result emu_execute_executor_entry(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry);
 
-bool emu_build_branch_executor(const struct arm64_decoded_insn *decoded, struct arm64_executor_entry *entry);
-bool emu_build_ldst_executor(const struct arm64_decoded_insn *decoded, struct arm64_executor_entry *entry);
-bool emu_build_simd_executor(const struct arm64_decoded_insn *decoded, struct arm64_executor_entry *entry);
-bool emu_build_immediate_executor(const struct arm64_decoded_insn *decoded, struct arm64_executor_entry *entry);
-bool emu_build_register_executor(const struct arm64_decoded_insn *decoded, struct arm64_executor_entry *entry);
+bool emu_build_branch_executor(const struct arm64_decoded_instruction *decoded, struct arm64_executor_entry *entry);
+bool emu_build_ldst_executor(const struct arm64_decoded_instruction *decoded, struct arm64_executor_entry *entry);
+bool emu_build_simd_executor(const struct arm64_decoded_instruction *decoded, struct arm64_executor_entry *entry);
+bool emu_build_immediate_executor(const struct arm64_decoded_instruction *decoded, struct arm64_executor_entry *entry);
+bool emu_build_register_executor(const struct arm64_decoded_instruction *decoded, struct arm64_executor_entry *entry);
 
 /* ========== 数据处理立即数类与寄存器类共享：固定硬件模板与纯运算辅助 ========== */
 

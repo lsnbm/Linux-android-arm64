@@ -1192,7 +1192,7 @@ static inline bool emu_hw_exclusive_store(enum arm64_instruction instruction, ui
 
 /* 每个固定访存执行模板直接对应缓存条目中的 execute 函数地址。 */
 
-static enum emu_insn_result emu_execute_ldst_ldxr_ldxr_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldxr_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1209,7 +1209,7 @@ static enum emu_insn_result emu_execute_ldst_ldxr_ldxr_b1_w32(struct pt_regs *re
     // 成对独占加载：建立独占监视，并将两个结果分别写回 Rt 和 Rt2。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldxr_ldxr_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldxr_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1226,7 +1226,7 @@ static enum emu_insn_result emu_execute_ldst_ldxr_ldxr_b2_w32(struct pt_regs *re
     // 成对独占加载：建立独占监视，并将两个结果分别写回 Rt 和 Rt2。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldxr_ldxr_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldxr_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1243,7 +1243,7 @@ static enum emu_insn_result emu_execute_ldst_ldxr_ldxr_b4_w32(struct pt_regs *re
     // 成对独占加载：建立独占监视，并将两个结果分别写回 Rt 和 Rt2。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldxr_ldxr_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldxr_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1260,7 +1260,7 @@ static enum emu_insn_result emu_execute_ldst_ldxr_ldxr_b8_w64(struct pt_regs *re
     // 成对独占加载：建立独占监视，并将两个结果分别写回 Rt 和 Rt2。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldxr_ldaxr_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldaxr_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1277,7 +1277,7 @@ static enum emu_insn_result emu_execute_ldst_ldxr_ldaxr_b1_w32(struct pt_regs *r
     // 成对独占加载：建立独占监视，并将两个结果分别写回 Rt 和 Rt2。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldxr_ldaxr_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldaxr_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1294,7 +1294,7 @@ static enum emu_insn_result emu_execute_ldst_ldxr_ldaxr_b2_w32(struct pt_regs *r
     // 成对独占加载：建立独占监视，并将两个结果分别写回 Rt 和 Rt2。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldxr_ldaxr_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldaxr_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1311,7 +1311,7 @@ static enum emu_insn_result emu_execute_ldst_ldxr_ldaxr_b4_w32(struct pt_regs *r
     // 成对独占加载：建立独占监视，并将两个结果分别写回 Rt 和 Rt2。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldxr_ldaxr_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldaxr_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1328,7 +1328,7 @@ static enum emu_insn_result emu_execute_ldst_ldxr_ldaxr_b8_w64(struct pt_regs *r
     // 成对独占加载：建立独占监视，并将两个结果分别写回 Rt 和 Rt2。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldxp_ldxp_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldxp_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1345,7 +1345,7 @@ static enum emu_insn_result emu_execute_ldst_ldxp_ldxp_b4_w32(struct pt_regs *re
     // 单寄存器独占存储：数据来自 Rt，硬件成败状态写回 Ws（0 表示成功）。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldxp_ldxp_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldxp_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1362,7 +1362,7 @@ static enum emu_insn_result emu_execute_ldst_ldxp_ldxp_b8_w64(struct pt_regs *re
     // 单寄存器独占存储：数据来自 Rt，硬件成败状态写回 Ws（0 表示成功）。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldxp_ldaxp_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldaxp_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1379,7 +1379,7 @@ static enum emu_insn_result emu_execute_ldst_ldxp_ldaxp_b4_w32(struct pt_regs *r
     // 单寄存器独占存储：数据来自 Rt，硬件成败状态写回 Ws（0 表示成功）。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldxp_ldaxp_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldaxp_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1396,7 +1396,7 @@ static enum emu_insn_result emu_execute_ldst_ldxp_ldaxp_b8_w64(struct pt_regs *r
     // 单寄存器独占存储：数据来自 Rt，硬件成败状态写回 Ws（0 表示成功）。
 }
 
-static enum emu_insn_result emu_execute_ldst_stxr_stxr_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stxr_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1412,7 +1412,7 @@ static enum emu_insn_result emu_execute_ldst_stxr_stxr_b1(struct pt_regs *regs, 
     // 成对独占存储：数据来自 Rt/Rt2，硬件成败状态写回 Ws。
 }
 
-static enum emu_insn_result emu_execute_ldst_stxr_stxr_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stxr_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1428,7 +1428,7 @@ static enum emu_insn_result emu_execute_ldst_stxr_stxr_b2(struct pt_regs *regs, 
     // 成对独占存储：数据来自 Rt/Rt2，硬件成败状态写回 Ws。
 }
 
-static enum emu_insn_result emu_execute_ldst_stxr_stxr_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stxr_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1444,7 +1444,7 @@ static enum emu_insn_result emu_execute_ldst_stxr_stxr_b4(struct pt_regs *regs, 
     // 成对独占存储：数据来自 Rt/Rt2，硬件成败状态写回 Ws。
 }
 
-static enum emu_insn_result emu_execute_ldst_stxr_stxr_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stxr_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1460,7 +1460,7 @@ static enum emu_insn_result emu_execute_ldst_stxr_stxr_b8(struct pt_regs *regs, 
     // 成对独占存储：数据来自 Rt/Rt2，硬件成败状态写回 Ws。
 }
 
-static enum emu_insn_result emu_execute_ldst_stxr_stlxr_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stlxr_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1476,7 +1476,7 @@ static enum emu_insn_result emu_execute_ldst_stxr_stlxr_b1(struct pt_regs *regs,
     // 成对独占存储：数据来自 Rt/Rt2，硬件成败状态写回 Ws。
 }
 
-static enum emu_insn_result emu_execute_ldst_stxr_stlxr_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stlxr_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1492,7 +1492,7 @@ static enum emu_insn_result emu_execute_ldst_stxr_stlxr_b2(struct pt_regs *regs,
     // 成对独占存储：数据来自 Rt/Rt2，硬件成败状态写回 Ws。
 }
 
-static enum emu_insn_result emu_execute_ldst_stxr_stlxr_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stlxr_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1508,7 +1508,7 @@ static enum emu_insn_result emu_execute_ldst_stxr_stlxr_b4(struct pt_regs *regs,
     // 成对独占存储：数据来自 Rt/Rt2，硬件成败状态写回 Ws。
 }
 
-static enum emu_insn_result emu_execute_ldst_stxr_stlxr_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stlxr_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1524,7 +1524,7 @@ static enum emu_insn_result emu_execute_ldst_stxr_stlxr_b8(struct pt_regs *regs,
     // 成对独占存储：数据来自 Rt/Rt2，硬件成败状态写回 Ws。
 }
 
-static enum emu_insn_result emu_execute_ldst_stxp_stxp_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stxp_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1540,7 +1540,7 @@ static enum emu_insn_result emu_execute_ldst_stxp_stxp_b4(struct pt_regs *regs, 
     // 成对比较交换：Rs/Rs+1 提供期望值并接收内存旧值，Rt/Rt+1 提供目标值。
 }
 
-static enum emu_insn_result emu_execute_ldst_stxp_stxp_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stxp_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1556,7 +1556,7 @@ static enum emu_insn_result emu_execute_ldst_stxp_stxp_b8(struct pt_regs *regs, 
     // 成对比较交换：Rs/Rs+1 提供期望值并接收内存旧值，Rt/Rt+1 提供目标值。
 }
 
-static enum emu_insn_result emu_execute_ldst_stxp_stlxp_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stlxp_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1572,7 +1572,7 @@ static enum emu_insn_result emu_execute_ldst_stxp_stlxp_b4(struct pt_regs *regs,
     // 成对比较交换：Rs/Rs+1 提供期望值并接收内存旧值，Rt/Rt+1 提供目标值。
 }
 
-static enum emu_insn_result emu_execute_ldst_stxp_stlxp_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stlxp_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1588,7 +1588,7 @@ static enum emu_insn_result emu_execute_ldst_stxp_stlxp_b8(struct pt_regs *regs,
     // 成对比较交换：Rs/Rs+1 提供期望值并接收内存旧值，Rt/Rt+1 提供目标值。
 }
 
-static enum emu_insn_result emu_execute_ldst_casp_casp_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_casp_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1606,7 +1606,7 @@ static enum emu_insn_result emu_execute_ldst_casp_casp_b4_w32(struct pt_regs *re
     // 有序存储：按 instruction 保留 release 或 limited-ordering 语义。
 }
 
-static enum emu_insn_result emu_execute_ldst_casp_casp_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_casp_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1624,7 +1624,7 @@ static enum emu_insn_result emu_execute_ldst_casp_casp_b8_w64(struct pt_regs *re
     // 有序存储：按 instruction 保留 release 或 limited-ordering 语义。
 }
 
-static enum emu_insn_result emu_execute_ldst_casp_caspa_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_caspa_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1642,7 +1642,7 @@ static enum emu_insn_result emu_execute_ldst_casp_caspa_b4_w32(struct pt_regs *r
     // 有序存储：按 instruction 保留 release 或 limited-ordering 语义。
 }
 
-static enum emu_insn_result emu_execute_ldst_casp_caspa_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_caspa_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1660,7 +1660,7 @@ static enum emu_insn_result emu_execute_ldst_casp_caspa_b8_w64(struct pt_regs *r
     // 有序存储：按 instruction 保留 release 或 limited-ordering 语义。
 }
 
-static enum emu_insn_result emu_execute_ldst_casp_caspl_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_caspl_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1678,7 +1678,7 @@ static enum emu_insn_result emu_execute_ldst_casp_caspl_b4_w32(struct pt_regs *r
     // 有序存储：按 instruction 保留 release 或 limited-ordering 语义。
 }
 
-static enum emu_insn_result emu_execute_ldst_casp_caspl_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_caspl_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1696,7 +1696,7 @@ static enum emu_insn_result emu_execute_ldst_casp_caspl_b8_w64(struct pt_regs *r
     // 有序存储：按 instruction 保留 release 或 limited-ordering 语义。
 }
 
-static enum emu_insn_result emu_execute_ldst_casp_caspal_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_caspal_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1714,7 +1714,7 @@ static enum emu_insn_result emu_execute_ldst_casp_caspal_b4_w32(struct pt_regs *
     // 有序存储：按 instruction 保留 release 或 limited-ordering 语义。
 }
 
-static enum emu_insn_result emu_execute_ldst_casp_caspal_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_caspal_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1732,7 +1732,7 @@ static enum emu_insn_result emu_execute_ldst_casp_caspal_b8_w64(struct pt_regs *
     // 有序存储：按 instruction 保留 release 或 limited-ordering 语义。
 }
 
-static enum emu_insn_result emu_execute_ldst_stllr_stllr_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stllr_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1746,7 +1746,7 @@ static enum emu_insn_result emu_execute_ldst_stllr_stllr_b1(struct pt_regs *regs
     // 有序加载：按 instruction 保留 acquire 或 limited-ordering 语义并写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_stllr_stllr_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stllr_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1760,7 +1760,7 @@ static enum emu_insn_result emu_execute_ldst_stllr_stllr_b2(struct pt_regs *regs
     // 有序加载：按 instruction 保留 acquire 或 limited-ordering 语义并写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_stllr_stllr_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stllr_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1774,7 +1774,7 @@ static enum emu_insn_result emu_execute_ldst_stllr_stllr_b4(struct pt_regs *regs
     // 有序加载：按 instruction 保留 acquire 或 limited-ordering 语义并写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_stllr_stllr_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stllr_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1788,7 +1788,7 @@ static enum emu_insn_result emu_execute_ldst_stllr_stllr_b8(struct pt_regs *regs
     // 有序加载：按 instruction 保留 acquire 或 limited-ordering 语义并写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_stllr_stlr_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stlr_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1802,7 +1802,7 @@ static enum emu_insn_result emu_execute_ldst_stllr_stlr_b1(struct pt_regs *regs,
     // 有序加载：按 instruction 保留 acquire 或 limited-ordering 语义并写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_stllr_stlr_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stlr_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1816,7 +1816,7 @@ static enum emu_insn_result emu_execute_ldst_stllr_stlr_b2(struct pt_regs *regs,
     // 有序加载：按 instruction 保留 acquire 或 limited-ordering 语义并写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_stllr_stlr_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stlr_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1830,7 +1830,7 @@ static enum emu_insn_result emu_execute_ldst_stllr_stlr_b4(struct pt_regs *regs,
     // 有序加载：按 instruction 保留 acquire 或 limited-ordering 语义并写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_stllr_stlr_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stlr_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1844,7 +1844,7 @@ static enum emu_insn_result emu_execute_ldst_stllr_stlr_b8(struct pt_regs *regs,
     // 有序加载：按 instruction 保留 acquire 或 limited-ordering 语义并写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldlar_ldlar_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldlar_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1860,7 +1860,7 @@ static enum emu_insn_result emu_execute_ldst_ldlar_ldlar_b1_w32(struct pt_regs *
     // 单寄存器比较交换：Rs 提供期望值并接收内存旧值，Rt 提供目标值。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldlar_ldlar_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldlar_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1876,7 +1876,7 @@ static enum emu_insn_result emu_execute_ldst_ldlar_ldlar_b2_w32(struct pt_regs *
     // 单寄存器比较交换：Rs 提供期望值并接收内存旧值，Rt 提供目标值。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldlar_ldlar_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldlar_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1892,7 +1892,7 @@ static enum emu_insn_result emu_execute_ldst_ldlar_ldlar_b4_w32(struct pt_regs *
     // 单寄存器比较交换：Rs 提供期望值并接收内存旧值，Rt 提供目标值。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldlar_ldlar_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldlar_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1908,7 +1908,7 @@ static enum emu_insn_result emu_execute_ldst_ldlar_ldlar_b8_w64(struct pt_regs *
     // 单寄存器比较交换：Rs 提供期望值并接收内存旧值，Rt 提供目标值。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldlar_ldar_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldar_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1924,7 +1924,7 @@ static enum emu_insn_result emu_execute_ldst_ldlar_ldar_b1_w32(struct pt_regs *r
     // 单寄存器比较交换：Rs 提供期望值并接收内存旧值，Rt 提供目标值。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldlar_ldar_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldar_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1940,7 +1940,7 @@ static enum emu_insn_result emu_execute_ldst_ldlar_ldar_b2_w32(struct pt_regs *r
     // 单寄存器比较交换：Rs 提供期望值并接收内存旧值，Rt 提供目标值。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldlar_ldar_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldar_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1956,7 +1956,7 @@ static enum emu_insn_result emu_execute_ldst_ldlar_ldar_b4_w32(struct pt_regs *r
     // 单寄存器比较交换：Rs 提供期望值并接收内存旧值，Rt 提供目标值。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldlar_ldar_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldar_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1972,7 +1972,7 @@ static enum emu_insn_result emu_execute_ldst_ldlar_ldar_b8_w64(struct pt_regs *r
     // 单寄存器比较交换：Rs 提供期望值并接收内存旧值，Rt 提供目标值。
 }
 
-static enum emu_insn_result emu_execute_ldst_cas_cas_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_cas_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -1988,7 +1988,7 @@ static enum emu_insn_result emu_execute_ldst_cas_cas_b1_w32(struct pt_regs *regs
     // LSE 原子读改写：Rs 提供运算源，Rt 接收修改前的内存值。
 }
 
-static enum emu_insn_result emu_execute_ldst_cas_cas_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_cas_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2004,7 +2004,7 @@ static enum emu_insn_result emu_execute_ldst_cas_cas_b2_w32(struct pt_regs *regs
     // LSE 原子读改写：Rs 提供运算源，Rt 接收修改前的内存值。
 }
 
-static enum emu_insn_result emu_execute_ldst_cas_cas_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_cas_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2020,7 +2020,7 @@ static enum emu_insn_result emu_execute_ldst_cas_cas_b4_w32(struct pt_regs *regs
     // LSE 原子读改写：Rs 提供运算源，Rt 接收修改前的内存值。
 }
 
-static enum emu_insn_result emu_execute_ldst_cas_cas_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_cas_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2036,7 +2036,7 @@ static enum emu_insn_result emu_execute_ldst_cas_cas_b8_w64(struct pt_regs *regs
     // LSE 原子读改写：Rs 提供运算源，Rt 接收修改前的内存值。
 }
 
-static enum emu_insn_result emu_execute_ldst_cas_casa_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_casa_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2052,7 +2052,7 @@ static enum emu_insn_result emu_execute_ldst_cas_casa_b1_w32(struct pt_regs *reg
     // LSE 原子读改写：Rs 提供运算源，Rt 接收修改前的内存值。
 }
 
-static enum emu_insn_result emu_execute_ldst_cas_casa_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_casa_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2068,7 +2068,7 @@ static enum emu_insn_result emu_execute_ldst_cas_casa_b2_w32(struct pt_regs *reg
     // LSE 原子读改写：Rs 提供运算源，Rt 接收修改前的内存值。
 }
 
-static enum emu_insn_result emu_execute_ldst_cas_casa_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_casa_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2084,7 +2084,7 @@ static enum emu_insn_result emu_execute_ldst_cas_casa_b4_w32(struct pt_regs *reg
     // LSE 原子读改写：Rs 提供运算源，Rt 接收修改前的内存值。
 }
 
-static enum emu_insn_result emu_execute_ldst_cas_casa_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_casa_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2100,7 +2100,7 @@ static enum emu_insn_result emu_execute_ldst_cas_casa_b8_w64(struct pt_regs *reg
     // LSE 原子读改写：Rs 提供运算源，Rt 接收修改前的内存值。
 }
 
-static enum emu_insn_result emu_execute_ldst_cas_casl_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_casl_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2116,7 +2116,7 @@ static enum emu_insn_result emu_execute_ldst_cas_casl_b1_w32(struct pt_regs *reg
     // LSE 原子读改写：Rs 提供运算源，Rt 接收修改前的内存值。
 }
 
-static enum emu_insn_result emu_execute_ldst_cas_casl_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_casl_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2132,7 +2132,7 @@ static enum emu_insn_result emu_execute_ldst_cas_casl_b2_w32(struct pt_regs *reg
     // LSE 原子读改写：Rs 提供运算源，Rt 接收修改前的内存值。
 }
 
-static enum emu_insn_result emu_execute_ldst_cas_casl_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_casl_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2148,7 +2148,7 @@ static enum emu_insn_result emu_execute_ldst_cas_casl_b4_w32(struct pt_regs *reg
     // LSE 原子读改写：Rs 提供运算源，Rt 接收修改前的内存值。
 }
 
-static enum emu_insn_result emu_execute_ldst_cas_casl_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_casl_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2164,7 +2164,7 @@ static enum emu_insn_result emu_execute_ldst_cas_casl_b8_w64(struct pt_regs *reg
     // LSE 原子读改写：Rs 提供运算源，Rt 接收修改前的内存值。
 }
 
-static enum emu_insn_result emu_execute_ldst_cas_casal_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_casal_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2180,7 +2180,7 @@ static enum emu_insn_result emu_execute_ldst_cas_casal_b1_w32(struct pt_regs *re
     // LSE 原子读改写：Rs 提供运算源，Rt 接收修改前的内存值。
 }
 
-static enum emu_insn_result emu_execute_ldst_cas_casal_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_casal_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2196,7 +2196,7 @@ static enum emu_insn_result emu_execute_ldst_cas_casal_b2_w32(struct pt_regs *re
     // LSE 原子读改写：Rs 提供运算源，Rt 接收修改前的内存值。
 }
 
-static enum emu_insn_result emu_execute_ldst_cas_casal_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_casal_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2212,7 +2212,7 @@ static enum emu_insn_result emu_execute_ldst_cas_casal_b4_w32(struct pt_regs *re
     // LSE 原子读改写：Rs 提供运算源，Rt 接收修改前的内存值。
 }
 
-static enum emu_insn_result emu_execute_ldst_cas_casal_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_casal_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2228,7 +2228,7 @@ static enum emu_insn_result emu_execute_ldst_cas_casal_b8_w64(struct pt_regs *re
     // LSE 原子读改写：Rs 提供运算源，Rt 接收修改前的内存值。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldadd_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldadd_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2244,7 +2244,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldadd_b1_w32(struct pt_regs *
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldadd_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldadd_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2260,7 +2260,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldadd_b2_w32(struct pt_regs *
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldadd_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldadd_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2276,7 +2276,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldadd_b4_w32(struct pt_regs *
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldadd_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldadd_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2292,7 +2292,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldadd_b8_w64(struct pt_regs *
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldadda_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldadda_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2308,7 +2308,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldadda_b1_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldadda_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldadda_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2324,7 +2324,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldadda_b2_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldadda_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldadda_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2340,7 +2340,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldadda_b4_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldadda_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldadda_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2356,7 +2356,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldadda_b8_w64(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldaddl_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldaddl_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2372,7 +2372,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldaddl_b1_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldaddl_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldaddl_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2388,7 +2388,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldaddl_b2_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldaddl_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldaddl_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2404,7 +2404,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldaddl_b4_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldaddl_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldaddl_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2420,7 +2420,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldaddl_b8_w64(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldaddal_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldaddal_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2436,7 +2436,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldaddal_b1_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldaddal_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldaddal_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2452,7 +2452,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldaddal_b2_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldaddal_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldaddal_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2468,7 +2468,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldaddal_b4_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldaddal_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldaddal_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2484,7 +2484,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldaddal_b8_w64(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldclr_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldclr_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2500,7 +2500,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldclr_b1_w32(struct pt_regs *
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldclr_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldclr_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2516,7 +2516,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldclr_b2_w32(struct pt_regs *
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldclr_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldclr_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2532,7 +2532,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldclr_b4_w32(struct pt_regs *
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldclr_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldclr_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2548,7 +2548,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldclr_b8_w64(struct pt_regs *
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldclra_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldclra_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2564,7 +2564,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldclra_b1_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldclra_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldclra_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2580,7 +2580,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldclra_b2_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldclra_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldclra_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2596,7 +2596,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldclra_b4_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldclra_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldclra_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2612,7 +2612,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldclra_b8_w64(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldclrl_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldclrl_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2628,7 +2628,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldclrl_b1_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldclrl_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldclrl_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2644,7 +2644,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldclrl_b2_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldclrl_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldclrl_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2660,7 +2660,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldclrl_b4_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldclrl_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldclrl_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2676,7 +2676,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldclrl_b8_w64(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldclral_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldclral_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2692,7 +2692,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldclral_b1_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldclral_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldclral_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2708,7 +2708,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldclral_b2_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldclral_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldclral_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2724,7 +2724,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldclral_b4_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldclral_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldclral_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2740,7 +2740,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldclral_b8_w64(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldeor_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldeor_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2756,7 +2756,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldeor_b1_w32(struct pt_regs *
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldeor_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldeor_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2772,7 +2772,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldeor_b2_w32(struct pt_regs *
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldeor_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldeor_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2788,7 +2788,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldeor_b4_w32(struct pt_regs *
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldeor_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldeor_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2804,7 +2804,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldeor_b8_w64(struct pt_regs *
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldeora_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldeora_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2820,7 +2820,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldeora_b1_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldeora_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldeora_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2836,7 +2836,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldeora_b2_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldeora_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldeora_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2852,7 +2852,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldeora_b4_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldeora_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldeora_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2868,7 +2868,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldeora_b8_w64(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldeorl_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldeorl_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2884,7 +2884,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldeorl_b1_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldeorl_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldeorl_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2900,7 +2900,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldeorl_b2_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldeorl_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldeorl_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2916,7 +2916,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldeorl_b4_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldeorl_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldeorl_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2932,7 +2932,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldeorl_b8_w64(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldeoral_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldeoral_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2948,7 +2948,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldeoral_b1_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldeoral_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldeoral_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2964,7 +2964,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldeoral_b2_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldeoral_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldeoral_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2980,7 +2980,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldeoral_b4_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldeoral_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldeoral_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -2996,7 +2996,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldeoral_b8_w64(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldset_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldset_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3012,7 +3012,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldset_b1_w32(struct pt_regs *
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldset_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldset_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3028,7 +3028,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldset_b2_w32(struct pt_regs *
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldset_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldset_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3044,7 +3044,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldset_b4_w32(struct pt_regs *
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldset_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldset_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3060,7 +3060,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldset_b8_w64(struct pt_regs *
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldseta_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldseta_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3076,7 +3076,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldseta_b1_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldseta_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldseta_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3092,7 +3092,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldseta_b2_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldseta_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldseta_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3108,7 +3108,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldseta_b4_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldseta_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldseta_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3124,7 +3124,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldseta_b8_w64(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsetl_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsetl_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3140,7 +3140,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsetl_b1_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsetl_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsetl_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3156,7 +3156,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsetl_b2_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsetl_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsetl_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3172,7 +3172,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsetl_b4_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsetl_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsetl_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3188,7 +3188,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsetl_b8_w64(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsetal_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsetal_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3204,7 +3204,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsetal_b1_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsetal_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsetal_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3220,7 +3220,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsetal_b2_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsetal_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsetal_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3236,7 +3236,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsetal_b4_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsetal_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsetal_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3252,7 +3252,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsetal_b8_w64(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsmax_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsmax_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3268,7 +3268,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsmax_b1_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsmax_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsmax_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3284,7 +3284,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsmax_b2_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsmax_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsmax_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3300,7 +3300,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsmax_b4_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsmax_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsmax_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3316,7 +3316,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsmax_b8_w64(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsmaxa_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsmaxa_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3332,7 +3332,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsmaxa_b1_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsmaxa_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsmaxa_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3348,7 +3348,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsmaxa_b2_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsmaxa_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsmaxa_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3364,7 +3364,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsmaxa_b4_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsmaxa_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsmaxa_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3380,7 +3380,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsmaxa_b8_w64(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsmaxl_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsmaxl_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3396,7 +3396,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsmaxl_b1_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsmaxl_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsmaxl_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3412,7 +3412,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsmaxl_b2_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsmaxl_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsmaxl_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3428,7 +3428,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsmaxl_b4_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsmaxl_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsmaxl_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3444,7 +3444,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsmaxl_b8_w64(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsmaxal_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsmaxal_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3460,7 +3460,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsmaxal_b1_w32(struct pt_reg
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsmaxal_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsmaxal_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3476,7 +3476,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsmaxal_b2_w32(struct pt_reg
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsmaxal_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsmaxal_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3492,7 +3492,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsmaxal_b4_w32(struct pt_reg
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsmaxal_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsmaxal_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3508,7 +3508,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsmaxal_b8_w64(struct pt_reg
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsmin_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsmin_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3524,7 +3524,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsmin_b1_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsmin_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsmin_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3540,7 +3540,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsmin_b2_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsmin_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsmin_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3556,7 +3556,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsmin_b4_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsmin_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsmin_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3572,7 +3572,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsmin_b8_w64(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsmina_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsmina_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3588,7 +3588,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsmina_b1_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsmina_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsmina_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3604,7 +3604,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsmina_b2_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsmina_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsmina_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3620,7 +3620,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsmina_b4_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsmina_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsmina_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3636,7 +3636,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsmina_b8_w64(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsminl_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsminl_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3652,7 +3652,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsminl_b1_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsminl_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsminl_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3668,7 +3668,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsminl_b2_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsminl_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsminl_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3684,7 +3684,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsminl_b4_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsminl_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsminl_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3700,7 +3700,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsminl_b8_w64(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsminal_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsminal_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3716,7 +3716,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsminal_b1_w32(struct pt_reg
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsminal_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsminal_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3732,7 +3732,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsminal_b2_w32(struct pt_reg
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsminal_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsminal_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3748,7 +3748,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsminal_b4_w32(struct pt_reg
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldsminal_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldsminal_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3764,7 +3764,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldsminal_b8_w64(struct pt_reg
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldumax_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldumax_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3780,7 +3780,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldumax_b1_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldumax_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldumax_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3796,7 +3796,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldumax_b2_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldumax_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldumax_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3812,7 +3812,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldumax_b4_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldumax_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldumax_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3828,7 +3828,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldumax_b8_w64(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldumaxa_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldumaxa_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3844,7 +3844,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldumaxa_b1_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldumaxa_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldumaxa_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3860,7 +3860,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldumaxa_b2_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldumaxa_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldumaxa_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3876,7 +3876,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldumaxa_b4_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldumaxa_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldumaxa_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3892,7 +3892,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldumaxa_b8_w64(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldumaxl_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldumaxl_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3908,7 +3908,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldumaxl_b1_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldumaxl_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldumaxl_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3924,7 +3924,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldumaxl_b2_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldumaxl_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldumaxl_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3940,7 +3940,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldumaxl_b4_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldumaxl_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldumaxl_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3956,7 +3956,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldumaxl_b8_w64(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldumaxal_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldumaxal_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3972,7 +3972,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldumaxal_b1_w32(struct pt_reg
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldumaxal_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldumaxal_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -3988,7 +3988,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldumaxal_b2_w32(struct pt_reg
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldumaxal_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldumaxal_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4004,7 +4004,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldumaxal_b4_w32(struct pt_reg
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldumaxal_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldumaxal_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4020,7 +4020,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldumaxal_b8_w64(struct pt_reg
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldumin_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldumin_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4036,7 +4036,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldumin_b1_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldumin_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldumin_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4052,7 +4052,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldumin_b2_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldumin_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldumin_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4068,7 +4068,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldumin_b4_w32(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldumin_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldumin_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4084,7 +4084,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldumin_b8_w64(struct pt_regs 
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldumina_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldumina_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4100,7 +4100,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldumina_b1_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldumina_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldumina_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4116,7 +4116,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldumina_b2_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldumina_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldumina_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4132,7 +4132,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldumina_b4_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_ldumina_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldumina_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4148,7 +4148,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_ldumina_b8_w64(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_lduminl_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_lduminl_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4164,7 +4164,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_lduminl_b1_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_lduminl_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_lduminl_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4180,7 +4180,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_lduminl_b2_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_lduminl_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_lduminl_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4196,7 +4196,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_lduminl_b4_w32(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_lduminl_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_lduminl_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4212,7 +4212,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_lduminl_b8_w64(struct pt_regs
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_lduminal_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_lduminal_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4228,7 +4228,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_lduminal_b1_w32(struct pt_reg
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_lduminal_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_lduminal_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4244,7 +4244,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_lduminal_b2_w32(struct pt_reg
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_lduminal_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_lduminal_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4260,7 +4260,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_lduminal_b4_w32(struct pt_reg
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_lduminal_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_lduminal_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4276,7 +4276,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_lduminal_b8_w64(struct pt_reg
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_swp_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_swp_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4292,7 +4292,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_swp_b1_w32(struct pt_regs *re
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_swp_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_swp_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4308,7 +4308,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_swp_b2_w32(struct pt_regs *re
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_swp_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_swp_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4324,7 +4324,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_swp_b4_w32(struct pt_regs *re
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_swp_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_swp_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4340,7 +4340,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_swp_b8_w64(struct pt_regs *re
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_swpa_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_swpa_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4356,7 +4356,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_swpa_b1_w32(struct pt_regs *r
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_swpa_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_swpa_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4372,7 +4372,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_swpa_b2_w32(struct pt_regs *r
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_swpa_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_swpa_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4388,7 +4388,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_swpa_b4_w32(struct pt_regs *r
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_swpa_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_swpa_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4404,7 +4404,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_swpa_b8_w64(struct pt_regs *r
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_swpl_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_swpl_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4420,7 +4420,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_swpl_b1_w32(struct pt_regs *r
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_swpl_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_swpl_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4436,7 +4436,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_swpl_b2_w32(struct pt_regs *r
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_swpl_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_swpl_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4452,7 +4452,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_swpl_b4_w32(struct pt_regs *r
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_swpl_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_swpl_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4468,7 +4468,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_swpl_b8_w64(struct pt_regs *r
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_swpal_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_swpal_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4484,7 +4484,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_swpal_b1_w32(struct pt_regs *
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_swpal_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_swpal_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4500,7 +4500,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_swpal_b2_w32(struct pt_regs *
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_swpal_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_swpal_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4516,7 +4516,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_swpal_b4_w32(struct pt_regs *
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldadd_swpal_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_swpal_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4532,7 +4532,7 @@ static enum emu_insn_result emu_execute_ldst_ldadd_swpal_b8_w64(struct pt_regs *
     // LDAPR 执行 RCpc acquire 加载，并将结果写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldapr_ldapr_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldapr_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4548,7 +4548,7 @@ static enum emu_insn_result emu_execute_ldst_ldapr_ldapr_b1_w32(struct pt_regs *
     // GPR 字面量加载：有效地址相对当前指令 PC 计算，不使用 Rn。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldapr_ldapr_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldapr_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4564,7 +4564,7 @@ static enum emu_insn_result emu_execute_ldst_ldapr_ldapr_b2_w32(struct pt_regs *
     // GPR 字面量加载：有效地址相对当前指令 PC 计算，不使用 Rn。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldapr_ldapr_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldapr_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4580,7 +4580,7 @@ static enum emu_insn_result emu_execute_ldst_ldapr_ldapr_b4_w32(struct pt_regs *
     // GPR 字面量加载：有效地址相对当前指令 PC 计算，不使用 Rn。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldapr_ldapr_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldapr_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4596,7 +4596,7 @@ static enum emu_insn_result emu_execute_ldst_ldapr_ldapr_b8_w64(struct pt_regs *
     // GPR 字面量加载：有效地址相对当前指令 PC 计算，不使用 Rn。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldr_literal_gpr_ldr_literal_gpr_b4_w32_literal(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_literal_gpr_w32_b4_mode_literal(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4614,7 +4614,7 @@ static enum emu_insn_result emu_execute_ldst_ldr_literal_gpr_ldr_literal_gpr_b4_
     // FP/SIMD 字面量加载：按 PC 相对地址直接写入目标 Q 寄存器的软件现场。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldr_literal_gpr_ldr_literal_gpr_b8_w64_literal(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_literal_gpr_w64_b8_mode_literal(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4632,7 +4632,7 @@ static enum emu_insn_result emu_execute_ldst_ldr_literal_gpr_ldr_literal_gpr_b8_
     // FP/SIMD 字面量加载：按 PC 相对地址直接写入目标 Q 寄存器的软件现场。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldr_literal_gpr_ldrsw_literal_b4_w64_literal(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldrsw_literal_w64_b4_mode_literal(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4650,49 +4650,43 @@ static enum emu_insn_result emu_execute_ldst_ldr_literal_gpr_ldrsw_literal_b4_w6
     // FP/SIMD 字面量加载：按 PC 相对地址直接写入目标 Q 寄存器的软件现场。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldr_literal_fp_simd_ldr_literal_fp_simd_b4_literal(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_literal_fp_simd_b4_mode_literal(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
+    uint64_t address;
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, 0, &address, ARM64_MEMORY_ADDRESS_LITERAL, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_LITERAL_FP_SIMD, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, 0, &address, ARM64_MEMORY_ADDRESS_LITERAL, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_LITERAL_FP_SIMD, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // RCpc 非对齐有序存储：地址为 Rn 加已解码的未缩放偏移。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldr_literal_fp_simd_ldr_literal_fp_simd_b8_literal(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_literal_fp_simd_b8_mode_literal(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
+    uint64_t address;
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, 0, &address, ARM64_MEMORY_ADDRESS_LITERAL, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_LITERAL_FP_SIMD, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, 0, &address, ARM64_MEMORY_ADDRESS_LITERAL, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_LITERAL_FP_SIMD, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // RCpc 非对齐有序存储：地址为 Rn 加已解码的未缩放偏移。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldr_literal_fp_simd_ldr_literal_fp_simd_b16_literal(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_literal_fp_simd_b16_mode_literal(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
+    uint64_t address;
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, 0, &address, ARM64_MEMORY_ADDRESS_LITERAL, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_LITERAL_FP_SIMD, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, 0, &address, ARM64_MEMORY_ADDRESS_LITERAL, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_LITERAL_FP_SIMD, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // RCpc 非对齐有序存储：地址为 Rn 加已解码的未缩放偏移。
 }
 
-static enum emu_insn_result emu_execute_ldst_stlur_stlur_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stlur_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4706,7 +4700,7 @@ static enum emu_insn_result emu_execute_ldst_stlur_stlur_b1(struct pt_regs *regs
     // RCpc 非对齐有序加载：地址为 Rn 加未缩放偏移，结果按目标宽度写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_stlur_stlur_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stlur_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4720,7 +4714,7 @@ static enum emu_insn_result emu_execute_ldst_stlur_stlur_b2(struct pt_regs *regs
     // RCpc 非对齐有序加载：地址为 Rn 加未缩放偏移，结果按目标宽度写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_stlur_stlur_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stlur_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4734,7 +4728,7 @@ static enum emu_insn_result emu_execute_ldst_stlur_stlur_b4(struct pt_regs *regs
     // RCpc 非对齐有序加载：地址为 Rn 加未缩放偏移，结果按目标宽度写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_stlur_stlur_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stlur_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4748,7 +4742,7 @@ static enum emu_insn_result emu_execute_ldst_stlur_stlur_b8(struct pt_regs *regs
     // RCpc 非对齐有序加载：地址为 Rn 加未缩放偏移，结果按目标宽度写回 Rt。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldapur_ldapur_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldapur_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4764,7 +4758,7 @@ static enum emu_insn_result emu_execute_ldst_ldapur_ldapur_b1_w32(struct pt_regs
     // GPR 成对加载：先完成两个内存读取和目标写回，再提交可选的 Rn writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldapur_ldapur_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldapur_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4780,7 +4774,7 @@ static enum emu_insn_result emu_execute_ldst_ldapur_ldapur_b2_w32(struct pt_regs
     // GPR 成对加载：先完成两个内存读取和目标写回，再提交可选的 Rn writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldapur_ldapur_b4_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldapur_w32_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4796,7 +4790,7 @@ static enum emu_insn_result emu_execute_ldst_ldapur_ldapur_b4_w32(struct pt_regs
     // GPR 成对加载：先完成两个内存读取和目标写回，再提交可选的 Rn writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldapur_ldapur_b8_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldapur_w64_b8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4812,7 +4806,7 @@ static enum emu_insn_result emu_execute_ldst_ldapur_ldapur_b8_w64(struct pt_regs
     // GPR 成对加载：先完成两个内存读取和目标写回，再提交可选的 Rn writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldapur_ldapur_signed_b1_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldapur_signed_w32_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4828,7 +4822,7 @@ static enum emu_insn_result emu_execute_ldst_ldapur_ldapur_signed_b1_w32(struct 
     // GPR 成对加载：先完成两个内存读取和目标写回，再提交可选的 Rn writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldapur_ldapur_signed_b1_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldapur_signed_w64_b1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4844,7 +4838,7 @@ static enum emu_insn_result emu_execute_ldst_ldapur_ldapur_signed_b1_w64(struct 
     // GPR 成对加载：先完成两个内存读取和目标写回，再提交可选的 Rn writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldapur_ldapur_signed_b2_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldapur_signed_w32_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4860,7 +4854,7 @@ static enum emu_insn_result emu_execute_ldst_ldapur_ldapur_signed_b2_w32(struct 
     // GPR 成对加载：先完成两个内存读取和目标写回，再提交可选的 Rn writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldapur_ldapur_signed_b2_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldapur_signed_w64_b2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4876,7 +4870,7 @@ static enum emu_insn_result emu_execute_ldst_ldapur_ldapur_signed_b2_w64(struct 
     // GPR 成对加载：先完成两个内存读取和目标写回，再提交可选的 Rn writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldapur_ldapur_signed_b4_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldapur_signed_w64_b4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4892,7 +4886,7 @@ static enum emu_insn_result emu_execute_ldst_ldapur_ldapur_signed_b4_w64(struct 
     // GPR 成对加载：先完成两个内存读取和目标写回，再提交可选的 Rn writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldnp_gpr_ldnp_gpr_b4_w32_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldnp_gpr_w32_b4_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4913,7 +4907,7 @@ static enum emu_insn_result emu_execute_ldst_ldnp_gpr_ldnp_gpr_b4_w32_base_offse
     // GPR 成对存储：数据来自 Rt/Rt2，成功后再提交可选的 Rn writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldnp_gpr_ldnp_gpr_b8_w64_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldnp_gpr_w64_b8_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4934,7 +4928,7 @@ static enum emu_insn_result emu_execute_ldst_ldnp_gpr_ldnp_gpr_b8_w64_base_offse
     // GPR 成对存储：数据来自 Rt/Rt2，成功后再提交可选的 Rn writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldnp_gpr_ldp_gpr_offset_b4_w32_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldp_gpr_offset_w32_b4_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4955,7 +4949,7 @@ static enum emu_insn_result emu_execute_ldst_ldnp_gpr_ldp_gpr_offset_b4_w32_base
     // GPR 成对存储：数据来自 Rt/Rt2，成功后再提交可选的 Rn writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldnp_gpr_ldp_gpr_offset_b8_w64_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldp_gpr_offset_w64_b8_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4976,7 +4970,7 @@ static enum emu_insn_result emu_execute_ldst_ldnp_gpr_ldp_gpr_offset_b8_w64_base
     // GPR 成对存储：数据来自 Rt/Rt2，成功后再提交可选的 Rn writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldnp_gpr_ldpsw_offset_b4_w64_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldpsw_offset_w64_b4_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -4997,7 +4991,7 @@ static enum emu_insn_result emu_execute_ldst_ldnp_gpr_ldpsw_offset_b4_w64_base_o
     // GPR 成对存储：数据来自 Rt/Rt2，成功后再提交可选的 Rn writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldnp_gpr_ldp_gpr_post_index_b4_w32_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldp_gpr_post_index_w32_b4_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5018,7 +5012,7 @@ static enum emu_insn_result emu_execute_ldst_ldnp_gpr_ldp_gpr_post_index_b4_w32_
     // GPR 成对存储：数据来自 Rt/Rt2，成功后再提交可选的 Rn writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldnp_gpr_ldp_gpr_post_index_b8_w64_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldp_gpr_post_index_w64_b8_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5039,7 +5033,7 @@ static enum emu_insn_result emu_execute_ldst_ldnp_gpr_ldp_gpr_post_index_b8_w64_
     // GPR 成对存储：数据来自 Rt/Rt2，成功后再提交可选的 Rn writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldnp_gpr_ldpsw_post_index_b4_w64_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldpsw_post_index_w64_b4_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5060,7 +5054,7 @@ static enum emu_insn_result emu_execute_ldst_ldnp_gpr_ldpsw_post_index_b4_w64_po
     // GPR 成对存储：数据来自 Rt/Rt2，成功后再提交可选的 Rn writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldnp_gpr_ldp_gpr_pre_index_b4_w32_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldp_gpr_pre_index_w32_b4_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5081,7 +5075,7 @@ static enum emu_insn_result emu_execute_ldst_ldnp_gpr_ldp_gpr_pre_index_b4_w32_p
     // GPR 成对存储：数据来自 Rt/Rt2，成功后再提交可选的 Rn writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldnp_gpr_ldp_gpr_pre_index_b8_w64_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldp_gpr_pre_index_w64_b8_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5102,7 +5096,7 @@ static enum emu_insn_result emu_execute_ldst_ldnp_gpr_ldp_gpr_pre_index_b8_w64_p
     // GPR 成对存储：数据来自 Rt/Rt2，成功后再提交可选的 Rn writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldnp_gpr_ldpsw_pre_index_b4_w64_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldpsw_pre_index_w64_b4_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5123,7 +5117,7 @@ static enum emu_insn_result emu_execute_ldst_ldnp_gpr_ldpsw_pre_index_b4_w64_pre
     // GPR 成对存储：数据来自 Rt/Rt2，成功后再提交可选的 Rn writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_stnp_gpr_stnp_gpr_b4_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stnp_gpr_b4_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5141,7 +5135,7 @@ static enum emu_insn_result emu_execute_ldst_stnp_gpr_stnp_gpr_b4_base_offset(st
     // FP/SIMD 成对加载：结果直接写入两个 Q 寄存器的软件现场。
 }
 
-static enum emu_insn_result emu_execute_ldst_stnp_gpr_stnp_gpr_b8_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stnp_gpr_b8_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5159,7 +5153,7 @@ static enum emu_insn_result emu_execute_ldst_stnp_gpr_stnp_gpr_b8_base_offset(st
     // FP/SIMD 成对加载：结果直接写入两个 Q 寄存器的软件现场。
 }
 
-static enum emu_insn_result emu_execute_ldst_stnp_gpr_stp_gpr_offset_b4_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stp_gpr_offset_b4_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5177,7 +5171,7 @@ static enum emu_insn_result emu_execute_ldst_stnp_gpr_stp_gpr_offset_b4_base_off
     // FP/SIMD 成对加载：结果直接写入两个 Q 寄存器的软件现场。
 }
 
-static enum emu_insn_result emu_execute_ldst_stnp_gpr_stp_gpr_offset_b8_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stp_gpr_offset_b8_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5195,7 +5189,7 @@ static enum emu_insn_result emu_execute_ldst_stnp_gpr_stp_gpr_offset_b8_base_off
     // FP/SIMD 成对加载：结果直接写入两个 Q 寄存器的软件现场。
 }
 
-static enum emu_insn_result emu_execute_ldst_stnp_gpr_stp_gpr_post_index_b4_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stp_gpr_post_index_b4_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5213,7 +5207,7 @@ static enum emu_insn_result emu_execute_ldst_stnp_gpr_stp_gpr_post_index_b4_post
     // FP/SIMD 成对加载：结果直接写入两个 Q 寄存器的软件现场。
 }
 
-static enum emu_insn_result emu_execute_ldst_stnp_gpr_stp_gpr_post_index_b8_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stp_gpr_post_index_b8_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5231,7 +5225,7 @@ static enum emu_insn_result emu_execute_ldst_stnp_gpr_stp_gpr_post_index_b8_post
     // FP/SIMD 成对加载：结果直接写入两个 Q 寄存器的软件现场。
 }
 
-static enum emu_insn_result emu_execute_ldst_stnp_gpr_stp_gpr_pre_index_b4_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stp_gpr_pre_index_b4_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5249,7 +5243,7 @@ static enum emu_insn_result emu_execute_ldst_stnp_gpr_stp_gpr_pre_index_b4_pre_i
     // FP/SIMD 成对加载：结果直接写入两个 Q 寄存器的软件现场。
 }
 
-static enum emu_insn_result emu_execute_ldst_stnp_gpr_stp_gpr_pre_index_b8_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stp_gpr_pre_index_b8_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5267,391 +5261,343 @@ static enum emu_insn_result emu_execute_ldst_stnp_gpr_stp_gpr_pre_index_b8_pre_i
     // FP/SIMD 成对加载：结果直接写入两个 Q 寄存器的软件现场。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldnp_fp_simd_ldnp_fp_simd_b4_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldnp_fp_simd_b4_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_pair_fp(ARM64_INSN_LDNP_FP_SIMD, address, 4, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_pair_fp(ARM64_INSN_LDNP_FP_SIMD, address, 4, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // FP/SIMD 成对存储：数据来自两个 Q 寄存器的软件现场。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldnp_fp_simd_ldnp_fp_simd_b8_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldnp_fp_simd_b8_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_pair_fp(ARM64_INSN_LDNP_FP_SIMD, address, 8, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_pair_fp(ARM64_INSN_LDNP_FP_SIMD, address, 8, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // FP/SIMD 成对存储：数据来自两个 Q 寄存器的软件现场。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldnp_fp_simd_ldnp_fp_simd_b16_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldnp_fp_simd_b16_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_pair_fp(ARM64_INSN_LDNP_FP_SIMD, address, 16, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_pair_fp(ARM64_INSN_LDNP_FP_SIMD, address, 16, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // FP/SIMD 成对存储：数据来自两个 Q 寄存器的软件现场。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldnp_fp_simd_ldp_fp_simd_offset_b4_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldp_fp_simd_offset_b4_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_pair_fp(ARM64_INSN_LDP_FP_SIMD_OFFSET, address, 4, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_pair_fp(ARM64_INSN_LDP_FP_SIMD_OFFSET, address, 4, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // FP/SIMD 成对存储：数据来自两个 Q 寄存器的软件现场。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldnp_fp_simd_ldp_fp_simd_offset_b8_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldp_fp_simd_offset_b8_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_pair_fp(ARM64_INSN_LDP_FP_SIMD_OFFSET, address, 8, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_pair_fp(ARM64_INSN_LDP_FP_SIMD_OFFSET, address, 8, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // FP/SIMD 成对存储：数据来自两个 Q 寄存器的软件现场。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldnp_fp_simd_ldp_fp_simd_offset_b16_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldp_fp_simd_offset_b16_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_pair_fp(ARM64_INSN_LDP_FP_SIMD_OFFSET, address, 16, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_pair_fp(ARM64_INSN_LDP_FP_SIMD_OFFSET, address, 16, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // FP/SIMD 成对存储：数据来自两个 Q 寄存器的软件现场。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldnp_fp_simd_ldp_fp_simd_post_index_b4_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldp_fp_simd_post_index_b4_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_pair_fp(ARM64_INSN_LDP_FP_SIMD_POST_INDEX, address, 4, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_pair_fp(ARM64_INSN_LDP_FP_SIMD_POST_INDEX, address, 4, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // FP/SIMD 成对存储：数据来自两个 Q 寄存器的软件现场。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldnp_fp_simd_ldp_fp_simd_post_index_b8_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldp_fp_simd_post_index_b8_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_pair_fp(ARM64_INSN_LDP_FP_SIMD_POST_INDEX, address, 8, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_pair_fp(ARM64_INSN_LDP_FP_SIMD_POST_INDEX, address, 8, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // FP/SIMD 成对存储：数据来自两个 Q 寄存器的软件现场。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldnp_fp_simd_ldp_fp_simd_post_index_b16_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldp_fp_simd_post_index_b16_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_pair_fp(ARM64_INSN_LDP_FP_SIMD_POST_INDEX, address, 16, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_pair_fp(ARM64_INSN_LDP_FP_SIMD_POST_INDEX, address, 16, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // FP/SIMD 成对存储：数据来自两个 Q 寄存器的软件现场。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldnp_fp_simd_ldp_fp_simd_pre_index_b4_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldp_fp_simd_pre_index_b4_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_pair_fp(ARM64_INSN_LDP_FP_SIMD_PRE_INDEX, address, 4, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_pair_fp(ARM64_INSN_LDP_FP_SIMD_PRE_INDEX, address, 4, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // FP/SIMD 成对存储：数据来自两个 Q 寄存器的软件现场。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldnp_fp_simd_ldp_fp_simd_pre_index_b8_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldp_fp_simd_pre_index_b8_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_pair_fp(ARM64_INSN_LDP_FP_SIMD_PRE_INDEX, address, 8, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_pair_fp(ARM64_INSN_LDP_FP_SIMD_PRE_INDEX, address, 8, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // FP/SIMD 成对存储：数据来自两个 Q 寄存器的软件现场。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldnp_fp_simd_ldp_fp_simd_pre_index_b16_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldp_fp_simd_pre_index_b16_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_pair_fp(ARM64_INSN_LDP_FP_SIMD_PRE_INDEX, address, 16, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_pair_fp(ARM64_INSN_LDP_FP_SIMD_PRE_INDEX, address, 16, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // FP/SIMD 成对存储：数据来自两个 Q 寄存器的软件现场。
 }
 
-static enum emu_insn_result emu_execute_ldst_stnp_fp_simd_stnp_fp_simd_b4_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stnp_fp_simd_b4_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_pair_fp(ARM64_INSN_STNP_FP_SIMD, address, 4, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_pair_fp(ARM64_INSN_STNP_FP_SIMD, address, 4, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 GPR 加载：统一解析偏移/索引寻址，加载成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_stnp_fp_simd_stnp_fp_simd_b8_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stnp_fp_simd_b8_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_pair_fp(ARM64_INSN_STNP_FP_SIMD, address, 8, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_pair_fp(ARM64_INSN_STNP_FP_SIMD, address, 8, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 GPR 加载：统一解析偏移/索引寻址，加载成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_stnp_fp_simd_stnp_fp_simd_b16_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stnp_fp_simd_b16_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_pair_fp(ARM64_INSN_STNP_FP_SIMD, address, 16, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_pair_fp(ARM64_INSN_STNP_FP_SIMD, address, 16, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 GPR 加载：统一解析偏移/索引寻址，加载成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_stnp_fp_simd_stp_fp_simd_offset_b4_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stp_fp_simd_offset_b4_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_pair_fp(ARM64_INSN_STP_FP_SIMD_OFFSET, address, 4, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_pair_fp(ARM64_INSN_STP_FP_SIMD_OFFSET, address, 4, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 GPR 加载：统一解析偏移/索引寻址，加载成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_stnp_fp_simd_stp_fp_simd_offset_b8_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stp_fp_simd_offset_b8_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_pair_fp(ARM64_INSN_STP_FP_SIMD_OFFSET, address, 8, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_pair_fp(ARM64_INSN_STP_FP_SIMD_OFFSET, address, 8, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 GPR 加载：统一解析偏移/索引寻址，加载成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_stnp_fp_simd_stp_fp_simd_offset_b16_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stp_fp_simd_offset_b16_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_pair_fp(ARM64_INSN_STP_FP_SIMD_OFFSET, address, 16, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_pair_fp(ARM64_INSN_STP_FP_SIMD_OFFSET, address, 16, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 GPR 加载：统一解析偏移/索引寻址，加载成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_stnp_fp_simd_stp_fp_simd_post_index_b4_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stp_fp_simd_post_index_b4_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_pair_fp(ARM64_INSN_STP_FP_SIMD_POST_INDEX, address, 4, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_pair_fp(ARM64_INSN_STP_FP_SIMD_POST_INDEX, address, 4, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 GPR 加载：统一解析偏移/索引寻址，加载成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_stnp_fp_simd_stp_fp_simd_post_index_b8_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stp_fp_simd_post_index_b8_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_pair_fp(ARM64_INSN_STP_FP_SIMD_POST_INDEX, address, 8, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_pair_fp(ARM64_INSN_STP_FP_SIMD_POST_INDEX, address, 8, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 GPR 加载：统一解析偏移/索引寻址，加载成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_stnp_fp_simd_stp_fp_simd_post_index_b16_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stp_fp_simd_post_index_b16_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_pair_fp(ARM64_INSN_STP_FP_SIMD_POST_INDEX, address, 16, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_pair_fp(ARM64_INSN_STP_FP_SIMD_POST_INDEX, address, 16, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 GPR 加载：统一解析偏移/索引寻址，加载成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_stnp_fp_simd_stp_fp_simd_pre_index_b4_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stp_fp_simd_pre_index_b4_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_pair_fp(ARM64_INSN_STP_FP_SIMD_PRE_INDEX, address, 4, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_pair_fp(ARM64_INSN_STP_FP_SIMD_PRE_INDEX, address, 4, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 GPR 加载：统一解析偏移/索引寻址，加载成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_stnp_fp_simd_stp_fp_simd_pre_index_b8_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stp_fp_simd_pre_index_b8_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_pair_fp(ARM64_INSN_STP_FP_SIMD_PRE_INDEX, address, 8, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_pair_fp(ARM64_INSN_STP_FP_SIMD_PRE_INDEX, address, 8, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 GPR 加载：统一解析偏移/索引寻址，加载成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_stnp_fp_simd_stp_fp_simd_pre_index_b16_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stp_fp_simd_pre_index_b16_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_pair_fp(ARM64_INSN_STP_FP_SIMD_PRE_INDEX, address, 16, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_pair_fp(ARM64_INSN_STP_FP_SIMD_PRE_INDEX, address, 16, &fp_regs->q[entry->reg2], &fp_regs->q[entry->reg3])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 GPR 加载：统一解析偏移/索引寻址，加载成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldur_gpr_b1_w32_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldur_gpr_w32_b1_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5671,7 +5617,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldur_gpr_b1_w32_base_offse
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldur_gpr_b2_w32_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldur_gpr_w32_b2_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5691,7 +5637,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldur_gpr_b2_w32_base_offse
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldur_gpr_b4_w32_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldur_gpr_w32_b4_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5711,7 +5657,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldur_gpr_b4_w32_base_offse
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldur_gpr_b8_w64_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldur_gpr_w64_b8_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5731,7 +5677,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldur_gpr_b8_w64_base_offse
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldur_signed_gpr_b1_w32_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldur_signed_gpr_w32_b1_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5751,7 +5697,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldur_signed_gpr_b1_w32_bas
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldur_signed_gpr_b1_w64_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldur_signed_gpr_w64_b1_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5771,7 +5717,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldur_signed_gpr_b1_w64_bas
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldur_signed_gpr_b2_w32_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldur_signed_gpr_w32_b2_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5791,7 +5737,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldur_signed_gpr_b2_w32_bas
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldur_signed_gpr_b2_w64_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldur_signed_gpr_w64_b2_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5811,7 +5757,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldur_signed_gpr_b2_w64_bas
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldur_signed_gpr_b4_w64_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldur_signed_gpr_w64_b4_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5831,7 +5777,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldur_signed_gpr_b4_w64_bas
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldtr_gpr_b1_w32_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldtr_gpr_w32_b1_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5851,7 +5797,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldtr_gpr_b1_w32_base_offse
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldtr_gpr_b2_w32_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldtr_gpr_w32_b2_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5871,7 +5817,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldtr_gpr_b2_w32_base_offse
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldtr_gpr_b4_w32_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldtr_gpr_w32_b4_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5891,7 +5837,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldtr_gpr_b4_w32_base_offse
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldtr_gpr_b8_w64_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldtr_gpr_w64_b8_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5911,7 +5857,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldtr_gpr_b8_w64_base_offse
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldtr_signed_gpr_b1_w32_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldtr_signed_gpr_w32_b1_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5931,7 +5877,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldtr_signed_gpr_b1_w32_bas
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldtr_signed_gpr_b1_w64_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldtr_signed_gpr_w64_b1_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5951,7 +5897,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldtr_signed_gpr_b1_w64_bas
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldtr_signed_gpr_b2_w32_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldtr_signed_gpr_w32_b2_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5971,7 +5917,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldtr_signed_gpr_b2_w32_bas
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldtr_signed_gpr_b2_w64_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldtr_signed_gpr_w64_b2_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -5991,7 +5937,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldtr_signed_gpr_b2_w64_bas
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldtr_signed_gpr_b4_w64_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldtr_signed_gpr_w64_b4_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6011,7 +5957,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldtr_signed_gpr_b4_w64_bas
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_post_index_b1_w32_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_post_index_w32_b1_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6031,7 +5977,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_post_index_b1_w32_
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_post_index_b2_w32_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_post_index_w32_b2_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6051,7 +5997,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_post_index_b2_w32_
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_post_index_b4_w32_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_post_index_w32_b4_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6071,7 +6017,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_post_index_b4_w32_
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_post_index_b8_w64_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_post_index_w64_b8_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6091,7 +6037,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_post_index_b8_w64_
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_post_index_b1_w32_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_post_index_w32_b1_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6111,7 +6057,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_post_index_
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_post_index_b1_w64_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_post_index_w64_b1_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6131,7 +6077,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_post_index_
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_post_index_b2_w32_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_post_index_w32_b2_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6151,7 +6097,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_post_index_
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_post_index_b2_w64_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_post_index_w64_b2_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6171,7 +6117,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_post_index_
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_post_index_b4_w64_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_post_index_w64_b4_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6191,7 +6137,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_post_index_
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_pre_index_b1_w32_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_pre_index_w32_b1_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6211,7 +6157,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_pre_index_b1_w32_p
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_pre_index_b2_w32_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_pre_index_w32_b2_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6231,7 +6177,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_pre_index_b2_w32_p
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_pre_index_b4_w32_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_pre_index_w32_b4_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6251,7 +6197,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_pre_index_b4_w32_p
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_pre_index_b8_w64_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_pre_index_w64_b8_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6271,7 +6217,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_pre_index_b8_w64_p
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_pre_index_b1_w32_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_pre_index_w32_b1_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6291,7 +6237,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_pre_index_b
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_pre_index_b1_w64_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_pre_index_w64_b1_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6311,7 +6257,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_pre_index_b
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_pre_index_b2_w32_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_pre_index_w32_b2_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6331,7 +6277,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_pre_index_b
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_pre_index_b2_w64_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_pre_index_w64_b2_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6351,7 +6297,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_pre_index_b
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_pre_index_b4_w64_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_pre_index_w64_b4_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6371,7 +6317,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_pre_index_b
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b1_w32_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_register_offset_w32_b1_mode_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6391,7 +6337,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b1
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b1_w32_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_register_offset_w32_b1_mode_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6411,7 +6357,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b1
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b1_w32_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_register_offset_w32_b1_mode_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6431,7 +6377,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b1
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b1_w32_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_register_offset_w32_b1_mode_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6451,7 +6397,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b1
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b2_w32_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_register_offset_w32_b2_mode_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6471,7 +6417,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b2
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b2_w32_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_register_offset_w32_b2_mode_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6491,7 +6437,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b2
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b2_w32_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_register_offset_w32_b2_mode_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6511,7 +6457,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b2
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b2_w32_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_register_offset_w32_b2_mode_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6531,7 +6477,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b2
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b4_w32_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_register_offset_w32_b4_mode_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6551,7 +6497,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b4
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b4_w32_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_register_offset_w32_b4_mode_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6571,7 +6517,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b4
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b4_w32_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_register_offset_w32_b4_mode_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6591,7 +6537,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b4
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b4_w32_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_register_offset_w32_b4_mode_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6611,7 +6557,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b4
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b8_w64_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_register_offset_w64_b8_mode_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6631,7 +6577,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b8
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b8_w64_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_register_offset_w64_b8_mode_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6651,7 +6597,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b8
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b8_w64_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_register_offset_w64_b8_mode_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6671,7 +6617,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b8
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b8_w64_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_register_offset_w64_b8_mode_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6691,7 +6637,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b8
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b1_w32_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_register_offset_w32_b1_mode_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6711,7 +6657,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_of
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b1_w32_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_register_offset_w32_b1_mode_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6731,7 +6677,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_of
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b1_w32_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_register_offset_w32_b1_mode_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6751,7 +6697,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_of
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b1_w32_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_register_offset_w32_b1_mode_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6771,7 +6717,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_of
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b1_w64_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_register_offset_w64_b1_mode_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6791,7 +6737,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_of
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b1_w64_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_register_offset_w64_b1_mode_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6811,7 +6757,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_of
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b1_w64_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_register_offset_w64_b1_mode_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6831,7 +6777,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_of
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b1_w64_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_register_offset_w64_b1_mode_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6851,7 +6797,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_of
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b2_w32_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_register_offset_w32_b2_mode_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6871,7 +6817,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_of
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b2_w32_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_register_offset_w32_b2_mode_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6891,7 +6837,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_of
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b2_w32_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_register_offset_w32_b2_mode_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6911,7 +6857,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_of
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b2_w32_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_register_offset_w32_b2_mode_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6931,7 +6877,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_of
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b2_w64_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_register_offset_w64_b2_mode_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6951,7 +6897,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_of
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b2_w64_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_register_offset_w64_b2_mode_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6971,7 +6917,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_of
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b2_w64_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_register_offset_w64_b2_mode_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -6991,7 +6937,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_of
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b2_w64_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_register_offset_w64_b2_mode_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7011,7 +6957,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_of
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b4_w64_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_register_offset_w64_b4_mode_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7031,7 +6977,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_of
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b4_w64_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_register_offset_w64_b4_mode_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7051,7 +6997,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_of
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b4_w64_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_register_offset_w64_b4_mode_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7071,7 +7017,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_of
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b4_w64_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_register_offset_w64_b4_mode_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7091,7 +7037,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_of
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_unsigned_offset_b1_w32_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_unsigned_offset_w32_b1_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7111,7 +7057,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_unsigned_offset_b1
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_unsigned_offset_b2_w32_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_unsigned_offset_w32_b2_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7131,7 +7077,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_unsigned_offset_b2
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_unsigned_offset_b4_w32_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_unsigned_offset_w32_b4_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7151,7 +7097,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_unsigned_offset_b4
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_unsigned_offset_b8_w64_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_gpr_unsigned_offset_w64_b8_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7171,7 +7117,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_gpr_unsigned_offset_b8
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_unsigned_offset_b1_w32_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_unsigned_offset_w32_b1_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7191,7 +7137,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_unsigned_of
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_unsigned_offset_b1_w64_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_unsigned_offset_w64_b1_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7211,7 +7157,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_unsigned_of
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_unsigned_offset_b2_w32_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_unsigned_offset_w32_b2_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7231,7 +7177,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_unsigned_of
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_unsigned_offset_b2_w64_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_unsigned_offset_w64_b2_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7251,7 +7197,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_unsigned_of
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_unsigned_offset_b4_w64_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_signed_gpr_unsigned_offset_w64_b4_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7271,7 +7217,7 @@ static enum emu_insn_result emu_execute_ldst_ldur_gpr_ldr_signed_gpr_unsigned_of
     // 普通 GPR 存储：从 Rt 取值，存储成功后执行可选 writeback。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_stur_gpr_b1_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stur_gpr_b1_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7289,7 +7235,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_stur_gpr_b1_base_offset(st
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_stur_gpr_b2_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stur_gpr_b2_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7307,7 +7253,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_stur_gpr_b2_base_offset(st
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_stur_gpr_b4_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stur_gpr_b4_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7325,7 +7271,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_stur_gpr_b4_base_offset(st
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_stur_gpr_b8_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stur_gpr_b8_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7343,7 +7289,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_stur_gpr_b8_base_offset(st
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_sttr_gpr_b1_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_sttr_gpr_b1_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7361,7 +7307,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_sttr_gpr_b1_base_offset(st
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_sttr_gpr_b2_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_sttr_gpr_b2_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7379,7 +7325,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_sttr_gpr_b2_base_offset(st
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_sttr_gpr_b4_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_sttr_gpr_b4_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7397,7 +7343,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_sttr_gpr_b4_base_offset(st
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_sttr_gpr_b8_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_sttr_gpr_b8_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7415,7 +7361,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_sttr_gpr_b8_base_offset(st
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_post_index_b1_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_post_index_b1_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7433,7 +7379,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_post_index_b1_post
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_post_index_b2_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_post_index_b2_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7451,7 +7397,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_post_index_b2_post
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_post_index_b4_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_post_index_b4_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7469,7 +7415,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_post_index_b4_post
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_post_index_b8_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_post_index_b8_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7487,7 +7433,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_post_index_b8_post
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_pre_index_b1_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_pre_index_b1_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7505,7 +7451,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_pre_index_b1_pre_i
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_pre_index_b2_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_pre_index_b2_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7523,7 +7469,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_pre_index_b2_pre_i
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_pre_index_b4_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_pre_index_b4_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7541,7 +7487,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_pre_index_b4_pre_i
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_pre_index_b8_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_pre_index_b8_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7559,7 +7505,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_pre_index_b8_pre_i
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b1_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_register_offset_b1_mode_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7577,7 +7523,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b1
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b1_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_register_offset_b1_mode_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7595,7 +7541,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b1
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b1_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_register_offset_b1_mode_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7613,7 +7559,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b1
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b1_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_register_offset_b1_mode_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7631,7 +7577,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b1
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b2_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_register_offset_b2_mode_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7649,7 +7595,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b2
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b2_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_register_offset_b2_mode_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7667,7 +7613,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b2
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b2_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_register_offset_b2_mode_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7685,7 +7631,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b2
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b2_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_register_offset_b2_mode_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7703,7 +7649,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b2
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b4_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_register_offset_b4_mode_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7721,7 +7667,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b4
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b4_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_register_offset_b4_mode_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7739,7 +7685,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b4
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b4_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_register_offset_b4_mode_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7757,7 +7703,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b4
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b4_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_register_offset_b4_mode_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7775,7 +7721,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b4
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b8_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_register_offset_b8_mode_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7793,7 +7739,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b8
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b8_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_register_offset_b8_mode_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7811,7 +7757,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b8
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b8_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_register_offset_b8_mode_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7829,7 +7775,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b8
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b8_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_register_offset_b8_mode_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7847,7 +7793,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_register_offset_b8
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_unsigned_offset_b1_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_unsigned_offset_b1_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7865,7 +7811,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_unsigned_offset_b1
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_unsigned_offset_b2_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_unsigned_offset_b2_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7883,7 +7829,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_unsigned_offset_b2
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_unsigned_offset_b4_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_unsigned_offset_b4_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7901,7 +7847,7 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_unsigned_offset_b4
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_unsigned_offset_b8_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_gpr_unsigned_offset_b8_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
 
@@ -7919,1287 +7865,1127 @@ static enum emu_insn_result emu_execute_ldst_stur_gpr_str_gpr_unsigned_offset_b8
     // 普通 FP/SIMD 加载：目标是 Q 寄存器软件现场中的对应低位元素。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldur_fp_simd_b1_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_b1_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDUR_FP_SIMD, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDUR_FP_SIMD, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldur_fp_simd_b2_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_b2_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDUR_FP_SIMD, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDUR_FP_SIMD, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldur_fp_simd_b4_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_b4_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDUR_FP_SIMD, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDUR_FP_SIMD, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldur_fp_simd_b8_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_b8_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDUR_FP_SIMD, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDUR_FP_SIMD, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldur_fp_simd_b16_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_b16_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDUR_FP_SIMD, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDUR_FP_SIMD, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_post_index_b1_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_post_index_b1_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_POST_INDEX, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_POST_INDEX, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_post_index_b2_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_post_index_b2_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_POST_INDEX, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_POST_INDEX, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_post_index_b4_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_post_index_b4_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_POST_INDEX, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_POST_INDEX, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_post_index_b8_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_post_index_b8_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_POST_INDEX, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_POST_INDEX, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_post_index_b16_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_post_index_b16_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_POST_INDEX, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_POST_INDEX, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_pre_index_b1_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_pre_index_b1_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_PRE_INDEX, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_PRE_INDEX, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_pre_index_b2_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_pre_index_b2_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_PRE_INDEX, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_PRE_INDEX, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_pre_index_b4_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_pre_index_b4_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_PRE_INDEX, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_PRE_INDEX, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_pre_index_b8_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_pre_index_b8_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_PRE_INDEX, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_PRE_INDEX, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_pre_index_b16_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_pre_index_b16_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_PRE_INDEX, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_PRE_INDEX, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b1_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_register_offset_b1_mode_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 2)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 2)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b1_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_register_offset_b1_mode_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 3)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 3)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b1_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_register_offset_b1_mode_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 6)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 6)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b1_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_register_offset_b1_mode_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 7)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 7)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b2_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_register_offset_b2_mode_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 2)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 2)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b2_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_register_offset_b2_mode_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 3)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 3)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b2_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_register_offset_b2_mode_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 6)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 6)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b2_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_register_offset_b2_mode_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 7)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 7)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b4_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_register_offset_b4_mode_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 2)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 2)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b4_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_register_offset_b4_mode_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 3)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 3)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b4_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_register_offset_b4_mode_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 6)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 6)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b4_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_register_offset_b4_mode_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 7)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 7)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b8_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_register_offset_b8_mode_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 2)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 2)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b8_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_register_offset_b8_mode_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 3)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 3)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b8_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_register_offset_b8_mode_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 6)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 6)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b8_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_register_offset_b8_mode_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 7)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 7)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b16_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_register_offset_b16_mode_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 2)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 2)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b16_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_register_offset_b16_mode_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 3)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 3)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b16_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_register_offset_b16_mode_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 6)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 6)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b16_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_register_offset_b16_mode_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 7)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 7)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_unsigned_offset_b1_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_unsigned_offset_b1_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_UNSIGNED_OFFSET, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_UNSIGNED_OFFSET, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_unsigned_offset_b2_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_unsigned_offset_b2_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_UNSIGNED_OFFSET, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_UNSIGNED_OFFSET, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_unsigned_offset_b4_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_unsigned_offset_b4_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_UNSIGNED_OFFSET, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_UNSIGNED_OFFSET, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_unsigned_offset_b8_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_unsigned_offset_b8_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_UNSIGNED_OFFSET, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_UNSIGNED_OFFSET, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_unsigned_offset_b16_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_ldr_fp_simd_unsigned_offset_b16_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_UNSIGNED_OFFSET, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_load_fp(ARM64_INSN_LDR_FP_SIMD_UNSIGNED_OFFSET, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 普通 FP/SIMD 存储：从 Q 寄存器软件现场读取指定宽度的数据。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_stur_fp_simd_b1_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stur_fp_simd_b1_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STUR_FP_SIMD, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STUR_FP_SIMD, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_stur_fp_simd_b2_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stur_fp_simd_b2_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STUR_FP_SIMD, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STUR_FP_SIMD, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_stur_fp_simd_b4_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stur_fp_simd_b4_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STUR_FP_SIMD, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STUR_FP_SIMD, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_stur_fp_simd_b8_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stur_fp_simd_b8_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STUR_FP_SIMD, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STUR_FP_SIMD, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_stur_fp_simd_b16_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_stur_fp_simd_b16_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STUR_FP_SIMD, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STUR_FP_SIMD, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_post_index_b1_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_post_index_b1_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_POST_INDEX, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_POST_INDEX, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_post_index_b2_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_post_index_b2_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_POST_INDEX, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_POST_INDEX, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_post_index_b4_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_post_index_b4_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_POST_INDEX, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_POST_INDEX, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_post_index_b8_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_post_index_b8_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_POST_INDEX, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_POST_INDEX, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_post_index_b16_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_post_index_b16_mode_post_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_POST_INDEX, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_POST_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_POST_INDEX, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_POST_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_pre_index_b1_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_pre_index_b1_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_PRE_INDEX, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_PRE_INDEX, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_pre_index_b2_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_pre_index_b2_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_PRE_INDEX, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_PRE_INDEX, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_pre_index_b4_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_pre_index_b4_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_PRE_INDEX, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_PRE_INDEX, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_pre_index_b8_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_pre_index_b8_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_PRE_INDEX, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_PRE_INDEX, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_pre_index_b16_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_pre_index_b16_mode_pre_index(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_PRE_INDEX, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_PRE_INDEX, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_PRE_INDEX, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_PRE_INDEX);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b1_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_register_offset_b1_mode_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 2)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 2)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b1_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_register_offset_b1_mode_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 3)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 3)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b1_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_register_offset_b1_mode_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 6)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 6)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b1_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_register_offset_b1_mode_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 7)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 7)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b2_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_register_offset_b2_mode_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 2)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 2)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b2_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_register_offset_b2_mode_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 3)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 3)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b2_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_register_offset_b2_mode_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 6)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 6)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b2_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_register_offset_b2_mode_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 7)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 7)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b4_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_register_offset_b4_mode_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 2)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 2)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b4_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_register_offset_b4_mode_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 3)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 3)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b4_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_register_offset_b4_mode_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 6)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 6)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b4_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_register_offset_b4_mode_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 7)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 7)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b8_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_register_offset_b8_mode_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 2)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 2)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b8_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_register_offset_b8_mode_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 3)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 3)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b8_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_register_offset_b8_mode_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 6)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 6)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b8_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_register_offset_b8_mode_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 7)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 7)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b16_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_register_offset_b16_mode_register_offset_ext2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 2)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 2)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b16_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_register_offset_b16_mode_register_offset_ext3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 3)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 3)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b16_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_register_offset_b16_mode_register_offset_ext6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 6)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 6)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b16_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_register_offset_b16_mode_register_offset_ext7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 7)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET, 7)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_REGISTER_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_unsigned_offset_b1_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_unsigned_offset_b1_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_UNSIGNED_OFFSET, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_UNSIGNED_OFFSET, address, 1, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_unsigned_offset_b2_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_unsigned_offset_b2_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_UNSIGNED_OFFSET, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_UNSIGNED_OFFSET, address, 2, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_unsigned_offset_b4_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_unsigned_offset_b4_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_UNSIGNED_OFFSET, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_UNSIGNED_OFFSET, address, 4, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_unsigned_offset_b8_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_unsigned_offset_b8_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_UNSIGNED_OFFSET, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_UNSIGNED_OFFSET, address, 8, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_stur_fp_simd_str_fp_simd_unsigned_offset_b16_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_str_fp_simd_unsigned_offset_b16_mode_base_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    {
-        uint64_t address;
-        uint64_t base = addr_reg_read(regs, entry->reg0);
+    uint64_t address;
+    uint64_t base = addr_reg_read(regs, entry->reg0);
 
-        if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
-        if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_UNSIGNED_OFFSET, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
-        emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
+    if (!emu_resolve_memory_address_entry(entry, regs, regs->pc, base, &address, ARM64_MEMORY_ADDRESS_BASE_OFFSET, 0)) return EMU_INSN_SKIP;
+    if (!emu_hw_store_fp(ARM64_INSN_STR_FP_SIMD_UNSIGNED_OFFSET, address, 16, &fp_regs->q[entry->reg2])) return EMU_INSN_SKIP;
+    emu_commit_memory_writeback_entry(entry, regs, base, ARM64_MEMORY_ADDRESS_BASE_OFFSET);
 
-        regs->pc += 4;
-        return EMU_INSN_HANDLED;
-    }
+    regs->pc += 4;
+    return EMU_INSN_HANDLED;
     // 预取是无架构可见结果的性能提示；无需实际访存即可视为已处理。
 }
 
-static enum emu_insn_result emu_execute_ldst_prfm_literal_prfm_literal_exact(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_prfm_literal(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
     (void)entry;
@@ -9208,7 +8994,7 @@ static enum emu_insn_result emu_execute_ldst_prfm_literal_prfm_literal_exact(str
         return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_ldst_prfm_literal_prfum_exact(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_prfum(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
     (void)entry;
@@ -9217,7 +9003,7 @@ static enum emu_insn_result emu_execute_ldst_prfm_literal_prfum_exact(struct pt_
         return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_ldst_prfm_literal_prfm_register_offset_exact(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_prfm_register_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
     (void)entry;
@@ -9226,7 +9012,7 @@ static enum emu_insn_result emu_execute_ldst_prfm_literal_prfm_register_offset_e
         return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_ldst_prfm_literal_prfm_unsigned_offset_exact(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_ldst_prfm_unsigned_offset(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
     (void)entry;
@@ -9237,7 +9023,7 @@ static enum emu_insn_result emu_execute_ldst_prfm_literal_prfm_unsigned_offset_e
 
 
 
-static enum emu_insn_result (*emu_select_ldst_executor(const struct arm64_decoded_insn *decoded))(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result (*emu_select_ldst_executor(const struct arm64_decoded_instruction *decoded))(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 
 {
 
@@ -9247,1401 +9033,1401 @@ static enum emu_insn_result (*emu_select_ldst_executor(const struct arm64_decode
 
     case ARM64_INSN_LDXR:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldxr_ldxr_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldxr_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldxr_ldxr_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldxr_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldxr_ldxr_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldxr_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldxr_ldxr_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldxr_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDAXR:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldxr_ldaxr_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldaxr_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldxr_ldaxr_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldaxr_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldxr_ldaxr_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldaxr_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldxr_ldaxr_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldaxr_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDXP:
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldxp_ldxp_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldxp_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldxp_ldxp_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldxp_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDAXP:
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldxp_ldaxp_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldaxp_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldxp_ldaxp_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldaxp_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_STXR:
 
-        if (decoded->access_bytes == 1) return emu_execute_ldst_stxr_stxr_b1;
+        if (decoded->access_bytes == 1) return emu_execute_ldst_stxr_b1;
 
-        if (decoded->access_bytes == 2) return emu_execute_ldst_stxr_stxr_b2;
+        if (decoded->access_bytes == 2) return emu_execute_ldst_stxr_b2;
 
-        if (decoded->access_bytes == 4) return emu_execute_ldst_stxr_stxr_b4;
+        if (decoded->access_bytes == 4) return emu_execute_ldst_stxr_b4;
 
-        if (decoded->access_bytes == 8) return emu_execute_ldst_stxr_stxr_b8;
+        if (decoded->access_bytes == 8) return emu_execute_ldst_stxr_b8;
 
         return NULL;
 
     case ARM64_INSN_STLXR:
 
-        if (decoded->access_bytes == 1) return emu_execute_ldst_stxr_stlxr_b1;
+        if (decoded->access_bytes == 1) return emu_execute_ldst_stlxr_b1;
 
-        if (decoded->access_bytes == 2) return emu_execute_ldst_stxr_stlxr_b2;
+        if (decoded->access_bytes == 2) return emu_execute_ldst_stlxr_b2;
 
-        if (decoded->access_bytes == 4) return emu_execute_ldst_stxr_stlxr_b4;
+        if (decoded->access_bytes == 4) return emu_execute_ldst_stlxr_b4;
 
-        if (decoded->access_bytes == 8) return emu_execute_ldst_stxr_stlxr_b8;
+        if (decoded->access_bytes == 8) return emu_execute_ldst_stlxr_b8;
 
         return NULL;
 
     case ARM64_INSN_STXP:
 
-        if (decoded->access_bytes == 4) return emu_execute_ldst_stxp_stxp_b4;
+        if (decoded->access_bytes == 4) return emu_execute_ldst_stxp_b4;
 
-        if (decoded->access_bytes == 8) return emu_execute_ldst_stxp_stxp_b8;
+        if (decoded->access_bytes == 8) return emu_execute_ldst_stxp_b8;
 
         return NULL;
 
     case ARM64_INSN_STLXP:
 
-        if (decoded->access_bytes == 4) return emu_execute_ldst_stxp_stlxp_b4;
+        if (decoded->access_bytes == 4) return emu_execute_ldst_stlxp_b4;
 
-        if (decoded->access_bytes == 8) return emu_execute_ldst_stxp_stlxp_b8;
+        if (decoded->access_bytes == 8) return emu_execute_ldst_stlxp_b8;
 
         return NULL;
 
     case ARM64_INSN_CASP:
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_casp_casp_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_casp_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_casp_casp_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_casp_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_CASPA:
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_casp_caspa_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_caspa_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_casp_caspa_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_caspa_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_CASPL:
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_casp_caspl_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_caspl_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_casp_caspl_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_caspl_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_CASPAL:
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_casp_caspal_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_caspal_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_casp_caspal_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_caspal_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_STLLR:
 
-        if (decoded->access_bytes == 1) return emu_execute_ldst_stllr_stllr_b1;
+        if (decoded->access_bytes == 1) return emu_execute_ldst_stllr_b1;
 
-        if (decoded->access_bytes == 2) return emu_execute_ldst_stllr_stllr_b2;
+        if (decoded->access_bytes == 2) return emu_execute_ldst_stllr_b2;
 
-        if (decoded->access_bytes == 4) return emu_execute_ldst_stllr_stllr_b4;
+        if (decoded->access_bytes == 4) return emu_execute_ldst_stllr_b4;
 
-        if (decoded->access_bytes == 8) return emu_execute_ldst_stllr_stllr_b8;
+        if (decoded->access_bytes == 8) return emu_execute_ldst_stllr_b8;
 
         return NULL;
 
     case ARM64_INSN_STLR:
 
-        if (decoded->access_bytes == 1) return emu_execute_ldst_stllr_stlr_b1;
+        if (decoded->access_bytes == 1) return emu_execute_ldst_stlr_b1;
 
-        if (decoded->access_bytes == 2) return emu_execute_ldst_stllr_stlr_b2;
+        if (decoded->access_bytes == 2) return emu_execute_ldst_stlr_b2;
 
-        if (decoded->access_bytes == 4) return emu_execute_ldst_stllr_stlr_b4;
+        if (decoded->access_bytes == 4) return emu_execute_ldst_stlr_b4;
 
-        if (decoded->access_bytes == 8) return emu_execute_ldst_stllr_stlr_b8;
+        if (decoded->access_bytes == 8) return emu_execute_ldst_stlr_b8;
 
         return NULL;
 
     case ARM64_INSN_LDLAR:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldlar_ldlar_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldlar_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldlar_ldlar_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldlar_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldlar_ldlar_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldlar_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldlar_ldlar_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldlar_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDAR:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldlar_ldar_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldar_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldlar_ldar_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldar_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldlar_ldar_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldar_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldlar_ldar_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldar_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_CAS:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_cas_cas_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_cas_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_cas_cas_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_cas_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_cas_cas_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_cas_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_cas_cas_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_cas_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_CASA:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_cas_casa_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_casa_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_cas_casa_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_casa_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_cas_casa_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_casa_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_cas_casa_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_casa_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_CASL:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_cas_casl_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_casl_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_cas_casl_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_casl_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_cas_casl_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_casl_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_cas_casl_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_casl_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_CASAL:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_cas_casal_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_casal_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_cas_casal_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_casal_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_cas_casal_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_casal_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_cas_casal_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_casal_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDADD:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldadd_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldadd_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldadd_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldadd_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDADDA:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldadda_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadda_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldadda_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadda_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldadda_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadda_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldadda_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadda_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDADDL:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldaddl_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldaddl_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldaddl_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldaddl_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldaddl_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldaddl_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldaddl_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldaddl_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDADDAL:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldaddal_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldaddal_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldaddal_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldaddal_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldaddal_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldaddal_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldaddal_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldaddal_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDCLR:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldclr_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldclr_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldclr_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldclr_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldclr_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldclr_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldclr_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldclr_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDCLRA:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldclra_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldclra_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldclra_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldclra_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldclra_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldclra_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldclra_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldclra_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDCLRL:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldclrl_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldclrl_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldclrl_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldclrl_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldclrl_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldclrl_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldclrl_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldclrl_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDCLRAL:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldclral_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldclral_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldclral_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldclral_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldclral_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldclral_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldclral_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldclral_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDEOR:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldeor_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldeor_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldeor_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldeor_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldeor_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldeor_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldeor_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldeor_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDEORA:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldeora_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldeora_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldeora_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldeora_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldeora_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldeora_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldeora_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldeora_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDEORL:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldeorl_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldeorl_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldeorl_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldeorl_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldeorl_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldeorl_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldeorl_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldeorl_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDEORAL:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldeoral_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldeoral_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldeoral_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldeoral_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldeoral_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldeoral_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldeoral_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldeoral_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDSET:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldset_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldset_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldset_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldset_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldset_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldset_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldset_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldset_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDSETA:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldseta_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldseta_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldseta_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldseta_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldseta_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldseta_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldseta_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldseta_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDSETL:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsetl_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldsetl_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsetl_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldsetl_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsetl_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldsetl_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldsetl_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldsetl_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDSETAL:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsetal_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldsetal_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsetal_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldsetal_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsetal_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldsetal_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldsetal_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldsetal_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDSMAX:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsmax_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldsmax_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsmax_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldsmax_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsmax_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldsmax_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldsmax_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldsmax_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDSMAXA:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsmaxa_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldsmaxa_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsmaxa_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldsmaxa_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsmaxa_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldsmaxa_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldsmaxa_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldsmaxa_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDSMAXL:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsmaxl_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldsmaxl_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsmaxl_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldsmaxl_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsmaxl_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldsmaxl_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldsmaxl_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldsmaxl_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDSMAXAL:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsmaxal_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldsmaxal_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsmaxal_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldsmaxal_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsmaxal_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldsmaxal_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldsmaxal_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldsmaxal_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDSMIN:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsmin_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldsmin_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsmin_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldsmin_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsmin_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldsmin_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldsmin_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldsmin_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDSMINA:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsmina_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldsmina_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsmina_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldsmina_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsmina_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldsmina_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldsmina_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldsmina_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDSMINL:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsminl_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldsminl_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsminl_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldsminl_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsminl_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldsminl_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldsminl_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldsminl_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDSMINAL:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsminal_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldsminal_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsminal_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldsminal_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldsminal_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldsminal_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldsminal_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldsminal_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDUMAX:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldumax_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldumax_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldumax_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldumax_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldumax_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldumax_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldumax_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldumax_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDUMAXA:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldumaxa_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldumaxa_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldumaxa_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldumaxa_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldumaxa_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldumaxa_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldumaxa_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldumaxa_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDUMAXL:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldumaxl_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldumaxl_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldumaxl_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldumaxl_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldumaxl_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldumaxl_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldumaxl_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldumaxl_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDUMAXAL:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldumaxal_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldumaxal_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldumaxal_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldumaxal_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldumaxal_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldumaxal_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldumaxal_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldumaxal_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDUMIN:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldumin_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldumin_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldumin_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldumin_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldumin_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldumin_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldumin_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldumin_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDUMINA:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldumina_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldumina_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldumina_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldumina_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_ldumina_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldumina_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_ldumina_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldumina_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDUMINL:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_lduminl_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_lduminl_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_lduminl_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_lduminl_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_lduminl_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_lduminl_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_lduminl_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_lduminl_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDUMINAL:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_lduminal_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_lduminal_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_lduminal_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_lduminal_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_lduminal_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_lduminal_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_lduminal_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_lduminal_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_SWP:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_swp_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_swp_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_swp_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_swp_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_swp_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_swp_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_swp_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_swp_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_SWPA:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_swpa_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_swpa_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_swpa_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_swpa_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_swpa_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_swpa_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_swpa_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_swpa_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_SWPL:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_swpl_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_swpl_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_swpl_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_swpl_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_swpl_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_swpl_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_swpl_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_swpl_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_SWPAL:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_swpal_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_swpal_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_swpal_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_swpal_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldadd_swpal_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_swpal_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldadd_swpal_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_swpal_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDAPR:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldapr_ldapr_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldapr_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldapr_ldapr_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldapr_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldapr_ldapr_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldapr_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldapr_ldapr_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldapr_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDR_LITERAL_GPR:
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_LITERAL) return emu_execute_ldst_ldr_literal_gpr_ldr_literal_gpr_b4_w32_literal;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_LITERAL) return emu_execute_ldst_ldr_literal_gpr_w32_b4_mode_literal;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_LITERAL) return emu_execute_ldst_ldr_literal_gpr_ldr_literal_gpr_b8_w64_literal;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_LITERAL) return emu_execute_ldst_ldr_literal_gpr_w64_b8_mode_literal;
 
         return NULL;
 
     case ARM64_INSN_LDRSW_LITERAL:
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_LITERAL) return emu_execute_ldst_ldr_literal_gpr_ldrsw_literal_b4_w64_literal;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_LITERAL) return emu_execute_ldst_ldrsw_literal_w64_b4_mode_literal;
 
         return NULL;
 
     case ARM64_INSN_LDR_LITERAL_FP_SIMD:
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_LITERAL) return emu_execute_ldst_ldr_literal_fp_simd_ldr_literal_fp_simd_b4_literal;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_LITERAL) return emu_execute_ldst_ldr_literal_fp_simd_b4_mode_literal;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_LITERAL) return emu_execute_ldst_ldr_literal_fp_simd_ldr_literal_fp_simd_b8_literal;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_LITERAL) return emu_execute_ldst_ldr_literal_fp_simd_b8_mode_literal;
 
-        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_LITERAL) return emu_execute_ldst_ldr_literal_fp_simd_ldr_literal_fp_simd_b16_literal;
+        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_LITERAL) return emu_execute_ldst_ldr_literal_fp_simd_b16_mode_literal;
 
         return NULL;
 
     case ARM64_INSN_STLUR:
 
-        if (decoded->access_bytes == 1) return emu_execute_ldst_stlur_stlur_b1;
+        if (decoded->access_bytes == 1) return emu_execute_ldst_stlur_b1;
 
-        if (decoded->access_bytes == 2) return emu_execute_ldst_stlur_stlur_b2;
+        if (decoded->access_bytes == 2) return emu_execute_ldst_stlur_b2;
 
-        if (decoded->access_bytes == 4) return emu_execute_ldst_stlur_stlur_b4;
+        if (decoded->access_bytes == 4) return emu_execute_ldst_stlur_b4;
 
-        if (decoded->access_bytes == 8) return emu_execute_ldst_stlur_stlur_b8;
+        if (decoded->access_bytes == 8) return emu_execute_ldst_stlur_b8;
 
         return NULL;
 
     case ARM64_INSN_LDAPUR:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldapur_ldapur_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldapur_w32_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldapur_ldapur_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldapur_w32_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldapur_ldapur_b4_w32;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32) return emu_execute_ldst_ldapur_w32_b4;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldapur_ldapur_b8_w64;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64) return emu_execute_ldst_ldapur_w64_b8;
 
         return NULL;
 
     case ARM64_INSN_LDAPUR_SIGNED:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldapur_ldapur_signed_b1_w32;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32) return emu_execute_ldst_ldapur_signed_w32_b1;
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 64) return emu_execute_ldst_ldapur_ldapur_signed_b1_w64;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 64) return emu_execute_ldst_ldapur_signed_w64_b1;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldapur_ldapur_signed_b2_w32;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32) return emu_execute_ldst_ldapur_signed_w32_b2;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 64) return emu_execute_ldst_ldapur_ldapur_signed_b2_w64;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 64) return emu_execute_ldst_ldapur_signed_w64_b2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 64) return emu_execute_ldst_ldapur_ldapur_signed_b4_w64;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 64) return emu_execute_ldst_ldapur_signed_w64_b4;
 
         return NULL;
 
     case ARM64_INSN_LDNP_GPR:
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldnp_gpr_ldnp_gpr_b4_w32_base_offset;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldnp_gpr_w32_b4_mode_base_offset;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldnp_gpr_ldnp_gpr_b8_w64_base_offset;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldnp_gpr_w64_b8_mode_base_offset;
 
         return NULL;
 
     case ARM64_INSN_LDP_GPR_OFFSET:
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldnp_gpr_ldp_gpr_offset_b4_w32_base_offset;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldp_gpr_offset_w32_b4_mode_base_offset;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldnp_gpr_ldp_gpr_offset_b8_w64_base_offset;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldp_gpr_offset_w64_b8_mode_base_offset;
 
         return NULL;
 
     case ARM64_INSN_LDPSW_OFFSET:
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldnp_gpr_ldpsw_offset_b4_w64_base_offset;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldpsw_offset_w64_b4_mode_base_offset;
 
         return NULL;
 
     case ARM64_INSN_LDP_GPR_POST_INDEX:
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldnp_gpr_ldp_gpr_post_index_b4_w32_post_index;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldp_gpr_post_index_w32_b4_mode_post_index;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldnp_gpr_ldp_gpr_post_index_b8_w64_post_index;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldp_gpr_post_index_w64_b8_mode_post_index;
 
         return NULL;
 
     case ARM64_INSN_LDPSW_POST_INDEX:
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldnp_gpr_ldpsw_post_index_b4_w64_post_index;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldpsw_post_index_w64_b4_mode_post_index;
 
         return NULL;
 
     case ARM64_INSN_LDP_GPR_PRE_INDEX:
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldnp_gpr_ldp_gpr_pre_index_b4_w32_pre_index;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldp_gpr_pre_index_w32_b4_mode_pre_index;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldnp_gpr_ldp_gpr_pre_index_b8_w64_pre_index;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldp_gpr_pre_index_w64_b8_mode_pre_index;
 
         return NULL;
 
     case ARM64_INSN_LDPSW_PRE_INDEX:
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldnp_gpr_ldpsw_pre_index_b4_w64_pre_index;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldpsw_pre_index_w64_b4_mode_pre_index;
 
         return NULL;
 
     case ARM64_INSN_STNP_GPR:
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stnp_gpr_stnp_gpr_b4_base_offset;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stnp_gpr_b4_mode_base_offset;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stnp_gpr_stnp_gpr_b8_base_offset;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stnp_gpr_b8_mode_base_offset;
 
         return NULL;
 
     case ARM64_INSN_STP_GPR_OFFSET:
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stnp_gpr_stp_gpr_offset_b4_base_offset;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stp_gpr_offset_b4_mode_base_offset;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stnp_gpr_stp_gpr_offset_b8_base_offset;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stp_gpr_offset_b8_mode_base_offset;
 
         return NULL;
 
     case ARM64_INSN_STP_GPR_POST_INDEX:
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_stnp_gpr_stp_gpr_post_index_b4_post_index;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_stp_gpr_post_index_b4_mode_post_index;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_stnp_gpr_stp_gpr_post_index_b8_post_index;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_stp_gpr_post_index_b8_mode_post_index;
 
         return NULL;
 
     case ARM64_INSN_STP_GPR_PRE_INDEX:
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_stnp_gpr_stp_gpr_pre_index_b4_pre_index;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_stp_gpr_pre_index_b4_mode_pre_index;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_stnp_gpr_stp_gpr_pre_index_b8_pre_index;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_stp_gpr_pre_index_b8_mode_pre_index;
 
         return NULL;
 
     case ARM64_INSN_LDNP_FP_SIMD:
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldnp_fp_simd_ldnp_fp_simd_b4_base_offset;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldnp_fp_simd_b4_mode_base_offset;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldnp_fp_simd_ldnp_fp_simd_b8_base_offset;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldnp_fp_simd_b8_mode_base_offset;
 
-        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldnp_fp_simd_ldnp_fp_simd_b16_base_offset;
+        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldnp_fp_simd_b16_mode_base_offset;
 
         return NULL;
 
     case ARM64_INSN_LDP_FP_SIMD_OFFSET:
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldnp_fp_simd_ldp_fp_simd_offset_b4_base_offset;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldp_fp_simd_offset_b4_mode_base_offset;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldnp_fp_simd_ldp_fp_simd_offset_b8_base_offset;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldp_fp_simd_offset_b8_mode_base_offset;
 
-        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldnp_fp_simd_ldp_fp_simd_offset_b16_base_offset;
+        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldp_fp_simd_offset_b16_mode_base_offset;
 
         return NULL;
 
     case ARM64_INSN_LDP_FP_SIMD_POST_INDEX:
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldnp_fp_simd_ldp_fp_simd_post_index_b4_post_index;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldp_fp_simd_post_index_b4_mode_post_index;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldnp_fp_simd_ldp_fp_simd_post_index_b8_post_index;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldp_fp_simd_post_index_b8_mode_post_index;
 
-        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldnp_fp_simd_ldp_fp_simd_post_index_b16_post_index;
+        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldp_fp_simd_post_index_b16_mode_post_index;
 
         return NULL;
 
     case ARM64_INSN_LDP_FP_SIMD_PRE_INDEX:
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldnp_fp_simd_ldp_fp_simd_pre_index_b4_pre_index;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldp_fp_simd_pre_index_b4_mode_pre_index;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldnp_fp_simd_ldp_fp_simd_pre_index_b8_pre_index;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldp_fp_simd_pre_index_b8_mode_pre_index;
 
-        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldnp_fp_simd_ldp_fp_simd_pre_index_b16_pre_index;
+        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldp_fp_simd_pre_index_b16_mode_pre_index;
 
         return NULL;
 
     case ARM64_INSN_STNP_FP_SIMD:
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stnp_fp_simd_stnp_fp_simd_b4_base_offset;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stnp_fp_simd_b4_mode_base_offset;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stnp_fp_simd_stnp_fp_simd_b8_base_offset;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stnp_fp_simd_b8_mode_base_offset;
 
-        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stnp_fp_simd_stnp_fp_simd_b16_base_offset;
+        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stnp_fp_simd_b16_mode_base_offset;
 
         return NULL;
 
     case ARM64_INSN_STP_FP_SIMD_OFFSET:
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stnp_fp_simd_stp_fp_simd_offset_b4_base_offset;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stp_fp_simd_offset_b4_mode_base_offset;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stnp_fp_simd_stp_fp_simd_offset_b8_base_offset;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stp_fp_simd_offset_b8_mode_base_offset;
 
-        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stnp_fp_simd_stp_fp_simd_offset_b16_base_offset;
+        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stp_fp_simd_offset_b16_mode_base_offset;
 
         return NULL;
 
     case ARM64_INSN_STP_FP_SIMD_POST_INDEX:
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_stnp_fp_simd_stp_fp_simd_post_index_b4_post_index;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_stp_fp_simd_post_index_b4_mode_post_index;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_stnp_fp_simd_stp_fp_simd_post_index_b8_post_index;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_stp_fp_simd_post_index_b8_mode_post_index;
 
-        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_stnp_fp_simd_stp_fp_simd_post_index_b16_post_index;
+        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_stp_fp_simd_post_index_b16_mode_post_index;
 
         return NULL;
 
     case ARM64_INSN_STP_FP_SIMD_PRE_INDEX:
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_stnp_fp_simd_stp_fp_simd_pre_index_b4_pre_index;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_stp_fp_simd_pre_index_b4_mode_pre_index;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_stnp_fp_simd_stp_fp_simd_pre_index_b8_pre_index;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_stp_fp_simd_pre_index_b8_mode_pre_index;
 
-        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_stnp_fp_simd_stp_fp_simd_pre_index_b16_pre_index;
+        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_stp_fp_simd_pre_index_b16_mode_pre_index;
 
         return NULL;
 
     case ARM64_INSN_LDUR_GPR:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_ldur_gpr_b1_w32_base_offset;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_w32_b1_mode_base_offset;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_ldur_gpr_b2_w32_base_offset;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_w32_b2_mode_base_offset;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_ldur_gpr_b4_w32_base_offset;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_w32_b4_mode_base_offset;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_ldur_gpr_b8_w64_base_offset;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_w64_b8_mode_base_offset;
 
         return NULL;
 
     case ARM64_INSN_LDUR_SIGNED_GPR:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_ldur_signed_gpr_b1_w32_base_offset;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_signed_gpr_w32_b1_mode_base_offset;
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_ldur_signed_gpr_b1_w64_base_offset;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_signed_gpr_w64_b1_mode_base_offset;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_ldur_signed_gpr_b2_w32_base_offset;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_signed_gpr_w32_b2_mode_base_offset;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_ldur_signed_gpr_b2_w64_base_offset;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_signed_gpr_w64_b2_mode_base_offset;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_ldur_signed_gpr_b4_w64_base_offset;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_signed_gpr_w64_b4_mode_base_offset;
 
         return NULL;
 
     case ARM64_INSN_LDTR_GPR:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_ldtr_gpr_b1_w32_base_offset;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldtr_gpr_w32_b1_mode_base_offset;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_ldtr_gpr_b2_w32_base_offset;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldtr_gpr_w32_b2_mode_base_offset;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_ldtr_gpr_b4_w32_base_offset;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldtr_gpr_w32_b4_mode_base_offset;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_ldtr_gpr_b8_w64_base_offset;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldtr_gpr_w64_b8_mode_base_offset;
 
         return NULL;
 
     case ARM64_INSN_LDTR_SIGNED_GPR:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_ldtr_signed_gpr_b1_w32_base_offset;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldtr_signed_gpr_w32_b1_mode_base_offset;
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_ldtr_signed_gpr_b1_w64_base_offset;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldtr_signed_gpr_w64_b1_mode_base_offset;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_ldtr_signed_gpr_b2_w32_base_offset;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldtr_signed_gpr_w32_b2_mode_base_offset;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_ldtr_signed_gpr_b2_w64_base_offset;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldtr_signed_gpr_w64_b2_mode_base_offset;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_ldtr_signed_gpr_b4_w64_base_offset;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldtr_signed_gpr_w64_b4_mode_base_offset;
 
         return NULL;
 
     case ARM64_INSN_LDR_GPR_POST_INDEX:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldur_gpr_ldr_gpr_post_index_b1_w32_post_index;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldr_gpr_post_index_w32_b1_mode_post_index;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldur_gpr_ldr_gpr_post_index_b2_w32_post_index;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldr_gpr_post_index_w32_b2_mode_post_index;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldur_gpr_ldr_gpr_post_index_b4_w32_post_index;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldr_gpr_post_index_w32_b4_mode_post_index;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldur_gpr_ldr_gpr_post_index_b8_w64_post_index;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldr_gpr_post_index_w64_b8_mode_post_index;
 
         return NULL;
 
     case ARM64_INSN_LDR_SIGNED_GPR_POST_INDEX:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_post_index_b1_w32_post_index;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldr_signed_gpr_post_index_w32_b1_mode_post_index;
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_post_index_b1_w64_post_index;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldr_signed_gpr_post_index_w64_b1_mode_post_index;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_post_index_b2_w32_post_index;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldr_signed_gpr_post_index_w32_b2_mode_post_index;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_post_index_b2_w64_post_index;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldr_signed_gpr_post_index_w64_b2_mode_post_index;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_post_index_b4_w64_post_index;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldr_signed_gpr_post_index_w64_b4_mode_post_index;
 
         return NULL;
 
     case ARM64_INSN_LDR_GPR_PRE_INDEX:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldur_gpr_ldr_gpr_pre_index_b1_w32_pre_index;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldr_gpr_pre_index_w32_b1_mode_pre_index;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldur_gpr_ldr_gpr_pre_index_b2_w32_pre_index;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldr_gpr_pre_index_w32_b2_mode_pre_index;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldur_gpr_ldr_gpr_pre_index_b4_w32_pre_index;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldr_gpr_pre_index_w32_b4_mode_pre_index;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldur_gpr_ldr_gpr_pre_index_b8_w64_pre_index;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldr_gpr_pre_index_w64_b8_mode_pre_index;
 
         return NULL;
 
     case ARM64_INSN_LDR_SIGNED_GPR_PRE_INDEX:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_pre_index_b1_w32_pre_index;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldr_signed_gpr_pre_index_w32_b1_mode_pre_index;
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_pre_index_b1_w64_pre_index;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldr_signed_gpr_pre_index_w64_b1_mode_pre_index;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_pre_index_b2_w32_pre_index;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldr_signed_gpr_pre_index_w32_b2_mode_pre_index;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_pre_index_b2_w64_pre_index;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldr_signed_gpr_pre_index_w64_b2_mode_pre_index;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_pre_index_b4_w64_pre_index;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldr_signed_gpr_pre_index_w64_b4_mode_pre_index;
 
         return NULL;
 
     case ARM64_INSN_LDR_GPR_REGISTER_OFFSET:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b1_w32_register_offset_ext2;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldr_gpr_register_offset_w32_b1_mode_register_offset_ext2;
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b1_w32_register_offset_ext3;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldr_gpr_register_offset_w32_b1_mode_register_offset_ext3;
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b1_w32_register_offset_ext6;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldr_gpr_register_offset_w32_b1_mode_register_offset_ext6;
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b1_w32_register_offset_ext7;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldr_gpr_register_offset_w32_b1_mode_register_offset_ext7;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b2_w32_register_offset_ext2;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldr_gpr_register_offset_w32_b2_mode_register_offset_ext2;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b2_w32_register_offset_ext3;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldr_gpr_register_offset_w32_b2_mode_register_offset_ext3;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b2_w32_register_offset_ext6;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldr_gpr_register_offset_w32_b2_mode_register_offset_ext6;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b2_w32_register_offset_ext7;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldr_gpr_register_offset_w32_b2_mode_register_offset_ext7;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b4_w32_register_offset_ext2;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldr_gpr_register_offset_w32_b4_mode_register_offset_ext2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b4_w32_register_offset_ext3;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldr_gpr_register_offset_w32_b4_mode_register_offset_ext3;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b4_w32_register_offset_ext6;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldr_gpr_register_offset_w32_b4_mode_register_offset_ext6;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b4_w32_register_offset_ext7;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldr_gpr_register_offset_w32_b4_mode_register_offset_ext7;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b8_w64_register_offset_ext2;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldr_gpr_register_offset_w64_b8_mode_register_offset_ext2;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b8_w64_register_offset_ext3;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldr_gpr_register_offset_w64_b8_mode_register_offset_ext3;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b8_w64_register_offset_ext6;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldr_gpr_register_offset_w64_b8_mode_register_offset_ext6;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldur_gpr_ldr_gpr_register_offset_b8_w64_register_offset_ext7;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldr_gpr_register_offset_w64_b8_mode_register_offset_ext7;
 
         return NULL;
 
     case ARM64_INSN_LDR_SIGNED_GPR_REGISTER_OFFSET:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b1_w32_register_offset_ext2;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldr_signed_gpr_register_offset_w32_b1_mode_register_offset_ext2;
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b1_w32_register_offset_ext3;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldr_signed_gpr_register_offset_w32_b1_mode_register_offset_ext3;
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b1_w32_register_offset_ext6;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldr_signed_gpr_register_offset_w32_b1_mode_register_offset_ext6;
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b1_w32_register_offset_ext7;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldr_signed_gpr_register_offset_w32_b1_mode_register_offset_ext7;
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b1_w64_register_offset_ext2;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldr_signed_gpr_register_offset_w64_b1_mode_register_offset_ext2;
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b1_w64_register_offset_ext3;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldr_signed_gpr_register_offset_w64_b1_mode_register_offset_ext3;
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b1_w64_register_offset_ext6;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldr_signed_gpr_register_offset_w64_b1_mode_register_offset_ext6;
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b1_w64_register_offset_ext7;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldr_signed_gpr_register_offset_w64_b1_mode_register_offset_ext7;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b2_w32_register_offset_ext2;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldr_signed_gpr_register_offset_w32_b2_mode_register_offset_ext2;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b2_w32_register_offset_ext3;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldr_signed_gpr_register_offset_w32_b2_mode_register_offset_ext3;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b2_w32_register_offset_ext6;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldr_signed_gpr_register_offset_w32_b2_mode_register_offset_ext6;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b2_w32_register_offset_ext7;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldr_signed_gpr_register_offset_w32_b2_mode_register_offset_ext7;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b2_w64_register_offset_ext2;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldr_signed_gpr_register_offset_w64_b2_mode_register_offset_ext2;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b2_w64_register_offset_ext3;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldr_signed_gpr_register_offset_w64_b2_mode_register_offset_ext3;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b2_w64_register_offset_ext6;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldr_signed_gpr_register_offset_w64_b2_mode_register_offset_ext6;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b2_w64_register_offset_ext7;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldr_signed_gpr_register_offset_w64_b2_mode_register_offset_ext7;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b4_w64_register_offset_ext2;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldr_signed_gpr_register_offset_w64_b4_mode_register_offset_ext2;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b4_w64_register_offset_ext3;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldr_signed_gpr_register_offset_w64_b4_mode_register_offset_ext3;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b4_w64_register_offset_ext6;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldr_signed_gpr_register_offset_w64_b4_mode_register_offset_ext6;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_register_offset_b4_w64_register_offset_ext7;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldr_signed_gpr_register_offset_w64_b4_mode_register_offset_ext7;
 
         return NULL;
 
     case ARM64_INSN_LDR_GPR_UNSIGNED_OFFSET:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_ldr_gpr_unsigned_offset_b1_w32_base_offset;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldr_gpr_unsigned_offset_w32_b1_mode_base_offset;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_ldr_gpr_unsigned_offset_b2_w32_base_offset;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldr_gpr_unsigned_offset_w32_b2_mode_base_offset;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_ldr_gpr_unsigned_offset_b4_w32_base_offset;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldr_gpr_unsigned_offset_w32_b4_mode_base_offset;
 
-        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_ldr_gpr_unsigned_offset_b8_w64_base_offset;
+        if (decoded->access_bytes == 8 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldr_gpr_unsigned_offset_w64_b8_mode_base_offset;
 
         return NULL;
 
     case ARM64_INSN_LDR_SIGNED_GPR_UNSIGNED_OFFSET:
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_unsigned_offset_b1_w32_base_offset;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldr_signed_gpr_unsigned_offset_w32_b1_mode_base_offset;
 
-        if (decoded->access_bytes == 1 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_unsigned_offset_b1_w64_base_offset;
+        if (decoded->access_bytes == 1 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldr_signed_gpr_unsigned_offset_w64_b1_mode_base_offset;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_unsigned_offset_b2_w32_base_offset;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 32 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldr_signed_gpr_unsigned_offset_w32_b2_mode_base_offset;
 
-        if (decoded->access_bytes == 2 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_unsigned_offset_b2_w64_base_offset;
+        if (decoded->access_bytes == 2 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldr_signed_gpr_unsigned_offset_w64_b2_mode_base_offset;
 
-        if (decoded->access_bytes == 4 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_gpr_ldr_signed_gpr_unsigned_offset_b4_w64_base_offset;
+        if (decoded->access_bytes == 4 && decoded->operand_width == 64 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldr_signed_gpr_unsigned_offset_w64_b4_mode_base_offset;
 
         return NULL;
 
     case ARM64_INSN_STUR_GPR:
 
-        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_gpr_stur_gpr_b1_base_offset;
+        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_gpr_b1_mode_base_offset;
 
-        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_gpr_stur_gpr_b2_base_offset;
+        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_gpr_b2_mode_base_offset;
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_gpr_stur_gpr_b4_base_offset;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_gpr_b4_mode_base_offset;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_gpr_stur_gpr_b8_base_offset;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_gpr_b8_mode_base_offset;
 
         return NULL;
 
     case ARM64_INSN_STTR_GPR:
 
-        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_gpr_sttr_gpr_b1_base_offset;
+        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_sttr_gpr_b1_mode_base_offset;
 
-        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_gpr_sttr_gpr_b2_base_offset;
+        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_sttr_gpr_b2_mode_base_offset;
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_gpr_sttr_gpr_b4_base_offset;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_sttr_gpr_b4_mode_base_offset;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_gpr_sttr_gpr_b8_base_offset;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_sttr_gpr_b8_mode_base_offset;
 
         return NULL;
 
     case ARM64_INSN_STR_GPR_POST_INDEX:
 
-        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_stur_gpr_str_gpr_post_index_b1_post_index;
+        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_str_gpr_post_index_b1_mode_post_index;
 
-        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_stur_gpr_str_gpr_post_index_b2_post_index;
+        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_str_gpr_post_index_b2_mode_post_index;
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_stur_gpr_str_gpr_post_index_b4_post_index;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_str_gpr_post_index_b4_mode_post_index;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_stur_gpr_str_gpr_post_index_b8_post_index;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_str_gpr_post_index_b8_mode_post_index;
 
         return NULL;
 
     case ARM64_INSN_STR_GPR_PRE_INDEX:
 
-        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_stur_gpr_str_gpr_pre_index_b1_pre_index;
+        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_str_gpr_pre_index_b1_mode_pre_index;
 
-        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_stur_gpr_str_gpr_pre_index_b2_pre_index;
+        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_str_gpr_pre_index_b2_mode_pre_index;
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_stur_gpr_str_gpr_pre_index_b4_pre_index;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_str_gpr_pre_index_b4_mode_pre_index;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_stur_gpr_str_gpr_pre_index_b8_pre_index;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_str_gpr_pre_index_b8_mode_pre_index;
 
         return NULL;
 
     case ARM64_INSN_STR_GPR_REGISTER_OFFSET:
 
-        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_stur_gpr_str_gpr_register_offset_b1_register_offset_ext2;
+        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_str_gpr_register_offset_b1_mode_register_offset_ext2;
 
-        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_stur_gpr_str_gpr_register_offset_b1_register_offset_ext3;
+        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_str_gpr_register_offset_b1_mode_register_offset_ext3;
 
-        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_stur_gpr_str_gpr_register_offset_b1_register_offset_ext6;
+        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_str_gpr_register_offset_b1_mode_register_offset_ext6;
 
-        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_stur_gpr_str_gpr_register_offset_b1_register_offset_ext7;
+        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_str_gpr_register_offset_b1_mode_register_offset_ext7;
 
-        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_stur_gpr_str_gpr_register_offset_b2_register_offset_ext2;
+        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_str_gpr_register_offset_b2_mode_register_offset_ext2;
 
-        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_stur_gpr_str_gpr_register_offset_b2_register_offset_ext3;
+        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_str_gpr_register_offset_b2_mode_register_offset_ext3;
 
-        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_stur_gpr_str_gpr_register_offset_b2_register_offset_ext6;
+        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_str_gpr_register_offset_b2_mode_register_offset_ext6;
 
-        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_stur_gpr_str_gpr_register_offset_b2_register_offset_ext7;
+        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_str_gpr_register_offset_b2_mode_register_offset_ext7;
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_stur_gpr_str_gpr_register_offset_b4_register_offset_ext2;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_str_gpr_register_offset_b4_mode_register_offset_ext2;
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_stur_gpr_str_gpr_register_offset_b4_register_offset_ext3;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_str_gpr_register_offset_b4_mode_register_offset_ext3;
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_stur_gpr_str_gpr_register_offset_b4_register_offset_ext6;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_str_gpr_register_offset_b4_mode_register_offset_ext6;
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_stur_gpr_str_gpr_register_offset_b4_register_offset_ext7;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_str_gpr_register_offset_b4_mode_register_offset_ext7;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_stur_gpr_str_gpr_register_offset_b8_register_offset_ext2;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_str_gpr_register_offset_b8_mode_register_offset_ext2;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_stur_gpr_str_gpr_register_offset_b8_register_offset_ext3;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_str_gpr_register_offset_b8_mode_register_offset_ext3;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_stur_gpr_str_gpr_register_offset_b8_register_offset_ext6;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_str_gpr_register_offset_b8_mode_register_offset_ext6;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_stur_gpr_str_gpr_register_offset_b8_register_offset_ext7;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_str_gpr_register_offset_b8_mode_register_offset_ext7;
 
         return NULL;
 
     case ARM64_INSN_STR_GPR_UNSIGNED_OFFSET:
 
-        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_gpr_str_gpr_unsigned_offset_b1_base_offset;
+        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_str_gpr_unsigned_offset_b1_mode_base_offset;
 
-        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_gpr_str_gpr_unsigned_offset_b2_base_offset;
+        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_str_gpr_unsigned_offset_b2_mode_base_offset;
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_gpr_str_gpr_unsigned_offset_b4_base_offset;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_str_gpr_unsigned_offset_b4_mode_base_offset;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_gpr_str_gpr_unsigned_offset_b8_base_offset;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_str_gpr_unsigned_offset_b8_mode_base_offset;
 
         return NULL;
 
     case ARM64_INSN_LDUR_FP_SIMD:
 
-        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_fp_simd_ldur_fp_simd_b1_base_offset;
+        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_fp_simd_b1_mode_base_offset;
 
-        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_fp_simd_ldur_fp_simd_b2_base_offset;
+        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_fp_simd_b2_mode_base_offset;
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_fp_simd_ldur_fp_simd_b4_base_offset;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_fp_simd_b4_mode_base_offset;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_fp_simd_ldur_fp_simd_b8_base_offset;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_fp_simd_b8_mode_base_offset;
 
-        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_fp_simd_ldur_fp_simd_b16_base_offset;
+        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_fp_simd_b16_mode_base_offset;
 
         return NULL;
 
     case ARM64_INSN_LDR_FP_SIMD_POST_INDEX:
 
-        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_post_index_b1_post_index;
+        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldr_fp_simd_post_index_b1_mode_post_index;
 
-        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_post_index_b2_post_index;
+        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldr_fp_simd_post_index_b2_mode_post_index;
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_post_index_b4_post_index;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldr_fp_simd_post_index_b4_mode_post_index;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_post_index_b8_post_index;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldr_fp_simd_post_index_b8_mode_post_index;
 
-        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_post_index_b16_post_index;
+        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_ldr_fp_simd_post_index_b16_mode_post_index;
 
         return NULL;
 
     case ARM64_INSN_LDR_FP_SIMD_PRE_INDEX:
 
-        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_pre_index_b1_pre_index;
+        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldr_fp_simd_pre_index_b1_mode_pre_index;
 
-        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_pre_index_b2_pre_index;
+        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldr_fp_simd_pre_index_b2_mode_pre_index;
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_pre_index_b4_pre_index;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldr_fp_simd_pre_index_b4_mode_pre_index;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_pre_index_b8_pre_index;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldr_fp_simd_pre_index_b8_mode_pre_index;
 
-        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_pre_index_b16_pre_index;
+        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_ldr_fp_simd_pre_index_b16_mode_pre_index;
 
         return NULL;
 
     case ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET:
 
-        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b1_register_offset_ext2;
+        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldr_fp_simd_register_offset_b1_mode_register_offset_ext2;
 
-        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b1_register_offset_ext3;
+        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldr_fp_simd_register_offset_b1_mode_register_offset_ext3;
 
-        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b1_register_offset_ext6;
+        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldr_fp_simd_register_offset_b1_mode_register_offset_ext6;
 
-        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b1_register_offset_ext7;
+        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldr_fp_simd_register_offset_b1_mode_register_offset_ext7;
 
-        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b2_register_offset_ext2;
+        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldr_fp_simd_register_offset_b2_mode_register_offset_ext2;
 
-        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b2_register_offset_ext3;
+        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldr_fp_simd_register_offset_b2_mode_register_offset_ext3;
 
-        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b2_register_offset_ext6;
+        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldr_fp_simd_register_offset_b2_mode_register_offset_ext6;
 
-        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b2_register_offset_ext7;
+        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldr_fp_simd_register_offset_b2_mode_register_offset_ext7;
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b4_register_offset_ext2;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldr_fp_simd_register_offset_b4_mode_register_offset_ext2;
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b4_register_offset_ext3;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldr_fp_simd_register_offset_b4_mode_register_offset_ext3;
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b4_register_offset_ext6;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldr_fp_simd_register_offset_b4_mode_register_offset_ext6;
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b4_register_offset_ext7;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldr_fp_simd_register_offset_b4_mode_register_offset_ext7;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b8_register_offset_ext2;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldr_fp_simd_register_offset_b8_mode_register_offset_ext2;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b8_register_offset_ext3;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldr_fp_simd_register_offset_b8_mode_register_offset_ext3;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b8_register_offset_ext6;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldr_fp_simd_register_offset_b8_mode_register_offset_ext6;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b8_register_offset_ext7;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldr_fp_simd_register_offset_b8_mode_register_offset_ext7;
 
-        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b16_register_offset_ext2;
+        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_ldr_fp_simd_register_offset_b16_mode_register_offset_ext2;
 
-        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b16_register_offset_ext3;
+        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_ldr_fp_simd_register_offset_b16_mode_register_offset_ext3;
 
-        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b16_register_offset_ext6;
+        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_ldr_fp_simd_register_offset_b16_mode_register_offset_ext6;
 
-        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_register_offset_b16_register_offset_ext7;
+        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_ldr_fp_simd_register_offset_b16_mode_register_offset_ext7;
 
         return NULL;
 
     case ARM64_INSN_LDR_FP_SIMD_UNSIGNED_OFFSET:
 
-        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_unsigned_offset_b1_base_offset;
+        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldr_fp_simd_unsigned_offset_b1_mode_base_offset;
 
-        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_unsigned_offset_b2_base_offset;
+        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldr_fp_simd_unsigned_offset_b2_mode_base_offset;
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_unsigned_offset_b4_base_offset;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldr_fp_simd_unsigned_offset_b4_mode_base_offset;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_unsigned_offset_b8_base_offset;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldr_fp_simd_unsigned_offset_b8_mode_base_offset;
 
-        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldur_fp_simd_ldr_fp_simd_unsigned_offset_b16_base_offset;
+        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_ldr_fp_simd_unsigned_offset_b16_mode_base_offset;
 
         return NULL;
 
     case ARM64_INSN_STUR_FP_SIMD:
 
-        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_fp_simd_stur_fp_simd_b1_base_offset;
+        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_fp_simd_b1_mode_base_offset;
 
-        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_fp_simd_stur_fp_simd_b2_base_offset;
+        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_fp_simd_b2_mode_base_offset;
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_fp_simd_stur_fp_simd_b4_base_offset;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_fp_simd_b4_mode_base_offset;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_fp_simd_stur_fp_simd_b8_base_offset;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_fp_simd_b8_mode_base_offset;
 
-        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_fp_simd_stur_fp_simd_b16_base_offset;
+        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_fp_simd_b16_mode_base_offset;
 
         return NULL;
 
     case ARM64_INSN_STR_FP_SIMD_POST_INDEX:
 
-        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_stur_fp_simd_str_fp_simd_post_index_b1_post_index;
+        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_str_fp_simd_post_index_b1_mode_post_index;
 
-        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_stur_fp_simd_str_fp_simd_post_index_b2_post_index;
+        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_str_fp_simd_post_index_b2_mode_post_index;
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_stur_fp_simd_str_fp_simd_post_index_b4_post_index;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_str_fp_simd_post_index_b4_mode_post_index;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_stur_fp_simd_str_fp_simd_post_index_b8_post_index;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_str_fp_simd_post_index_b8_mode_post_index;
 
-        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_stur_fp_simd_str_fp_simd_post_index_b16_post_index;
+        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_POST_INDEX) return emu_execute_ldst_str_fp_simd_post_index_b16_mode_post_index;
 
         return NULL;
 
     case ARM64_INSN_STR_FP_SIMD_PRE_INDEX:
 
-        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_stur_fp_simd_str_fp_simd_pre_index_b1_pre_index;
+        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_str_fp_simd_pre_index_b1_mode_pre_index;
 
-        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_stur_fp_simd_str_fp_simd_pre_index_b2_pre_index;
+        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_str_fp_simd_pre_index_b2_mode_pre_index;
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_stur_fp_simd_str_fp_simd_pre_index_b4_pre_index;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_str_fp_simd_pre_index_b4_mode_pre_index;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_stur_fp_simd_str_fp_simd_pre_index_b8_pre_index;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_str_fp_simd_pre_index_b8_mode_pre_index;
 
-        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_stur_fp_simd_str_fp_simd_pre_index_b16_pre_index;
+        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_PRE_INDEX) return emu_execute_ldst_str_fp_simd_pre_index_b16_mode_pre_index;
 
         return NULL;
 
     case ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET:
 
-        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b1_register_offset_ext2;
+        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_str_fp_simd_register_offset_b1_mode_register_offset_ext2;
 
-        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b1_register_offset_ext3;
+        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_str_fp_simd_register_offset_b1_mode_register_offset_ext3;
 
-        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b1_register_offset_ext6;
+        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_str_fp_simd_register_offset_b1_mode_register_offset_ext6;
 
-        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b1_register_offset_ext7;
+        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_str_fp_simd_register_offset_b1_mode_register_offset_ext7;
 
-        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b2_register_offset_ext2;
+        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_str_fp_simd_register_offset_b2_mode_register_offset_ext2;
 
-        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b2_register_offset_ext3;
+        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_str_fp_simd_register_offset_b2_mode_register_offset_ext3;
 
-        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b2_register_offset_ext6;
+        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_str_fp_simd_register_offset_b2_mode_register_offset_ext6;
 
-        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b2_register_offset_ext7;
+        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_str_fp_simd_register_offset_b2_mode_register_offset_ext7;
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b4_register_offset_ext2;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_str_fp_simd_register_offset_b4_mode_register_offset_ext2;
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b4_register_offset_ext3;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_str_fp_simd_register_offset_b4_mode_register_offset_ext3;
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b4_register_offset_ext6;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_str_fp_simd_register_offset_b4_mode_register_offset_ext6;
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b4_register_offset_ext7;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_str_fp_simd_register_offset_b4_mode_register_offset_ext7;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b8_register_offset_ext2;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_str_fp_simd_register_offset_b8_mode_register_offset_ext2;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b8_register_offset_ext3;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_str_fp_simd_register_offset_b8_mode_register_offset_ext3;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b8_register_offset_ext6;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_str_fp_simd_register_offset_b8_mode_register_offset_ext6;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b8_register_offset_ext7;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_str_fp_simd_register_offset_b8_mode_register_offset_ext7;
 
-        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b16_register_offset_ext2;
+        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 2) return emu_execute_ldst_str_fp_simd_register_offset_b16_mode_register_offset_ext2;
 
-        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b16_register_offset_ext3;
+        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 3) return emu_execute_ldst_str_fp_simd_register_offset_b16_mode_register_offset_ext3;
 
-        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b16_register_offset_ext6;
+        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 6) return emu_execute_ldst_str_fp_simd_register_offset_b16_mode_register_offset_ext6;
 
-        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_stur_fp_simd_str_fp_simd_register_offset_b16_register_offset_ext7;
+        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_REGISTER_OFFSET && decoded->extend_type == 7) return emu_execute_ldst_str_fp_simd_register_offset_b16_mode_register_offset_ext7;
 
         return NULL;
 
     case ARM64_INSN_STR_FP_SIMD_UNSIGNED_OFFSET:
 
-        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_fp_simd_str_fp_simd_unsigned_offset_b1_base_offset;
+        if (decoded->access_bytes == 1 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_str_fp_simd_unsigned_offset_b1_mode_base_offset;
 
-        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_fp_simd_str_fp_simd_unsigned_offset_b2_base_offset;
+        if (decoded->access_bytes == 2 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_str_fp_simd_unsigned_offset_b2_mode_base_offset;
 
-        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_fp_simd_str_fp_simd_unsigned_offset_b4_base_offset;
+        if (decoded->access_bytes == 4 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_str_fp_simd_unsigned_offset_b4_mode_base_offset;
 
-        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_fp_simd_str_fp_simd_unsigned_offset_b8_base_offset;
+        if (decoded->access_bytes == 8 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_str_fp_simd_unsigned_offset_b8_mode_base_offset;
 
-        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_stur_fp_simd_str_fp_simd_unsigned_offset_b16_base_offset;
+        if (decoded->access_bytes == 16 && decoded->memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET) return emu_execute_ldst_str_fp_simd_unsigned_offset_b16_mode_base_offset;
 
         return NULL;
 
     case ARM64_INSN_PRFM_LITERAL:
 
-        return emu_execute_ldst_prfm_literal_prfm_literal_exact;
+        return emu_execute_ldst_prfm_literal;
 
     case ARM64_INSN_PRFUM:
 
-        return emu_execute_ldst_prfm_literal_prfum_exact;
+        return emu_execute_ldst_prfum;
 
     case ARM64_INSN_PRFM_REGISTER_OFFSET:
 
-        return emu_execute_ldst_prfm_literal_prfm_register_offset_exact;
+        return emu_execute_ldst_prfm_register_offset;
 
     case ARM64_INSN_PRFM_UNSIGNED_OFFSET:
 
-        return emu_execute_ldst_prfm_literal_prfm_unsigned_offset_exact;
+        return emu_execute_ldst_prfm_unsigned_offset;
 
     default:
 
@@ -10653,7 +10439,7 @@ static enum emu_insn_result (*emu_select_ldst_executor(const struct arm64_decode
 
 /* ======================== 访存类：解码结果构建缓存条目 ======================== */
 
-bool emu_build_ldst_executor(const struct arm64_decoded_insn *decoded, struct arm64_executor_entry *entry)
+bool emu_build_ldst_executor(const struct arm64_decoded_instruction *decoded, struct arm64_executor_entry *entry)
 {
     entry->execute = emu_select_ldst_executor(decoded);
     if (!entry->execute) return false;

@@ -122,7 +122,7 @@ static inline uint32_t emu_dp_count_bits_hw(uint64_t value, bool sf)
 
 /* 每个固定寄存器执行模板直接对应缓存条目中的 execute 函数地址。 */
 
-static enum emu_insn_result emu_execute_logic_shifted_and_shifted_register_w32_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_and_shifted_register_w32_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_AND_SHIFTED_REGISTER;
     bool sf = false;
@@ -139,7 +139,7 @@ static enum emu_insn_result emu_execute_logic_shifted_and_shifted_register_w32_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_and_shifted_register_w64_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_and_shifted_register_w64_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_AND_SHIFTED_REGISTER;
     bool sf = true;
@@ -156,7 +156,7 @@ static enum emu_insn_result emu_execute_logic_shifted_and_shifted_register_w64_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_and_shifted_register_w32_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_and_shifted_register_w32_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_AND_SHIFTED_REGISTER;
     bool sf = false;
@@ -173,7 +173,7 @@ static enum emu_insn_result emu_execute_logic_shifted_and_shifted_register_w32_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_and_shifted_register_w64_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_and_shifted_register_w64_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_AND_SHIFTED_REGISTER;
     bool sf = true;
@@ -190,7 +190,7 @@ static enum emu_insn_result emu_execute_logic_shifted_and_shifted_register_w64_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_and_shifted_register_w32_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_and_shifted_register_w32_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_AND_SHIFTED_REGISTER;
     bool sf = false;
@@ -207,7 +207,7 @@ static enum emu_insn_result emu_execute_logic_shifted_and_shifted_register_w32_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_and_shifted_register_w64_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_and_shifted_register_w64_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_AND_SHIFTED_REGISTER;
     bool sf = true;
@@ -224,7 +224,7 @@ static enum emu_insn_result emu_execute_logic_shifted_and_shifted_register_w64_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_and_shifted_register_w32_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_and_shifted_register_w32_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_AND_SHIFTED_REGISTER;
     bool sf = false;
@@ -241,7 +241,7 @@ static enum emu_insn_result emu_execute_logic_shifted_and_shifted_register_w32_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_and_shifted_register_w64_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_and_shifted_register_w64_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_AND_SHIFTED_REGISTER;
     bool sf = true;
@@ -258,7 +258,7 @@ static enum emu_insn_result emu_execute_logic_shifted_and_shifted_register_w64_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_bic_shifted_register_w32_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_bic_shifted_register_w32_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_BIC_SHIFTED_REGISTER;
     bool sf = false;
@@ -275,7 +275,7 @@ static enum emu_insn_result emu_execute_logic_shifted_bic_shifted_register_w32_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_bic_shifted_register_w64_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_bic_shifted_register_w64_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_BIC_SHIFTED_REGISTER;
     bool sf = true;
@@ -292,7 +292,7 @@ static enum emu_insn_result emu_execute_logic_shifted_bic_shifted_register_w64_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_bic_shifted_register_w32_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_bic_shifted_register_w32_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_BIC_SHIFTED_REGISTER;
     bool sf = false;
@@ -309,7 +309,7 @@ static enum emu_insn_result emu_execute_logic_shifted_bic_shifted_register_w32_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_bic_shifted_register_w64_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_bic_shifted_register_w64_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_BIC_SHIFTED_REGISTER;
     bool sf = true;
@@ -326,7 +326,7 @@ static enum emu_insn_result emu_execute_logic_shifted_bic_shifted_register_w64_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_bic_shifted_register_w32_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_bic_shifted_register_w32_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_BIC_SHIFTED_REGISTER;
     bool sf = false;
@@ -343,7 +343,7 @@ static enum emu_insn_result emu_execute_logic_shifted_bic_shifted_register_w32_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_bic_shifted_register_w64_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_bic_shifted_register_w64_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_BIC_SHIFTED_REGISTER;
     bool sf = true;
@@ -360,7 +360,7 @@ static enum emu_insn_result emu_execute_logic_shifted_bic_shifted_register_w64_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_bic_shifted_register_w32_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_bic_shifted_register_w32_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_BIC_SHIFTED_REGISTER;
     bool sf = false;
@@ -377,7 +377,7 @@ static enum emu_insn_result emu_execute_logic_shifted_bic_shifted_register_w32_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_bic_shifted_register_w64_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_bic_shifted_register_w64_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_BIC_SHIFTED_REGISTER;
     bool sf = true;
@@ -394,7 +394,7 @@ static enum emu_insn_result emu_execute_logic_shifted_bic_shifted_register_w64_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_orr_shifted_register_w32_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_orr_shifted_register_w32_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ORR_SHIFTED_REGISTER;
     bool sf = false;
@@ -411,7 +411,7 @@ static enum emu_insn_result emu_execute_logic_shifted_orr_shifted_register_w32_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_orr_shifted_register_w64_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_orr_shifted_register_w64_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ORR_SHIFTED_REGISTER;
     bool sf = true;
@@ -428,7 +428,7 @@ static enum emu_insn_result emu_execute_logic_shifted_orr_shifted_register_w64_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_orr_shifted_register_w32_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_orr_shifted_register_w32_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ORR_SHIFTED_REGISTER;
     bool sf = false;
@@ -445,7 +445,7 @@ static enum emu_insn_result emu_execute_logic_shifted_orr_shifted_register_w32_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_orr_shifted_register_w64_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_orr_shifted_register_w64_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ORR_SHIFTED_REGISTER;
     bool sf = true;
@@ -462,7 +462,7 @@ static enum emu_insn_result emu_execute_logic_shifted_orr_shifted_register_w64_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_orr_shifted_register_w32_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_orr_shifted_register_w32_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ORR_SHIFTED_REGISTER;
     bool sf = false;
@@ -479,7 +479,7 @@ static enum emu_insn_result emu_execute_logic_shifted_orr_shifted_register_w32_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_orr_shifted_register_w64_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_orr_shifted_register_w64_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ORR_SHIFTED_REGISTER;
     bool sf = true;
@@ -496,7 +496,7 @@ static enum emu_insn_result emu_execute_logic_shifted_orr_shifted_register_w64_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_orr_shifted_register_w32_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_orr_shifted_register_w32_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ORR_SHIFTED_REGISTER;
     bool sf = false;
@@ -513,7 +513,7 @@ static enum emu_insn_result emu_execute_logic_shifted_orr_shifted_register_w32_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_orr_shifted_register_w64_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_orr_shifted_register_w64_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ORR_SHIFTED_REGISTER;
     bool sf = true;
@@ -530,7 +530,7 @@ static enum emu_insn_result emu_execute_logic_shifted_orr_shifted_register_w64_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_orn_shifted_register_w32_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_orn_shifted_register_w32_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ORN_SHIFTED_REGISTER;
     bool sf = false;
@@ -547,7 +547,7 @@ static enum emu_insn_result emu_execute_logic_shifted_orn_shifted_register_w32_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_orn_shifted_register_w64_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_orn_shifted_register_w64_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ORN_SHIFTED_REGISTER;
     bool sf = true;
@@ -564,7 +564,7 @@ static enum emu_insn_result emu_execute_logic_shifted_orn_shifted_register_w64_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_orn_shifted_register_w32_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_orn_shifted_register_w32_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ORN_SHIFTED_REGISTER;
     bool sf = false;
@@ -581,7 +581,7 @@ static enum emu_insn_result emu_execute_logic_shifted_orn_shifted_register_w32_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_orn_shifted_register_w64_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_orn_shifted_register_w64_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ORN_SHIFTED_REGISTER;
     bool sf = true;
@@ -598,7 +598,7 @@ static enum emu_insn_result emu_execute_logic_shifted_orn_shifted_register_w64_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_orn_shifted_register_w32_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_orn_shifted_register_w32_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ORN_SHIFTED_REGISTER;
     bool sf = false;
@@ -615,7 +615,7 @@ static enum emu_insn_result emu_execute_logic_shifted_orn_shifted_register_w32_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_orn_shifted_register_w64_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_orn_shifted_register_w64_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ORN_SHIFTED_REGISTER;
     bool sf = true;
@@ -632,7 +632,7 @@ static enum emu_insn_result emu_execute_logic_shifted_orn_shifted_register_w64_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_orn_shifted_register_w32_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_orn_shifted_register_w32_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ORN_SHIFTED_REGISTER;
     bool sf = false;
@@ -649,7 +649,7 @@ static enum emu_insn_result emu_execute_logic_shifted_orn_shifted_register_w32_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_orn_shifted_register_w64_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_orn_shifted_register_w64_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ORN_SHIFTED_REGISTER;
     bool sf = true;
@@ -666,7 +666,7 @@ static enum emu_insn_result emu_execute_logic_shifted_orn_shifted_register_w64_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_eor_shifted_register_w32_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_eor_shifted_register_w32_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_EOR_SHIFTED_REGISTER;
     bool sf = false;
@@ -683,7 +683,7 @@ static enum emu_insn_result emu_execute_logic_shifted_eor_shifted_register_w32_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_eor_shifted_register_w64_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_eor_shifted_register_w64_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_EOR_SHIFTED_REGISTER;
     bool sf = true;
@@ -700,7 +700,7 @@ static enum emu_insn_result emu_execute_logic_shifted_eor_shifted_register_w64_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_eor_shifted_register_w32_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_eor_shifted_register_w32_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_EOR_SHIFTED_REGISTER;
     bool sf = false;
@@ -717,7 +717,7 @@ static enum emu_insn_result emu_execute_logic_shifted_eor_shifted_register_w32_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_eor_shifted_register_w64_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_eor_shifted_register_w64_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_EOR_SHIFTED_REGISTER;
     bool sf = true;
@@ -734,7 +734,7 @@ static enum emu_insn_result emu_execute_logic_shifted_eor_shifted_register_w64_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_eor_shifted_register_w32_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_eor_shifted_register_w32_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_EOR_SHIFTED_REGISTER;
     bool sf = false;
@@ -751,7 +751,7 @@ static enum emu_insn_result emu_execute_logic_shifted_eor_shifted_register_w32_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_eor_shifted_register_w64_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_eor_shifted_register_w64_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_EOR_SHIFTED_REGISTER;
     bool sf = true;
@@ -768,7 +768,7 @@ static enum emu_insn_result emu_execute_logic_shifted_eor_shifted_register_w64_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_eor_shifted_register_w32_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_eor_shifted_register_w32_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_EOR_SHIFTED_REGISTER;
     bool sf = false;
@@ -785,7 +785,7 @@ static enum emu_insn_result emu_execute_logic_shifted_eor_shifted_register_w32_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_eor_shifted_register_w64_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_eor_shifted_register_w64_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_EOR_SHIFTED_REGISTER;
     bool sf = true;
@@ -802,7 +802,7 @@ static enum emu_insn_result emu_execute_logic_shifted_eor_shifted_register_w64_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_eon_shifted_register_w32_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_eon_shifted_register_w32_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_EON_SHIFTED_REGISTER;
     bool sf = false;
@@ -819,7 +819,7 @@ static enum emu_insn_result emu_execute_logic_shifted_eon_shifted_register_w32_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_eon_shifted_register_w64_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_eon_shifted_register_w64_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_EON_SHIFTED_REGISTER;
     bool sf = true;
@@ -836,7 +836,7 @@ static enum emu_insn_result emu_execute_logic_shifted_eon_shifted_register_w64_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_eon_shifted_register_w32_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_eon_shifted_register_w32_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_EON_SHIFTED_REGISTER;
     bool sf = false;
@@ -853,7 +853,7 @@ static enum emu_insn_result emu_execute_logic_shifted_eon_shifted_register_w32_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_eon_shifted_register_w64_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_eon_shifted_register_w64_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_EON_SHIFTED_REGISTER;
     bool sf = true;
@@ -870,7 +870,7 @@ static enum emu_insn_result emu_execute_logic_shifted_eon_shifted_register_w64_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_eon_shifted_register_w32_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_eon_shifted_register_w32_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_EON_SHIFTED_REGISTER;
     bool sf = false;
@@ -887,7 +887,7 @@ static enum emu_insn_result emu_execute_logic_shifted_eon_shifted_register_w32_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_eon_shifted_register_w64_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_eon_shifted_register_w64_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_EON_SHIFTED_REGISTER;
     bool sf = true;
@@ -904,7 +904,7 @@ static enum emu_insn_result emu_execute_logic_shifted_eon_shifted_register_w64_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_eon_shifted_register_w32_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_eon_shifted_register_w32_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_EON_SHIFTED_REGISTER;
     bool sf = false;
@@ -921,7 +921,7 @@ static enum emu_insn_result emu_execute_logic_shifted_eon_shifted_register_w32_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_eon_shifted_register_w64_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_eon_shifted_register_w64_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_EON_SHIFTED_REGISTER;
     bool sf = true;
@@ -938,7 +938,7 @@ static enum emu_insn_result emu_execute_logic_shifted_eon_shifted_register_w64_s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_ands_shifted_register_w32_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ands_shifted_register_w32_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ANDS_SHIFTED_REGISTER;
     bool sf = false;
@@ -955,7 +955,7 @@ static enum emu_insn_result emu_execute_logic_shifted_ands_shifted_register_w32_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_ands_shifted_register_w64_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ands_shifted_register_w64_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ANDS_SHIFTED_REGISTER;
     bool sf = true;
@@ -972,7 +972,7 @@ static enum emu_insn_result emu_execute_logic_shifted_ands_shifted_register_w64_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_ands_shifted_register_w32_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ands_shifted_register_w32_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ANDS_SHIFTED_REGISTER;
     bool sf = false;
@@ -989,7 +989,7 @@ static enum emu_insn_result emu_execute_logic_shifted_ands_shifted_register_w32_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_ands_shifted_register_w64_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ands_shifted_register_w64_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ANDS_SHIFTED_REGISTER;
     bool sf = true;
@@ -1006,7 +1006,7 @@ static enum emu_insn_result emu_execute_logic_shifted_ands_shifted_register_w64_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_ands_shifted_register_w32_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ands_shifted_register_w32_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ANDS_SHIFTED_REGISTER;
     bool sf = false;
@@ -1023,7 +1023,7 @@ static enum emu_insn_result emu_execute_logic_shifted_ands_shifted_register_w32_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_ands_shifted_register_w64_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ands_shifted_register_w64_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ANDS_SHIFTED_REGISTER;
     bool sf = true;
@@ -1040,7 +1040,7 @@ static enum emu_insn_result emu_execute_logic_shifted_ands_shifted_register_w64_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_ands_shifted_register_w32_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ands_shifted_register_w32_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ANDS_SHIFTED_REGISTER;
     bool sf = false;
@@ -1057,7 +1057,7 @@ static enum emu_insn_result emu_execute_logic_shifted_ands_shifted_register_w32_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_ands_shifted_register_w64_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ands_shifted_register_w64_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ANDS_SHIFTED_REGISTER;
     bool sf = true;
@@ -1074,7 +1074,7 @@ static enum emu_insn_result emu_execute_logic_shifted_ands_shifted_register_w64_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_bics_shifted_register_w32_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_bics_shifted_register_w32_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_BICS_SHIFTED_REGISTER;
     bool sf = false;
@@ -1091,7 +1091,7 @@ static enum emu_insn_result emu_execute_logic_shifted_bics_shifted_register_w32_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_bics_shifted_register_w64_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_bics_shifted_register_w64_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_BICS_SHIFTED_REGISTER;
     bool sf = true;
@@ -1108,7 +1108,7 @@ static enum emu_insn_result emu_execute_logic_shifted_bics_shifted_register_w64_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_bics_shifted_register_w32_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_bics_shifted_register_w32_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_BICS_SHIFTED_REGISTER;
     bool sf = false;
@@ -1125,7 +1125,7 @@ static enum emu_insn_result emu_execute_logic_shifted_bics_shifted_register_w32_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_bics_shifted_register_w64_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_bics_shifted_register_w64_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_BICS_SHIFTED_REGISTER;
     bool sf = true;
@@ -1142,7 +1142,7 @@ static enum emu_insn_result emu_execute_logic_shifted_bics_shifted_register_w64_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_bics_shifted_register_w32_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_bics_shifted_register_w32_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_BICS_SHIFTED_REGISTER;
     bool sf = false;
@@ -1159,7 +1159,7 @@ static enum emu_insn_result emu_execute_logic_shifted_bics_shifted_register_w32_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_bics_shifted_register_w64_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_bics_shifted_register_w64_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_BICS_SHIFTED_REGISTER;
     bool sf = true;
@@ -1176,7 +1176,7 @@ static enum emu_insn_result emu_execute_logic_shifted_bics_shifted_register_w64_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_bics_shifted_register_w32_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_bics_shifted_register_w32_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_BICS_SHIFTED_REGISTER;
     bool sf = false;
@@ -1193,7 +1193,7 @@ static enum emu_insn_result emu_execute_logic_shifted_bics_shifted_register_w32_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_shifted_bics_shifted_register_w64_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_bics_shifted_register_w64_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_BICS_SHIFTED_REGISTER;
     bool sf = true;
@@ -1210,7 +1210,7 @@ static enum emu_insn_result emu_execute_logic_shifted_bics_shifted_register_w64_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_add_shifted_register_w32_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_add_shifted_register_w32_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADD_SHIFTED_REGISTER;
     bool sf = false;
@@ -1227,7 +1227,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_add_shifted_register_w32_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_add_shifted_register_w64_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_add_shifted_register_w64_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADD_SHIFTED_REGISTER;
     bool sf = true;
@@ -1244,7 +1244,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_add_shifted_register_w64_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_add_shifted_register_w32_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_add_shifted_register_w32_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADD_SHIFTED_REGISTER;
     bool sf = false;
@@ -1261,7 +1261,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_add_shifted_register_w32_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_add_shifted_register_w64_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_add_shifted_register_w64_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADD_SHIFTED_REGISTER;
     bool sf = true;
@@ -1278,7 +1278,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_add_shifted_register_w64_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_add_shifted_register_w32_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_add_shifted_register_w32_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADD_SHIFTED_REGISTER;
     bool sf = false;
@@ -1295,7 +1295,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_add_shifted_register_w32_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_add_shifted_register_w64_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_add_shifted_register_w64_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADD_SHIFTED_REGISTER;
     bool sf = true;
@@ -1312,7 +1312,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_add_shifted_register_w64_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_add_shifted_register_w32_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_add_shifted_register_w32_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADD_SHIFTED_REGISTER;
     bool sf = false;
@@ -1329,7 +1329,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_add_shifted_register_w32_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_add_shifted_register_w64_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_add_shifted_register_w64_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADD_SHIFTED_REGISTER;
     bool sf = true;
@@ -1346,7 +1346,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_add_shifted_register_w64_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_adds_shifted_register_w32_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adds_shifted_register_w32_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADDS_SHIFTED_REGISTER;
     bool sf = false;
@@ -1363,7 +1363,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_adds_shifted_register_w32
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_adds_shifted_register_w64_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adds_shifted_register_w64_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADDS_SHIFTED_REGISTER;
     bool sf = true;
@@ -1380,7 +1380,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_adds_shifted_register_w64
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_adds_shifted_register_w32_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adds_shifted_register_w32_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADDS_SHIFTED_REGISTER;
     bool sf = false;
@@ -1397,7 +1397,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_adds_shifted_register_w32
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_adds_shifted_register_w64_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adds_shifted_register_w64_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADDS_SHIFTED_REGISTER;
     bool sf = true;
@@ -1414,7 +1414,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_adds_shifted_register_w64
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_adds_shifted_register_w32_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adds_shifted_register_w32_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADDS_SHIFTED_REGISTER;
     bool sf = false;
@@ -1431,7 +1431,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_adds_shifted_register_w32
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_adds_shifted_register_w64_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adds_shifted_register_w64_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADDS_SHIFTED_REGISTER;
     bool sf = true;
@@ -1448,7 +1448,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_adds_shifted_register_w64
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_adds_shifted_register_w32_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adds_shifted_register_w32_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADDS_SHIFTED_REGISTER;
     bool sf = false;
@@ -1465,7 +1465,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_adds_shifted_register_w32
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_adds_shifted_register_w64_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adds_shifted_register_w64_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADDS_SHIFTED_REGISTER;
     bool sf = true;
@@ -1482,7 +1482,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_adds_shifted_register_w64
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_sub_shifted_register_w32_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sub_shifted_register_w32_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUB_SHIFTED_REGISTER;
     bool sf = false;
@@ -1499,7 +1499,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_sub_shifted_register_w32_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_sub_shifted_register_w64_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sub_shifted_register_w64_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUB_SHIFTED_REGISTER;
     bool sf = true;
@@ -1516,7 +1516,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_sub_shifted_register_w64_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_sub_shifted_register_w32_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sub_shifted_register_w32_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUB_SHIFTED_REGISTER;
     bool sf = false;
@@ -1533,7 +1533,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_sub_shifted_register_w32_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_sub_shifted_register_w64_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sub_shifted_register_w64_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUB_SHIFTED_REGISTER;
     bool sf = true;
@@ -1550,7 +1550,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_sub_shifted_register_w64_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_sub_shifted_register_w32_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sub_shifted_register_w32_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUB_SHIFTED_REGISTER;
     bool sf = false;
@@ -1567,7 +1567,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_sub_shifted_register_w32_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_sub_shifted_register_w64_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sub_shifted_register_w64_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUB_SHIFTED_REGISTER;
     bool sf = true;
@@ -1584,7 +1584,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_sub_shifted_register_w64_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_sub_shifted_register_w32_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sub_shifted_register_w32_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUB_SHIFTED_REGISTER;
     bool sf = false;
@@ -1601,7 +1601,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_sub_shifted_register_w32_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_sub_shifted_register_w64_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sub_shifted_register_w64_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUB_SHIFTED_REGISTER;
     bool sf = true;
@@ -1618,7 +1618,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_sub_shifted_register_w64_
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_subs_shifted_register_w32_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_subs_shifted_register_w32_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUBS_SHIFTED_REGISTER;
     bool sf = false;
@@ -1635,7 +1635,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_subs_shifted_register_w32
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_subs_shifted_register_w64_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_subs_shifted_register_w64_shift0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUBS_SHIFTED_REGISTER;
     bool sf = true;
@@ -1652,7 +1652,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_subs_shifted_register_w64
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_subs_shifted_register_w32_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_subs_shifted_register_w32_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUBS_SHIFTED_REGISTER;
     bool sf = false;
@@ -1669,7 +1669,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_subs_shifted_register_w32
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_subs_shifted_register_w64_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_subs_shifted_register_w64_shift1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUBS_SHIFTED_REGISTER;
     bool sf = true;
@@ -1686,7 +1686,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_subs_shifted_register_w64
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_subs_shifted_register_w32_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_subs_shifted_register_w32_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUBS_SHIFTED_REGISTER;
     bool sf = false;
@@ -1703,7 +1703,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_subs_shifted_register_w32
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_subs_shifted_register_w64_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_subs_shifted_register_w64_shift2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUBS_SHIFTED_REGISTER;
     bool sf = true;
@@ -1720,7 +1720,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_subs_shifted_register_w64
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_subs_shifted_register_w32_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_subs_shifted_register_w32_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUBS_SHIFTED_REGISTER;
     bool sf = false;
@@ -1737,7 +1737,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_subs_shifted_register_w32
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_shifted_subs_shifted_register_w64_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_subs_shifted_register_w64_shift3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUBS_SHIFTED_REGISTER;
     bool sf = true;
@@ -1754,7 +1754,7 @@ static enum emu_insn_result emu_execute_addsub_shifted_subs_shifted_register_w64
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w32_extend0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_add_extended_register_w32_opt0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADD_EXTENDED_REGISTER;
     bool sf = false;
@@ -1778,7 +1778,7 @@ static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w3
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w64_extend0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_add_extended_register_w64_opt0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADD_EXTENDED_REGISTER;
     bool sf = true;
@@ -1802,7 +1802,7 @@ static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w6
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w32_extend1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_add_extended_register_w32_opt1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADD_EXTENDED_REGISTER;
     bool sf = false;
@@ -1826,7 +1826,7 @@ static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w3
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w64_extend1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_add_extended_register_w64_opt1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADD_EXTENDED_REGISTER;
     bool sf = true;
@@ -1850,7 +1850,7 @@ static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w6
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w32_extend2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_add_extended_register_w32_opt2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADD_EXTENDED_REGISTER;
     bool sf = false;
@@ -1874,7 +1874,7 @@ static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w3
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w64_extend2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_add_extended_register_w64_opt2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADD_EXTENDED_REGISTER;
     bool sf = true;
@@ -1898,7 +1898,7 @@ static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w6
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w32_extend3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_add_extended_register_w32_opt3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADD_EXTENDED_REGISTER;
     bool sf = false;
@@ -1922,7 +1922,7 @@ static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w3
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w64_extend3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_add_extended_register_w64_opt3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADD_EXTENDED_REGISTER;
     bool sf = true;
@@ -1946,7 +1946,7 @@ static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w6
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w32_extend4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_add_extended_register_w32_opt4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADD_EXTENDED_REGISTER;
     bool sf = false;
@@ -1970,7 +1970,7 @@ static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w3
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w64_extend4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_add_extended_register_w64_opt4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADD_EXTENDED_REGISTER;
     bool sf = true;
@@ -1994,7 +1994,7 @@ static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w6
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w32_extend5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_add_extended_register_w32_opt5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADD_EXTENDED_REGISTER;
     bool sf = false;
@@ -2018,7 +2018,7 @@ static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w3
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w64_extend5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_add_extended_register_w64_opt5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADD_EXTENDED_REGISTER;
     bool sf = true;
@@ -2042,7 +2042,7 @@ static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w6
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w32_extend6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_add_extended_register_w32_opt6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADD_EXTENDED_REGISTER;
     bool sf = false;
@@ -2066,7 +2066,7 @@ static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w3
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w64_extend6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_add_extended_register_w64_opt6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADD_EXTENDED_REGISTER;
     bool sf = true;
@@ -2090,7 +2090,7 @@ static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w6
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w32_extend7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_add_extended_register_w32_opt7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADD_EXTENDED_REGISTER;
     bool sf = false;
@@ -2114,7 +2114,7 @@ static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w3
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w64_extend7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_add_extended_register_w64_opt7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADD_EXTENDED_REGISTER;
     bool sf = true;
@@ -2138,7 +2138,7 @@ static enum emu_insn_result emu_execute_addsub_extended_add_extended_register_w6
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w32_extend0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adds_extended_register_w32_opt0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADDS_EXTENDED_REGISTER;
     bool sf = false;
@@ -2162,7 +2162,7 @@ static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w64_extend0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adds_extended_register_w64_opt0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADDS_EXTENDED_REGISTER;
     bool sf = true;
@@ -2186,7 +2186,7 @@ static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w32_extend1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adds_extended_register_w32_opt1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADDS_EXTENDED_REGISTER;
     bool sf = false;
@@ -2210,7 +2210,7 @@ static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w64_extend1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adds_extended_register_w64_opt1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADDS_EXTENDED_REGISTER;
     bool sf = true;
@@ -2234,7 +2234,7 @@ static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w32_extend2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adds_extended_register_w32_opt2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADDS_EXTENDED_REGISTER;
     bool sf = false;
@@ -2258,7 +2258,7 @@ static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w64_extend2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adds_extended_register_w64_opt2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADDS_EXTENDED_REGISTER;
     bool sf = true;
@@ -2282,7 +2282,7 @@ static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w32_extend3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adds_extended_register_w32_opt3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADDS_EXTENDED_REGISTER;
     bool sf = false;
@@ -2306,7 +2306,7 @@ static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w64_extend3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adds_extended_register_w64_opt3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADDS_EXTENDED_REGISTER;
     bool sf = true;
@@ -2330,7 +2330,7 @@ static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w32_extend4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adds_extended_register_w32_opt4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADDS_EXTENDED_REGISTER;
     bool sf = false;
@@ -2354,7 +2354,7 @@ static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w64_extend4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adds_extended_register_w64_opt4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADDS_EXTENDED_REGISTER;
     bool sf = true;
@@ -2378,7 +2378,7 @@ static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w32_extend5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adds_extended_register_w32_opt5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADDS_EXTENDED_REGISTER;
     bool sf = false;
@@ -2402,7 +2402,7 @@ static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w64_extend5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adds_extended_register_w64_opt5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADDS_EXTENDED_REGISTER;
     bool sf = true;
@@ -2426,7 +2426,7 @@ static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w32_extend6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adds_extended_register_w32_opt6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADDS_EXTENDED_REGISTER;
     bool sf = false;
@@ -2450,7 +2450,7 @@ static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w64_extend6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adds_extended_register_w64_opt6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADDS_EXTENDED_REGISTER;
     bool sf = true;
@@ -2474,7 +2474,7 @@ static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w32_extend7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adds_extended_register_w32_opt7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADDS_EXTENDED_REGISTER;
     bool sf = false;
@@ -2498,7 +2498,7 @@ static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w64_extend7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adds_extended_register_w64_opt7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADDS_EXTENDED_REGISTER;
     bool sf = true;
@@ -2522,7 +2522,7 @@ static enum emu_insn_result emu_execute_addsub_extended_adds_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w32_extend0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sub_extended_register_w32_opt0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUB_EXTENDED_REGISTER;
     bool sf = false;
@@ -2546,7 +2546,7 @@ static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w3
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w64_extend0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sub_extended_register_w64_opt0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUB_EXTENDED_REGISTER;
     bool sf = true;
@@ -2570,7 +2570,7 @@ static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w6
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w32_extend1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sub_extended_register_w32_opt1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUB_EXTENDED_REGISTER;
     bool sf = false;
@@ -2594,7 +2594,7 @@ static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w3
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w64_extend1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sub_extended_register_w64_opt1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUB_EXTENDED_REGISTER;
     bool sf = true;
@@ -2618,7 +2618,7 @@ static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w6
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w32_extend2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sub_extended_register_w32_opt2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUB_EXTENDED_REGISTER;
     bool sf = false;
@@ -2642,7 +2642,7 @@ static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w3
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w64_extend2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sub_extended_register_w64_opt2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUB_EXTENDED_REGISTER;
     bool sf = true;
@@ -2666,7 +2666,7 @@ static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w6
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w32_extend3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sub_extended_register_w32_opt3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUB_EXTENDED_REGISTER;
     bool sf = false;
@@ -2690,7 +2690,7 @@ static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w3
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w64_extend3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sub_extended_register_w64_opt3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUB_EXTENDED_REGISTER;
     bool sf = true;
@@ -2714,7 +2714,7 @@ static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w6
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w32_extend4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sub_extended_register_w32_opt4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUB_EXTENDED_REGISTER;
     bool sf = false;
@@ -2738,7 +2738,7 @@ static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w3
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w64_extend4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sub_extended_register_w64_opt4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUB_EXTENDED_REGISTER;
     bool sf = true;
@@ -2762,7 +2762,7 @@ static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w6
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w32_extend5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sub_extended_register_w32_opt5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUB_EXTENDED_REGISTER;
     bool sf = false;
@@ -2786,7 +2786,7 @@ static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w3
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w64_extend5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sub_extended_register_w64_opt5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUB_EXTENDED_REGISTER;
     bool sf = true;
@@ -2810,7 +2810,7 @@ static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w6
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w32_extend6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sub_extended_register_w32_opt6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUB_EXTENDED_REGISTER;
     bool sf = false;
@@ -2834,7 +2834,7 @@ static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w3
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w64_extend6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sub_extended_register_w64_opt6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUB_EXTENDED_REGISTER;
     bool sf = true;
@@ -2858,7 +2858,7 @@ static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w6
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w32_extend7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sub_extended_register_w32_opt7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUB_EXTENDED_REGISTER;
     bool sf = false;
@@ -2882,7 +2882,7 @@ static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w3
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w64_extend7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sub_extended_register_w64_opt7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUB_EXTENDED_REGISTER;
     bool sf = true;
@@ -2906,7 +2906,7 @@ static enum emu_insn_result emu_execute_addsub_extended_sub_extended_register_w6
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w32_extend0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_subs_extended_register_w32_opt0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUBS_EXTENDED_REGISTER;
     bool sf = false;
@@ -2930,7 +2930,7 @@ static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w64_extend0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_subs_extended_register_w64_opt0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUBS_EXTENDED_REGISTER;
     bool sf = true;
@@ -2954,7 +2954,7 @@ static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w32_extend1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_subs_extended_register_w32_opt1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUBS_EXTENDED_REGISTER;
     bool sf = false;
@@ -2978,7 +2978,7 @@ static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w64_extend1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_subs_extended_register_w64_opt1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUBS_EXTENDED_REGISTER;
     bool sf = true;
@@ -3002,7 +3002,7 @@ static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w32_extend2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_subs_extended_register_w32_opt2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUBS_EXTENDED_REGISTER;
     bool sf = false;
@@ -3026,7 +3026,7 @@ static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w64_extend2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_subs_extended_register_w64_opt2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUBS_EXTENDED_REGISTER;
     bool sf = true;
@@ -3050,7 +3050,7 @@ static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w32_extend3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_subs_extended_register_w32_opt3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUBS_EXTENDED_REGISTER;
     bool sf = false;
@@ -3074,7 +3074,7 @@ static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w64_extend3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_subs_extended_register_w64_opt3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUBS_EXTENDED_REGISTER;
     bool sf = true;
@@ -3098,7 +3098,7 @@ static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w32_extend4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_subs_extended_register_w32_opt4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUBS_EXTENDED_REGISTER;
     bool sf = false;
@@ -3122,7 +3122,7 @@ static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w64_extend4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_subs_extended_register_w64_opt4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUBS_EXTENDED_REGISTER;
     bool sf = true;
@@ -3146,7 +3146,7 @@ static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w32_extend5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_subs_extended_register_w32_opt5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUBS_EXTENDED_REGISTER;
     bool sf = false;
@@ -3170,7 +3170,7 @@ static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w64_extend5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_subs_extended_register_w64_opt5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUBS_EXTENDED_REGISTER;
     bool sf = true;
@@ -3194,7 +3194,7 @@ static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w32_extend6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_subs_extended_register_w32_opt6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUBS_EXTENDED_REGISTER;
     bool sf = false;
@@ -3218,7 +3218,7 @@ static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w64_extend6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_subs_extended_register_w64_opt6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUBS_EXTENDED_REGISTER;
     bool sf = true;
@@ -3242,7 +3242,7 @@ static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w32_extend7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_subs_extended_register_w32_opt7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUBS_EXTENDED_REGISTER;
     bool sf = false;
@@ -3266,7 +3266,7 @@ static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w64_extend7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_subs_extended_register_w64_opt7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUBS_EXTENDED_REGISTER;
     bool sf = true;
@@ -3290,7 +3290,7 @@ static enum emu_insn_result emu_execute_addsub_extended_subs_extended_register_w
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_carry_adc_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adc_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADC;
     bool sf = false;
@@ -3305,7 +3305,7 @@ static enum emu_insn_result emu_execute_addsub_carry_adc_w32(struct pt_regs *reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_carry_adc_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adc_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADC;
     bool sf = true;
@@ -3320,7 +3320,7 @@ static enum emu_insn_result emu_execute_addsub_carry_adc_w64(struct pt_regs *reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_carry_adcs_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adcs_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADCS;
     bool sf = false;
@@ -3335,7 +3335,7 @@ static enum emu_insn_result emu_execute_addsub_carry_adcs_w32(struct pt_regs *re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_carry_adcs_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_adcs_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADCS;
     bool sf = true;
@@ -3350,7 +3350,7 @@ static enum emu_insn_result emu_execute_addsub_carry_adcs_w64(struct pt_regs *re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_carry_sbc_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sbc_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SBC;
     bool sf = false;
@@ -3365,7 +3365,7 @@ static enum emu_insn_result emu_execute_addsub_carry_sbc_w32(struct pt_regs *reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_carry_sbc_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sbc_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SBC;
     bool sf = true;
@@ -3380,7 +3380,7 @@ static enum emu_insn_result emu_execute_addsub_carry_sbc_w64(struct pt_regs *reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_carry_sbcs_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sbcs_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SBCS;
     bool sf = false;
@@ -3395,7 +3395,7 @@ static enum emu_insn_result emu_execute_addsub_carry_sbcs_w32(struct pt_regs *re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_carry_sbcs_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sbcs_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SBCS;
     bool sf = true;
@@ -3410,7 +3410,7 @@ static enum emu_insn_result emu_execute_addsub_carry_sbcs_w64(struct pt_regs *re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w32_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w32_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = false;
@@ -3423,7 +3423,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w32_cond0(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w32_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w32_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = false;
@@ -3436,7 +3436,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w32_cond1(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w32_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w32_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = false;
@@ -3449,7 +3449,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w32_cond2(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w32_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w32_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = false;
@@ -3462,7 +3462,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w32_cond3(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w32_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w32_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = false;
@@ -3475,7 +3475,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w32_cond4(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w32_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w32_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = false;
@@ -3488,7 +3488,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w32_cond5(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w32_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w32_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = false;
@@ -3501,7 +3501,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w32_cond6(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w32_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w32_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = false;
@@ -3514,7 +3514,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w32_cond7(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w32_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w32_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = false;
@@ -3527,7 +3527,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w32_cond8(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w32_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w32_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = false;
@@ -3540,7 +3540,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w32_cond9(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w32_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w32_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = false;
@@ -3553,7 +3553,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w32_cond10(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w32_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w32_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = false;
@@ -3566,7 +3566,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w32_cond11(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w32_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w32_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = false;
@@ -3579,7 +3579,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w32_cond12(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w32_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w32_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = false;
@@ -3592,7 +3592,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w32_cond13(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w32_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w32_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = false;
@@ -3605,7 +3605,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w32_cond14(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w32_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w32_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = false;
@@ -3618,7 +3618,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w32_cond15(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w64_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w64_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = true;
@@ -3631,7 +3631,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w64_cond0(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w64_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w64_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = true;
@@ -3644,7 +3644,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w64_cond1(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w64_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w64_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = true;
@@ -3657,7 +3657,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w64_cond2(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w64_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w64_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = true;
@@ -3670,7 +3670,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w64_cond3(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w64_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w64_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = true;
@@ -3683,7 +3683,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w64_cond4(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w64_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w64_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = true;
@@ -3696,7 +3696,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w64_cond5(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w64_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w64_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = true;
@@ -3709,7 +3709,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w64_cond6(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w64_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w64_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = true;
@@ -3722,7 +3722,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w64_cond7(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w64_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w64_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = true;
@@ -3735,7 +3735,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w64_cond8(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w64_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w64_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = true;
@@ -3748,7 +3748,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w64_cond9(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w64_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w64_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = true;
@@ -3761,7 +3761,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w64_cond10(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w64_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w64_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = true;
@@ -3774,7 +3774,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w64_cond11(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w64_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w64_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = true;
@@ -3787,7 +3787,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w64_cond12(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w64_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w64_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = true;
@@ -3800,7 +3800,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w64_cond13(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w64_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w64_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = true;
@@ -3813,7 +3813,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w64_cond14(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csel_w64_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csel_w64_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSEL;
     bool sf = true;
@@ -3826,7 +3826,7 @@ static enum emu_insn_result emu_execute_cond_select_csel_w64_cond15(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w32_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = false;
@@ -3839,7 +3839,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond0(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w32_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = false;
@@ -3852,7 +3852,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond1(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w32_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = false;
@@ -3865,7 +3865,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond2(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w32_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = false;
@@ -3878,7 +3878,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond3(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w32_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = false;
@@ -3891,7 +3891,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond4(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w32_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = false;
@@ -3904,7 +3904,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond5(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w32_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = false;
@@ -3917,7 +3917,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond6(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w32_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = false;
@@ -3930,7 +3930,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond7(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w32_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = false;
@@ -3943,7 +3943,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond8(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w32_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = false;
@@ -3956,7 +3956,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond9(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w32_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = false;
@@ -3969,7 +3969,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond10(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w32_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = false;
@@ -3982,7 +3982,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond11(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w32_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = false;
@@ -3995,7 +3995,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond12(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w32_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = false;
@@ -4008,7 +4008,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond13(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w32_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = false;
@@ -4021,7 +4021,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond14(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w32_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = false;
@@ -4034,7 +4034,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w32_cond15(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w64_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = true;
@@ -4047,7 +4047,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond0(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w64_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = true;
@@ -4060,7 +4060,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond1(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w64_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = true;
@@ -4073,7 +4073,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond2(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w64_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = true;
@@ -4086,7 +4086,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond3(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w64_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = true;
@@ -4099,7 +4099,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond4(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w64_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = true;
@@ -4112,7 +4112,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond5(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w64_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = true;
@@ -4125,7 +4125,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond6(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w64_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = true;
@@ -4138,7 +4138,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond7(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w64_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = true;
@@ -4151,7 +4151,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond8(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w64_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = true;
@@ -4164,7 +4164,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond9(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w64_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = true;
@@ -4177,7 +4177,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond10(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w64_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = true;
@@ -4190,7 +4190,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond11(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w64_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = true;
@@ -4203,7 +4203,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond12(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w64_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = true;
@@ -4216,7 +4216,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond13(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w64_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = true;
@@ -4229,7 +4229,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond14(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinc_w64_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINC;
     bool sf = true;
@@ -4242,7 +4242,7 @@ static enum emu_insn_result emu_execute_cond_select_csinc_w64_cond15(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w32_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = false;
@@ -4255,7 +4255,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond0(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w32_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = false;
@@ -4268,7 +4268,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond1(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w32_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = false;
@@ -4281,7 +4281,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond2(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w32_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = false;
@@ -4294,7 +4294,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond3(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w32_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = false;
@@ -4307,7 +4307,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond4(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w32_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = false;
@@ -4320,7 +4320,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond5(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w32_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = false;
@@ -4333,7 +4333,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond6(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w32_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = false;
@@ -4346,7 +4346,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond7(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w32_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = false;
@@ -4359,7 +4359,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond8(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w32_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = false;
@@ -4372,7 +4372,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond9(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w32_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = false;
@@ -4385,7 +4385,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond10(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w32_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = false;
@@ -4398,7 +4398,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond11(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w32_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = false;
@@ -4411,7 +4411,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond12(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w32_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = false;
@@ -4424,7 +4424,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond13(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w32_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = false;
@@ -4437,7 +4437,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond14(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w32_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = false;
@@ -4450,7 +4450,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w32_cond15(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w64_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = true;
@@ -4463,7 +4463,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond0(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w64_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = true;
@@ -4476,7 +4476,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond1(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w64_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = true;
@@ -4489,7 +4489,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond2(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w64_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = true;
@@ -4502,7 +4502,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond3(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w64_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = true;
@@ -4515,7 +4515,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond4(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w64_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = true;
@@ -4528,7 +4528,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond5(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w64_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = true;
@@ -4541,7 +4541,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond6(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w64_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = true;
@@ -4554,7 +4554,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond7(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w64_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = true;
@@ -4567,7 +4567,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond8(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w64_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = true;
@@ -4580,7 +4580,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond9(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w64_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = true;
@@ -4593,7 +4593,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond10(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w64_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = true;
@@ -4606,7 +4606,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond11(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w64_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = true;
@@ -4619,7 +4619,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond12(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w64_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = true;
@@ -4632,7 +4632,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond13(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w64_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = true;
@@ -4645,7 +4645,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond14(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csinv_w64_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSINV;
     bool sf = true;
@@ -4658,7 +4658,7 @@ static enum emu_insn_result emu_execute_cond_select_csinv_w64_cond15(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w32_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = false;
@@ -4671,7 +4671,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond0(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w32_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = false;
@@ -4684,7 +4684,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond1(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w32_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = false;
@@ -4697,7 +4697,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond2(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w32_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = false;
@@ -4710,7 +4710,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond3(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w32_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = false;
@@ -4723,7 +4723,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond4(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w32_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = false;
@@ -4736,7 +4736,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond5(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w32_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = false;
@@ -4749,7 +4749,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond6(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w32_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = false;
@@ -4762,7 +4762,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond7(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w32_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = false;
@@ -4775,7 +4775,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond8(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w32_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = false;
@@ -4788,7 +4788,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond9(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w32_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = false;
@@ -4801,7 +4801,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond10(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w32_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = false;
@@ -4814,7 +4814,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond11(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w32_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = false;
@@ -4827,7 +4827,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond12(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w32_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = false;
@@ -4840,7 +4840,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond13(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w32_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = false;
@@ -4853,7 +4853,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond14(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w32_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = false;
@@ -4866,7 +4866,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w32_cond15(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w64_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = true;
@@ -4879,7 +4879,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond0(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w64_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = true;
@@ -4892,7 +4892,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond1(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w64_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = true;
@@ -4905,7 +4905,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond2(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w64_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = true;
@@ -4918,7 +4918,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond3(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w64_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = true;
@@ -4931,7 +4931,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond4(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w64_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = true;
@@ -4944,7 +4944,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond5(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w64_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = true;
@@ -4957,7 +4957,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond6(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w64_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = true;
@@ -4970,7 +4970,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond7(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w64_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = true;
@@ -4983,7 +4983,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond8(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w64_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = true;
@@ -4996,7 +4996,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond9(struct pt_re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w64_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = true;
@@ -5009,7 +5009,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond10(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w64_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = true;
@@ -5022,7 +5022,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond11(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w64_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = true;
@@ -5035,7 +5035,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond12(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w64_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = true;
@@ -5048,7 +5048,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond13(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w64_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = true;
@@ -5061,7 +5061,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond14(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_csneg_w64_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CSNEG;
     bool sf = true;
@@ -5074,7 +5074,7 @@ static enum emu_insn_result emu_execute_cond_select_csneg_w64_cond15(struct pt_r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_udiv_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_udiv_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_UDIV;
     bool sf = false;
@@ -5089,7 +5089,7 @@ static enum emu_insn_result emu_execute_integer_binary_udiv_w32(struct pt_regs *
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_udiv_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_udiv_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_UDIV;
     bool sf = true;
@@ -5104,7 +5104,7 @@ static enum emu_insn_result emu_execute_integer_binary_udiv_w64(struct pt_regs *
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_sdiv_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sdiv_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SDIV;
     bool sf = false;
@@ -5119,7 +5119,7 @@ static enum emu_insn_result emu_execute_integer_binary_sdiv_w32(struct pt_regs *
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_sdiv_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_sdiv_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SDIV;
     bool sf = true;
@@ -5134,7 +5134,7 @@ static enum emu_insn_result emu_execute_integer_binary_sdiv_w64(struct pt_regs *
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_lslv_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_lslv_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_LSLV;
     bool sf = false;
@@ -5149,7 +5149,7 @@ static enum emu_insn_result emu_execute_integer_binary_lslv_w32(struct pt_regs *
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_lslv_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_lslv_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_LSLV;
     bool sf = true;
@@ -5164,7 +5164,7 @@ static enum emu_insn_result emu_execute_integer_binary_lslv_w64(struct pt_regs *
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_lsrv_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_lsrv_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_LSRV;
     bool sf = false;
@@ -5179,7 +5179,7 @@ static enum emu_insn_result emu_execute_integer_binary_lsrv_w32(struct pt_regs *
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_lsrv_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_lsrv_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_LSRV;
     bool sf = true;
@@ -5194,7 +5194,7 @@ static enum emu_insn_result emu_execute_integer_binary_lsrv_w64(struct pt_regs *
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_asrv_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_asrv_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ASRV;
     bool sf = false;
@@ -5209,7 +5209,7 @@ static enum emu_insn_result emu_execute_integer_binary_asrv_w32(struct pt_regs *
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_asrv_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_asrv_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ASRV;
     bool sf = true;
@@ -5224,7 +5224,7 @@ static enum emu_insn_result emu_execute_integer_binary_asrv_w64(struct pt_regs *
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_rorv_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_rorv_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_RORV;
     bool sf = false;
@@ -5239,7 +5239,7 @@ static enum emu_insn_result emu_execute_integer_binary_rorv_w32(struct pt_regs *
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_rorv_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_rorv_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_RORV;
     bool sf = true;
@@ -5254,7 +5254,7 @@ static enum emu_insn_result emu_execute_integer_binary_rorv_w64(struct pt_regs *
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_crc32b_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_crc32b_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CRC32B;
     bool sf = false;
@@ -5269,7 +5269,7 @@ static enum emu_insn_result emu_execute_integer_binary_crc32b_w32(struct pt_regs
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_crc32b_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_crc32b_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CRC32B;
     bool sf = true;
@@ -5284,7 +5284,7 @@ static enum emu_insn_result emu_execute_integer_binary_crc32b_w64(struct pt_regs
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_crc32h_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_crc32h_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CRC32H;
     bool sf = false;
@@ -5299,7 +5299,7 @@ static enum emu_insn_result emu_execute_integer_binary_crc32h_w32(struct pt_regs
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_crc32h_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_crc32h_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CRC32H;
     bool sf = true;
@@ -5314,7 +5314,7 @@ static enum emu_insn_result emu_execute_integer_binary_crc32h_w64(struct pt_regs
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_crc32w_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_crc32w_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CRC32W;
     bool sf = false;
@@ -5329,7 +5329,7 @@ static enum emu_insn_result emu_execute_integer_binary_crc32w_w32(struct pt_regs
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_crc32w_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_crc32w_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CRC32W;
     bool sf = true;
@@ -5344,7 +5344,7 @@ static enum emu_insn_result emu_execute_integer_binary_crc32w_w64(struct pt_regs
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_crc32x_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_crc32x_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CRC32X;
     bool sf = false;
@@ -5359,7 +5359,7 @@ static enum emu_insn_result emu_execute_integer_binary_crc32x_w32(struct pt_regs
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_crc32x_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_crc32x_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CRC32X;
     bool sf = true;
@@ -5374,7 +5374,7 @@ static enum emu_insn_result emu_execute_integer_binary_crc32x_w64(struct pt_regs
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_crc32cb_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_crc32cb_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CRC32CB;
     bool sf = false;
@@ -5389,7 +5389,7 @@ static enum emu_insn_result emu_execute_integer_binary_crc32cb_w32(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_crc32cb_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_crc32cb_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CRC32CB;
     bool sf = true;
@@ -5404,7 +5404,7 @@ static enum emu_insn_result emu_execute_integer_binary_crc32cb_w64(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_crc32ch_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_crc32ch_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CRC32CH;
     bool sf = false;
@@ -5419,7 +5419,7 @@ static enum emu_insn_result emu_execute_integer_binary_crc32ch_w32(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_crc32ch_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_crc32ch_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CRC32CH;
     bool sf = true;
@@ -5434,7 +5434,7 @@ static enum emu_insn_result emu_execute_integer_binary_crc32ch_w64(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_crc32cw_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_crc32cw_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CRC32CW;
     bool sf = false;
@@ -5449,7 +5449,7 @@ static enum emu_insn_result emu_execute_integer_binary_crc32cw_w32(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_crc32cw_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_crc32cw_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CRC32CW;
     bool sf = true;
@@ -5464,7 +5464,7 @@ static enum emu_insn_result emu_execute_integer_binary_crc32cw_w64(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_crc32cx_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_crc32cx_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CRC32CX;
     bool sf = false;
@@ -5479,7 +5479,7 @@ static enum emu_insn_result emu_execute_integer_binary_crc32cx_w32(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_crc32cx_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_crc32cx_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CRC32CX;
     bool sf = true;
@@ -5494,7 +5494,7 @@ static enum emu_insn_result emu_execute_integer_binary_crc32cx_w64(struct pt_reg
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_smax_register_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_smax_register_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SMAX_REGISTER;
     bool sf = false;
@@ -5509,7 +5509,7 @@ static enum emu_insn_result emu_execute_integer_binary_smax_register_w32(struct 
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_smax_register_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_smax_register_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SMAX_REGISTER;
     bool sf = true;
@@ -5524,7 +5524,7 @@ static enum emu_insn_result emu_execute_integer_binary_smax_register_w64(struct 
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_umax_register_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_umax_register_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_UMAX_REGISTER;
     bool sf = false;
@@ -5539,7 +5539,7 @@ static enum emu_insn_result emu_execute_integer_binary_umax_register_w32(struct 
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_umax_register_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_umax_register_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_UMAX_REGISTER;
     bool sf = true;
@@ -5571,7 +5571,7 @@ static inline bool emu_multiply_hw(enum arm64_instruction instruction, uint64_t 
     }
 }
 
-static enum emu_insn_result emu_execute_integer_binary_smin_register_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_smin_register_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SMIN_REGISTER;
     bool sf = false;
@@ -5586,7 +5586,7 @@ static enum emu_insn_result emu_execute_integer_binary_smin_register_w32(struct 
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_smin_register_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_smin_register_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SMIN_REGISTER;
     bool sf = true;
@@ -5601,7 +5601,7 @@ static enum emu_insn_result emu_execute_integer_binary_smin_register_w64(struct 
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_umin_register_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_umin_register_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_UMIN_REGISTER;
     bool sf = false;
@@ -5616,7 +5616,7 @@ static enum emu_insn_result emu_execute_integer_binary_umin_register_w32(struct 
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_binary_umin_register_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_umin_register_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_UMIN_REGISTER;
     bool sf = true;
@@ -5631,7 +5631,7 @@ static enum emu_insn_result emu_execute_integer_binary_umin_register_w64(struct 
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_multiply_madd_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_madd_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_MADD;
     bool sf = false;
@@ -5644,7 +5644,7 @@ static enum emu_insn_result emu_execute_multiply_madd_w32(struct pt_regs *regs, 
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_multiply_madd_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_madd_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_MADD;
     bool sf = true;
@@ -5657,7 +5657,7 @@ static enum emu_insn_result emu_execute_multiply_madd_w64(struct pt_regs *regs, 
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_multiply_msub_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_msub_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_MSUB;
     bool sf = false;
@@ -5670,7 +5670,7 @@ static enum emu_insn_result emu_execute_multiply_msub_w32(struct pt_regs *regs, 
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_multiply_msub_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_msub_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_MSUB;
     bool sf = true;
@@ -5683,7 +5683,7 @@ static enum emu_insn_result emu_execute_multiply_msub_w64(struct pt_regs *regs, 
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_multiply_smaddl_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_smaddl_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SMADDL;
     bool sf = false;
@@ -5696,7 +5696,7 @@ static enum emu_insn_result emu_execute_multiply_smaddl_w32(struct pt_regs *regs
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_multiply_smaddl_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_smaddl_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SMADDL;
     bool sf = true;
@@ -5709,7 +5709,7 @@ static enum emu_insn_result emu_execute_multiply_smaddl_w64(struct pt_regs *regs
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_multiply_smsubl_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_smsubl_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SMSUBL;
     bool sf = false;
@@ -5722,7 +5722,7 @@ static enum emu_insn_result emu_execute_multiply_smsubl_w32(struct pt_regs *regs
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_multiply_smsubl_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_smsubl_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SMSUBL;
     bool sf = true;
@@ -5735,7 +5735,7 @@ static enum emu_insn_result emu_execute_multiply_smsubl_w64(struct pt_regs *regs
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_multiply_smulh_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_smulh_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SMULH;
     bool sf = false;
@@ -5748,7 +5748,7 @@ static enum emu_insn_result emu_execute_multiply_smulh_w32(struct pt_regs *regs,
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_multiply_smulh_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_smulh_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SMULH;
     bool sf = true;
@@ -5761,7 +5761,7 @@ static enum emu_insn_result emu_execute_multiply_smulh_w64(struct pt_regs *regs,
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_multiply_umaddl_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_umaddl_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_UMADDL;
     bool sf = false;
@@ -5774,7 +5774,7 @@ static enum emu_insn_result emu_execute_multiply_umaddl_w32(struct pt_regs *regs
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_multiply_umaddl_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_umaddl_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_UMADDL;
     bool sf = true;
@@ -5787,7 +5787,7 @@ static enum emu_insn_result emu_execute_multiply_umaddl_w64(struct pt_regs *regs
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_multiply_umsubl_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_umsubl_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_UMSUBL;
     bool sf = false;
@@ -5800,7 +5800,7 @@ static enum emu_insn_result emu_execute_multiply_umsubl_w32(struct pt_regs *regs
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_multiply_umsubl_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_umsubl_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_UMSUBL;
     bool sf = true;
@@ -5813,7 +5813,7 @@ static enum emu_insn_result emu_execute_multiply_umsubl_w64(struct pt_regs *regs
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_multiply_umulh_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_umulh_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_UMULH;
     bool sf = false;
@@ -5826,7 +5826,7 @@ static enum emu_insn_result emu_execute_multiply_umulh_w32(struct pt_regs *regs,
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_multiply_umulh_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_umulh_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_UMULH;
     bool sf = true;
@@ -5839,7 +5839,7 @@ static enum emu_insn_result emu_execute_multiply_umulh_w64(struct pt_regs *regs,
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w32_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = false;
@@ -5861,7 +5861,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond0(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w32_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = false;
@@ -5883,7 +5883,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond1(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w32_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = false;
@@ -5905,7 +5905,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond2(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w32_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = false;
@@ -5927,7 +5927,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond3(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w32_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = false;
@@ -5949,7 +5949,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond4(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w32_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = false;
@@ -5971,7 +5971,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond5(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w32_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = false;
@@ -5993,7 +5993,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond6(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w32_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = false;
@@ -6015,7 +6015,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond7(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w32_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = false;
@@ -6037,7 +6037,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond8(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w32_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = false;
@@ -6059,7 +6059,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond9(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w32_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = false;
@@ -6081,7 +6081,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond10(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w32_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = false;
@@ -6103,7 +6103,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond11(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w32_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = false;
@@ -6125,7 +6125,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond12(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w32_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = false;
@@ -6147,7 +6147,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond13(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w32_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = false;
@@ -6169,7 +6169,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond14(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w32_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = false;
@@ -6191,7 +6191,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w32_cond15(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w64_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = true;
@@ -6213,7 +6213,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond0(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w64_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = true;
@@ -6235,7 +6235,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond1(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w64_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = true;
@@ -6257,7 +6257,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond2(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w64_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = true;
@@ -6279,7 +6279,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond3(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w64_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = true;
@@ -6301,7 +6301,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond4(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w64_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = true;
@@ -6323,7 +6323,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond5(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w64_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = true;
@@ -6345,7 +6345,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond6(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w64_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = true;
@@ -6367,7 +6367,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond7(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w64_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = true;
@@ -6389,7 +6389,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond8(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w64_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = true;
@@ -6411,7 +6411,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond9(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w64_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = true;
@@ -6433,7 +6433,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond10(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w64_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = true;
@@ -6455,7 +6455,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond11(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w64_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = true;
@@ -6477,7 +6477,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond12(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w64_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = true;
@@ -6499,7 +6499,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond13(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w64_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = true;
@@ -6521,7 +6521,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond14(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_register_w64_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_REGISTER;
     bool sf = true;
@@ -6543,7 +6543,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_register_w64_cond15(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w32_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = false;
@@ -6565,7 +6565,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond0(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w32_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = false;
@@ -6587,7 +6587,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond1(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w32_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = false;
@@ -6609,7 +6609,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond2(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w32_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = false;
@@ -6631,7 +6631,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond3(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w32_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = false;
@@ -6653,7 +6653,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond4(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w32_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = false;
@@ -6675,7 +6675,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond5(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w32_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = false;
@@ -6697,7 +6697,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond6(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w32_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = false;
@@ -6719,7 +6719,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond7(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w32_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = false;
@@ -6741,7 +6741,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond8(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w32_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = false;
@@ -6763,7 +6763,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond9(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w32_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = false;
@@ -6785,7 +6785,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond10(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w32_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = false;
@@ -6807,7 +6807,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond11(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w32_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = false;
@@ -6829,7 +6829,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond12(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w32_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = false;
@@ -6851,7 +6851,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond13(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w32_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = false;
@@ -6873,7 +6873,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond14(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w32_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = false;
@@ -6895,7 +6895,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w32_cond15(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w64_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = true;
@@ -6917,7 +6917,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond0(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w64_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = true;
@@ -6939,7 +6939,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond1(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w64_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = true;
@@ -6961,7 +6961,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond2(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w64_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = true;
@@ -6983,7 +6983,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond3(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w64_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = true;
@@ -7005,7 +7005,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond4(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w64_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = true;
@@ -7027,7 +7027,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond5(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w64_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = true;
@@ -7049,7 +7049,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond6(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w64_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = true;
@@ -7071,7 +7071,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond7(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w64_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = true;
@@ -7093,7 +7093,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond8(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w64_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = true;
@@ -7115,7 +7115,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond9(str
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w64_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = true;
@@ -7137,7 +7137,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond10(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w64_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = true;
@@ -7159,7 +7159,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond11(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w64_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = true;
@@ -7181,7 +7181,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond12(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w64_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = true;
@@ -7203,7 +7203,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond13(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w64_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = true;
@@ -7225,7 +7225,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond14(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_register_w64_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_REGISTER;
     bool sf = true;
@@ -7247,7 +7247,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_register_w64_cond15(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w32_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = false;
@@ -7269,7 +7269,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond0(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w32_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = false;
@@ -7291,7 +7291,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond1(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w32_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = false;
@@ -7313,7 +7313,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond2(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w32_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = false;
@@ -7335,7 +7335,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond3(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w32_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = false;
@@ -7357,7 +7357,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond4(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w32_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = false;
@@ -7379,7 +7379,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond5(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w32_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = false;
@@ -7401,7 +7401,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond6(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w32_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = false;
@@ -7423,7 +7423,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond7(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w32_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = false;
@@ -7445,7 +7445,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond8(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w32_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = false;
@@ -7467,7 +7467,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond9(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w32_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = false;
@@ -7489,7 +7489,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond10(s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w32_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = false;
@@ -7511,7 +7511,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond11(s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w32_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = false;
@@ -7533,7 +7533,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond12(s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w32_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = false;
@@ -7555,7 +7555,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond13(s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w32_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = false;
@@ -7577,7 +7577,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond14(s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w32_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = false;
@@ -7599,7 +7599,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w32_cond15(s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w64_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = true;
@@ -7621,7 +7621,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond0(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w64_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = true;
@@ -7643,7 +7643,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond1(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w64_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = true;
@@ -7665,7 +7665,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond2(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w64_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = true;
@@ -7687,7 +7687,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond3(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w64_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = true;
@@ -7709,7 +7709,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond4(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w64_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = true;
@@ -7731,7 +7731,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond5(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w64_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = true;
@@ -7753,7 +7753,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond6(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w64_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = true;
@@ -7775,7 +7775,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond7(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w64_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = true;
@@ -7797,7 +7797,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond8(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w64_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = true;
@@ -7819,7 +7819,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond9(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w64_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = true;
@@ -7841,7 +7841,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond10(s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w64_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = true;
@@ -7863,7 +7863,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond11(s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w64_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = true;
@@ -7885,7 +7885,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond12(s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w64_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = true;
@@ -7907,7 +7907,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond13(s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w64_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = true;
@@ -7929,7 +7929,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond14(s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmn_immediate_w64_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMN_IMMEDIATE;
     bool sf = true;
@@ -7951,7 +7951,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmn_immediate_w64_cond15(s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w32_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = false;
@@ -7973,7 +7973,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond0(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w32_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = false;
@@ -7995,7 +7995,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond1(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w32_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = false;
@@ -8017,7 +8017,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond2(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w32_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = false;
@@ -8039,7 +8039,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond3(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w32_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = false;
@@ -8061,7 +8061,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond4(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w32_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = false;
@@ -8083,7 +8083,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond5(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w32_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = false;
@@ -8105,7 +8105,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond6(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w32_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = false;
@@ -8127,7 +8127,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond7(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w32_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = false;
@@ -8149,7 +8149,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond8(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w32_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = false;
@@ -8171,7 +8171,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond9(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w32_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = false;
@@ -8193,7 +8193,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond10(s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w32_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = false;
@@ -8215,7 +8215,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond11(s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w32_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = false;
@@ -8237,7 +8237,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond12(s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w32_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = false;
@@ -8259,7 +8259,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond13(s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w32_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = false;
@@ -8281,7 +8281,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond14(s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w32_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = false;
@@ -8303,7 +8303,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w32_cond15(s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w64_cond0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = true;
@@ -8325,7 +8325,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond0(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w64_cond1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = true;
@@ -8347,7 +8347,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond1(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w64_cond2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = true;
@@ -8369,7 +8369,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond2(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w64_cond3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = true;
@@ -8391,7 +8391,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond3(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w64_cond4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = true;
@@ -8413,7 +8413,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond4(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w64_cond5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = true;
@@ -8435,7 +8435,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond5(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w64_cond6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = true;
@@ -8457,7 +8457,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond6(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w64_cond7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = true;
@@ -8479,7 +8479,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond7(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w64_cond8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = true;
@@ -8501,7 +8501,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond8(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w64_cond9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = true;
@@ -8523,7 +8523,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond9(st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w64_cond10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = true;
@@ -8545,7 +8545,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond10(s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w64_cond11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = true;
@@ -8567,7 +8567,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond11(s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w64_cond12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = true;
@@ -8589,7 +8589,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond12(s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w64_cond13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = true;
@@ -8611,7 +8611,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond13(s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w64_cond14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = true;
@@ -8633,7 +8633,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond14(s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ccmp_immediate_w64_cond15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CCMP_IMMEDIATE;
     bool sf = true;
@@ -8655,7 +8655,7 @@ static enum emu_insn_result emu_execute_cond_compare_ccmp_immediate_w64_cond15(s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_unary_rbit_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_rbit_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_RBIT;
     bool sf = false;
@@ -8700,7 +8700,7 @@ static enum emu_insn_result emu_execute_integer_unary_rbit_w32(struct pt_regs *r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_unary_rbit_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_rbit_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_RBIT;
     bool sf = true;
@@ -8745,7 +8745,7 @@ static enum emu_insn_result emu_execute_integer_unary_rbit_w64(struct pt_regs *r
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_unary_rev16_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_rev16_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_REV16;
     bool sf = false;
@@ -8790,7 +8790,7 @@ static enum emu_insn_result emu_execute_integer_unary_rev16_w32(struct pt_regs *
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_unary_rev16_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_rev16_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_REV16;
     bool sf = true;
@@ -8835,7 +8835,7 @@ static enum emu_insn_result emu_execute_integer_unary_rev16_w64(struct pt_regs *
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_unary_rev32_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_rev32_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_REV32;
     bool sf = false;
@@ -8880,7 +8880,7 @@ static enum emu_insn_result emu_execute_integer_unary_rev32_w32(struct pt_regs *
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_unary_rev32_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_rev32_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_REV32;
     bool sf = true;
@@ -8925,7 +8925,7 @@ static enum emu_insn_result emu_execute_integer_unary_rev32_w64(struct pt_regs *
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_unary_rev64_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_rev64_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_REV64;
     bool sf = false;
@@ -8970,7 +8970,7 @@ static enum emu_insn_result emu_execute_integer_unary_rev64_w32(struct pt_regs *
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_unary_rev64_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_rev64_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_REV64;
     bool sf = true;
@@ -9015,7 +9015,7 @@ static enum emu_insn_result emu_execute_integer_unary_rev64_w64(struct pt_regs *
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_unary_clz_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_clz_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CLZ;
     bool sf = false;
@@ -9060,7 +9060,7 @@ static enum emu_insn_result emu_execute_integer_unary_clz_w32(struct pt_regs *re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_unary_clz_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_clz_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CLZ;
     bool sf = true;
@@ -9105,7 +9105,7 @@ static enum emu_insn_result emu_execute_integer_unary_clz_w64(struct pt_regs *re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_unary_cls_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_cls_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CLS;
     bool sf = false;
@@ -9150,7 +9150,7 @@ static enum emu_insn_result emu_execute_integer_unary_cls_w32(struct pt_regs *re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_unary_cls_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_cls_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CLS;
     bool sf = true;
@@ -9195,7 +9195,7 @@ static enum emu_insn_result emu_execute_integer_unary_cls_w64(struct pt_regs *re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_unary_ctz_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ctz_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CTZ;
     bool sf = false;
@@ -9240,7 +9240,7 @@ static enum emu_insn_result emu_execute_integer_unary_ctz_w32(struct pt_regs *re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_unary_ctz_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_ctz_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CTZ;
     bool sf = true;
@@ -9285,7 +9285,7 @@ static enum emu_insn_result emu_execute_integer_unary_ctz_w64(struct pt_regs *re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_unary_cnt_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_cnt_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CNT;
     bool sf = false;
@@ -9330,7 +9330,7 @@ static enum emu_insn_result emu_execute_integer_unary_cnt_w32(struct pt_regs *re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_unary_cnt_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_cnt_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_CNT;
     bool sf = true;
@@ -9375,7 +9375,7 @@ static enum emu_insn_result emu_execute_integer_unary_cnt_w64(struct pt_regs *re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_unary_abs_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_abs_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ABS;
     bool sf = false;
@@ -9420,7 +9420,7 @@ static enum emu_insn_result emu_execute_integer_unary_abs_w32(struct pt_regs *re
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_integer_unary_abs_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_register_abs_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ABS;
     bool sf = true;
@@ -9467,7 +9467,7 @@ static enum emu_insn_result emu_execute_integer_unary_abs_w64(struct pt_regs *re
 
 
 
-static enum emu_insn_result (*emu_select_register_executor(const struct arm64_decoded_insn *decoded))(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result (*emu_select_register_executor(const struct arm64_decoded_instruction *decoded))(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 
 {
 
@@ -9477,1241 +9477,1241 @@ static enum emu_insn_result (*emu_select_register_executor(const struct arm64_de
 
     case ARM64_INSN_AND_SHIFTED_REGISTER:
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 0) return emu_execute_logic_shifted_and_shifted_register_w32_shift0;
+        if (decoded->operand_width == 32 && decoded->shift_type == 0) return emu_execute_register_and_shifted_register_w32_shift0;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 0) return emu_execute_logic_shifted_and_shifted_register_w64_shift0;
+        if (decoded->operand_width == 64 && decoded->shift_type == 0) return emu_execute_register_and_shifted_register_w64_shift0;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 1) return emu_execute_logic_shifted_and_shifted_register_w32_shift1;
+        if (decoded->operand_width == 32 && decoded->shift_type == 1) return emu_execute_register_and_shifted_register_w32_shift1;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 1) return emu_execute_logic_shifted_and_shifted_register_w64_shift1;
+        if (decoded->operand_width == 64 && decoded->shift_type == 1) return emu_execute_register_and_shifted_register_w64_shift1;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 2) return emu_execute_logic_shifted_and_shifted_register_w32_shift2;
+        if (decoded->operand_width == 32 && decoded->shift_type == 2) return emu_execute_register_and_shifted_register_w32_shift2;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 2) return emu_execute_logic_shifted_and_shifted_register_w64_shift2;
+        if (decoded->operand_width == 64 && decoded->shift_type == 2) return emu_execute_register_and_shifted_register_w64_shift2;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 3) return emu_execute_logic_shifted_and_shifted_register_w32_shift3;
+        if (decoded->operand_width == 32 && decoded->shift_type == 3) return emu_execute_register_and_shifted_register_w32_shift3;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 3) return emu_execute_logic_shifted_and_shifted_register_w64_shift3;
+        if (decoded->operand_width == 64 && decoded->shift_type == 3) return emu_execute_register_and_shifted_register_w64_shift3;
 
         return NULL;
 
     case ARM64_INSN_BIC_SHIFTED_REGISTER:
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 0) return emu_execute_logic_shifted_bic_shifted_register_w32_shift0;
+        if (decoded->operand_width == 32 && decoded->shift_type == 0) return emu_execute_register_bic_shifted_register_w32_shift0;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 0) return emu_execute_logic_shifted_bic_shifted_register_w64_shift0;
+        if (decoded->operand_width == 64 && decoded->shift_type == 0) return emu_execute_register_bic_shifted_register_w64_shift0;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 1) return emu_execute_logic_shifted_bic_shifted_register_w32_shift1;
+        if (decoded->operand_width == 32 && decoded->shift_type == 1) return emu_execute_register_bic_shifted_register_w32_shift1;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 1) return emu_execute_logic_shifted_bic_shifted_register_w64_shift1;
+        if (decoded->operand_width == 64 && decoded->shift_type == 1) return emu_execute_register_bic_shifted_register_w64_shift1;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 2) return emu_execute_logic_shifted_bic_shifted_register_w32_shift2;
+        if (decoded->operand_width == 32 && decoded->shift_type == 2) return emu_execute_register_bic_shifted_register_w32_shift2;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 2) return emu_execute_logic_shifted_bic_shifted_register_w64_shift2;
+        if (decoded->operand_width == 64 && decoded->shift_type == 2) return emu_execute_register_bic_shifted_register_w64_shift2;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 3) return emu_execute_logic_shifted_bic_shifted_register_w32_shift3;
+        if (decoded->operand_width == 32 && decoded->shift_type == 3) return emu_execute_register_bic_shifted_register_w32_shift3;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 3) return emu_execute_logic_shifted_bic_shifted_register_w64_shift3;
+        if (decoded->operand_width == 64 && decoded->shift_type == 3) return emu_execute_register_bic_shifted_register_w64_shift3;
 
         return NULL;
 
     case ARM64_INSN_ORR_SHIFTED_REGISTER:
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 0) return emu_execute_logic_shifted_orr_shifted_register_w32_shift0;
+        if (decoded->operand_width == 32 && decoded->shift_type == 0) return emu_execute_register_orr_shifted_register_w32_shift0;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 0) return emu_execute_logic_shifted_orr_shifted_register_w64_shift0;
+        if (decoded->operand_width == 64 && decoded->shift_type == 0) return emu_execute_register_orr_shifted_register_w64_shift0;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 1) return emu_execute_logic_shifted_orr_shifted_register_w32_shift1;
+        if (decoded->operand_width == 32 && decoded->shift_type == 1) return emu_execute_register_orr_shifted_register_w32_shift1;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 1) return emu_execute_logic_shifted_orr_shifted_register_w64_shift1;
+        if (decoded->operand_width == 64 && decoded->shift_type == 1) return emu_execute_register_orr_shifted_register_w64_shift1;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 2) return emu_execute_logic_shifted_orr_shifted_register_w32_shift2;
+        if (decoded->operand_width == 32 && decoded->shift_type == 2) return emu_execute_register_orr_shifted_register_w32_shift2;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 2) return emu_execute_logic_shifted_orr_shifted_register_w64_shift2;
+        if (decoded->operand_width == 64 && decoded->shift_type == 2) return emu_execute_register_orr_shifted_register_w64_shift2;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 3) return emu_execute_logic_shifted_orr_shifted_register_w32_shift3;
+        if (decoded->operand_width == 32 && decoded->shift_type == 3) return emu_execute_register_orr_shifted_register_w32_shift3;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 3) return emu_execute_logic_shifted_orr_shifted_register_w64_shift3;
+        if (decoded->operand_width == 64 && decoded->shift_type == 3) return emu_execute_register_orr_shifted_register_w64_shift3;
 
         return NULL;
 
     case ARM64_INSN_ORN_SHIFTED_REGISTER:
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 0) return emu_execute_logic_shifted_orn_shifted_register_w32_shift0;
+        if (decoded->operand_width == 32 && decoded->shift_type == 0) return emu_execute_register_orn_shifted_register_w32_shift0;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 0) return emu_execute_logic_shifted_orn_shifted_register_w64_shift0;
+        if (decoded->operand_width == 64 && decoded->shift_type == 0) return emu_execute_register_orn_shifted_register_w64_shift0;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 1) return emu_execute_logic_shifted_orn_shifted_register_w32_shift1;
+        if (decoded->operand_width == 32 && decoded->shift_type == 1) return emu_execute_register_orn_shifted_register_w32_shift1;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 1) return emu_execute_logic_shifted_orn_shifted_register_w64_shift1;
+        if (decoded->operand_width == 64 && decoded->shift_type == 1) return emu_execute_register_orn_shifted_register_w64_shift1;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 2) return emu_execute_logic_shifted_orn_shifted_register_w32_shift2;
+        if (decoded->operand_width == 32 && decoded->shift_type == 2) return emu_execute_register_orn_shifted_register_w32_shift2;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 2) return emu_execute_logic_shifted_orn_shifted_register_w64_shift2;
+        if (decoded->operand_width == 64 && decoded->shift_type == 2) return emu_execute_register_orn_shifted_register_w64_shift2;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 3) return emu_execute_logic_shifted_orn_shifted_register_w32_shift3;
+        if (decoded->operand_width == 32 && decoded->shift_type == 3) return emu_execute_register_orn_shifted_register_w32_shift3;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 3) return emu_execute_logic_shifted_orn_shifted_register_w64_shift3;
+        if (decoded->operand_width == 64 && decoded->shift_type == 3) return emu_execute_register_orn_shifted_register_w64_shift3;
 
         return NULL;
 
     case ARM64_INSN_EOR_SHIFTED_REGISTER:
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 0) return emu_execute_logic_shifted_eor_shifted_register_w32_shift0;
+        if (decoded->operand_width == 32 && decoded->shift_type == 0) return emu_execute_register_eor_shifted_register_w32_shift0;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 0) return emu_execute_logic_shifted_eor_shifted_register_w64_shift0;
+        if (decoded->operand_width == 64 && decoded->shift_type == 0) return emu_execute_register_eor_shifted_register_w64_shift0;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 1) return emu_execute_logic_shifted_eor_shifted_register_w32_shift1;
+        if (decoded->operand_width == 32 && decoded->shift_type == 1) return emu_execute_register_eor_shifted_register_w32_shift1;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 1) return emu_execute_logic_shifted_eor_shifted_register_w64_shift1;
+        if (decoded->operand_width == 64 && decoded->shift_type == 1) return emu_execute_register_eor_shifted_register_w64_shift1;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 2) return emu_execute_logic_shifted_eor_shifted_register_w32_shift2;
+        if (decoded->operand_width == 32 && decoded->shift_type == 2) return emu_execute_register_eor_shifted_register_w32_shift2;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 2) return emu_execute_logic_shifted_eor_shifted_register_w64_shift2;
+        if (decoded->operand_width == 64 && decoded->shift_type == 2) return emu_execute_register_eor_shifted_register_w64_shift2;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 3) return emu_execute_logic_shifted_eor_shifted_register_w32_shift3;
+        if (decoded->operand_width == 32 && decoded->shift_type == 3) return emu_execute_register_eor_shifted_register_w32_shift3;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 3) return emu_execute_logic_shifted_eor_shifted_register_w64_shift3;
+        if (decoded->operand_width == 64 && decoded->shift_type == 3) return emu_execute_register_eor_shifted_register_w64_shift3;
 
         return NULL;
 
     case ARM64_INSN_EON_SHIFTED_REGISTER:
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 0) return emu_execute_logic_shifted_eon_shifted_register_w32_shift0;
+        if (decoded->operand_width == 32 && decoded->shift_type == 0) return emu_execute_register_eon_shifted_register_w32_shift0;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 0) return emu_execute_logic_shifted_eon_shifted_register_w64_shift0;
+        if (decoded->operand_width == 64 && decoded->shift_type == 0) return emu_execute_register_eon_shifted_register_w64_shift0;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 1) return emu_execute_logic_shifted_eon_shifted_register_w32_shift1;
+        if (decoded->operand_width == 32 && decoded->shift_type == 1) return emu_execute_register_eon_shifted_register_w32_shift1;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 1) return emu_execute_logic_shifted_eon_shifted_register_w64_shift1;
+        if (decoded->operand_width == 64 && decoded->shift_type == 1) return emu_execute_register_eon_shifted_register_w64_shift1;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 2) return emu_execute_logic_shifted_eon_shifted_register_w32_shift2;
+        if (decoded->operand_width == 32 && decoded->shift_type == 2) return emu_execute_register_eon_shifted_register_w32_shift2;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 2) return emu_execute_logic_shifted_eon_shifted_register_w64_shift2;
+        if (decoded->operand_width == 64 && decoded->shift_type == 2) return emu_execute_register_eon_shifted_register_w64_shift2;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 3) return emu_execute_logic_shifted_eon_shifted_register_w32_shift3;
+        if (decoded->operand_width == 32 && decoded->shift_type == 3) return emu_execute_register_eon_shifted_register_w32_shift3;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 3) return emu_execute_logic_shifted_eon_shifted_register_w64_shift3;
+        if (decoded->operand_width == 64 && decoded->shift_type == 3) return emu_execute_register_eon_shifted_register_w64_shift3;
 
         return NULL;
 
     case ARM64_INSN_ANDS_SHIFTED_REGISTER:
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 0) return emu_execute_logic_shifted_ands_shifted_register_w32_shift0;
+        if (decoded->operand_width == 32 && decoded->shift_type == 0) return emu_execute_register_ands_shifted_register_w32_shift0;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 0) return emu_execute_logic_shifted_ands_shifted_register_w64_shift0;
+        if (decoded->operand_width == 64 && decoded->shift_type == 0) return emu_execute_register_ands_shifted_register_w64_shift0;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 1) return emu_execute_logic_shifted_ands_shifted_register_w32_shift1;
+        if (decoded->operand_width == 32 && decoded->shift_type == 1) return emu_execute_register_ands_shifted_register_w32_shift1;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 1) return emu_execute_logic_shifted_ands_shifted_register_w64_shift1;
+        if (decoded->operand_width == 64 && decoded->shift_type == 1) return emu_execute_register_ands_shifted_register_w64_shift1;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 2) return emu_execute_logic_shifted_ands_shifted_register_w32_shift2;
+        if (decoded->operand_width == 32 && decoded->shift_type == 2) return emu_execute_register_ands_shifted_register_w32_shift2;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 2) return emu_execute_logic_shifted_ands_shifted_register_w64_shift2;
+        if (decoded->operand_width == 64 && decoded->shift_type == 2) return emu_execute_register_ands_shifted_register_w64_shift2;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 3) return emu_execute_logic_shifted_ands_shifted_register_w32_shift3;
+        if (decoded->operand_width == 32 && decoded->shift_type == 3) return emu_execute_register_ands_shifted_register_w32_shift3;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 3) return emu_execute_logic_shifted_ands_shifted_register_w64_shift3;
+        if (decoded->operand_width == 64 && decoded->shift_type == 3) return emu_execute_register_ands_shifted_register_w64_shift3;
 
         return NULL;
 
     case ARM64_INSN_BICS_SHIFTED_REGISTER:
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 0) return emu_execute_logic_shifted_bics_shifted_register_w32_shift0;
+        if (decoded->operand_width == 32 && decoded->shift_type == 0) return emu_execute_register_bics_shifted_register_w32_shift0;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 0) return emu_execute_logic_shifted_bics_shifted_register_w64_shift0;
+        if (decoded->operand_width == 64 && decoded->shift_type == 0) return emu_execute_register_bics_shifted_register_w64_shift0;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 1) return emu_execute_logic_shifted_bics_shifted_register_w32_shift1;
+        if (decoded->operand_width == 32 && decoded->shift_type == 1) return emu_execute_register_bics_shifted_register_w32_shift1;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 1) return emu_execute_logic_shifted_bics_shifted_register_w64_shift1;
+        if (decoded->operand_width == 64 && decoded->shift_type == 1) return emu_execute_register_bics_shifted_register_w64_shift1;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 2) return emu_execute_logic_shifted_bics_shifted_register_w32_shift2;
+        if (decoded->operand_width == 32 && decoded->shift_type == 2) return emu_execute_register_bics_shifted_register_w32_shift2;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 2) return emu_execute_logic_shifted_bics_shifted_register_w64_shift2;
+        if (decoded->operand_width == 64 && decoded->shift_type == 2) return emu_execute_register_bics_shifted_register_w64_shift2;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 3) return emu_execute_logic_shifted_bics_shifted_register_w32_shift3;
+        if (decoded->operand_width == 32 && decoded->shift_type == 3) return emu_execute_register_bics_shifted_register_w32_shift3;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 3) return emu_execute_logic_shifted_bics_shifted_register_w64_shift3;
+        if (decoded->operand_width == 64 && decoded->shift_type == 3) return emu_execute_register_bics_shifted_register_w64_shift3;
 
         return NULL;
 
     case ARM64_INSN_ADD_SHIFTED_REGISTER:
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 0) return emu_execute_addsub_shifted_add_shifted_register_w32_shift0;
+        if (decoded->operand_width == 32 && decoded->shift_type == 0) return emu_execute_register_add_shifted_register_w32_shift0;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 0) return emu_execute_addsub_shifted_add_shifted_register_w64_shift0;
+        if (decoded->operand_width == 64 && decoded->shift_type == 0) return emu_execute_register_add_shifted_register_w64_shift0;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 1) return emu_execute_addsub_shifted_add_shifted_register_w32_shift1;
+        if (decoded->operand_width == 32 && decoded->shift_type == 1) return emu_execute_register_add_shifted_register_w32_shift1;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 1) return emu_execute_addsub_shifted_add_shifted_register_w64_shift1;
+        if (decoded->operand_width == 64 && decoded->shift_type == 1) return emu_execute_register_add_shifted_register_w64_shift1;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 2) return emu_execute_addsub_shifted_add_shifted_register_w32_shift2;
+        if (decoded->operand_width == 32 && decoded->shift_type == 2) return emu_execute_register_add_shifted_register_w32_shift2;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 2) return emu_execute_addsub_shifted_add_shifted_register_w64_shift2;
+        if (decoded->operand_width == 64 && decoded->shift_type == 2) return emu_execute_register_add_shifted_register_w64_shift2;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 3) return emu_execute_addsub_shifted_add_shifted_register_w32_shift3;
+        if (decoded->operand_width == 32 && decoded->shift_type == 3) return emu_execute_register_add_shifted_register_w32_shift3;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 3) return emu_execute_addsub_shifted_add_shifted_register_w64_shift3;
+        if (decoded->operand_width == 64 && decoded->shift_type == 3) return emu_execute_register_add_shifted_register_w64_shift3;
 
         return NULL;
 
     case ARM64_INSN_ADDS_SHIFTED_REGISTER:
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 0) return emu_execute_addsub_shifted_adds_shifted_register_w32_shift0;
+        if (decoded->operand_width == 32 && decoded->shift_type == 0) return emu_execute_register_adds_shifted_register_w32_shift0;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 0) return emu_execute_addsub_shifted_adds_shifted_register_w64_shift0;
+        if (decoded->operand_width == 64 && decoded->shift_type == 0) return emu_execute_register_adds_shifted_register_w64_shift0;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 1) return emu_execute_addsub_shifted_adds_shifted_register_w32_shift1;
+        if (decoded->operand_width == 32 && decoded->shift_type == 1) return emu_execute_register_adds_shifted_register_w32_shift1;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 1) return emu_execute_addsub_shifted_adds_shifted_register_w64_shift1;
+        if (decoded->operand_width == 64 && decoded->shift_type == 1) return emu_execute_register_adds_shifted_register_w64_shift1;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 2) return emu_execute_addsub_shifted_adds_shifted_register_w32_shift2;
+        if (decoded->operand_width == 32 && decoded->shift_type == 2) return emu_execute_register_adds_shifted_register_w32_shift2;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 2) return emu_execute_addsub_shifted_adds_shifted_register_w64_shift2;
+        if (decoded->operand_width == 64 && decoded->shift_type == 2) return emu_execute_register_adds_shifted_register_w64_shift2;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 3) return emu_execute_addsub_shifted_adds_shifted_register_w32_shift3;
+        if (decoded->operand_width == 32 && decoded->shift_type == 3) return emu_execute_register_adds_shifted_register_w32_shift3;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 3) return emu_execute_addsub_shifted_adds_shifted_register_w64_shift3;
+        if (decoded->operand_width == 64 && decoded->shift_type == 3) return emu_execute_register_adds_shifted_register_w64_shift3;
 
         return NULL;
 
     case ARM64_INSN_SUB_SHIFTED_REGISTER:
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 0) return emu_execute_addsub_shifted_sub_shifted_register_w32_shift0;
+        if (decoded->operand_width == 32 && decoded->shift_type == 0) return emu_execute_register_sub_shifted_register_w32_shift0;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 0) return emu_execute_addsub_shifted_sub_shifted_register_w64_shift0;
+        if (decoded->operand_width == 64 && decoded->shift_type == 0) return emu_execute_register_sub_shifted_register_w64_shift0;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 1) return emu_execute_addsub_shifted_sub_shifted_register_w32_shift1;
+        if (decoded->operand_width == 32 && decoded->shift_type == 1) return emu_execute_register_sub_shifted_register_w32_shift1;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 1) return emu_execute_addsub_shifted_sub_shifted_register_w64_shift1;
+        if (decoded->operand_width == 64 && decoded->shift_type == 1) return emu_execute_register_sub_shifted_register_w64_shift1;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 2) return emu_execute_addsub_shifted_sub_shifted_register_w32_shift2;
+        if (decoded->operand_width == 32 && decoded->shift_type == 2) return emu_execute_register_sub_shifted_register_w32_shift2;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 2) return emu_execute_addsub_shifted_sub_shifted_register_w64_shift2;
+        if (decoded->operand_width == 64 && decoded->shift_type == 2) return emu_execute_register_sub_shifted_register_w64_shift2;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 3) return emu_execute_addsub_shifted_sub_shifted_register_w32_shift3;
+        if (decoded->operand_width == 32 && decoded->shift_type == 3) return emu_execute_register_sub_shifted_register_w32_shift3;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 3) return emu_execute_addsub_shifted_sub_shifted_register_w64_shift3;
+        if (decoded->operand_width == 64 && decoded->shift_type == 3) return emu_execute_register_sub_shifted_register_w64_shift3;
 
         return NULL;
 
     case ARM64_INSN_SUBS_SHIFTED_REGISTER:
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 0) return emu_execute_addsub_shifted_subs_shifted_register_w32_shift0;
+        if (decoded->operand_width == 32 && decoded->shift_type == 0) return emu_execute_register_subs_shifted_register_w32_shift0;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 0) return emu_execute_addsub_shifted_subs_shifted_register_w64_shift0;
+        if (decoded->operand_width == 64 && decoded->shift_type == 0) return emu_execute_register_subs_shifted_register_w64_shift0;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 1) return emu_execute_addsub_shifted_subs_shifted_register_w32_shift1;
+        if (decoded->operand_width == 32 && decoded->shift_type == 1) return emu_execute_register_subs_shifted_register_w32_shift1;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 1) return emu_execute_addsub_shifted_subs_shifted_register_w64_shift1;
+        if (decoded->operand_width == 64 && decoded->shift_type == 1) return emu_execute_register_subs_shifted_register_w64_shift1;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 2) return emu_execute_addsub_shifted_subs_shifted_register_w32_shift2;
+        if (decoded->operand_width == 32 && decoded->shift_type == 2) return emu_execute_register_subs_shifted_register_w32_shift2;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 2) return emu_execute_addsub_shifted_subs_shifted_register_w64_shift2;
+        if (decoded->operand_width == 64 && decoded->shift_type == 2) return emu_execute_register_subs_shifted_register_w64_shift2;
 
-        if (decoded->operand_width == 32 && decoded->shift_type == 3) return emu_execute_addsub_shifted_subs_shifted_register_w32_shift3;
+        if (decoded->operand_width == 32 && decoded->shift_type == 3) return emu_execute_register_subs_shifted_register_w32_shift3;
 
-        if (decoded->operand_width == 64 && decoded->shift_type == 3) return emu_execute_addsub_shifted_subs_shifted_register_w64_shift3;
+        if (decoded->operand_width == 64 && decoded->shift_type == 3) return emu_execute_register_subs_shifted_register_w64_shift3;
 
         return NULL;
 
     case ARM64_INSN_ADD_EXTENDED_REGISTER:
 
-        if (decoded->operand_width == 32 && decoded->option == 0) return emu_execute_addsub_extended_add_extended_register_w32_extend0;
+        if (decoded->operand_width == 32 && decoded->option == 0) return emu_execute_register_add_extended_register_w32_opt0;
 
-        if (decoded->operand_width == 64 && decoded->option == 0) return emu_execute_addsub_extended_add_extended_register_w64_extend0;
+        if (decoded->operand_width == 64 && decoded->option == 0) return emu_execute_register_add_extended_register_w64_opt0;
 
-        if (decoded->operand_width == 32 && decoded->option == 1) return emu_execute_addsub_extended_add_extended_register_w32_extend1;
+        if (decoded->operand_width == 32 && decoded->option == 1) return emu_execute_register_add_extended_register_w32_opt1;
 
-        if (decoded->operand_width == 64 && decoded->option == 1) return emu_execute_addsub_extended_add_extended_register_w64_extend1;
+        if (decoded->operand_width == 64 && decoded->option == 1) return emu_execute_register_add_extended_register_w64_opt1;
 
-        if (decoded->operand_width == 32 && decoded->option == 2) return emu_execute_addsub_extended_add_extended_register_w32_extend2;
+        if (decoded->operand_width == 32 && decoded->option == 2) return emu_execute_register_add_extended_register_w32_opt2;
 
-        if (decoded->operand_width == 64 && decoded->option == 2) return emu_execute_addsub_extended_add_extended_register_w64_extend2;
+        if (decoded->operand_width == 64 && decoded->option == 2) return emu_execute_register_add_extended_register_w64_opt2;
 
-        if (decoded->operand_width == 32 && decoded->option == 3) return emu_execute_addsub_extended_add_extended_register_w32_extend3;
+        if (decoded->operand_width == 32 && decoded->option == 3) return emu_execute_register_add_extended_register_w32_opt3;
 
-        if (decoded->operand_width == 64 && decoded->option == 3) return emu_execute_addsub_extended_add_extended_register_w64_extend3;
+        if (decoded->operand_width == 64 && decoded->option == 3) return emu_execute_register_add_extended_register_w64_opt3;
 
-        if (decoded->operand_width == 32 && decoded->option == 4) return emu_execute_addsub_extended_add_extended_register_w32_extend4;
+        if (decoded->operand_width == 32 && decoded->option == 4) return emu_execute_register_add_extended_register_w32_opt4;
 
-        if (decoded->operand_width == 64 && decoded->option == 4) return emu_execute_addsub_extended_add_extended_register_w64_extend4;
+        if (decoded->operand_width == 64 && decoded->option == 4) return emu_execute_register_add_extended_register_w64_opt4;
 
-        if (decoded->operand_width == 32 && decoded->option == 5) return emu_execute_addsub_extended_add_extended_register_w32_extend5;
+        if (decoded->operand_width == 32 && decoded->option == 5) return emu_execute_register_add_extended_register_w32_opt5;
 
-        if (decoded->operand_width == 64 && decoded->option == 5) return emu_execute_addsub_extended_add_extended_register_w64_extend5;
+        if (decoded->operand_width == 64 && decoded->option == 5) return emu_execute_register_add_extended_register_w64_opt5;
 
-        if (decoded->operand_width == 32 && decoded->option == 6) return emu_execute_addsub_extended_add_extended_register_w32_extend6;
+        if (decoded->operand_width == 32 && decoded->option == 6) return emu_execute_register_add_extended_register_w32_opt6;
 
-        if (decoded->operand_width == 64 && decoded->option == 6) return emu_execute_addsub_extended_add_extended_register_w64_extend6;
+        if (decoded->operand_width == 64 && decoded->option == 6) return emu_execute_register_add_extended_register_w64_opt6;
 
-        if (decoded->operand_width == 32 && decoded->option == 7) return emu_execute_addsub_extended_add_extended_register_w32_extend7;
+        if (decoded->operand_width == 32 && decoded->option == 7) return emu_execute_register_add_extended_register_w32_opt7;
 
-        if (decoded->operand_width == 64 && decoded->option == 7) return emu_execute_addsub_extended_add_extended_register_w64_extend7;
+        if (decoded->operand_width == 64 && decoded->option == 7) return emu_execute_register_add_extended_register_w64_opt7;
 
         return NULL;
 
     case ARM64_INSN_ADDS_EXTENDED_REGISTER:
 
-        if (decoded->operand_width == 32 && decoded->option == 0) return emu_execute_addsub_extended_adds_extended_register_w32_extend0;
+        if (decoded->operand_width == 32 && decoded->option == 0) return emu_execute_register_adds_extended_register_w32_opt0;
 
-        if (decoded->operand_width == 64 && decoded->option == 0) return emu_execute_addsub_extended_adds_extended_register_w64_extend0;
+        if (decoded->operand_width == 64 && decoded->option == 0) return emu_execute_register_adds_extended_register_w64_opt0;
 
-        if (decoded->operand_width == 32 && decoded->option == 1) return emu_execute_addsub_extended_adds_extended_register_w32_extend1;
+        if (decoded->operand_width == 32 && decoded->option == 1) return emu_execute_register_adds_extended_register_w32_opt1;
 
-        if (decoded->operand_width == 64 && decoded->option == 1) return emu_execute_addsub_extended_adds_extended_register_w64_extend1;
+        if (decoded->operand_width == 64 && decoded->option == 1) return emu_execute_register_adds_extended_register_w64_opt1;
 
-        if (decoded->operand_width == 32 && decoded->option == 2) return emu_execute_addsub_extended_adds_extended_register_w32_extend2;
+        if (decoded->operand_width == 32 && decoded->option == 2) return emu_execute_register_adds_extended_register_w32_opt2;
 
-        if (decoded->operand_width == 64 && decoded->option == 2) return emu_execute_addsub_extended_adds_extended_register_w64_extend2;
+        if (decoded->operand_width == 64 && decoded->option == 2) return emu_execute_register_adds_extended_register_w64_opt2;
 
-        if (decoded->operand_width == 32 && decoded->option == 3) return emu_execute_addsub_extended_adds_extended_register_w32_extend3;
+        if (decoded->operand_width == 32 && decoded->option == 3) return emu_execute_register_adds_extended_register_w32_opt3;
 
-        if (decoded->operand_width == 64 && decoded->option == 3) return emu_execute_addsub_extended_adds_extended_register_w64_extend3;
+        if (decoded->operand_width == 64 && decoded->option == 3) return emu_execute_register_adds_extended_register_w64_opt3;
 
-        if (decoded->operand_width == 32 && decoded->option == 4) return emu_execute_addsub_extended_adds_extended_register_w32_extend4;
+        if (decoded->operand_width == 32 && decoded->option == 4) return emu_execute_register_adds_extended_register_w32_opt4;
 
-        if (decoded->operand_width == 64 && decoded->option == 4) return emu_execute_addsub_extended_adds_extended_register_w64_extend4;
+        if (decoded->operand_width == 64 && decoded->option == 4) return emu_execute_register_adds_extended_register_w64_opt4;
 
-        if (decoded->operand_width == 32 && decoded->option == 5) return emu_execute_addsub_extended_adds_extended_register_w32_extend5;
+        if (decoded->operand_width == 32 && decoded->option == 5) return emu_execute_register_adds_extended_register_w32_opt5;
 
-        if (decoded->operand_width == 64 && decoded->option == 5) return emu_execute_addsub_extended_adds_extended_register_w64_extend5;
+        if (decoded->operand_width == 64 && decoded->option == 5) return emu_execute_register_adds_extended_register_w64_opt5;
 
-        if (decoded->operand_width == 32 && decoded->option == 6) return emu_execute_addsub_extended_adds_extended_register_w32_extend6;
+        if (decoded->operand_width == 32 && decoded->option == 6) return emu_execute_register_adds_extended_register_w32_opt6;
 
-        if (decoded->operand_width == 64 && decoded->option == 6) return emu_execute_addsub_extended_adds_extended_register_w64_extend6;
+        if (decoded->operand_width == 64 && decoded->option == 6) return emu_execute_register_adds_extended_register_w64_opt6;
 
-        if (decoded->operand_width == 32 && decoded->option == 7) return emu_execute_addsub_extended_adds_extended_register_w32_extend7;
+        if (decoded->operand_width == 32 && decoded->option == 7) return emu_execute_register_adds_extended_register_w32_opt7;
 
-        if (decoded->operand_width == 64 && decoded->option == 7) return emu_execute_addsub_extended_adds_extended_register_w64_extend7;
+        if (decoded->operand_width == 64 && decoded->option == 7) return emu_execute_register_adds_extended_register_w64_opt7;
 
         return NULL;
 
     case ARM64_INSN_SUB_EXTENDED_REGISTER:
 
-        if (decoded->operand_width == 32 && decoded->option == 0) return emu_execute_addsub_extended_sub_extended_register_w32_extend0;
+        if (decoded->operand_width == 32 && decoded->option == 0) return emu_execute_register_sub_extended_register_w32_opt0;
 
-        if (decoded->operand_width == 64 && decoded->option == 0) return emu_execute_addsub_extended_sub_extended_register_w64_extend0;
+        if (decoded->operand_width == 64 && decoded->option == 0) return emu_execute_register_sub_extended_register_w64_opt0;
 
-        if (decoded->operand_width == 32 && decoded->option == 1) return emu_execute_addsub_extended_sub_extended_register_w32_extend1;
+        if (decoded->operand_width == 32 && decoded->option == 1) return emu_execute_register_sub_extended_register_w32_opt1;
 
-        if (decoded->operand_width == 64 && decoded->option == 1) return emu_execute_addsub_extended_sub_extended_register_w64_extend1;
+        if (decoded->operand_width == 64 && decoded->option == 1) return emu_execute_register_sub_extended_register_w64_opt1;
 
-        if (decoded->operand_width == 32 && decoded->option == 2) return emu_execute_addsub_extended_sub_extended_register_w32_extend2;
+        if (decoded->operand_width == 32 && decoded->option == 2) return emu_execute_register_sub_extended_register_w32_opt2;
 
-        if (decoded->operand_width == 64 && decoded->option == 2) return emu_execute_addsub_extended_sub_extended_register_w64_extend2;
+        if (decoded->operand_width == 64 && decoded->option == 2) return emu_execute_register_sub_extended_register_w64_opt2;
 
-        if (decoded->operand_width == 32 && decoded->option == 3) return emu_execute_addsub_extended_sub_extended_register_w32_extend3;
+        if (decoded->operand_width == 32 && decoded->option == 3) return emu_execute_register_sub_extended_register_w32_opt3;
 
-        if (decoded->operand_width == 64 && decoded->option == 3) return emu_execute_addsub_extended_sub_extended_register_w64_extend3;
+        if (decoded->operand_width == 64 && decoded->option == 3) return emu_execute_register_sub_extended_register_w64_opt3;
 
-        if (decoded->operand_width == 32 && decoded->option == 4) return emu_execute_addsub_extended_sub_extended_register_w32_extend4;
+        if (decoded->operand_width == 32 && decoded->option == 4) return emu_execute_register_sub_extended_register_w32_opt4;
 
-        if (decoded->operand_width == 64 && decoded->option == 4) return emu_execute_addsub_extended_sub_extended_register_w64_extend4;
+        if (decoded->operand_width == 64 && decoded->option == 4) return emu_execute_register_sub_extended_register_w64_opt4;
 
-        if (decoded->operand_width == 32 && decoded->option == 5) return emu_execute_addsub_extended_sub_extended_register_w32_extend5;
+        if (decoded->operand_width == 32 && decoded->option == 5) return emu_execute_register_sub_extended_register_w32_opt5;
 
-        if (decoded->operand_width == 64 && decoded->option == 5) return emu_execute_addsub_extended_sub_extended_register_w64_extend5;
+        if (decoded->operand_width == 64 && decoded->option == 5) return emu_execute_register_sub_extended_register_w64_opt5;
 
-        if (decoded->operand_width == 32 && decoded->option == 6) return emu_execute_addsub_extended_sub_extended_register_w32_extend6;
+        if (decoded->operand_width == 32 && decoded->option == 6) return emu_execute_register_sub_extended_register_w32_opt6;
 
-        if (decoded->operand_width == 64 && decoded->option == 6) return emu_execute_addsub_extended_sub_extended_register_w64_extend6;
+        if (decoded->operand_width == 64 && decoded->option == 6) return emu_execute_register_sub_extended_register_w64_opt6;
 
-        if (decoded->operand_width == 32 && decoded->option == 7) return emu_execute_addsub_extended_sub_extended_register_w32_extend7;
+        if (decoded->operand_width == 32 && decoded->option == 7) return emu_execute_register_sub_extended_register_w32_opt7;
 
-        if (decoded->operand_width == 64 && decoded->option == 7) return emu_execute_addsub_extended_sub_extended_register_w64_extend7;
+        if (decoded->operand_width == 64 && decoded->option == 7) return emu_execute_register_sub_extended_register_w64_opt7;
 
         return NULL;
 
     case ARM64_INSN_SUBS_EXTENDED_REGISTER:
 
-        if (decoded->operand_width == 32 && decoded->option == 0) return emu_execute_addsub_extended_subs_extended_register_w32_extend0;
+        if (decoded->operand_width == 32 && decoded->option == 0) return emu_execute_register_subs_extended_register_w32_opt0;
 
-        if (decoded->operand_width == 64 && decoded->option == 0) return emu_execute_addsub_extended_subs_extended_register_w64_extend0;
+        if (decoded->operand_width == 64 && decoded->option == 0) return emu_execute_register_subs_extended_register_w64_opt0;
 
-        if (decoded->operand_width == 32 && decoded->option == 1) return emu_execute_addsub_extended_subs_extended_register_w32_extend1;
+        if (decoded->operand_width == 32 && decoded->option == 1) return emu_execute_register_subs_extended_register_w32_opt1;
 
-        if (decoded->operand_width == 64 && decoded->option == 1) return emu_execute_addsub_extended_subs_extended_register_w64_extend1;
+        if (decoded->operand_width == 64 && decoded->option == 1) return emu_execute_register_subs_extended_register_w64_opt1;
 
-        if (decoded->operand_width == 32 && decoded->option == 2) return emu_execute_addsub_extended_subs_extended_register_w32_extend2;
+        if (decoded->operand_width == 32 && decoded->option == 2) return emu_execute_register_subs_extended_register_w32_opt2;
 
-        if (decoded->operand_width == 64 && decoded->option == 2) return emu_execute_addsub_extended_subs_extended_register_w64_extend2;
+        if (decoded->operand_width == 64 && decoded->option == 2) return emu_execute_register_subs_extended_register_w64_opt2;
 
-        if (decoded->operand_width == 32 && decoded->option == 3) return emu_execute_addsub_extended_subs_extended_register_w32_extend3;
+        if (decoded->operand_width == 32 && decoded->option == 3) return emu_execute_register_subs_extended_register_w32_opt3;
 
-        if (decoded->operand_width == 64 && decoded->option == 3) return emu_execute_addsub_extended_subs_extended_register_w64_extend3;
+        if (decoded->operand_width == 64 && decoded->option == 3) return emu_execute_register_subs_extended_register_w64_opt3;
 
-        if (decoded->operand_width == 32 && decoded->option == 4) return emu_execute_addsub_extended_subs_extended_register_w32_extend4;
+        if (decoded->operand_width == 32 && decoded->option == 4) return emu_execute_register_subs_extended_register_w32_opt4;
 
-        if (decoded->operand_width == 64 && decoded->option == 4) return emu_execute_addsub_extended_subs_extended_register_w64_extend4;
+        if (decoded->operand_width == 64 && decoded->option == 4) return emu_execute_register_subs_extended_register_w64_opt4;
 
-        if (decoded->operand_width == 32 && decoded->option == 5) return emu_execute_addsub_extended_subs_extended_register_w32_extend5;
+        if (decoded->operand_width == 32 && decoded->option == 5) return emu_execute_register_subs_extended_register_w32_opt5;
 
-        if (decoded->operand_width == 64 && decoded->option == 5) return emu_execute_addsub_extended_subs_extended_register_w64_extend5;
+        if (decoded->operand_width == 64 && decoded->option == 5) return emu_execute_register_subs_extended_register_w64_opt5;
 
-        if (decoded->operand_width == 32 && decoded->option == 6) return emu_execute_addsub_extended_subs_extended_register_w32_extend6;
+        if (decoded->operand_width == 32 && decoded->option == 6) return emu_execute_register_subs_extended_register_w32_opt6;
 
-        if (decoded->operand_width == 64 && decoded->option == 6) return emu_execute_addsub_extended_subs_extended_register_w64_extend6;
+        if (decoded->operand_width == 64 && decoded->option == 6) return emu_execute_register_subs_extended_register_w64_opt6;
 
-        if (decoded->operand_width == 32 && decoded->option == 7) return emu_execute_addsub_extended_subs_extended_register_w32_extend7;
+        if (decoded->operand_width == 32 && decoded->option == 7) return emu_execute_register_subs_extended_register_w32_opt7;
 
-        if (decoded->operand_width == 64 && decoded->option == 7) return emu_execute_addsub_extended_subs_extended_register_w64_extend7;
+        if (decoded->operand_width == 64 && decoded->option == 7) return emu_execute_register_subs_extended_register_w64_opt7;
 
         return NULL;
 
     case ARM64_INSN_ADC:
 
-        if (decoded->operand_width == 32) return emu_execute_addsub_carry_adc_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_adc_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_addsub_carry_adc_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_adc_w64;
 
         return NULL;
 
     case ARM64_INSN_ADCS:
 
-        if (decoded->operand_width == 32) return emu_execute_addsub_carry_adcs_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_adcs_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_addsub_carry_adcs_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_adcs_w64;
 
         return NULL;
 
     case ARM64_INSN_SBC:
 
-        if (decoded->operand_width == 32) return emu_execute_addsub_carry_sbc_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_sbc_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_addsub_carry_sbc_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_sbc_w64;
 
         return NULL;
 
     case ARM64_INSN_SBCS:
 
-        if (decoded->operand_width == 32) return emu_execute_addsub_carry_sbcs_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_sbcs_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_addsub_carry_sbcs_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_sbcs_w64;
 
         return NULL;
 
     case ARM64_INSN_CSEL:
 
-        if (decoded->operand_width == 32 && decoded->condition == 0) return emu_execute_cond_select_csel_w32_cond0;
+        if (decoded->operand_width == 32 && decoded->condition == 0) return emu_execute_register_csel_w32_cond0;
 
-        if (decoded->operand_width == 32 && decoded->condition == 1) return emu_execute_cond_select_csel_w32_cond1;
+        if (decoded->operand_width == 32 && decoded->condition == 1) return emu_execute_register_csel_w32_cond1;
 
-        if (decoded->operand_width == 32 && decoded->condition == 2) return emu_execute_cond_select_csel_w32_cond2;
+        if (decoded->operand_width == 32 && decoded->condition == 2) return emu_execute_register_csel_w32_cond2;
 
-        if (decoded->operand_width == 32 && decoded->condition == 3) return emu_execute_cond_select_csel_w32_cond3;
+        if (decoded->operand_width == 32 && decoded->condition == 3) return emu_execute_register_csel_w32_cond3;
 
-        if (decoded->operand_width == 32 && decoded->condition == 4) return emu_execute_cond_select_csel_w32_cond4;
+        if (decoded->operand_width == 32 && decoded->condition == 4) return emu_execute_register_csel_w32_cond4;
 
-        if (decoded->operand_width == 32 && decoded->condition == 5) return emu_execute_cond_select_csel_w32_cond5;
+        if (decoded->operand_width == 32 && decoded->condition == 5) return emu_execute_register_csel_w32_cond5;
 
-        if (decoded->operand_width == 32 && decoded->condition == 6) return emu_execute_cond_select_csel_w32_cond6;
+        if (decoded->operand_width == 32 && decoded->condition == 6) return emu_execute_register_csel_w32_cond6;
 
-        if (decoded->operand_width == 32 && decoded->condition == 7) return emu_execute_cond_select_csel_w32_cond7;
+        if (decoded->operand_width == 32 && decoded->condition == 7) return emu_execute_register_csel_w32_cond7;
 
-        if (decoded->operand_width == 32 && decoded->condition == 8) return emu_execute_cond_select_csel_w32_cond8;
+        if (decoded->operand_width == 32 && decoded->condition == 8) return emu_execute_register_csel_w32_cond8;
 
-        if (decoded->operand_width == 32 && decoded->condition == 9) return emu_execute_cond_select_csel_w32_cond9;
+        if (decoded->operand_width == 32 && decoded->condition == 9) return emu_execute_register_csel_w32_cond9;
 
-        if (decoded->operand_width == 32 && decoded->condition == 10) return emu_execute_cond_select_csel_w32_cond10;
+        if (decoded->operand_width == 32 && decoded->condition == 10) return emu_execute_register_csel_w32_cond10;
 
-        if (decoded->operand_width == 32 && decoded->condition == 11) return emu_execute_cond_select_csel_w32_cond11;
+        if (decoded->operand_width == 32 && decoded->condition == 11) return emu_execute_register_csel_w32_cond11;
 
-        if (decoded->operand_width == 32 && decoded->condition == 12) return emu_execute_cond_select_csel_w32_cond12;
+        if (decoded->operand_width == 32 && decoded->condition == 12) return emu_execute_register_csel_w32_cond12;
 
-        if (decoded->operand_width == 32 && decoded->condition == 13) return emu_execute_cond_select_csel_w32_cond13;
+        if (decoded->operand_width == 32 && decoded->condition == 13) return emu_execute_register_csel_w32_cond13;
 
-        if (decoded->operand_width == 32 && decoded->condition == 14) return emu_execute_cond_select_csel_w32_cond14;
+        if (decoded->operand_width == 32 && decoded->condition == 14) return emu_execute_register_csel_w32_cond14;
 
-        if (decoded->operand_width == 32 && decoded->condition == 15) return emu_execute_cond_select_csel_w32_cond15;
+        if (decoded->operand_width == 32 && decoded->condition == 15) return emu_execute_register_csel_w32_cond15;
 
-        if (decoded->operand_width == 64 && decoded->condition == 0) return emu_execute_cond_select_csel_w64_cond0;
+        if (decoded->operand_width == 64 && decoded->condition == 0) return emu_execute_register_csel_w64_cond0;
 
-        if (decoded->operand_width == 64 && decoded->condition == 1) return emu_execute_cond_select_csel_w64_cond1;
+        if (decoded->operand_width == 64 && decoded->condition == 1) return emu_execute_register_csel_w64_cond1;
 
-        if (decoded->operand_width == 64 && decoded->condition == 2) return emu_execute_cond_select_csel_w64_cond2;
+        if (decoded->operand_width == 64 && decoded->condition == 2) return emu_execute_register_csel_w64_cond2;
 
-        if (decoded->operand_width == 64 && decoded->condition == 3) return emu_execute_cond_select_csel_w64_cond3;
+        if (decoded->operand_width == 64 && decoded->condition == 3) return emu_execute_register_csel_w64_cond3;
 
-        if (decoded->operand_width == 64 && decoded->condition == 4) return emu_execute_cond_select_csel_w64_cond4;
+        if (decoded->operand_width == 64 && decoded->condition == 4) return emu_execute_register_csel_w64_cond4;
 
-        if (decoded->operand_width == 64 && decoded->condition == 5) return emu_execute_cond_select_csel_w64_cond5;
+        if (decoded->operand_width == 64 && decoded->condition == 5) return emu_execute_register_csel_w64_cond5;
 
-        if (decoded->operand_width == 64 && decoded->condition == 6) return emu_execute_cond_select_csel_w64_cond6;
+        if (decoded->operand_width == 64 && decoded->condition == 6) return emu_execute_register_csel_w64_cond6;
 
-        if (decoded->operand_width == 64 && decoded->condition == 7) return emu_execute_cond_select_csel_w64_cond7;
+        if (decoded->operand_width == 64 && decoded->condition == 7) return emu_execute_register_csel_w64_cond7;
 
-        if (decoded->operand_width == 64 && decoded->condition == 8) return emu_execute_cond_select_csel_w64_cond8;
+        if (decoded->operand_width == 64 && decoded->condition == 8) return emu_execute_register_csel_w64_cond8;
 
-        if (decoded->operand_width == 64 && decoded->condition == 9) return emu_execute_cond_select_csel_w64_cond9;
+        if (decoded->operand_width == 64 && decoded->condition == 9) return emu_execute_register_csel_w64_cond9;
 
-        if (decoded->operand_width == 64 && decoded->condition == 10) return emu_execute_cond_select_csel_w64_cond10;
+        if (decoded->operand_width == 64 && decoded->condition == 10) return emu_execute_register_csel_w64_cond10;
 
-        if (decoded->operand_width == 64 && decoded->condition == 11) return emu_execute_cond_select_csel_w64_cond11;
+        if (decoded->operand_width == 64 && decoded->condition == 11) return emu_execute_register_csel_w64_cond11;
 
-        if (decoded->operand_width == 64 && decoded->condition == 12) return emu_execute_cond_select_csel_w64_cond12;
+        if (decoded->operand_width == 64 && decoded->condition == 12) return emu_execute_register_csel_w64_cond12;
 
-        if (decoded->operand_width == 64 && decoded->condition == 13) return emu_execute_cond_select_csel_w64_cond13;
+        if (decoded->operand_width == 64 && decoded->condition == 13) return emu_execute_register_csel_w64_cond13;
 
-        if (decoded->operand_width == 64 && decoded->condition == 14) return emu_execute_cond_select_csel_w64_cond14;
+        if (decoded->operand_width == 64 && decoded->condition == 14) return emu_execute_register_csel_w64_cond14;
 
-        if (decoded->operand_width == 64 && decoded->condition == 15) return emu_execute_cond_select_csel_w64_cond15;
+        if (decoded->operand_width == 64 && decoded->condition == 15) return emu_execute_register_csel_w64_cond15;
 
         return NULL;
 
     case ARM64_INSN_CSINC:
 
-        if (decoded->operand_width == 32 && decoded->condition == 0) return emu_execute_cond_select_csinc_w32_cond0;
+        if (decoded->operand_width == 32 && decoded->condition == 0) return emu_execute_register_csinc_w32_cond0;
 
-        if (decoded->operand_width == 32 && decoded->condition == 1) return emu_execute_cond_select_csinc_w32_cond1;
+        if (decoded->operand_width == 32 && decoded->condition == 1) return emu_execute_register_csinc_w32_cond1;
 
-        if (decoded->operand_width == 32 && decoded->condition == 2) return emu_execute_cond_select_csinc_w32_cond2;
+        if (decoded->operand_width == 32 && decoded->condition == 2) return emu_execute_register_csinc_w32_cond2;
 
-        if (decoded->operand_width == 32 && decoded->condition == 3) return emu_execute_cond_select_csinc_w32_cond3;
+        if (decoded->operand_width == 32 && decoded->condition == 3) return emu_execute_register_csinc_w32_cond3;
 
-        if (decoded->operand_width == 32 && decoded->condition == 4) return emu_execute_cond_select_csinc_w32_cond4;
+        if (decoded->operand_width == 32 && decoded->condition == 4) return emu_execute_register_csinc_w32_cond4;
 
-        if (decoded->operand_width == 32 && decoded->condition == 5) return emu_execute_cond_select_csinc_w32_cond5;
+        if (decoded->operand_width == 32 && decoded->condition == 5) return emu_execute_register_csinc_w32_cond5;
 
-        if (decoded->operand_width == 32 && decoded->condition == 6) return emu_execute_cond_select_csinc_w32_cond6;
+        if (decoded->operand_width == 32 && decoded->condition == 6) return emu_execute_register_csinc_w32_cond6;
 
-        if (decoded->operand_width == 32 && decoded->condition == 7) return emu_execute_cond_select_csinc_w32_cond7;
+        if (decoded->operand_width == 32 && decoded->condition == 7) return emu_execute_register_csinc_w32_cond7;
 
-        if (decoded->operand_width == 32 && decoded->condition == 8) return emu_execute_cond_select_csinc_w32_cond8;
+        if (decoded->operand_width == 32 && decoded->condition == 8) return emu_execute_register_csinc_w32_cond8;
 
-        if (decoded->operand_width == 32 && decoded->condition == 9) return emu_execute_cond_select_csinc_w32_cond9;
+        if (decoded->operand_width == 32 && decoded->condition == 9) return emu_execute_register_csinc_w32_cond9;
 
-        if (decoded->operand_width == 32 && decoded->condition == 10) return emu_execute_cond_select_csinc_w32_cond10;
+        if (decoded->operand_width == 32 && decoded->condition == 10) return emu_execute_register_csinc_w32_cond10;
 
-        if (decoded->operand_width == 32 && decoded->condition == 11) return emu_execute_cond_select_csinc_w32_cond11;
+        if (decoded->operand_width == 32 && decoded->condition == 11) return emu_execute_register_csinc_w32_cond11;
 
-        if (decoded->operand_width == 32 && decoded->condition == 12) return emu_execute_cond_select_csinc_w32_cond12;
+        if (decoded->operand_width == 32 && decoded->condition == 12) return emu_execute_register_csinc_w32_cond12;
 
-        if (decoded->operand_width == 32 && decoded->condition == 13) return emu_execute_cond_select_csinc_w32_cond13;
+        if (decoded->operand_width == 32 && decoded->condition == 13) return emu_execute_register_csinc_w32_cond13;
 
-        if (decoded->operand_width == 32 && decoded->condition == 14) return emu_execute_cond_select_csinc_w32_cond14;
+        if (decoded->operand_width == 32 && decoded->condition == 14) return emu_execute_register_csinc_w32_cond14;
 
-        if (decoded->operand_width == 32 && decoded->condition == 15) return emu_execute_cond_select_csinc_w32_cond15;
+        if (decoded->operand_width == 32 && decoded->condition == 15) return emu_execute_register_csinc_w32_cond15;
 
-        if (decoded->operand_width == 64 && decoded->condition == 0) return emu_execute_cond_select_csinc_w64_cond0;
+        if (decoded->operand_width == 64 && decoded->condition == 0) return emu_execute_register_csinc_w64_cond0;
 
-        if (decoded->operand_width == 64 && decoded->condition == 1) return emu_execute_cond_select_csinc_w64_cond1;
+        if (decoded->operand_width == 64 && decoded->condition == 1) return emu_execute_register_csinc_w64_cond1;
 
-        if (decoded->operand_width == 64 && decoded->condition == 2) return emu_execute_cond_select_csinc_w64_cond2;
+        if (decoded->operand_width == 64 && decoded->condition == 2) return emu_execute_register_csinc_w64_cond2;
 
-        if (decoded->operand_width == 64 && decoded->condition == 3) return emu_execute_cond_select_csinc_w64_cond3;
+        if (decoded->operand_width == 64 && decoded->condition == 3) return emu_execute_register_csinc_w64_cond3;
 
-        if (decoded->operand_width == 64 && decoded->condition == 4) return emu_execute_cond_select_csinc_w64_cond4;
+        if (decoded->operand_width == 64 && decoded->condition == 4) return emu_execute_register_csinc_w64_cond4;
 
-        if (decoded->operand_width == 64 && decoded->condition == 5) return emu_execute_cond_select_csinc_w64_cond5;
+        if (decoded->operand_width == 64 && decoded->condition == 5) return emu_execute_register_csinc_w64_cond5;
 
-        if (decoded->operand_width == 64 && decoded->condition == 6) return emu_execute_cond_select_csinc_w64_cond6;
+        if (decoded->operand_width == 64 && decoded->condition == 6) return emu_execute_register_csinc_w64_cond6;
 
-        if (decoded->operand_width == 64 && decoded->condition == 7) return emu_execute_cond_select_csinc_w64_cond7;
+        if (decoded->operand_width == 64 && decoded->condition == 7) return emu_execute_register_csinc_w64_cond7;
 
-        if (decoded->operand_width == 64 && decoded->condition == 8) return emu_execute_cond_select_csinc_w64_cond8;
+        if (decoded->operand_width == 64 && decoded->condition == 8) return emu_execute_register_csinc_w64_cond8;
 
-        if (decoded->operand_width == 64 && decoded->condition == 9) return emu_execute_cond_select_csinc_w64_cond9;
+        if (decoded->operand_width == 64 && decoded->condition == 9) return emu_execute_register_csinc_w64_cond9;
 
-        if (decoded->operand_width == 64 && decoded->condition == 10) return emu_execute_cond_select_csinc_w64_cond10;
+        if (decoded->operand_width == 64 && decoded->condition == 10) return emu_execute_register_csinc_w64_cond10;
 
-        if (decoded->operand_width == 64 && decoded->condition == 11) return emu_execute_cond_select_csinc_w64_cond11;
+        if (decoded->operand_width == 64 && decoded->condition == 11) return emu_execute_register_csinc_w64_cond11;
 
-        if (decoded->operand_width == 64 && decoded->condition == 12) return emu_execute_cond_select_csinc_w64_cond12;
+        if (decoded->operand_width == 64 && decoded->condition == 12) return emu_execute_register_csinc_w64_cond12;
 
-        if (decoded->operand_width == 64 && decoded->condition == 13) return emu_execute_cond_select_csinc_w64_cond13;
+        if (decoded->operand_width == 64 && decoded->condition == 13) return emu_execute_register_csinc_w64_cond13;
 
-        if (decoded->operand_width == 64 && decoded->condition == 14) return emu_execute_cond_select_csinc_w64_cond14;
+        if (decoded->operand_width == 64 && decoded->condition == 14) return emu_execute_register_csinc_w64_cond14;
 
-        if (decoded->operand_width == 64 && decoded->condition == 15) return emu_execute_cond_select_csinc_w64_cond15;
+        if (decoded->operand_width == 64 && decoded->condition == 15) return emu_execute_register_csinc_w64_cond15;
 
         return NULL;
 
     case ARM64_INSN_CSINV:
 
-        if (decoded->operand_width == 32 && decoded->condition == 0) return emu_execute_cond_select_csinv_w32_cond0;
+        if (decoded->operand_width == 32 && decoded->condition == 0) return emu_execute_register_csinv_w32_cond0;
 
-        if (decoded->operand_width == 32 && decoded->condition == 1) return emu_execute_cond_select_csinv_w32_cond1;
+        if (decoded->operand_width == 32 && decoded->condition == 1) return emu_execute_register_csinv_w32_cond1;
 
-        if (decoded->operand_width == 32 && decoded->condition == 2) return emu_execute_cond_select_csinv_w32_cond2;
+        if (decoded->operand_width == 32 && decoded->condition == 2) return emu_execute_register_csinv_w32_cond2;
 
-        if (decoded->operand_width == 32 && decoded->condition == 3) return emu_execute_cond_select_csinv_w32_cond3;
+        if (decoded->operand_width == 32 && decoded->condition == 3) return emu_execute_register_csinv_w32_cond3;
 
-        if (decoded->operand_width == 32 && decoded->condition == 4) return emu_execute_cond_select_csinv_w32_cond4;
+        if (decoded->operand_width == 32 && decoded->condition == 4) return emu_execute_register_csinv_w32_cond4;
 
-        if (decoded->operand_width == 32 && decoded->condition == 5) return emu_execute_cond_select_csinv_w32_cond5;
+        if (decoded->operand_width == 32 && decoded->condition == 5) return emu_execute_register_csinv_w32_cond5;
 
-        if (decoded->operand_width == 32 && decoded->condition == 6) return emu_execute_cond_select_csinv_w32_cond6;
+        if (decoded->operand_width == 32 && decoded->condition == 6) return emu_execute_register_csinv_w32_cond6;
 
-        if (decoded->operand_width == 32 && decoded->condition == 7) return emu_execute_cond_select_csinv_w32_cond7;
+        if (decoded->operand_width == 32 && decoded->condition == 7) return emu_execute_register_csinv_w32_cond7;
 
-        if (decoded->operand_width == 32 && decoded->condition == 8) return emu_execute_cond_select_csinv_w32_cond8;
+        if (decoded->operand_width == 32 && decoded->condition == 8) return emu_execute_register_csinv_w32_cond8;
 
-        if (decoded->operand_width == 32 && decoded->condition == 9) return emu_execute_cond_select_csinv_w32_cond9;
+        if (decoded->operand_width == 32 && decoded->condition == 9) return emu_execute_register_csinv_w32_cond9;
 
-        if (decoded->operand_width == 32 && decoded->condition == 10) return emu_execute_cond_select_csinv_w32_cond10;
+        if (decoded->operand_width == 32 && decoded->condition == 10) return emu_execute_register_csinv_w32_cond10;
 
-        if (decoded->operand_width == 32 && decoded->condition == 11) return emu_execute_cond_select_csinv_w32_cond11;
+        if (decoded->operand_width == 32 && decoded->condition == 11) return emu_execute_register_csinv_w32_cond11;
 
-        if (decoded->operand_width == 32 && decoded->condition == 12) return emu_execute_cond_select_csinv_w32_cond12;
+        if (decoded->operand_width == 32 && decoded->condition == 12) return emu_execute_register_csinv_w32_cond12;
 
-        if (decoded->operand_width == 32 && decoded->condition == 13) return emu_execute_cond_select_csinv_w32_cond13;
+        if (decoded->operand_width == 32 && decoded->condition == 13) return emu_execute_register_csinv_w32_cond13;
 
-        if (decoded->operand_width == 32 && decoded->condition == 14) return emu_execute_cond_select_csinv_w32_cond14;
+        if (decoded->operand_width == 32 && decoded->condition == 14) return emu_execute_register_csinv_w32_cond14;
 
-        if (decoded->operand_width == 32 && decoded->condition == 15) return emu_execute_cond_select_csinv_w32_cond15;
+        if (decoded->operand_width == 32 && decoded->condition == 15) return emu_execute_register_csinv_w32_cond15;
 
-        if (decoded->operand_width == 64 && decoded->condition == 0) return emu_execute_cond_select_csinv_w64_cond0;
+        if (decoded->operand_width == 64 && decoded->condition == 0) return emu_execute_register_csinv_w64_cond0;
 
-        if (decoded->operand_width == 64 && decoded->condition == 1) return emu_execute_cond_select_csinv_w64_cond1;
+        if (decoded->operand_width == 64 && decoded->condition == 1) return emu_execute_register_csinv_w64_cond1;
 
-        if (decoded->operand_width == 64 && decoded->condition == 2) return emu_execute_cond_select_csinv_w64_cond2;
+        if (decoded->operand_width == 64 && decoded->condition == 2) return emu_execute_register_csinv_w64_cond2;
 
-        if (decoded->operand_width == 64 && decoded->condition == 3) return emu_execute_cond_select_csinv_w64_cond3;
+        if (decoded->operand_width == 64 && decoded->condition == 3) return emu_execute_register_csinv_w64_cond3;
 
-        if (decoded->operand_width == 64 && decoded->condition == 4) return emu_execute_cond_select_csinv_w64_cond4;
+        if (decoded->operand_width == 64 && decoded->condition == 4) return emu_execute_register_csinv_w64_cond4;
 
-        if (decoded->operand_width == 64 && decoded->condition == 5) return emu_execute_cond_select_csinv_w64_cond5;
+        if (decoded->operand_width == 64 && decoded->condition == 5) return emu_execute_register_csinv_w64_cond5;
 
-        if (decoded->operand_width == 64 && decoded->condition == 6) return emu_execute_cond_select_csinv_w64_cond6;
+        if (decoded->operand_width == 64 && decoded->condition == 6) return emu_execute_register_csinv_w64_cond6;
 
-        if (decoded->operand_width == 64 && decoded->condition == 7) return emu_execute_cond_select_csinv_w64_cond7;
+        if (decoded->operand_width == 64 && decoded->condition == 7) return emu_execute_register_csinv_w64_cond7;
 
-        if (decoded->operand_width == 64 && decoded->condition == 8) return emu_execute_cond_select_csinv_w64_cond8;
+        if (decoded->operand_width == 64 && decoded->condition == 8) return emu_execute_register_csinv_w64_cond8;
 
-        if (decoded->operand_width == 64 && decoded->condition == 9) return emu_execute_cond_select_csinv_w64_cond9;
+        if (decoded->operand_width == 64 && decoded->condition == 9) return emu_execute_register_csinv_w64_cond9;
 
-        if (decoded->operand_width == 64 && decoded->condition == 10) return emu_execute_cond_select_csinv_w64_cond10;
+        if (decoded->operand_width == 64 && decoded->condition == 10) return emu_execute_register_csinv_w64_cond10;
 
-        if (decoded->operand_width == 64 && decoded->condition == 11) return emu_execute_cond_select_csinv_w64_cond11;
+        if (decoded->operand_width == 64 && decoded->condition == 11) return emu_execute_register_csinv_w64_cond11;
 
-        if (decoded->operand_width == 64 && decoded->condition == 12) return emu_execute_cond_select_csinv_w64_cond12;
+        if (decoded->operand_width == 64 && decoded->condition == 12) return emu_execute_register_csinv_w64_cond12;
 
-        if (decoded->operand_width == 64 && decoded->condition == 13) return emu_execute_cond_select_csinv_w64_cond13;
+        if (decoded->operand_width == 64 && decoded->condition == 13) return emu_execute_register_csinv_w64_cond13;
 
-        if (decoded->operand_width == 64 && decoded->condition == 14) return emu_execute_cond_select_csinv_w64_cond14;
+        if (decoded->operand_width == 64 && decoded->condition == 14) return emu_execute_register_csinv_w64_cond14;
 
-        if (decoded->operand_width == 64 && decoded->condition == 15) return emu_execute_cond_select_csinv_w64_cond15;
+        if (decoded->operand_width == 64 && decoded->condition == 15) return emu_execute_register_csinv_w64_cond15;
 
         return NULL;
 
     case ARM64_INSN_CSNEG:
 
-        if (decoded->operand_width == 32 && decoded->condition == 0) return emu_execute_cond_select_csneg_w32_cond0;
+        if (decoded->operand_width == 32 && decoded->condition == 0) return emu_execute_register_csneg_w32_cond0;
 
-        if (decoded->operand_width == 32 && decoded->condition == 1) return emu_execute_cond_select_csneg_w32_cond1;
+        if (decoded->operand_width == 32 && decoded->condition == 1) return emu_execute_register_csneg_w32_cond1;
 
-        if (decoded->operand_width == 32 && decoded->condition == 2) return emu_execute_cond_select_csneg_w32_cond2;
+        if (decoded->operand_width == 32 && decoded->condition == 2) return emu_execute_register_csneg_w32_cond2;
 
-        if (decoded->operand_width == 32 && decoded->condition == 3) return emu_execute_cond_select_csneg_w32_cond3;
+        if (decoded->operand_width == 32 && decoded->condition == 3) return emu_execute_register_csneg_w32_cond3;
 
-        if (decoded->operand_width == 32 && decoded->condition == 4) return emu_execute_cond_select_csneg_w32_cond4;
+        if (decoded->operand_width == 32 && decoded->condition == 4) return emu_execute_register_csneg_w32_cond4;
 
-        if (decoded->operand_width == 32 && decoded->condition == 5) return emu_execute_cond_select_csneg_w32_cond5;
+        if (decoded->operand_width == 32 && decoded->condition == 5) return emu_execute_register_csneg_w32_cond5;
 
-        if (decoded->operand_width == 32 && decoded->condition == 6) return emu_execute_cond_select_csneg_w32_cond6;
+        if (decoded->operand_width == 32 && decoded->condition == 6) return emu_execute_register_csneg_w32_cond6;
 
-        if (decoded->operand_width == 32 && decoded->condition == 7) return emu_execute_cond_select_csneg_w32_cond7;
+        if (decoded->operand_width == 32 && decoded->condition == 7) return emu_execute_register_csneg_w32_cond7;
 
-        if (decoded->operand_width == 32 && decoded->condition == 8) return emu_execute_cond_select_csneg_w32_cond8;
+        if (decoded->operand_width == 32 && decoded->condition == 8) return emu_execute_register_csneg_w32_cond8;
 
-        if (decoded->operand_width == 32 && decoded->condition == 9) return emu_execute_cond_select_csneg_w32_cond9;
+        if (decoded->operand_width == 32 && decoded->condition == 9) return emu_execute_register_csneg_w32_cond9;
 
-        if (decoded->operand_width == 32 && decoded->condition == 10) return emu_execute_cond_select_csneg_w32_cond10;
+        if (decoded->operand_width == 32 && decoded->condition == 10) return emu_execute_register_csneg_w32_cond10;
 
-        if (decoded->operand_width == 32 && decoded->condition == 11) return emu_execute_cond_select_csneg_w32_cond11;
+        if (decoded->operand_width == 32 && decoded->condition == 11) return emu_execute_register_csneg_w32_cond11;
 
-        if (decoded->operand_width == 32 && decoded->condition == 12) return emu_execute_cond_select_csneg_w32_cond12;
+        if (decoded->operand_width == 32 && decoded->condition == 12) return emu_execute_register_csneg_w32_cond12;
 
-        if (decoded->operand_width == 32 && decoded->condition == 13) return emu_execute_cond_select_csneg_w32_cond13;
+        if (decoded->operand_width == 32 && decoded->condition == 13) return emu_execute_register_csneg_w32_cond13;
 
-        if (decoded->operand_width == 32 && decoded->condition == 14) return emu_execute_cond_select_csneg_w32_cond14;
+        if (decoded->operand_width == 32 && decoded->condition == 14) return emu_execute_register_csneg_w32_cond14;
 
-        if (decoded->operand_width == 32 && decoded->condition == 15) return emu_execute_cond_select_csneg_w32_cond15;
+        if (decoded->operand_width == 32 && decoded->condition == 15) return emu_execute_register_csneg_w32_cond15;
 
-        if (decoded->operand_width == 64 && decoded->condition == 0) return emu_execute_cond_select_csneg_w64_cond0;
+        if (decoded->operand_width == 64 && decoded->condition == 0) return emu_execute_register_csneg_w64_cond0;
 
-        if (decoded->operand_width == 64 && decoded->condition == 1) return emu_execute_cond_select_csneg_w64_cond1;
+        if (decoded->operand_width == 64 && decoded->condition == 1) return emu_execute_register_csneg_w64_cond1;
 
-        if (decoded->operand_width == 64 && decoded->condition == 2) return emu_execute_cond_select_csneg_w64_cond2;
+        if (decoded->operand_width == 64 && decoded->condition == 2) return emu_execute_register_csneg_w64_cond2;
 
-        if (decoded->operand_width == 64 && decoded->condition == 3) return emu_execute_cond_select_csneg_w64_cond3;
+        if (decoded->operand_width == 64 && decoded->condition == 3) return emu_execute_register_csneg_w64_cond3;
 
-        if (decoded->operand_width == 64 && decoded->condition == 4) return emu_execute_cond_select_csneg_w64_cond4;
+        if (decoded->operand_width == 64 && decoded->condition == 4) return emu_execute_register_csneg_w64_cond4;
 
-        if (decoded->operand_width == 64 && decoded->condition == 5) return emu_execute_cond_select_csneg_w64_cond5;
+        if (decoded->operand_width == 64 && decoded->condition == 5) return emu_execute_register_csneg_w64_cond5;
 
-        if (decoded->operand_width == 64 && decoded->condition == 6) return emu_execute_cond_select_csneg_w64_cond6;
+        if (decoded->operand_width == 64 && decoded->condition == 6) return emu_execute_register_csneg_w64_cond6;
 
-        if (decoded->operand_width == 64 && decoded->condition == 7) return emu_execute_cond_select_csneg_w64_cond7;
+        if (decoded->operand_width == 64 && decoded->condition == 7) return emu_execute_register_csneg_w64_cond7;
 
-        if (decoded->operand_width == 64 && decoded->condition == 8) return emu_execute_cond_select_csneg_w64_cond8;
+        if (decoded->operand_width == 64 && decoded->condition == 8) return emu_execute_register_csneg_w64_cond8;
 
-        if (decoded->operand_width == 64 && decoded->condition == 9) return emu_execute_cond_select_csneg_w64_cond9;
+        if (decoded->operand_width == 64 && decoded->condition == 9) return emu_execute_register_csneg_w64_cond9;
 
-        if (decoded->operand_width == 64 && decoded->condition == 10) return emu_execute_cond_select_csneg_w64_cond10;
+        if (decoded->operand_width == 64 && decoded->condition == 10) return emu_execute_register_csneg_w64_cond10;
 
-        if (decoded->operand_width == 64 && decoded->condition == 11) return emu_execute_cond_select_csneg_w64_cond11;
+        if (decoded->operand_width == 64 && decoded->condition == 11) return emu_execute_register_csneg_w64_cond11;
 
-        if (decoded->operand_width == 64 && decoded->condition == 12) return emu_execute_cond_select_csneg_w64_cond12;
+        if (decoded->operand_width == 64 && decoded->condition == 12) return emu_execute_register_csneg_w64_cond12;
 
-        if (decoded->operand_width == 64 && decoded->condition == 13) return emu_execute_cond_select_csneg_w64_cond13;
+        if (decoded->operand_width == 64 && decoded->condition == 13) return emu_execute_register_csneg_w64_cond13;
 
-        if (decoded->operand_width == 64 && decoded->condition == 14) return emu_execute_cond_select_csneg_w64_cond14;
+        if (decoded->operand_width == 64 && decoded->condition == 14) return emu_execute_register_csneg_w64_cond14;
 
-        if (decoded->operand_width == 64 && decoded->condition == 15) return emu_execute_cond_select_csneg_w64_cond15;
+        if (decoded->operand_width == 64 && decoded->condition == 15) return emu_execute_register_csneg_w64_cond15;
 
         return NULL;
 
     case ARM64_INSN_UDIV:
 
-        if (decoded->operand_width == 32) return emu_execute_integer_binary_udiv_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_udiv_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_integer_binary_udiv_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_udiv_w64;
 
         return NULL;
 
     case ARM64_INSN_SDIV:
 
-        if (decoded->operand_width == 32) return emu_execute_integer_binary_sdiv_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_sdiv_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_integer_binary_sdiv_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_sdiv_w64;
 
         return NULL;
 
     case ARM64_INSN_LSLV:
 
-        if (decoded->operand_width == 32) return emu_execute_integer_binary_lslv_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_lslv_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_integer_binary_lslv_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_lslv_w64;
 
         return NULL;
 
     case ARM64_INSN_LSRV:
 
-        if (decoded->operand_width == 32) return emu_execute_integer_binary_lsrv_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_lsrv_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_integer_binary_lsrv_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_lsrv_w64;
 
         return NULL;
 
     case ARM64_INSN_ASRV:
 
-        if (decoded->operand_width == 32) return emu_execute_integer_binary_asrv_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_asrv_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_integer_binary_asrv_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_asrv_w64;
 
         return NULL;
 
     case ARM64_INSN_RORV:
 
-        if (decoded->operand_width == 32) return emu_execute_integer_binary_rorv_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_rorv_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_integer_binary_rorv_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_rorv_w64;
 
         return NULL;
 
     case ARM64_INSN_CRC32B:
 
-        if (decoded->operand_width == 32) return emu_execute_integer_binary_crc32b_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_crc32b_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_integer_binary_crc32b_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_crc32b_w64;
 
         return NULL;
 
     case ARM64_INSN_CRC32H:
 
-        if (decoded->operand_width == 32) return emu_execute_integer_binary_crc32h_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_crc32h_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_integer_binary_crc32h_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_crc32h_w64;
 
         return NULL;
 
     case ARM64_INSN_CRC32W:
 
-        if (decoded->operand_width == 32) return emu_execute_integer_binary_crc32w_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_crc32w_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_integer_binary_crc32w_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_crc32w_w64;
 
         return NULL;
 
     case ARM64_INSN_CRC32X:
 
-        if (decoded->operand_width == 32) return emu_execute_integer_binary_crc32x_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_crc32x_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_integer_binary_crc32x_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_crc32x_w64;
 
         return NULL;
 
     case ARM64_INSN_CRC32CB:
 
-        if (decoded->operand_width == 32) return emu_execute_integer_binary_crc32cb_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_crc32cb_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_integer_binary_crc32cb_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_crc32cb_w64;
 
         return NULL;
 
     case ARM64_INSN_CRC32CH:
 
-        if (decoded->operand_width == 32) return emu_execute_integer_binary_crc32ch_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_crc32ch_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_integer_binary_crc32ch_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_crc32ch_w64;
 
         return NULL;
 
     case ARM64_INSN_CRC32CW:
 
-        if (decoded->operand_width == 32) return emu_execute_integer_binary_crc32cw_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_crc32cw_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_integer_binary_crc32cw_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_crc32cw_w64;
 
         return NULL;
 
     case ARM64_INSN_CRC32CX:
 
-        if (decoded->operand_width == 32) return emu_execute_integer_binary_crc32cx_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_crc32cx_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_integer_binary_crc32cx_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_crc32cx_w64;
 
         return NULL;
 
     case ARM64_INSN_SMAX_REGISTER:
 
-        if (decoded->operand_width == 32) return emu_execute_integer_binary_smax_register_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_smax_register_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_integer_binary_smax_register_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_smax_register_w64;
 
         return NULL;
 
     case ARM64_INSN_UMAX_REGISTER:
 
-        if (decoded->operand_width == 32) return emu_execute_integer_binary_umax_register_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_umax_register_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_integer_binary_umax_register_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_umax_register_w64;
 
         return NULL;
 
     case ARM64_INSN_SMIN_REGISTER:
 
-        if (decoded->operand_width == 32) return emu_execute_integer_binary_smin_register_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_smin_register_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_integer_binary_smin_register_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_smin_register_w64;
 
         return NULL;
 
     case ARM64_INSN_UMIN_REGISTER:
 
-        if (decoded->operand_width == 32) return emu_execute_integer_binary_umin_register_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_umin_register_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_integer_binary_umin_register_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_umin_register_w64;
 
         return NULL;
 
     case ARM64_INSN_MADD:
 
-        if (decoded->operand_width == 32) return emu_execute_multiply_madd_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_madd_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_multiply_madd_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_madd_w64;
 
         return NULL;
 
     case ARM64_INSN_MSUB:
 
-        if (decoded->operand_width == 32) return emu_execute_multiply_msub_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_msub_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_multiply_msub_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_msub_w64;
 
         return NULL;
 
     case ARM64_INSN_SMADDL:
 
-        if (decoded->operand_width == 32) return emu_execute_multiply_smaddl_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_smaddl_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_multiply_smaddl_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_smaddl_w64;
 
         return NULL;
 
     case ARM64_INSN_SMSUBL:
 
-        if (decoded->operand_width == 32) return emu_execute_multiply_smsubl_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_smsubl_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_multiply_smsubl_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_smsubl_w64;
 
         return NULL;
 
     case ARM64_INSN_SMULH:
 
-        if (decoded->operand_width == 32) return emu_execute_multiply_smulh_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_smulh_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_multiply_smulh_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_smulh_w64;
 
         return NULL;
 
     case ARM64_INSN_UMADDL:
 
-        if (decoded->operand_width == 32) return emu_execute_multiply_umaddl_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_umaddl_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_multiply_umaddl_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_umaddl_w64;
 
         return NULL;
 
     case ARM64_INSN_UMSUBL:
 
-        if (decoded->operand_width == 32) return emu_execute_multiply_umsubl_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_umsubl_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_multiply_umsubl_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_umsubl_w64;
 
         return NULL;
 
     case ARM64_INSN_UMULH:
 
-        if (decoded->operand_width == 32) return emu_execute_multiply_umulh_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_umulh_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_multiply_umulh_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_umulh_w64;
 
         return NULL;
 
     case ARM64_INSN_CCMN_REGISTER:
 
-        if (decoded->operand_width == 32 && decoded->condition == 0) return emu_execute_cond_compare_ccmn_register_w32_cond0;
+        if (decoded->operand_width == 32 && decoded->condition == 0) return emu_execute_register_ccmn_register_w32_cond0;
 
-        if (decoded->operand_width == 32 && decoded->condition == 1) return emu_execute_cond_compare_ccmn_register_w32_cond1;
+        if (decoded->operand_width == 32 && decoded->condition == 1) return emu_execute_register_ccmn_register_w32_cond1;
 
-        if (decoded->operand_width == 32 && decoded->condition == 2) return emu_execute_cond_compare_ccmn_register_w32_cond2;
+        if (decoded->operand_width == 32 && decoded->condition == 2) return emu_execute_register_ccmn_register_w32_cond2;
 
-        if (decoded->operand_width == 32 && decoded->condition == 3) return emu_execute_cond_compare_ccmn_register_w32_cond3;
+        if (decoded->operand_width == 32 && decoded->condition == 3) return emu_execute_register_ccmn_register_w32_cond3;
 
-        if (decoded->operand_width == 32 && decoded->condition == 4) return emu_execute_cond_compare_ccmn_register_w32_cond4;
+        if (decoded->operand_width == 32 && decoded->condition == 4) return emu_execute_register_ccmn_register_w32_cond4;
 
-        if (decoded->operand_width == 32 && decoded->condition == 5) return emu_execute_cond_compare_ccmn_register_w32_cond5;
+        if (decoded->operand_width == 32 && decoded->condition == 5) return emu_execute_register_ccmn_register_w32_cond5;
 
-        if (decoded->operand_width == 32 && decoded->condition == 6) return emu_execute_cond_compare_ccmn_register_w32_cond6;
+        if (decoded->operand_width == 32 && decoded->condition == 6) return emu_execute_register_ccmn_register_w32_cond6;
 
-        if (decoded->operand_width == 32 && decoded->condition == 7) return emu_execute_cond_compare_ccmn_register_w32_cond7;
+        if (decoded->operand_width == 32 && decoded->condition == 7) return emu_execute_register_ccmn_register_w32_cond7;
 
-        if (decoded->operand_width == 32 && decoded->condition == 8) return emu_execute_cond_compare_ccmn_register_w32_cond8;
+        if (decoded->operand_width == 32 && decoded->condition == 8) return emu_execute_register_ccmn_register_w32_cond8;
 
-        if (decoded->operand_width == 32 && decoded->condition == 9) return emu_execute_cond_compare_ccmn_register_w32_cond9;
+        if (decoded->operand_width == 32 && decoded->condition == 9) return emu_execute_register_ccmn_register_w32_cond9;
 
-        if (decoded->operand_width == 32 && decoded->condition == 10) return emu_execute_cond_compare_ccmn_register_w32_cond10;
+        if (decoded->operand_width == 32 && decoded->condition == 10) return emu_execute_register_ccmn_register_w32_cond10;
 
-        if (decoded->operand_width == 32 && decoded->condition == 11) return emu_execute_cond_compare_ccmn_register_w32_cond11;
+        if (decoded->operand_width == 32 && decoded->condition == 11) return emu_execute_register_ccmn_register_w32_cond11;
 
-        if (decoded->operand_width == 32 && decoded->condition == 12) return emu_execute_cond_compare_ccmn_register_w32_cond12;
+        if (decoded->operand_width == 32 && decoded->condition == 12) return emu_execute_register_ccmn_register_w32_cond12;
 
-        if (decoded->operand_width == 32 && decoded->condition == 13) return emu_execute_cond_compare_ccmn_register_w32_cond13;
+        if (decoded->operand_width == 32 && decoded->condition == 13) return emu_execute_register_ccmn_register_w32_cond13;
 
-        if (decoded->operand_width == 32 && decoded->condition == 14) return emu_execute_cond_compare_ccmn_register_w32_cond14;
+        if (decoded->operand_width == 32 && decoded->condition == 14) return emu_execute_register_ccmn_register_w32_cond14;
 
-        if (decoded->operand_width == 32 && decoded->condition == 15) return emu_execute_cond_compare_ccmn_register_w32_cond15;
+        if (decoded->operand_width == 32 && decoded->condition == 15) return emu_execute_register_ccmn_register_w32_cond15;
 
-        if (decoded->operand_width == 64 && decoded->condition == 0) return emu_execute_cond_compare_ccmn_register_w64_cond0;
+        if (decoded->operand_width == 64 && decoded->condition == 0) return emu_execute_register_ccmn_register_w64_cond0;
 
-        if (decoded->operand_width == 64 && decoded->condition == 1) return emu_execute_cond_compare_ccmn_register_w64_cond1;
+        if (decoded->operand_width == 64 && decoded->condition == 1) return emu_execute_register_ccmn_register_w64_cond1;
 
-        if (decoded->operand_width == 64 && decoded->condition == 2) return emu_execute_cond_compare_ccmn_register_w64_cond2;
+        if (decoded->operand_width == 64 && decoded->condition == 2) return emu_execute_register_ccmn_register_w64_cond2;
 
-        if (decoded->operand_width == 64 && decoded->condition == 3) return emu_execute_cond_compare_ccmn_register_w64_cond3;
+        if (decoded->operand_width == 64 && decoded->condition == 3) return emu_execute_register_ccmn_register_w64_cond3;
 
-        if (decoded->operand_width == 64 && decoded->condition == 4) return emu_execute_cond_compare_ccmn_register_w64_cond4;
+        if (decoded->operand_width == 64 && decoded->condition == 4) return emu_execute_register_ccmn_register_w64_cond4;
 
-        if (decoded->operand_width == 64 && decoded->condition == 5) return emu_execute_cond_compare_ccmn_register_w64_cond5;
+        if (decoded->operand_width == 64 && decoded->condition == 5) return emu_execute_register_ccmn_register_w64_cond5;
 
-        if (decoded->operand_width == 64 && decoded->condition == 6) return emu_execute_cond_compare_ccmn_register_w64_cond6;
+        if (decoded->operand_width == 64 && decoded->condition == 6) return emu_execute_register_ccmn_register_w64_cond6;
 
-        if (decoded->operand_width == 64 && decoded->condition == 7) return emu_execute_cond_compare_ccmn_register_w64_cond7;
+        if (decoded->operand_width == 64 && decoded->condition == 7) return emu_execute_register_ccmn_register_w64_cond7;
 
-        if (decoded->operand_width == 64 && decoded->condition == 8) return emu_execute_cond_compare_ccmn_register_w64_cond8;
+        if (decoded->operand_width == 64 && decoded->condition == 8) return emu_execute_register_ccmn_register_w64_cond8;
 
-        if (decoded->operand_width == 64 && decoded->condition == 9) return emu_execute_cond_compare_ccmn_register_w64_cond9;
+        if (decoded->operand_width == 64 && decoded->condition == 9) return emu_execute_register_ccmn_register_w64_cond9;
 
-        if (decoded->operand_width == 64 && decoded->condition == 10) return emu_execute_cond_compare_ccmn_register_w64_cond10;
+        if (decoded->operand_width == 64 && decoded->condition == 10) return emu_execute_register_ccmn_register_w64_cond10;
 
-        if (decoded->operand_width == 64 && decoded->condition == 11) return emu_execute_cond_compare_ccmn_register_w64_cond11;
+        if (decoded->operand_width == 64 && decoded->condition == 11) return emu_execute_register_ccmn_register_w64_cond11;
 
-        if (decoded->operand_width == 64 && decoded->condition == 12) return emu_execute_cond_compare_ccmn_register_w64_cond12;
+        if (decoded->operand_width == 64 && decoded->condition == 12) return emu_execute_register_ccmn_register_w64_cond12;
 
-        if (decoded->operand_width == 64 && decoded->condition == 13) return emu_execute_cond_compare_ccmn_register_w64_cond13;
+        if (decoded->operand_width == 64 && decoded->condition == 13) return emu_execute_register_ccmn_register_w64_cond13;
 
-        if (decoded->operand_width == 64 && decoded->condition == 14) return emu_execute_cond_compare_ccmn_register_w64_cond14;
+        if (decoded->operand_width == 64 && decoded->condition == 14) return emu_execute_register_ccmn_register_w64_cond14;
 
-        if (decoded->operand_width == 64 && decoded->condition == 15) return emu_execute_cond_compare_ccmn_register_w64_cond15;
+        if (decoded->operand_width == 64 && decoded->condition == 15) return emu_execute_register_ccmn_register_w64_cond15;
 
         return NULL;
 
     case ARM64_INSN_CCMP_REGISTER:
 
-        if (decoded->operand_width == 32 && decoded->condition == 0) return emu_execute_cond_compare_ccmp_register_w32_cond0;
+        if (decoded->operand_width == 32 && decoded->condition == 0) return emu_execute_register_ccmp_register_w32_cond0;
 
-        if (decoded->operand_width == 32 && decoded->condition == 1) return emu_execute_cond_compare_ccmp_register_w32_cond1;
+        if (decoded->operand_width == 32 && decoded->condition == 1) return emu_execute_register_ccmp_register_w32_cond1;
 
-        if (decoded->operand_width == 32 && decoded->condition == 2) return emu_execute_cond_compare_ccmp_register_w32_cond2;
+        if (decoded->operand_width == 32 && decoded->condition == 2) return emu_execute_register_ccmp_register_w32_cond2;
 
-        if (decoded->operand_width == 32 && decoded->condition == 3) return emu_execute_cond_compare_ccmp_register_w32_cond3;
+        if (decoded->operand_width == 32 && decoded->condition == 3) return emu_execute_register_ccmp_register_w32_cond3;
 
-        if (decoded->operand_width == 32 && decoded->condition == 4) return emu_execute_cond_compare_ccmp_register_w32_cond4;
+        if (decoded->operand_width == 32 && decoded->condition == 4) return emu_execute_register_ccmp_register_w32_cond4;
 
-        if (decoded->operand_width == 32 && decoded->condition == 5) return emu_execute_cond_compare_ccmp_register_w32_cond5;
+        if (decoded->operand_width == 32 && decoded->condition == 5) return emu_execute_register_ccmp_register_w32_cond5;
 
-        if (decoded->operand_width == 32 && decoded->condition == 6) return emu_execute_cond_compare_ccmp_register_w32_cond6;
+        if (decoded->operand_width == 32 && decoded->condition == 6) return emu_execute_register_ccmp_register_w32_cond6;
 
-        if (decoded->operand_width == 32 && decoded->condition == 7) return emu_execute_cond_compare_ccmp_register_w32_cond7;
+        if (decoded->operand_width == 32 && decoded->condition == 7) return emu_execute_register_ccmp_register_w32_cond7;
 
-        if (decoded->operand_width == 32 && decoded->condition == 8) return emu_execute_cond_compare_ccmp_register_w32_cond8;
+        if (decoded->operand_width == 32 && decoded->condition == 8) return emu_execute_register_ccmp_register_w32_cond8;
 
-        if (decoded->operand_width == 32 && decoded->condition == 9) return emu_execute_cond_compare_ccmp_register_w32_cond9;
+        if (decoded->operand_width == 32 && decoded->condition == 9) return emu_execute_register_ccmp_register_w32_cond9;
 
-        if (decoded->operand_width == 32 && decoded->condition == 10) return emu_execute_cond_compare_ccmp_register_w32_cond10;
+        if (decoded->operand_width == 32 && decoded->condition == 10) return emu_execute_register_ccmp_register_w32_cond10;
 
-        if (decoded->operand_width == 32 && decoded->condition == 11) return emu_execute_cond_compare_ccmp_register_w32_cond11;
+        if (decoded->operand_width == 32 && decoded->condition == 11) return emu_execute_register_ccmp_register_w32_cond11;
 
-        if (decoded->operand_width == 32 && decoded->condition == 12) return emu_execute_cond_compare_ccmp_register_w32_cond12;
+        if (decoded->operand_width == 32 && decoded->condition == 12) return emu_execute_register_ccmp_register_w32_cond12;
 
-        if (decoded->operand_width == 32 && decoded->condition == 13) return emu_execute_cond_compare_ccmp_register_w32_cond13;
+        if (decoded->operand_width == 32 && decoded->condition == 13) return emu_execute_register_ccmp_register_w32_cond13;
 
-        if (decoded->operand_width == 32 && decoded->condition == 14) return emu_execute_cond_compare_ccmp_register_w32_cond14;
+        if (decoded->operand_width == 32 && decoded->condition == 14) return emu_execute_register_ccmp_register_w32_cond14;
 
-        if (decoded->operand_width == 32 && decoded->condition == 15) return emu_execute_cond_compare_ccmp_register_w32_cond15;
+        if (decoded->operand_width == 32 && decoded->condition == 15) return emu_execute_register_ccmp_register_w32_cond15;
 
-        if (decoded->operand_width == 64 && decoded->condition == 0) return emu_execute_cond_compare_ccmp_register_w64_cond0;
+        if (decoded->operand_width == 64 && decoded->condition == 0) return emu_execute_register_ccmp_register_w64_cond0;
 
-        if (decoded->operand_width == 64 && decoded->condition == 1) return emu_execute_cond_compare_ccmp_register_w64_cond1;
+        if (decoded->operand_width == 64 && decoded->condition == 1) return emu_execute_register_ccmp_register_w64_cond1;
 
-        if (decoded->operand_width == 64 && decoded->condition == 2) return emu_execute_cond_compare_ccmp_register_w64_cond2;
+        if (decoded->operand_width == 64 && decoded->condition == 2) return emu_execute_register_ccmp_register_w64_cond2;
 
-        if (decoded->operand_width == 64 && decoded->condition == 3) return emu_execute_cond_compare_ccmp_register_w64_cond3;
+        if (decoded->operand_width == 64 && decoded->condition == 3) return emu_execute_register_ccmp_register_w64_cond3;
 
-        if (decoded->operand_width == 64 && decoded->condition == 4) return emu_execute_cond_compare_ccmp_register_w64_cond4;
+        if (decoded->operand_width == 64 && decoded->condition == 4) return emu_execute_register_ccmp_register_w64_cond4;
 
-        if (decoded->operand_width == 64 && decoded->condition == 5) return emu_execute_cond_compare_ccmp_register_w64_cond5;
+        if (decoded->operand_width == 64 && decoded->condition == 5) return emu_execute_register_ccmp_register_w64_cond5;
 
-        if (decoded->operand_width == 64 && decoded->condition == 6) return emu_execute_cond_compare_ccmp_register_w64_cond6;
+        if (decoded->operand_width == 64 && decoded->condition == 6) return emu_execute_register_ccmp_register_w64_cond6;
 
-        if (decoded->operand_width == 64 && decoded->condition == 7) return emu_execute_cond_compare_ccmp_register_w64_cond7;
+        if (decoded->operand_width == 64 && decoded->condition == 7) return emu_execute_register_ccmp_register_w64_cond7;
 
-        if (decoded->operand_width == 64 && decoded->condition == 8) return emu_execute_cond_compare_ccmp_register_w64_cond8;
+        if (decoded->operand_width == 64 && decoded->condition == 8) return emu_execute_register_ccmp_register_w64_cond8;
 
-        if (decoded->operand_width == 64 && decoded->condition == 9) return emu_execute_cond_compare_ccmp_register_w64_cond9;
+        if (decoded->operand_width == 64 && decoded->condition == 9) return emu_execute_register_ccmp_register_w64_cond9;
 
-        if (decoded->operand_width == 64 && decoded->condition == 10) return emu_execute_cond_compare_ccmp_register_w64_cond10;
+        if (decoded->operand_width == 64 && decoded->condition == 10) return emu_execute_register_ccmp_register_w64_cond10;
 
-        if (decoded->operand_width == 64 && decoded->condition == 11) return emu_execute_cond_compare_ccmp_register_w64_cond11;
+        if (decoded->operand_width == 64 && decoded->condition == 11) return emu_execute_register_ccmp_register_w64_cond11;
 
-        if (decoded->operand_width == 64 && decoded->condition == 12) return emu_execute_cond_compare_ccmp_register_w64_cond12;
+        if (decoded->operand_width == 64 && decoded->condition == 12) return emu_execute_register_ccmp_register_w64_cond12;
 
-        if (decoded->operand_width == 64 && decoded->condition == 13) return emu_execute_cond_compare_ccmp_register_w64_cond13;
+        if (decoded->operand_width == 64 && decoded->condition == 13) return emu_execute_register_ccmp_register_w64_cond13;
 
-        if (decoded->operand_width == 64 && decoded->condition == 14) return emu_execute_cond_compare_ccmp_register_w64_cond14;
+        if (decoded->operand_width == 64 && decoded->condition == 14) return emu_execute_register_ccmp_register_w64_cond14;
 
-        if (decoded->operand_width == 64 && decoded->condition == 15) return emu_execute_cond_compare_ccmp_register_w64_cond15;
+        if (decoded->operand_width == 64 && decoded->condition == 15) return emu_execute_register_ccmp_register_w64_cond15;
 
         return NULL;
 
     case ARM64_INSN_CCMN_IMMEDIATE:
 
-        if (decoded->operand_width == 32 && decoded->condition == 0) return emu_execute_cond_compare_ccmn_immediate_w32_cond0;
+        if (decoded->operand_width == 32 && decoded->condition == 0) return emu_execute_register_ccmn_immediate_w32_cond0;
 
-        if (decoded->operand_width == 32 && decoded->condition == 1) return emu_execute_cond_compare_ccmn_immediate_w32_cond1;
+        if (decoded->operand_width == 32 && decoded->condition == 1) return emu_execute_register_ccmn_immediate_w32_cond1;
 
-        if (decoded->operand_width == 32 && decoded->condition == 2) return emu_execute_cond_compare_ccmn_immediate_w32_cond2;
+        if (decoded->operand_width == 32 && decoded->condition == 2) return emu_execute_register_ccmn_immediate_w32_cond2;
 
-        if (decoded->operand_width == 32 && decoded->condition == 3) return emu_execute_cond_compare_ccmn_immediate_w32_cond3;
+        if (decoded->operand_width == 32 && decoded->condition == 3) return emu_execute_register_ccmn_immediate_w32_cond3;
 
-        if (decoded->operand_width == 32 && decoded->condition == 4) return emu_execute_cond_compare_ccmn_immediate_w32_cond4;
+        if (decoded->operand_width == 32 && decoded->condition == 4) return emu_execute_register_ccmn_immediate_w32_cond4;
 
-        if (decoded->operand_width == 32 && decoded->condition == 5) return emu_execute_cond_compare_ccmn_immediate_w32_cond5;
+        if (decoded->operand_width == 32 && decoded->condition == 5) return emu_execute_register_ccmn_immediate_w32_cond5;
 
-        if (decoded->operand_width == 32 && decoded->condition == 6) return emu_execute_cond_compare_ccmn_immediate_w32_cond6;
+        if (decoded->operand_width == 32 && decoded->condition == 6) return emu_execute_register_ccmn_immediate_w32_cond6;
 
-        if (decoded->operand_width == 32 && decoded->condition == 7) return emu_execute_cond_compare_ccmn_immediate_w32_cond7;
+        if (decoded->operand_width == 32 && decoded->condition == 7) return emu_execute_register_ccmn_immediate_w32_cond7;
 
-        if (decoded->operand_width == 32 && decoded->condition == 8) return emu_execute_cond_compare_ccmn_immediate_w32_cond8;
+        if (decoded->operand_width == 32 && decoded->condition == 8) return emu_execute_register_ccmn_immediate_w32_cond8;
 
-        if (decoded->operand_width == 32 && decoded->condition == 9) return emu_execute_cond_compare_ccmn_immediate_w32_cond9;
+        if (decoded->operand_width == 32 && decoded->condition == 9) return emu_execute_register_ccmn_immediate_w32_cond9;
 
-        if (decoded->operand_width == 32 && decoded->condition == 10) return emu_execute_cond_compare_ccmn_immediate_w32_cond10;
+        if (decoded->operand_width == 32 && decoded->condition == 10) return emu_execute_register_ccmn_immediate_w32_cond10;
 
-        if (decoded->operand_width == 32 && decoded->condition == 11) return emu_execute_cond_compare_ccmn_immediate_w32_cond11;
+        if (decoded->operand_width == 32 && decoded->condition == 11) return emu_execute_register_ccmn_immediate_w32_cond11;
 
-        if (decoded->operand_width == 32 && decoded->condition == 12) return emu_execute_cond_compare_ccmn_immediate_w32_cond12;
+        if (decoded->operand_width == 32 && decoded->condition == 12) return emu_execute_register_ccmn_immediate_w32_cond12;
 
-        if (decoded->operand_width == 32 && decoded->condition == 13) return emu_execute_cond_compare_ccmn_immediate_w32_cond13;
+        if (decoded->operand_width == 32 && decoded->condition == 13) return emu_execute_register_ccmn_immediate_w32_cond13;
 
-        if (decoded->operand_width == 32 && decoded->condition == 14) return emu_execute_cond_compare_ccmn_immediate_w32_cond14;
+        if (decoded->operand_width == 32 && decoded->condition == 14) return emu_execute_register_ccmn_immediate_w32_cond14;
 
-        if (decoded->operand_width == 32 && decoded->condition == 15) return emu_execute_cond_compare_ccmn_immediate_w32_cond15;
+        if (decoded->operand_width == 32 && decoded->condition == 15) return emu_execute_register_ccmn_immediate_w32_cond15;
 
-        if (decoded->operand_width == 64 && decoded->condition == 0) return emu_execute_cond_compare_ccmn_immediate_w64_cond0;
+        if (decoded->operand_width == 64 && decoded->condition == 0) return emu_execute_register_ccmn_immediate_w64_cond0;
 
-        if (decoded->operand_width == 64 && decoded->condition == 1) return emu_execute_cond_compare_ccmn_immediate_w64_cond1;
+        if (decoded->operand_width == 64 && decoded->condition == 1) return emu_execute_register_ccmn_immediate_w64_cond1;
 
-        if (decoded->operand_width == 64 && decoded->condition == 2) return emu_execute_cond_compare_ccmn_immediate_w64_cond2;
+        if (decoded->operand_width == 64 && decoded->condition == 2) return emu_execute_register_ccmn_immediate_w64_cond2;
 
-        if (decoded->operand_width == 64 && decoded->condition == 3) return emu_execute_cond_compare_ccmn_immediate_w64_cond3;
+        if (decoded->operand_width == 64 && decoded->condition == 3) return emu_execute_register_ccmn_immediate_w64_cond3;
 
-        if (decoded->operand_width == 64 && decoded->condition == 4) return emu_execute_cond_compare_ccmn_immediate_w64_cond4;
+        if (decoded->operand_width == 64 && decoded->condition == 4) return emu_execute_register_ccmn_immediate_w64_cond4;
 
-        if (decoded->operand_width == 64 && decoded->condition == 5) return emu_execute_cond_compare_ccmn_immediate_w64_cond5;
+        if (decoded->operand_width == 64 && decoded->condition == 5) return emu_execute_register_ccmn_immediate_w64_cond5;
 
-        if (decoded->operand_width == 64 && decoded->condition == 6) return emu_execute_cond_compare_ccmn_immediate_w64_cond6;
+        if (decoded->operand_width == 64 && decoded->condition == 6) return emu_execute_register_ccmn_immediate_w64_cond6;
 
-        if (decoded->operand_width == 64 && decoded->condition == 7) return emu_execute_cond_compare_ccmn_immediate_w64_cond7;
+        if (decoded->operand_width == 64 && decoded->condition == 7) return emu_execute_register_ccmn_immediate_w64_cond7;
 
-        if (decoded->operand_width == 64 && decoded->condition == 8) return emu_execute_cond_compare_ccmn_immediate_w64_cond8;
+        if (decoded->operand_width == 64 && decoded->condition == 8) return emu_execute_register_ccmn_immediate_w64_cond8;
 
-        if (decoded->operand_width == 64 && decoded->condition == 9) return emu_execute_cond_compare_ccmn_immediate_w64_cond9;
+        if (decoded->operand_width == 64 && decoded->condition == 9) return emu_execute_register_ccmn_immediate_w64_cond9;
 
-        if (decoded->operand_width == 64 && decoded->condition == 10) return emu_execute_cond_compare_ccmn_immediate_w64_cond10;
+        if (decoded->operand_width == 64 && decoded->condition == 10) return emu_execute_register_ccmn_immediate_w64_cond10;
 
-        if (decoded->operand_width == 64 && decoded->condition == 11) return emu_execute_cond_compare_ccmn_immediate_w64_cond11;
+        if (decoded->operand_width == 64 && decoded->condition == 11) return emu_execute_register_ccmn_immediate_w64_cond11;
 
-        if (decoded->operand_width == 64 && decoded->condition == 12) return emu_execute_cond_compare_ccmn_immediate_w64_cond12;
+        if (decoded->operand_width == 64 && decoded->condition == 12) return emu_execute_register_ccmn_immediate_w64_cond12;
 
-        if (decoded->operand_width == 64 && decoded->condition == 13) return emu_execute_cond_compare_ccmn_immediate_w64_cond13;
+        if (decoded->operand_width == 64 && decoded->condition == 13) return emu_execute_register_ccmn_immediate_w64_cond13;
 
-        if (decoded->operand_width == 64 && decoded->condition == 14) return emu_execute_cond_compare_ccmn_immediate_w64_cond14;
+        if (decoded->operand_width == 64 && decoded->condition == 14) return emu_execute_register_ccmn_immediate_w64_cond14;
 
-        if (decoded->operand_width == 64 && decoded->condition == 15) return emu_execute_cond_compare_ccmn_immediate_w64_cond15;
+        if (decoded->operand_width == 64 && decoded->condition == 15) return emu_execute_register_ccmn_immediate_w64_cond15;
 
         return NULL;
 
     case ARM64_INSN_CCMP_IMMEDIATE:
 
-        if (decoded->operand_width == 32 && decoded->condition == 0) return emu_execute_cond_compare_ccmp_immediate_w32_cond0;
+        if (decoded->operand_width == 32 && decoded->condition == 0) return emu_execute_register_ccmp_immediate_w32_cond0;
 
-        if (decoded->operand_width == 32 && decoded->condition == 1) return emu_execute_cond_compare_ccmp_immediate_w32_cond1;
+        if (decoded->operand_width == 32 && decoded->condition == 1) return emu_execute_register_ccmp_immediate_w32_cond1;
 
-        if (decoded->operand_width == 32 && decoded->condition == 2) return emu_execute_cond_compare_ccmp_immediate_w32_cond2;
+        if (decoded->operand_width == 32 && decoded->condition == 2) return emu_execute_register_ccmp_immediate_w32_cond2;
 
-        if (decoded->operand_width == 32 && decoded->condition == 3) return emu_execute_cond_compare_ccmp_immediate_w32_cond3;
+        if (decoded->operand_width == 32 && decoded->condition == 3) return emu_execute_register_ccmp_immediate_w32_cond3;
 
-        if (decoded->operand_width == 32 && decoded->condition == 4) return emu_execute_cond_compare_ccmp_immediate_w32_cond4;
+        if (decoded->operand_width == 32 && decoded->condition == 4) return emu_execute_register_ccmp_immediate_w32_cond4;
 
-        if (decoded->operand_width == 32 && decoded->condition == 5) return emu_execute_cond_compare_ccmp_immediate_w32_cond5;
+        if (decoded->operand_width == 32 && decoded->condition == 5) return emu_execute_register_ccmp_immediate_w32_cond5;
 
-        if (decoded->operand_width == 32 && decoded->condition == 6) return emu_execute_cond_compare_ccmp_immediate_w32_cond6;
+        if (decoded->operand_width == 32 && decoded->condition == 6) return emu_execute_register_ccmp_immediate_w32_cond6;
 
-        if (decoded->operand_width == 32 && decoded->condition == 7) return emu_execute_cond_compare_ccmp_immediate_w32_cond7;
+        if (decoded->operand_width == 32 && decoded->condition == 7) return emu_execute_register_ccmp_immediate_w32_cond7;
 
-        if (decoded->operand_width == 32 && decoded->condition == 8) return emu_execute_cond_compare_ccmp_immediate_w32_cond8;
+        if (decoded->operand_width == 32 && decoded->condition == 8) return emu_execute_register_ccmp_immediate_w32_cond8;
 
-        if (decoded->operand_width == 32 && decoded->condition == 9) return emu_execute_cond_compare_ccmp_immediate_w32_cond9;
+        if (decoded->operand_width == 32 && decoded->condition == 9) return emu_execute_register_ccmp_immediate_w32_cond9;
 
-        if (decoded->operand_width == 32 && decoded->condition == 10) return emu_execute_cond_compare_ccmp_immediate_w32_cond10;
+        if (decoded->operand_width == 32 && decoded->condition == 10) return emu_execute_register_ccmp_immediate_w32_cond10;
 
-        if (decoded->operand_width == 32 && decoded->condition == 11) return emu_execute_cond_compare_ccmp_immediate_w32_cond11;
+        if (decoded->operand_width == 32 && decoded->condition == 11) return emu_execute_register_ccmp_immediate_w32_cond11;
 
-        if (decoded->operand_width == 32 && decoded->condition == 12) return emu_execute_cond_compare_ccmp_immediate_w32_cond12;
+        if (decoded->operand_width == 32 && decoded->condition == 12) return emu_execute_register_ccmp_immediate_w32_cond12;
 
-        if (decoded->operand_width == 32 && decoded->condition == 13) return emu_execute_cond_compare_ccmp_immediate_w32_cond13;
+        if (decoded->operand_width == 32 && decoded->condition == 13) return emu_execute_register_ccmp_immediate_w32_cond13;
 
-        if (decoded->operand_width == 32 && decoded->condition == 14) return emu_execute_cond_compare_ccmp_immediate_w32_cond14;
+        if (decoded->operand_width == 32 && decoded->condition == 14) return emu_execute_register_ccmp_immediate_w32_cond14;
 
-        if (decoded->operand_width == 32 && decoded->condition == 15) return emu_execute_cond_compare_ccmp_immediate_w32_cond15;
+        if (decoded->operand_width == 32 && decoded->condition == 15) return emu_execute_register_ccmp_immediate_w32_cond15;
 
-        if (decoded->operand_width == 64 && decoded->condition == 0) return emu_execute_cond_compare_ccmp_immediate_w64_cond0;
+        if (decoded->operand_width == 64 && decoded->condition == 0) return emu_execute_register_ccmp_immediate_w64_cond0;
 
-        if (decoded->operand_width == 64 && decoded->condition == 1) return emu_execute_cond_compare_ccmp_immediate_w64_cond1;
+        if (decoded->operand_width == 64 && decoded->condition == 1) return emu_execute_register_ccmp_immediate_w64_cond1;
 
-        if (decoded->operand_width == 64 && decoded->condition == 2) return emu_execute_cond_compare_ccmp_immediate_w64_cond2;
+        if (decoded->operand_width == 64 && decoded->condition == 2) return emu_execute_register_ccmp_immediate_w64_cond2;
 
-        if (decoded->operand_width == 64 && decoded->condition == 3) return emu_execute_cond_compare_ccmp_immediate_w64_cond3;
+        if (decoded->operand_width == 64 && decoded->condition == 3) return emu_execute_register_ccmp_immediate_w64_cond3;
 
-        if (decoded->operand_width == 64 && decoded->condition == 4) return emu_execute_cond_compare_ccmp_immediate_w64_cond4;
+        if (decoded->operand_width == 64 && decoded->condition == 4) return emu_execute_register_ccmp_immediate_w64_cond4;
 
-        if (decoded->operand_width == 64 && decoded->condition == 5) return emu_execute_cond_compare_ccmp_immediate_w64_cond5;
+        if (decoded->operand_width == 64 && decoded->condition == 5) return emu_execute_register_ccmp_immediate_w64_cond5;
 
-        if (decoded->operand_width == 64 && decoded->condition == 6) return emu_execute_cond_compare_ccmp_immediate_w64_cond6;
+        if (decoded->operand_width == 64 && decoded->condition == 6) return emu_execute_register_ccmp_immediate_w64_cond6;
 
-        if (decoded->operand_width == 64 && decoded->condition == 7) return emu_execute_cond_compare_ccmp_immediate_w64_cond7;
+        if (decoded->operand_width == 64 && decoded->condition == 7) return emu_execute_register_ccmp_immediate_w64_cond7;
 
-        if (decoded->operand_width == 64 && decoded->condition == 8) return emu_execute_cond_compare_ccmp_immediate_w64_cond8;
+        if (decoded->operand_width == 64 && decoded->condition == 8) return emu_execute_register_ccmp_immediate_w64_cond8;
 
-        if (decoded->operand_width == 64 && decoded->condition == 9) return emu_execute_cond_compare_ccmp_immediate_w64_cond9;
+        if (decoded->operand_width == 64 && decoded->condition == 9) return emu_execute_register_ccmp_immediate_w64_cond9;
 
-        if (decoded->operand_width == 64 && decoded->condition == 10) return emu_execute_cond_compare_ccmp_immediate_w64_cond10;
+        if (decoded->operand_width == 64 && decoded->condition == 10) return emu_execute_register_ccmp_immediate_w64_cond10;
 
-        if (decoded->operand_width == 64 && decoded->condition == 11) return emu_execute_cond_compare_ccmp_immediate_w64_cond11;
+        if (decoded->operand_width == 64 && decoded->condition == 11) return emu_execute_register_ccmp_immediate_w64_cond11;
 
-        if (decoded->operand_width == 64 && decoded->condition == 12) return emu_execute_cond_compare_ccmp_immediate_w64_cond12;
+        if (decoded->operand_width == 64 && decoded->condition == 12) return emu_execute_register_ccmp_immediate_w64_cond12;
 
-        if (decoded->operand_width == 64 && decoded->condition == 13) return emu_execute_cond_compare_ccmp_immediate_w64_cond13;
+        if (decoded->operand_width == 64 && decoded->condition == 13) return emu_execute_register_ccmp_immediate_w64_cond13;
 
-        if (decoded->operand_width == 64 && decoded->condition == 14) return emu_execute_cond_compare_ccmp_immediate_w64_cond14;
+        if (decoded->operand_width == 64 && decoded->condition == 14) return emu_execute_register_ccmp_immediate_w64_cond14;
 
-        if (decoded->operand_width == 64 && decoded->condition == 15) return emu_execute_cond_compare_ccmp_immediate_w64_cond15;
+        if (decoded->operand_width == 64 && decoded->condition == 15) return emu_execute_register_ccmp_immediate_w64_cond15;
 
         return NULL;
 
     case ARM64_INSN_RBIT:
 
-        if (decoded->operand_width == 32) return emu_execute_integer_unary_rbit_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_rbit_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_integer_unary_rbit_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_rbit_w64;
 
         return NULL;
 
     case ARM64_INSN_REV16:
 
-        if (decoded->operand_width == 32) return emu_execute_integer_unary_rev16_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_rev16_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_integer_unary_rev16_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_rev16_w64;
 
         return NULL;
 
     case ARM64_INSN_REV32:
 
-        if (decoded->operand_width == 32) return emu_execute_integer_unary_rev32_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_rev32_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_integer_unary_rev32_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_rev32_w64;
 
         return NULL;
 
     case ARM64_INSN_REV64:
 
-        if (decoded->operand_width == 32) return emu_execute_integer_unary_rev64_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_rev64_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_integer_unary_rev64_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_rev64_w64;
 
         return NULL;
 
     case ARM64_INSN_CLZ:
 
-        if (decoded->operand_width == 32) return emu_execute_integer_unary_clz_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_clz_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_integer_unary_clz_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_clz_w64;
 
         return NULL;
 
     case ARM64_INSN_CLS:
 
-        if (decoded->operand_width == 32) return emu_execute_integer_unary_cls_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_cls_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_integer_unary_cls_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_cls_w64;
 
         return NULL;
 
     case ARM64_INSN_CTZ:
 
-        if (decoded->operand_width == 32) return emu_execute_integer_unary_ctz_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_ctz_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_integer_unary_ctz_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_ctz_w64;
 
         return NULL;
 
     case ARM64_INSN_CNT:
 
-        if (decoded->operand_width == 32) return emu_execute_integer_unary_cnt_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_cnt_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_integer_unary_cnt_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_cnt_w64;
 
         return NULL;
 
     case ARM64_INSN_ABS:
 
-        if (decoded->operand_width == 32) return emu_execute_integer_unary_abs_w32;
+        if (decoded->operand_width == 32) return emu_execute_register_abs_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_integer_unary_abs_w64;
+        if (decoded->operand_width == 64) return emu_execute_register_abs_w64;
 
         return NULL;
 
@@ -10725,7 +10725,7 @@ static enum emu_insn_result (*emu_select_register_executor(const struct arm64_de
 
 /* ======================== 数据处理寄存器类：解码结果构建缓存条目 ======================== */
 
-bool emu_build_register_executor(const struct arm64_decoded_insn *decoded, struct arm64_executor_entry *entry)
+bool emu_build_register_executor(const struct arm64_decoded_instruction *decoded, struct arm64_executor_entry *entry)
 {
     bool multiply;
     bool conditional_compare;

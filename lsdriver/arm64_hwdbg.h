@@ -45,7 +45,6 @@ static void (*fn_perf_bp_event)(struct perf_event *event, void *data);
 static int hw_breakpoint_parse(struct bp_point *point, bool is_compat, struct arch_hw_breakpoint *hw)
 {
     if (!point || !hw) return -EINVAL;
-
     memset(hw, 0, sizeof(*hw));
 
     // 类型转换：对应 arch_build_bp_info()
@@ -67,7 +66,7 @@ static int hw_breakpoint_parse(struct bp_point *point, bool is_compat, struct ar
         return -EINVAL;
     }
 
-    // 长度转换：对应 arch_build_bp_info()
+    // 长度转换：对应 arch_build_bp_info()（精确映射，防止枚举不连续）
     switch (point->bl)
     {
     case BP_BREAKPOINT_LEN_1:
@@ -124,10 +123,7 @@ static int hw_breakpoint_parse(struct bp_point *point, bool is_compat, struct ar
     uint64_t offset;
     if (is_compat)
     {
-
-        if (hw->ctrl.len == ARM_BREAKPOINT_LEN_8) alignment_mask = 0x7;
-        else alignment_mask = 0x3;
-
+        alignment_mask = (hw->ctrl.len == ARM_BREAKPOINT_LEN_8) ? 0x7 : 0x3;
         offset = hw->address & alignment_mask;
 
         switch (offset)
@@ -147,9 +143,7 @@ static int hw_breakpoint_parse(struct bp_point *point, bool is_compat, struct ar
     }
     else
     {
-        if (hw->ctrl.type == ARM_BREAKPOINT_EXECUTE) alignment_mask = 0x3;
-        else alignment_mask = 0x7;
-
+        alignment_mask = (hw->ctrl.type == ARM_BREAKPOINT_EXECUTE) ? 0x3 : 0x7;
         offset = hw->address & alignment_mask;
     }
 
@@ -186,6 +180,23 @@ static bool watchpoint_access_matches(struct arch_hw_breakpoint *info, uint64_t 
     if (is_write) return !!(info->ctrl.type & ARM_BREAKPOINT_STORE);
 
     return !!(info->ctrl.type & ARM_BREAKPOINT_LOAD);
+}
+
+// 统一提取的命中断点后单步模拟/步过逻辑
+static inline void process_point_hit(struct bp_point *point, struct pt_regs *regs, int dbg_ctrl_reg, int slot, uint64_t ctrl)
+{
+    struct fp_regs fp_regs __attribute__((__uninitialized__));
+    read_all_q_regs(&fp_regs);
+    point->on_hit(regs, &fp_regs, point);
+    bool emulated = emulate_insn(regs, &fp_regs, 0);
+    write_all_q_regs(&fp_regs);
+
+    // 模拟指令步过,失败走禁用进行步过
+    if (!emulated)
+    {
+        // 只清 enable 位，保留原有寄存器配置，继续走原异常处理链
+        write_wb_reg(dbg_ctrl_reg, slot, ctrl & ~0x1ULL);
+    }
 }
 
 // 执行断异常处理跳板工作函数
@@ -237,84 +248,73 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
     只有异常步过和 debug_info 的临时启停，才是只改 BCR/WCR 的 enable 位
     */
 
+    uint64_t current_pc = regs->pc & ~0x3ULL;
+
     for (int slot = 0; slot < num_brps; slot++)
     {
-        // 获取当前cpu的指定槽位寄存器
-        uint64_t addr = read_wb_reg(AARCH64_DBG_REG_BVR, slot);
         uint64_t ctrl = read_wb_reg(AARCH64_DBG_REG_BCR, slot);
+        if (!(ctrl & 0x1)) continue;
+
+        uint64_t addr = read_wb_reg(AARCH64_DBG_REG_BVR, slot);
+
+        /*
+            上案例
+            point0 配置地址 = 0x71B5654190
+            point1 配置地址 = 0x71B5653A68
+            point2 配置地址 = 0x71B5655590
+
+            安装进硬件地址寄存器：
+            BVR0 = 0x71B5654190
+            BVR1 = 0x71B5653A68
+            BVR2 = 0x71B5655590
+
+            目标执行到：
+            PC = 0x71B5655590
+
+            CPU 触发 debug exception，真实命中的是 slot2。
+
+            进入异常后，从 slot0 开始扫：
+            slot0:addr = read_bvr(0);  // 0x71B5654190
+
+            point0:info.address = 0x71B5654190
+
+            if (info.address == addr)派发 point0
+
+            bug 点：
+            这里仅证明 point0 安装在 slot0，
+            没证明这次异常由 slot0 触发。
+
+            所以真实命中 slot2，但 point0 先被派发了，
+            导致 point0.records 里写入了 record.pc = 0x71B5655590。
+            */
+        if (addr != current_pc) continue;
+
         size_t point_slot = 0;
         struct bp_point *point;
 
-        // 根据不同观点派发
         while ((point = bp_info_find_active_point(bp_info, &point_slot)))
         {
             struct arch_hw_breakpoint info;
 
-            // 地址不相等跳过
             if (hw_breakpoint_parse(point, 0, &info) || info.address != addr) continue;
 
-            /*
-                上案例
-                point0 配置地址 = 0x71B5654190
-                point1 配置地址 = 0x71B5653A68
-                point2 配置地址 = 0x71B5655590
-
-                安装进硬件地址寄存器：
-                BVR0 = 0x71B5654190
-                BVR1 = 0x71B5653A68
-                BVR2 = 0x71B5655590
-
-                目标执行到：
-                PC = 0x71B5655590
-
-                CPU 触发 debug exception，真实命中的是 slot2。
-
-                进入异常后，从 slot0 开始扫：
-                slot0:addr = read_bvr(0);  // 0x71B5654190
-
-                point0:info.address = 0x71B5654190
-
-                if (info.address == addr)派发 point0
-
-                bug 点：
-                这里仅证明 point0 安装在 slot0，
-                没证明这次异常由 slot0 触发。
-
-                所以真实命中 slot2，但 point0 先被派发了，
-                导致 point0.records 里写入了 record.pc = 0x71B5655590。
-                */
-            if (info.address != (regs->pc & ~0x3ULL)) continue;
-
             // 地址相等、控制码相等且当前槽位启用才派发
-            if ((ctrl & 0x1) && ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) == (ctrl & ~0x1ULL)))
+            if ((encode_ctrl_reg(info.ctrl) & ~0x1ULL) == (ctrl & ~0x1ULL))
             {
-                struct fp_regs fp_regs __attribute__((__uninitialized__));
-                read_all_q_regs(&fp_regs);
-                point->on_hit(regs, &fp_regs, point);
-                bool emulated = emulate_insn(regs, &fp_regs, 0);
-                write_all_q_regs(&fp_regs);
-
-                // 模拟指令步过,失败走禁用进行步过
-                if (!emulated)
-                {
-                    // 只清 enable 位，保留原有寄存器配置，继续走原异常处理链
-                    write_wb_reg(AARCH64_DBG_REG_BCR, slot, ctrl & ~0x1);
-                }
+                process_point_hit(point, regs, AARCH64_DBG_REG_BCR, slot, ctrl);
 
                 /*
                 自己的命中了就说明把这个槽位占了，其他使用perf使用槽位要进行补
                 命中自己的执行断点后不继续跑原 breakpoint_handler：并手动补发当前槽位给 perf。
                 只补发当前槽位，遍历全部 slots 会把其他 perf 断点重复计数。
                 */
-                // slots = this_cpu_ptr(bp_on_reg);
-                // if (slot >= 0 && slot < num_brps)
-                // {
-                //     bp = READ_ONCE(slots[slot]);
-                //     if (bp)
-                //         fn_perf_bp_event(bp, regs);
-                // }
-                // hook_regs->regs[0] = 0;// 给 breakpoint_handler返回 0，表示已处理异常
-                // return 1;     // 给hook框架返回1，表示跳过原函数
+                /*
+                struct perf_event *event = READ_ONCE(this_cpu_ptr(bp_on_reg)[slot]);
+                if (event) fn_perf_bp_event(event, regs);
+
+                hook_regs->regs[0] = 0;
+                return 1;
+                */
                 return 0;
             }
         }
@@ -325,12 +325,9 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
 // 访问断异常处理跳板工作函数
 static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
 {
-    int hit_slot = -1;
-    uint64_t hit_ctrl = 0;
     uint64_t fault_addr = hook_regs->regs[0];
     uint64_t esr = hook_regs->regs[1];
     struct break_point *bp_info = g_bp_info;
-    struct bp_point *hit_point = NULL;
     struct pt_regs *regs = (struct pt_regs *)hook_regs->regs[2];
 
     if (!bp_info_targets_task(bp_info, current)) return 0;
@@ -339,14 +336,14 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
     watchpoint_handler 原型是 (addr, esr, regs)。这里用 addr 判断真实命中的访问地址，
     用 esr 判断读写方向，避免只证明 point 安装在某个 WRP 槽就误派发。
     */
-    for (int slot = 0; slot < num_wrps && !hit_point; slot++)
+    for (int slot = 0; slot < num_wrps; slot++)
     {
-        uint64_t addr = read_wb_reg(AARCH64_DBG_REG_WVR, slot);
         uint64_t ctrl = read_wb_reg(AARCH64_DBG_REG_WCR, slot);
+        if (!(ctrl & 0x1)) continue;
+
+        uint64_t addr = read_wb_reg(AARCH64_DBG_REG_WVR, slot);
         size_t point_slot = 0;
         struct bp_point *point;
-
-        if (!(ctrl & 0x1)) continue;
 
         while ((point = bp_info_find_active_point(bp_info, &point_slot)))
         {
@@ -358,90 +355,51 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
             内核 perf 可以在没有精确命中时选择最近 watchpoint 兜底；
             这里做自定义断点计数，非精确命中会把相邻访问归到第一个点位，必须跳过。
             */
-            uint64_t dist = get_distance_from_watchpoint(fault_addr, addr, &info.ctrl);
-            if (dist != 0) continue;
+            if (get_distance_from_watchpoint(fault_addr, addr, &info.ctrl) != 0) continue;
 
-            hit_point = point;
-            hit_slot = slot;
-            hit_ctrl = ctrl;
+            process_point_hit(point, regs, AARCH64_DBG_REG_WCR, slot, ctrl);
+            /*
+            struct perf_event *event = READ_ONCE(this_cpu_ptr(wp_on_reg)[slot]);
+            if (event) fn_perf_bp_event(event, regs);
 
-            break;
+            hook_regs->regs[0] = 0;
+            return 1;
+            */
+            return 0;
         }
     }
-
-    if (!hit_point) return 0;
-
-    struct fp_regs fp_regs __attribute__((__uninitialized__));
-    read_all_q_regs(&fp_regs);
-    hit_point->on_hit(regs, &fp_regs, hit_point);
-    bool emulated = emulate_insn(regs, &fp_regs, 0);
-    write_all_q_regs(&fp_regs);
-
-    // 模拟指令步过,失败走禁用进行步过
-    if (!emulated)
-    {
-        // 只清 enable 位，保留原有寄存器配置，继续走原异常处理链
-        write_wb_reg(AARCH64_DBG_REG_WCR, hit_slot, hit_ctrl & ~0x1);
-    }
-
-    // slots = this_cpu_ptr(wp_on_reg);
-    // if (hit_slot >= 0 && hit_slot < num_wrps)
-    // {
-    //     bp = READ_ONCE(slots[hit_slot]);
-    //     if (bp)
-    //         fn_perf_bp_event(bp, regs);
-    // }
-    // hook_regs->regs[0] = 0;
-    // return 1;
     return 0;
-}
-
-// 声明硬件调试异常 hook 表
-static struct hook_entry g_debug_exception_hooks[] = {
-    HOOK_ENTRY("breakpoint_handler", work_trampoline_breakpoint),
-    HOOK_ENTRY("watchpoint_handler", work_trampoline_watchpoint),
-};
-
-// 返回地址hook 跳板
-static void __attribute__((used, __noinline__)) ret_work_finish_task_switch(void);
-__attribute__((naked, used)) void ret_trampoline_finish_task_switch(void)
-{
-    asm volatile("str x0, [sp, #8]\n"
-                 "bl ret_work_finish_task_switch\n"
-                 "ldp x16, x0, [sp], #304\n"
-                 "ret x16\n");
 }
 
 // 在当前 CPU 上安装硬件断点/观察点寄存器。
 static void install_hwbp_regs_on_cpu(struct break_point *bp_info)
 {
-    int brp_slot = 0;
-    int wrp_slot = 0;
+    int brp_slot = 0, wrp_slot = 0;
     size_t point_slot = 0;
     struct bp_point *point;
 
     while ((point = bp_info_find_active_point(bp_info, &point_slot)))
     {
         struct arch_hw_breakpoint info;
-        int reg_slot;
-
         if (hw_breakpoint_parse(point, 0, &info)) continue;
 
         if (info.ctrl.type == ARM_BREAKPOINT_EXECUTE)
         {
-            if (brp_slot >= num_brps) continue;
-
-            reg_slot = brp_slot++;
-            write_wb_reg(AARCH64_DBG_REG_BVR, reg_slot, info.address);
-            write_wb_reg(AARCH64_DBG_REG_BCR, reg_slot, encode_ctrl_reg(info.ctrl) | 0x1);
+            if (brp_slot < num_brps)
+            {
+                write_wb_reg(AARCH64_DBG_REG_BVR, brp_slot, info.address);
+                write_wb_reg(AARCH64_DBG_REG_BCR, brp_slot, encode_ctrl_reg(info.ctrl) | 0x1);
+                brp_slot++;
+            }
         }
         else
         {
-            if (wrp_slot >= num_wrps) continue;
-
-            reg_slot = wrp_slot++;
-            write_wb_reg(AARCH64_DBG_REG_WVR, reg_slot, info.address);
-            write_wb_reg(AARCH64_DBG_REG_WCR, reg_slot, encode_ctrl_reg(info.ctrl) | 0x1);
+            if (wrp_slot < num_wrps)
+            {
+                write_wb_reg(AARCH64_DBG_REG_WVR, wrp_slot, info.address);
+                write_wb_reg(AARCH64_DBG_REG_WCR, wrp_slot, encode_ctrl_reg(info.ctrl) | 0x1);
+                wrp_slot++;
+            }
         }
     }
 }
@@ -449,48 +407,36 @@ static void install_hwbp_regs_on_cpu(struct break_point *bp_info)
 // 禁用当前 CPU 上的硬件断点/观察点控制寄存器，保留原有配置位
 static void clear_hwbp_regs_on_cpu(void *data)
 {
-    int brp_slot = 0;
-    int wrp_slot = 0;
+    int brp_slot = 0, wrp_slot = 0;
     struct break_point *bp_info = g_bp_info;
     size_t point_slot = 0;
     struct bp_point *point;
 
     (void)data;
+    if (!bp_info) return;
 
     while ((point = bp_info_find_active_point(bp_info, &point_slot)))
     {
         struct arch_hw_breakpoint info;
-
         if (hw_breakpoint_parse(point, 0, &info)) continue;
 
-        uint32_t expected_ctrl = encode_ctrl_reg(info.ctrl);
-        if (info.ctrl.type == ARM_BREAKPOINT_EXECUTE)
-        {
-            if (brp_slot >= num_brps) continue;
+        bool is_exec = (info.ctrl.type == ARM_BREAKPOINT_EXECUTE);
+        int *slot_ptr = is_exec ? &brp_slot : &wrp_slot;
+        int max_slots = is_exec ? num_brps : num_wrps;
+        int reg_vr = is_exec ? AARCH64_DBG_REG_BVR : AARCH64_DBG_REG_WVR;
+        int reg_cr = is_exec ? AARCH64_DBG_REG_BCR : AARCH64_DBG_REG_WCR;
 
-            uint64_t addr = read_wb_reg(AARCH64_DBG_REG_BVR, brp_slot);
-            uint32_t ctrl = read_wb_reg(AARCH64_DBG_REG_BCR, brp_slot);
+        if (*slot_ptr < max_slots)
+        {
+            uint64_t addr = read_wb_reg(reg_vr, *slot_ptr);
+            uint32_t ctrl = read_wb_reg(reg_cr, *slot_ptr);
+            uint32_t expected_ctrl = encode_ctrl_reg(info.ctrl);
 
             if ((ctrl & 0x1) && info.address == addr && ((expected_ctrl & ~0x1) == (ctrl & ~0x1)))
             {
-                write_wb_reg(AARCH64_DBG_REG_BCR, brp_slot, ctrl & ~0x1);
+                write_wb_reg(reg_cr, *slot_ptr, ctrl & ~0x1);
             }
-
-            brp_slot++;
-        }
-        else
-        {
-            if (wrp_slot >= num_wrps) continue;
-
-            uint64_t addr = read_wb_reg(AARCH64_DBG_REG_WVR, wrp_slot);
-            uint32_t ctrl = read_wb_reg(AARCH64_DBG_REG_WCR, wrp_slot);
-
-            if ((ctrl & 0x1) && info.address == addr && ((expected_ctrl & ~0x1) == (ctrl & ~0x1)))
-            {
-                write_wb_reg(AARCH64_DBG_REG_WCR, wrp_slot, ctrl & ~0x1);
-            }
-
-            wrp_slot++;
+            (*slot_ptr)++;
         }
     }
 }
@@ -503,15 +449,6 @@ static void __attribute__((used, __noinline__)) ret_work_finish_task_switch(void
     {
         if (bp_info_targets_task(bp_info, current) && bp_info_find_active_point(bp_info, NULL))
         {
-            if (current->pid == current->tgid)
-            {
-                //ls_log_tag("hwbp", "目标进程的主线程被切换进来: pid=%d comm=%s cpu=%d\n", current->pid, current->comm, raw_smp_processor_id());
-            }
-            else
-            {
-                //ls_log_tag("hwbp", "目标进程的子线程被切换进来: pid=%d comm=%s cpu=%d\n", current->pid, current->comm, raw_smp_processor_id());
-            }
-
             enable_hardware_debug_on_cpu(NULL);
             install_hwbp_regs_on_cpu(bp_info);
         }
@@ -521,6 +458,15 @@ static void __attribute__((used, __noinline__)) ret_work_finish_task_switch(void
             // disable_hardware_debug_on_cpu(NULL);
         }
     }
+}
+
+// 返回地址hook 跳板
+__attribute__((naked, used)) void ret_trampoline_finish_task_switch(void)
+{
+    asm volatile("str x0, [sp, #8]\n"
+                 "bl ret_work_finish_task_switch\n"
+                 "ldp x16, x0, [sp], #304\n"
+                 "ret x16\n");
 }
 
 // finish_task_switch(prev) 入口 hook：函数返回后再覆盖 perf 写入的硬件断点寄存器。
@@ -534,7 +480,10 @@ static int work_trampoline_finish_task_switch(struct pt_regs *hook_regs)
     return 0;
 }
 
-static struct hook_entry g_finish_task_switch_ret_hooks[] = {
+// 硬件调试异常和调度返回 hook 统一安装、回滚与卸载。
+static struct hook_entry g_hwbp_hooks[] = {
+    HOOK_ENTRY("breakpoint_handler", work_trampoline_breakpoint),
+    HOOK_ENTRY("watchpoint_handler", work_trampoline_watchpoint),
     /*
       __schedule() 调度切换层级：
 
@@ -664,62 +613,48 @@ static int start_task_run_monitor(struct break_point *bp_info)
 {
     int ret;
 
-    if (!bp_info_find_active_point(bp_info, NULL))
+    if (!bp_info || !bp_info_find_active_point(bp_info, NULL))
     {
         ls_log_tag("hwbp", "breakpoint info error\n");
         return -EINVAL;
     }
 
+    num_brps = get_brps_num();
+    num_wrps = get_wrps_num();
+    bp_info->num_brps = num_brps;
+    bp_info->num_wrps = num_wrps;
+
+    //配置存在说明安装过了，这里只替换更新配置指针
     if (g_bp_info)
     {
         g_bp_info = bp_info;
-        num_brps = get_brps_num();
-        num_wrps = get_wrps_num();
-        bp_info->num_brps = num_brps;
-        bp_info->num_wrps = num_wrps;
         ls_log_tag("hwbp", "monitor config updated\n");
         return 0;
     }
 
-    // 传递上下文给全局指针，让异常处理和断点写入都能互相传递配置信息
-    g_bp_info = bp_info;
-
-    // 总数也是只获取一次。
-    num_brps = get_brps_num();
-    num_wrps = get_wrps_num();
     bp_on_reg = (struct perf_event * __percpu *)generic_kallsyms_lookup_name("bp_on_reg");
     wp_on_reg = (struct perf_event * __percpu *)generic_kallsyms_lookup_name("wp_on_reg");
     fn_perf_bp_event = (void (*)(struct perf_event *, void *))generic_kallsyms_lookup_name("perf_bp_event");
     if (!bp_on_reg || !wp_on_reg || !fn_perf_bp_event)
     {
         ls_log_tag("hwbp", "lookup bp_on_reg/wp_on_reg/perf_bp_event failed\n");
-        g_bp_info = NULL;
         return -ENOENT;
     }
-    bp_info->num_brps = num_brps;
-    bp_info->num_wrps = num_wrps;
 
+    // 传递上下文给全局指针，让异常处理和断点写入都能互相传递配置信息
+    g_bp_info = bp_info;
     dump_perf_breakpoint_slots();
 
-    // 安装inline hook接管异常
-    ret = inline_hook_install(g_debug_exception_hooks);
+    // 统一安装异常 hook 和 finish_task_switch return hook。
+    ret = inline_hook_install(g_hwbp_hooks);
     if (ret)
     {
-        ls_log_tag("hwbp", "inline_hook_install debug exception hooks failed: %d\n", ret);
+        ls_log_tag("hwbp", "inline_hook_install hwbp hooks failed: %d\n", ret);
         g_bp_info = NULL;
         return ret;
     }
 
-    // 安装 finish_task_switch return hook
-    ret = inline_hook_install(g_finish_task_switch_ret_hooks);
-    if (ret)
-    {
-        ls_log_tag("hwbp", "inline_hook_install finish_task_switch return hook failed: %d\n", ret);
-        g_bp_info = NULL;
-        inline_hook_remove(g_debug_exception_hooks);
-        return ret;
-    }
-    ls_log_tag("hwbp", "finish_task_switch return hook installed\n");
+    ls_log_tag("hwbp", "hwbp hooks installed\n");
     ls_log_tag("hwbp", "monitor start\n");
     return 0;
 }
@@ -727,16 +662,13 @@ static int start_task_run_monitor(struct break_point *bp_info)
 // 注销 hook，取消监听
 static void stop_task_run_monitor(void)
 {
-    struct break_point *info = READ_ONCE(g_bp_info);
+    if (!READ_ONCE(g_bp_info)) return;
+
     int cpu;
-
-    if (!info) return;
-
     // 遍历所有在线 CPU，清理寄存器
     for_each_online_cpu(cpu) smp_call_function_single(cpu, clear_hwbp_regs_on_cpu, NULL, 1);
 
-    inline_hook_remove(g_finish_task_switch_ret_hooks);
-    inline_hook_remove(g_debug_exception_hooks);
+    inline_hook_remove(g_hwbp_hooks);
     WRITE_ONCE(g_bp_info, NULL);
     ls_log_tag("hwbp", "monitor stop\n");
 }

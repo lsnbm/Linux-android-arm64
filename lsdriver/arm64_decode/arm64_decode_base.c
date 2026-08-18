@@ -1,26 +1,26 @@
 #include "arm64_decode_internal.h"
 
-static void arm64_decode_rd_rn(uint32_t raw, struct arm64_decoded_insn *decoded)
+static void arm64_decode_rd_rn(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
     decoded->rd = raw & 0x1F;
     decoded->rn = (raw >> 5) & 0x1F;
     decoded->operand_width = (raw & 0x80000000U) ? 64 : 32;
 }
 
-static void arm64_decode_rd_rn_rm(uint32_t raw, struct arm64_decoded_insn *decoded)
+static void arm64_decode_rd_rn_rm(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
     arm64_decode_rd_rn(raw, decoded);
     decoded->rm = (raw >> 16) & 0x1F;
 }
 
-static uint64_t arm64_low_mask(uint8_t bits)
+static uint64_t arm64_decode_low_mask(uint8_t bits)
 {
     return bits >= 64 ? ~0ULL : (1ULL << bits) - 1;
 }
 
-static uint64_t arm64_ror_element(uint64_t value, uint8_t rotation, uint8_t width)
+static uint64_t arm64_decode_ror_element(uint64_t value, uint8_t rotation, uint8_t width)
 {
-    uint64_t mask = arm64_low_mask(width);
+    uint64_t mask = arm64_decode_low_mask(width);
 
     rotation %= width;
     value &= mask;
@@ -28,11 +28,11 @@ static uint64_t arm64_ror_element(uint64_t value, uint8_t rotation, uint8_t widt
     return ((value >> rotation) | (value << (width - rotation))) & mask;
 }
 
-static uint64_t arm64_replicate(uint64_t value, uint8_t element_width, uint8_t width)
+static uint64_t arm64_decode_replicate(uint64_t value, uint8_t element_width, uint8_t width)
 {
     uint64_t result = 0;
 
-    value &= arm64_low_mask(element_width);
+    value &= arm64_decode_low_mask(element_width);
     for (uint8_t offset = 0; offset < width; offset += element_width) result |= value << offset;
     return result;
 }
@@ -52,20 +52,20 @@ static int arm64_decode_bit_masks(uint8_t n, uint8_t immr, uint8_t imms, uint8_t
     if (immediate && s == levels) return 0;
 
     uint8_t element_width = 1U << len;
-    *wmask = arm64_replicate(arm64_ror_element(arm64_low_mask(s + 1), r, element_width), element_width, width);
+    *wmask = arm64_decode_replicate(arm64_decode_ror_element(arm64_decode_low_mask(s + 1), r, element_width), element_width, width);
     if (!immediate)
     {
         uint8_t diff = (s - r) & levels;
 
-        *tmask = arm64_replicate(arm64_low_mask(diff + 1), element_width, width);
+        *tmask = arm64_decode_replicate(arm64_decode_low_mask(diff + 1), element_width, width);
     }
     return 1;
 }
 
 /* 解码 Data Processing -- Immediate，并展开 PC-relative/普通立即数。 */
-enum arm64_decode_status arm64_decode_data_processing_immediate(uint32_t raw, struct arm64_decoded_insn *decoded)
+enum arm64_decode_status arm64_decode_data_processing_immediate(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
-    decoded->insn_class = ARM64_INSN_CLASS_DATA_PROCESSING_IMMEDIATE;
+    decoded->instruction_class = ARM64_INSTRUCTION_CLASS_DATA_PROCESSING_IMMEDIATE;
 
     if ((raw & 0x1F000000U) == 0x10000000U)
     {
@@ -74,7 +74,7 @@ enum arm64_decode_status arm64_decode_data_processing_immediate(uint32_t raw, st
         decoded->instruction = (raw & 0x80000000U) ? ARM64_INSN_ADRP : ARM64_INSN_ADR;
         decoded->rd = raw & 0x1F;
         decoded->operand_width = 64;
-        decoded->offset = (raw & 0x80000000U) ? arm64_sign_extend(imm21 << 12, 33) : arm64_sign_extend(imm21, 21);
+        decoded->offset = (raw & 0x80000000U) ? arm64_decode_sign_extend(imm21 << 12, 33) : arm64_decode_sign_extend(imm21, 21);
         return ARM64_DECODE_OK;
     }
 
@@ -110,14 +110,14 @@ enum arm64_decode_status arm64_decode_data_processing_immediate(uint32_t raw, st
         {
         case 0:
             decoded->instruction = ARM64_INSN_SMAX_IMMEDIATE;
-            decoded->immediate = (uint64_t)arm64_sign_extend(decoded->immediate, 8);
+            decoded->immediate = (uint64_t)arm64_decode_sign_extend(decoded->immediate, 8);
             break;
         case 1:
             decoded->instruction = ARM64_INSN_UMAX_IMMEDIATE;
             break;
         case 2:
             decoded->instruction = ARM64_INSN_SMIN_IMMEDIATE;
-            decoded->immediate = (uint64_t)arm64_sign_extend(decoded->immediate, 8);
+            decoded->immediate = (uint64_t)arm64_decode_sign_extend(decoded->immediate, 8);
             break;
         case 3:
             decoded->instruction = ARM64_INSN_UMIN_IMMEDIATE;
@@ -195,9 +195,9 @@ enum arm64_decode_status arm64_decode_data_processing_immediate(uint32_t raw, st
 }
 
 /* 解码 Data Processing -- Register，并把编码选择位转换成 operation。 */
-enum arm64_decode_status arm64_decode_data_processing_register(uint32_t raw, struct arm64_decoded_insn *decoded)
+enum arm64_decode_status arm64_decode_data_processing_register(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
-    decoded->insn_class = ARM64_INSN_CLASS_DATA_PROCESSING_REGISTER;
+    decoded->instruction_class = ARM64_INSTRUCTION_CLASS_DATA_PROCESSING_REGISTER;
 
     if ((raw & 0x1F000000U) == 0x0A000000U)
     {

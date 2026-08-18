@@ -15,11 +15,11 @@ static int failures;
         }                                                        \
     } while (0)
 
-static struct arm64_decoded_insn decode_ok(uint32_t raw)
+static struct arm64_decoded_instruction decode_ok(uint32_t raw)
 {
-    struct arm64_decoded_insn decoded;
+    struct arm64_decoded_instruction decoded;
 
-    enum arm64_decode_status status = arm64_decode_insn(raw, &decoded);
+    enum arm64_decode_status status = arm64_decode_instruction(raw, &decoded);
 
     CHECK(status == ARM64_DECODE_OK);
     return decoded;
@@ -27,9 +27,9 @@ static struct arm64_decoded_insn decode_ok(uint32_t raw)
 
 static void decode_status_is(uint32_t raw, enum arm64_decode_status expected)
 {
-    struct arm64_decoded_insn decoded;
+    struct arm64_decoded_instruction decoded;
 
-    enum arm64_decode_status status = arm64_decode_insn(raw, &decoded);
+    enum arm64_decode_status status = arm64_decode_instruction(raw, &decoded);
 
     CHECK(status == expected);
 }
@@ -72,7 +72,7 @@ static void test_fp_simd_instruction_identities(void)
 
     for (size_t index = 0; index < sizeof(samples) / sizeof(samples[0]); index++)
     {
-        struct arm64_decoded_insn decoded = decode_ok(samples[index].raw);
+        struct arm64_decoded_instruction decoded = decode_ok(samples[index].raw);
 
         CHECK(decoded.instruction == samples[index].instruction);
     }
@@ -115,7 +115,7 @@ static void test_fp_conversions(void)
         {0x00400000U, 32, 64},
         {0x80400000U, 64, 64},
     };
-    struct arm64_decoded_insn decoded;
+    struct arm64_decoded_instruction decoded;
 
     decoded = decode_ok(0x5EA1B842U);
     CHECK(decoded.instruction == ARM64_INSN_FCVTZS_SIMD_SCALAR);
@@ -175,9 +175,9 @@ static void test_fp_conversions(void)
 
 static void test_dispatch(void)
 {
-    struct arm64_decoded_insn decoded = decode_ok(0x91000420U);
+    struct arm64_decoded_instruction decoded = decode_ok(0x91000420U);
 
-    CHECK(decoded.insn_class == ARM64_INSN_CLASS_DATA_PROCESSING_IMMEDIATE);
+    CHECK(decoded.instruction_class == ARM64_INSTRUCTION_CLASS_DATA_PROCESSING_IMMEDIATE);
     CHECK(decoded.instruction == ARM64_INSN_ADD_IMMEDIATE);
     CHECK(decoded.rd == 0);
     CHECK(decoded.rn == 1);
@@ -193,7 +193,7 @@ static void test_dispatch(void)
     CHECK(decoded.instruction == ARM64_INSN_SUBS_IMMEDIATE);
 
     decoded = decode_ok(0x8B020020U);
-    CHECK(decoded.insn_class == ARM64_INSN_CLASS_DATA_PROCESSING_REGISTER);
+    CHECK(decoded.instruction_class == ARM64_INSTRUCTION_CLASS_DATA_PROCESSING_REGISTER);
     CHECK(decoded.instruction == ARM64_INSN_ADD_SHIFTED_REGISTER);
     CHECK(decoded.rm == 2);
 
@@ -262,7 +262,7 @@ static void test_dispatch(void)
     decode_status_is(0x0000C19FU, ARM64_DECODE_UNALLOCATED);
 
     decoded = decode_ok(0x90000000U);
-    CHECK(decoded.insn_class == ARM64_INSN_CLASS_DATA_PROCESSING_IMMEDIATE);
+    CHECK(decoded.instruction_class == ARM64_INSTRUCTION_CLASS_DATA_PROCESSING_IMMEDIATE);
     CHECK(decoded.instruction == ARM64_INSN_ADRP);
     CHECK(decoded.offset == 0);
 
@@ -270,13 +270,13 @@ static void test_dispatch(void)
     decode_status_is(0x04000000U, ARM64_DECODE_UNSUPPORTED);
     decode_status_is(0xC00800FFU, ARM64_DECODE_UNSUPPORTED);
     decode_status_is(0x40000000U, ARM64_DECODE_UNALLOCATED);
-    CHECK(arm64_decode_insn(0x80000000U, &decoded) == ARM64_DECODE_UNSUPPORTED);
-    CHECK(decoded.insn_class == ARM64_INSN_CLASS_SME);
+    CHECK(arm64_decode_instruction(0x80000000U, &decoded) == ARM64_DECODE_UNSUPPORTED);
+    CHECK(decoded.instruction_class == ARM64_INSTRUCTION_CLASS_SME);
 }
 
 static void test_system(void)
 {
-    struct arm64_decoded_insn decoded = decode_ok(0xD5033BBFU);
+    struct arm64_decoded_instruction decoded = decode_ok(0xD5033BBFU);
     static const struct
     {
         uint32_t raw;
@@ -291,8 +291,8 @@ static void test_system(void)
     decoded = decode_ok(0xD503201FU);
     CHECK(decoded.instruction == ARM64_INSN_NOP);
 
-    CHECK(arm64_decode_insn(0xD50320DFU, &decoded) == ARM64_DECODE_UNSUPPORTED);
-    CHECK(decoded.insn_class == ARM64_INSN_CLASS_BRANCH_EXCEPTION_SYSTEM);
+    CHECK(arm64_decode_instruction(0xD50320DFU, &decoded) == ARM64_DECODE_UNSUPPORTED);
+    CHECK(decoded.instruction_class == ARM64_INSTRUCTION_CLASS_BRANCH_EXCEPTION_SYSTEM);
     CHECK(decoded.instruction == ARM64_INSN_UNKNOWN);
 
     decoded = decode_ok(0xD5033BBFU);
@@ -326,7 +326,7 @@ static void test_system(void)
 
 static void test_load_store(void)
 {
-    struct arm64_decoded_insn decoded = decode_ok(0xA8410440U);
+    struct arm64_decoded_instruction decoded = decode_ok(0xA8410440U);
 
     CHECK(decoded.instruction == ARM64_INSN_LDNP_GPR);
     CHECK(decoded.memory_address_mode == ARM64_MEMORY_ADDRESS_BASE_OFFSET);
@@ -374,8 +374,8 @@ static void test_load_store(void)
     CHECK(decoded.rm == 2);
     CHECK(decoded.rt == 0);
 
-    CHECK(arm64_decode_insn(0xF8A04818U, &decoded) == ARM64_DECODE_UNSUPPORTED);
-    CHECK(decoded.insn_class == ARM64_INSN_CLASS_LOAD_STORE);
+    CHECK(arm64_decode_instruction(0xF8A04818U, &decoded) == ARM64_DECODE_UNSUPPORTED);
+    CHECK(decoded.instruction_class == ARM64_INSTRUCTION_CLASS_LOAD_STORE);
     CHECK(decoded.instruction == ARM64_INSN_UNKNOWN);
 
     decoded = decode_ok(0xB93336D0U);
@@ -515,7 +515,7 @@ static void test_load_store(void)
 
 static void test_control_flow(void)
 {
-    struct arm64_decoded_insn decoded = decode_ok(0x14000004U);
+    struct arm64_decoded_instruction decoded = decode_ok(0x14000004U);
 
     CHECK(decoded.instruction == ARM64_INSN_B);
     CHECK(decoded.offset == 16);
@@ -554,7 +554,7 @@ static void test_scalar_fp(void)
     static const enum arm64_instruction two_source_instructions[] = {
         ARM64_INSN_FMUL_SCALAR, ARM64_INSN_FDIV_SCALAR, ARM64_INSN_FADD_SCALAR, ARM64_INSN_FSUB_SCALAR, ARM64_INSN_FMAX_SCALAR, ARM64_INSN_FMIN_SCALAR, ARM64_INSN_FMAXNM_SCALAR, ARM64_INSN_FMINNM_SCALAR, ARM64_INSN_FNMUL_SCALAR,
     };
-    struct arm64_decoded_insn decoded = decode_ok(0x1E2E1000U);
+    struct arm64_decoded_instruction decoded = decode_ok(0x1E2E1000U);
 
     CHECK(decoded.instruction == ARM64_INSN_FMOV_SCALAR_IMMEDIATE);
     CHECK(decoded.expanded_immediate == 0x3F800000ULL);
@@ -640,7 +640,7 @@ static void test_scalar_copy(void)
     } cases[] = {
         {0x5E010420U, 8, 0}, {0x5E1F0462U, 8, 15}, {0x5E0204A4U, 16, 0}, {0x5E1E04E6U, 16, 7}, {0x5E040528U, 32, 0}, {0x5E0C0422U, 32, 1}, {0x5E1C056AU, 32, 3}, {0x5E0805ACU, 64, 0}, {0x5E1805EEU, 64, 1},
     };
-    struct arm64_decoded_insn decoded;
+    struct arm64_decoded_instruction decoded;
 
     for (size_t index = 0; index < sizeof(cases) / sizeof(cases[0]); index++)
     {
@@ -698,7 +698,7 @@ static void test_fp_by_element(void)
     } shapes[] = {
         {0x0F3F1883U, 0, 64, 16, 7, 15}, {0x4F3F1883U, 0, 128, 16, 7, 15}, {0x0FBF1883U, 0, 64, 32, 3, 31}, {0x4FBF1883U, 0, 128, 32, 3, 31}, {0x4FDF1883U, 0, 128, 64, 1, 31}, {0x5F3F1883U, 1, 16, 16, 7, 15}, {0x5FBF1883U, 1, 32, 32, 3, 31}, {0x5FDF1883U, 1, 64, 64, 1, 31},
     };
-    struct arm64_decoded_insn decoded;
+    struct arm64_decoded_instruction decoded;
 
     for (size_t operation_index = 0; operation_index < sizeof(operations) / sizeof(operations[0]); operation_index++)
     {
@@ -754,7 +754,7 @@ static void test_fhm_by_element(void)
         {0x00000000U, 0},
         {0x00300800U, 7},
     };
-    struct arm64_decoded_insn decoded;
+    struct arm64_decoded_instruction decoded;
 
     for (size_t operation_index = 0; operation_index < sizeof(operations) / sizeof(operations[0]); operation_index++)
     {
@@ -782,7 +782,7 @@ static void test_fhm_by_element(void)
 
 static void test_extra_by_element(void)
 {
-    struct arm64_decoded_insn decoded;
+    struct arm64_decoded_instruction decoded;
 
     decoded = decode_ok(0x2F72D020U);
     CHECK(decoded.instruction == ARM64_INSN_SQRDMLAH_VECTOR_BY_ELEMENT);
@@ -886,7 +886,7 @@ static void test_fcma(void)
     } element_shapes[] = {
         {0, 1, 0, 0, 64, 16, 0}, {0, 1, 0, 1, 64, 16, 1}, {1, 1, 0, 0, 128, 16, 0}, {1, 1, 0, 1, 128, 16, 1}, {1, 1, 1, 0, 128, 16, 2}, {1, 1, 1, 1, 128, 16, 3}, {1, 2, 0, 0, 128, 32, 0}, {1, 2, 1, 0, 128, 32, 1},
     };
-    struct arm64_decoded_insn decoded;
+    struct arm64_decoded_instruction decoded;
 
     for (size_t shape_index = 0; shape_index < sizeof(vector_shapes) / sizeof(vector_shapes[0]); shape_index++)
     {
@@ -953,7 +953,7 @@ static void test_vector_3same_extra(void)
     } operations[] = {
         {1, 16, 0x6, 0, ARM64_INSN_SQRDMLAH_VECTOR}, {1, 17, 0x6, 0, ARM64_INSN_SQRDMLSH_VECTOR}, {0, 18, 0x4, 8, ARM64_INSN_SDOT_VECTOR}, {1, 18, 0x4, 8, ARM64_INSN_UDOT_VECTOR}, {0, 19, 0x4, 8, ARM64_INSN_USDOT_VECTOR},
     };
-    struct arm64_decoded_insn decoded;
+    struct arm64_decoded_instruction decoded;
 
     for (size_t operation_index = 0; operation_index < sizeof(operations) / sizeof(operations[0]); operation_index++)
     {
@@ -1069,7 +1069,7 @@ static void test_scalar_3same(void)
     } fp16_operations[] = {
         {0, 0, 3, ARM64_INSN_FMULX_SCALAR}, {0, 0, 4, ARM64_INSN_FCMEQ_SCALAR}, {0, 0, 7, ARM64_INSN_FRECPS_SCALAR}, {0, 1, 7, ARM64_INSN_FRSQRTS_SCALAR}, {1, 0, 4, ARM64_INSN_FCMGE_SCALAR}, {1, 0, 5, ARM64_INSN_FACGE_SCALAR}, {1, 1, 2, ARM64_INSN_FABD_SCALAR}, {1, 1, 4, ARM64_INSN_FCMGT_SCALAR}, {1, 1, 5, ARM64_INSN_FACGT_SCALAR},
     };
-    struct arm64_decoded_insn decoded;
+    struct arm64_decoded_instruction decoded;
 
     for (size_t index = 0; index < sizeof(integer_operations) / sizeof(integer_operations[0]); index++)
     {
@@ -1164,7 +1164,7 @@ static void test_scalar_fp_3source(void)
         {0x00400000U, 64},
         {0x00C00000U, 16},
     };
-    struct arm64_decoded_insn decoded;
+    struct arm64_decoded_instruction decoded;
 
     for (size_t operation_index = 0; operation_index < sizeof(operations) / sizeof(operations[0]); operation_index++)
     {
@@ -1322,7 +1322,7 @@ static void test_vector(void)
     } compare_zero_shapes[] = {
         {0x0EF80800U, 0, 64, 16}, {0x4EF80800U, 0, 128, 16}, {0x0EA00800U, 0, 64, 32}, {0x4EA00800U, 0, 128, 32}, {0x4EE00800U, 0, 128, 64}, {0x5EF80800U, 1, 16, 16}, {0x5EA00800U, 1, 32, 32}, {0x5EE00800U, 1, 64, 64},
     };
-    struct arm64_decoded_insn decoded = decode_ok(0x4F00E640U);
+    struct arm64_decoded_instruction decoded = decode_ok(0x4F00E640U);
 
     CHECK(decoded.instruction == ARM64_INSN_MOVI_VECTOR_IMMEDIATE);
     CHECK(decoded.expanded_immediate == 0x1212121212121212ULL);

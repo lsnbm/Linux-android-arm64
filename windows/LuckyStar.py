@@ -3034,7 +3034,8 @@ class HttpBridgeWindow(QWidget):
         if snapshot is None:
             return None
         if not bool(snapshot.get("read_success", False)):
-            QMessageBox.warning(self, "读取失败", "MemViewer 读取失败。")
+            status = self._safe_int(snapshot.get("read_status"), 0)
+            QMessageBox.warning(self, "读取失败", f"MemViewer 读取失败（status={status}）。")
             return None
         return snapshot
 

@@ -141,7 +141,7 @@ static int hook_relocate_replay_insns(uint64_t source_addr, uint64_t replay_addr
 
     for (int i = 0; i < count; i++)
     {
-        struct arm64_decoded_insn decoded;
+        struct arm64_decoded_instruction decoded;
         uint64_t source_pc = source_addr + i * sizeof(uint32_t);
         uint64_t replay_pc = replay_addr + i * sizeof(uint32_t);
 
@@ -192,16 +192,16 @@ static int hook_relocate_replay_insns(uint64_t source_addr, uint64_t replay_addr
         }
 
         // 对解包后的真实原指令继续执行既有 ADR/ADRP relocation 和不支持指令检查。
-        enum arm64_decode_status decode_status = arm64_decode_insn(insns[i], &decoded);
+        enum arm64_decode_status decode_status = arm64_decode_instruction(insns[i], &decoded);
         if (decode_status != ARM64_DECODE_OK)
         {
             ls_log_tag("hook", "instruction cannot be replayed status=%u addr=0x%llx insn=%08x\n", decode_status, (unsigned long long)source_pc, insns[i]);
             return -EOPNOTSUPP;
         }
 
-        switch (decoded.insn_class)
+        switch (decoded.instruction_class)
         {
-        case ARM64_INSN_CLASS_DATA_PROCESSING_IMMEDIATE:
+        case ARM64_INSTRUCTION_CLASS_DATA_PROCESSING_IMMEDIATE:
         {
             if (decoded.instruction != ARM64_INSN_ADR && decoded.instruction != ARM64_INSN_ADRP) continue;
 
@@ -217,7 +217,7 @@ static int hook_relocate_replay_insns(uint64_t source_addr, uint64_t replay_addr
             }
             break;
         }
-        case ARM64_INSN_CLASS_BRANCH_EXCEPTION_SYSTEM:
+        case ARM64_INSTRUCTION_CLASS_BRANCH_EXCEPTION_SYSTEM:
             switch (decoded.instruction)
             {
             case ARM64_INSN_B:
@@ -232,7 +232,7 @@ static int hook_relocate_replay_insns(uint64_t source_addr, uint64_t replay_addr
             default:
                 continue;
             }
-        case ARM64_INSN_CLASS_LOAD_STORE:
+        case ARM64_INSTRUCTION_CLASS_LOAD_STORE:
             switch (decoded.instruction)
             {
             case ARM64_INSN_LDR_LITERAL_GPR:

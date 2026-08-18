@@ -6,14 +6,14 @@
 #define ARM64_HINT_INSN        0xD503201FU
 
 /* 分支偏移在这里完成符号扩展和缩放，统一以字节为单位返回。 */
-enum arm64_decode_status arm64_decode_branch(uint32_t raw, struct arm64_decoded_insn *decoded)
+enum arm64_decode_status arm64_decode_branch_exception_system(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
-    decoded->insn_class = ARM64_INSN_CLASS_BRANCH_EXCEPTION_SYSTEM;
+    decoded->instruction_class = ARM64_INSTRUCTION_CLASS_BRANCH_EXCEPTION_SYSTEM;
 
     if ((raw & 0x7C000000U) == 0x14000000U)
     {
         decoded->instruction = (raw & 0x80000000U) ? ARM64_INSN_BL : ARM64_INSN_B;
-        decoded->offset = arm64_sign_extend((uint64_t)(raw & 0x03FFFFFFU) << 2, 28);
+        decoded->offset = arm64_decode_sign_extend((uint64_t)(raw & 0x03FFFFFFU) << 2, 28);
         return ARM64_DECODE_OK;
     }
 
@@ -22,7 +22,7 @@ enum arm64_decode_status arm64_decode_branch(uint32_t raw, struct arm64_decoded_
         decoded->instruction = (raw & 0x01000000U) ? ARM64_INSN_CBNZ : ARM64_INSN_CBZ;
         decoded->operand_width = (raw & 0x80000000U) ? 64 : 32;
         decoded->rt = raw & 0x1F;
-        decoded->offset = arm64_sign_extend((uint64_t)((raw >> 5) & 0x7FFFFU) << 2, 21);
+        decoded->offset = arm64_decode_sign_extend((uint64_t)((raw >> 5) & 0x7FFFFU) << 2, 21);
         return ARM64_DECODE_OK;
     }
 
@@ -32,7 +32,7 @@ enum arm64_decode_status arm64_decode_branch(uint32_t raw, struct arm64_decoded_
         decoded->operand_width = (raw & 0x80000000U) ? 64 : 32;
         decoded->rt = raw & 0x1F;
         decoded->test_bit = ((raw >> 26) & 0x20) | ((raw >> 19) & 0x1F);
-        decoded->offset = arm64_sign_extend((uint64_t)((raw >> 5) & 0x3FFFU) << 2, 16);
+        decoded->offset = arm64_decode_sign_extend((uint64_t)((raw >> 5) & 0x3FFFU) << 2, 16);
         return ARM64_DECODE_OK;
     }
 
@@ -40,7 +40,7 @@ enum arm64_decode_status arm64_decode_branch(uint32_t raw, struct arm64_decoded_
     {
         decoded->instruction = ARM64_INSN_B_COND;
         decoded->condition = raw & 0xF;
-        decoded->offset = arm64_sign_extend((uint64_t)((raw >> 5) & 0x7FFFFU) << 2, 21);
+        decoded->offset = arm64_decode_sign_extend((uint64_t)((raw >> 5) & 0x7FFFFU) << 2, 21);
         return ARM64_DECODE_OK;
     }
 

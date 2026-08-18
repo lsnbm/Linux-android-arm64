@@ -95,7 +95,7 @@ static inline int arm64_page_reloc_call(uint64_t source_pc, uint64_t ghost_pc, u
 }
 
 // 将解码后的 literal load 语义映射到编码器的访存类型。
-static inline int arm64_page_reloc_load_store_kind(const struct arm64_decoded_insn *decoded, enum arm64_encode_load_store_kind *kind)
+static inline int arm64_page_reloc_load_store_kind(const struct arm64_decoded_instruction *decoded, enum arm64_encode_load_store_kind *kind)
 {
     if (!decoded || !kind) return -EINVAL;
 
@@ -112,7 +112,7 @@ static inline int arm64_page_reloc_load_store_kind(const struct arm64_decoded_in
     case ARM64_INSN_LDR_LITERAL_FP_SIMD:
         if (decoded->access_bytes == 4) *kind = ARM64_ENCODE_LS_FP32;
         else if (decoded->access_bytes == 8) *kind = ARM64_ENCODE_LS_FP64;
-        else if (decoded->access_bytes == 16) *kind = ARM64_ENCODE_LS_FP128;
+        else if (decoded->access_bytes == 16) *kind = ARM64_ENCODE_LS_SIMD128;
         else return -EINVAL;
         break;
     default:
@@ -123,7 +123,7 @@ static inline int arm64_page_reloc_load_store_kind(const struct arm64_decoded_in
 }
 
 // 使用解码结果重新编码同一种直接分支。
-static inline int arm64_page_reloc_encode_branch(const struct arm64_decoded_insn *decoded, uint64_t pc, uint64_t target, uint32_t *instruction)
+static inline int arm64_page_reloc_encode_branch(const struct arm64_decoded_instruction *decoded, uint64_t pc, uint64_t target, uint32_t *instruction)
 {
     switch (decoded->instruction)
     {
@@ -132,18 +132,20 @@ static inline int arm64_page_reloc_encode_branch(const struct arm64_decoded_insn
     case ARM64_INSN_B_COND:
         return arm64_encode_b_cond(pc, target, decoded->condition, instruction);
     case ARM64_INSN_CBZ:
+        return arm64_encode_cbz(pc, target, decoded->operand_width == 64, decoded->rt, instruction);
     case ARM64_INSN_CBNZ:
-        return arm64_encode_cbz(pc, target, decoded->instruction == ARM64_INSN_CBNZ, decoded->operand_width == 64, decoded->rt, instruction);
+        return arm64_encode_cbnz(pc, target, decoded->operand_width == 64, decoded->rt, instruction);
     case ARM64_INSN_TBZ:
+        return arm64_encode_tbz(pc, target, decoded->test_bit, decoded->rt, instruction);
     case ARM64_INSN_TBNZ:
-        return arm64_encode_tbz(pc, target, decoded->instruction == ARM64_INSN_TBNZ, decoded->test_bit, decoded->rt, instruction);
+        return arm64_encode_tbnz(pc, target, decoded->test_bit, decoded->rt, instruction);
     default:
         return -EINVAL;
     }
 }
 
 // 重编码直接分支；超出原分支范围时跳到近端绝对跳转槽。返回 1 表示占用了当前槽。
-static inline int arm64_page_reloc_branch(const struct arm64_page_relocation *relocation, const struct arm64_decoded_insn *decoded, uint64_t source_pc, uint64_t ghost_pc, uint32_t *instruction, uint64_t slot_pc, uint32_t *slot)
+static inline int arm64_page_reloc_branch(const struct arm64_page_relocation *relocation, const struct arm64_decoded_instruction *decoded, uint64_t source_pc, uint64_t ghost_pc, uint32_t *instruction, uint64_t slot_pc, uint32_t *slot)
 {
     uint64_t target = source_pc + decoded->offset;
     if (target >= relocation->source_page && target < relocation->source_page + PAGE_SIZE) target = relocation->ghost_page + (target - relocation->source_page);
@@ -162,7 +164,7 @@ static inline int arm64_page_reloc_branch(const struct arm64_page_relocation *re
 }
 
 // 重编码 ADR/ADRP；超出范围时在回放槽装载原始绝对目标地址。返回 1 表示占用了当前槽。
-static inline int arm64_page_reloc_pc_address(const struct arm64_decoded_insn *decoded, uint64_t source_pc, uint64_t ghost_pc, uint32_t *instruction, uint64_t slot_pc, uint32_t *slot)
+static inline int arm64_page_reloc_pc_address(const struct arm64_decoded_instruction *decoded, uint64_t source_pc, uint64_t ghost_pc, uint32_t *instruction, uint64_t slot_pc, uint32_t *slot)
 {
     bool page_relative = decoded->instruction == ARM64_INSN_ADRP;
     uint64_t source_base = page_relative ? source_pc & ~0xFFFULL : source_pc;
@@ -185,7 +187,7 @@ static inline int arm64_page_reloc_pc_address(const struct arm64_decoded_insn *d
 }
 
 // 重编码字面量访问；超出范围时在回放槽按原访问宽度和目标寄存器执行。返回 1 表示占用了当前槽。
-static inline int arm64_page_reloc_literal(const struct arm64_decoded_insn *decoded, uint64_t source_pc, uint64_t ghost_pc, uint32_t *instruction, uint64_t slot_pc, uint32_t *slot)
+static inline int arm64_page_reloc_literal(const struct arm64_decoded_instruction *decoded, uint64_t source_pc, uint64_t ghost_pc, uint32_t *instruction, uint64_t slot_pc, uint32_t *slot)
 {
     uint64_t target = source_pc + decoded->offset;
     int status;
@@ -218,30 +220,30 @@ static inline int arm64_page_reloc_literal(const struct arm64_decoded_insn *deco
     {
         status = arm64_encode_ldr_literal(ARM64_ENCODE_LS_GPR64, decoded->rt, slot_pc, slot_pc + 6 * sizeof(uint32_t), &slot[0]);
         if (status) return status;
-        status = arm64_encode_load_store_unsigned(true, kind, decoded->rt, decoded->rt, 0, &slot[1]);
+        status = arm64_encode_load_store_unsigned_offset(true, kind, decoded->rt, decoded->rt, 0, &slot[1]);
         if (status) return status;
         status = arm64_encode_b(slot_pc + 2 * sizeof(uint32_t), ghost_pc + sizeof(uint32_t), &slot[2]);
         return status ? status : 1;
     }
 
-    status = arm64_encode_load_store_x_indexed(false, true, 16, 31, -16, &slot[0]);
+    status = arm64_encode_load_store_gpr64_pre_post_indexed(false, true, 16, 31, -16, &slot[0]);
     if (status) return status;
     status = arm64_encode_ldr_literal(ARM64_ENCODE_LS_GPR64, 16, slot_pc + sizeof(uint32_t), slot_pc + 6 * sizeof(uint32_t), &slot[1]);
     if (status) return status;
-    status = arm64_encode_load_store_unsigned(true, kind, decoded->rt, 16, 0, &slot[2]);
+    status = arm64_encode_load_store_unsigned_offset(true, kind, decoded->rt, 16, 0, &slot[2]);
     if (status) return status;
-    status = arm64_encode_load_store_x_indexed(true, false, 16, 31, 16, &slot[3]);
+    status = arm64_encode_load_store_gpr64_pre_post_indexed(true, false, 16, 31, 16, &slot[3]);
     if (status) return status;
     status = arm64_encode_b(slot_pc + 4 * sizeof(uint32_t), ghost_pc + sizeof(uint32_t), &slot[4]);
     return status ? status : 1;
 }
 
 // 按 PC 相对指令语义选择目标地址并重编码；返回 1 表示使用槽，非 PC 相对指令返回 0。
-static inline int arm64_page_reloc_instruction(const struct arm64_page_relocation *relocation, const struct arm64_decoded_insn *decoded, uint64_t source_pc, uint64_t ghost_pc, uint32_t *instruction, uint64_t slot_pc, uint32_t *slot)
+static inline int arm64_page_reloc_instruction(const struct arm64_page_relocation *relocation, const struct arm64_decoded_instruction *decoded, uint64_t source_pc, uint64_t ghost_pc, uint32_t *instruction, uint64_t slot_pc, uint32_t *slot)
 {
-    switch (decoded->insn_class)
+    switch (decoded->instruction_class)
     {
-    case ARM64_INSN_CLASS_DATA_PROCESSING_IMMEDIATE:
+    case ARM64_INSTRUCTION_CLASS_DATA_PROCESSING_IMMEDIATE:
         switch (decoded->instruction)
         {
         case ARM64_INSN_ADR:
@@ -250,7 +252,7 @@ static inline int arm64_page_reloc_instruction(const struct arm64_page_relocatio
         default:
             return 0;
         }
-    case ARM64_INSN_CLASS_LOAD_STORE:
+    case ARM64_INSTRUCTION_CLASS_LOAD_STORE:
         switch (decoded->instruction)
         {
         case ARM64_INSN_LDR_LITERAL_GPR:
@@ -261,7 +263,7 @@ static inline int arm64_page_reloc_instruction(const struct arm64_page_relocatio
         default:
             return 0;
         }
-    case ARM64_INSN_CLASS_BRANCH_EXCEPTION_SYSTEM:
+    case ARM64_INSTRUCTION_CLASS_BRANCH_EXCEPTION_SYSTEM:
         switch (decoded->instruction)
         {
         case ARM64_INSN_B:
@@ -318,9 +320,9 @@ static inline int arm64_page_relocate(uint64_t source_page, uint64_t ghost_page,
         uint64_t source_pc = source_page + (uint64_t)source_index * sizeof(uint32_t);
         uint64_t ghost_pc = ghost_page + (uint64_t)source_index * sizeof(uint32_t);
         uint64_t slot_pc = ghost_page + (uint64_t)slot_index * sizeof(uint32_t);
-        struct arm64_decoded_insn decoded;
+        struct arm64_decoded_instruction decoded;
 
-        enum arm64_decode_status decode_status = arm64_decode_insn(source[source_index], &decoded);
+        enum arm64_decode_status decode_status = arm64_decode_instruction(source[source_index], &decoded);
         if (decode_status != ARM64_DECODE_OK)
         {
             __builtin_memset(relocation, 0, sizeof(*relocation));

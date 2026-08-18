@@ -707,6 +707,7 @@ namespace
     {
         json root;
         root["read_success"] = viewer.readSuccess();
+        root["read_status"] = viewer.readStatus();
         root["base"] = static_cast<std::uint64_t>(viewer.base());
         root["base_hex"] = std::format("0x{:X}", static_cast<std::uint64_t>(viewer.base()));
         const auto format = viewer.format();

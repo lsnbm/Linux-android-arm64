@@ -651,21 +651,21 @@ enum arm64_memory_address_mode
     ARM64_MEMORY_ADDRESS_REGISTER_OFFSET,
 };
 
-struct arm64_decoded_insn
+struct arm64_decoded_instruction
 {
     // 顶层指令大类，对应 Arm A64 main encoding table；具体编码形式由 instruction 唯一确定。
-    enum arm64_insn_class
+    enum arm64_instruction_class
     {
-        ARM64_INSN_CLASS_UNKNOWN, // 无效/尚未分类，不是指令类别
+        ARM64_INSTRUCTION_CLASS_UNKNOWN, // 无效/尚未分类，不是指令类别
 
-        ARM64_INSN_CLASS_SME, // SME 可伸缩矩阵扩展指令，当前仅识别编码空间
-        ARM64_INSN_CLASS_SVE, // SVE 可伸缩向量扩展指令，当前仅识别编码空间
-        ARM64_INSN_CLASS_LOAD_STORE,
-        ARM64_INSN_CLASS_DATA_PROCESSING_REGISTER,
-        ARM64_INSN_CLASS_DATA_PROCESSING_SIMD_FP,
-        ARM64_INSN_CLASS_DATA_PROCESSING_IMMEDIATE,
-        ARM64_INSN_CLASS_BRANCH_EXCEPTION_SYSTEM,
-    } insn_class;
+        ARM64_INSTRUCTION_CLASS_SME, // SME 可伸缩矩阵扩展指令，当前仅识别编码空间
+        ARM64_INSTRUCTION_CLASS_SVE, // SVE 可伸缩向量扩展指令，当前仅识别编码空间
+        ARM64_INSTRUCTION_CLASS_LOAD_STORE,
+        ARM64_INSTRUCTION_CLASS_DATA_PROCESSING_REGISTER,
+        ARM64_INSTRUCTION_CLASS_DATA_PROCESSING_SIMD_FP,
+        ARM64_INSTRUCTION_CLASS_DATA_PROCESSING_IMMEDIATE,
+        ARM64_INSTRUCTION_CLASS_BRANCH_EXCEPTION_SYSTEM,
+    } instruction_class;
 
     enum arm64_instruction instruction;
 
@@ -727,11 +727,11 @@ struct arm64_decoded_insn
 产生隐藏返回槽以及调用端的结构体复制。
 
 返回值为 OK 时，instruction 和该指令对应的 operands 完整有效。
-返回值为 UNSUPPORTED 时，只保证 insn_class；调用方不得依赖 instruction 或 operands 执行或重定位。
+返回值为 UNSUPPORTED 时，只保证 instruction_class；调用方不得依赖 instruction 或 operands 执行或重定位。
 返回值为 UNPREDICTABLE 或 UNALLOCATED 时，不保证输出结构中的字段有效。
 参数0:待解码的一条 32 位 A64 指令机器码
 参数1:解码结果
 */
-enum arm64_decode_status arm64_decode_insn(uint32_t raw, struct arm64_decoded_insn *decoded);
+enum arm64_decode_status arm64_decode_instruction(uint32_t raw, struct arm64_decoded_instruction *decoded);
 
 #endif

@@ -1,6 +1,6 @@
 #include "arm64_decode_internal.h"
 
-static void arm64_decode_ldst_rt_rn(uint32_t raw, struct arm64_decoded_insn *decoded)
+static void arm64_decode_ldst_rt_rn(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
     decoded->rt = raw & 0x1F;
     decoded->rn = (raw >> 5) & 0x1F;
@@ -87,60 +87,60 @@ static enum arm64_instruction arm64_decode_lse_atomic_instruction(uint32_t raw)
     }
 }
 
-enum arm64_ldst_form
+enum arm64_decode_ldst_form
 {
-    ARM64_LDST_FORM_UNSIGNED_OFFSET,
-    ARM64_LDST_FORM_IMMEDIATE,
-    ARM64_LDST_FORM_REGISTER_OFFSET,
-    ARM64_LDST_FORM_PAUTH,
-    ARM64_LDST_FORM_ATOMIC,
+    ARM64_DECODE_LDST_FORM_UNSIGNED_OFFSET,
+    ARM64_DECODE_LDST_FORM_IMMEDIATE,
+    ARM64_DECODE_LDST_FORM_REGISTER_OFFSET,
+    ARM64_DECODE_LDST_FORM_PAUTH,
+    ARM64_DECODE_LDST_FORM_ATOMIC,
 };
 
-enum arm64_ldst_register_kind
+enum arm64_decode_ldst_register_kind
 {
-    ARM64_LDST_REGISTER_GPR,
-    ARM64_LDST_REGISTER_FP_SIMD,
+    ARM64_DECODE_LDST_REGISTER_GPR,
+    ARM64_DECODE_LDST_REGISTER_FP_SIMD,
 };
 
-enum arm64_ldst_address_mode
+enum arm64_decode_ldst_address_mode
 {
-    ARM64_LDST_ADDRESS_BASE,
-    ARM64_LDST_ADDRESS_UNSCALED_OFFSET,
-    ARM64_LDST_ADDRESS_NON_TEMPORAL_OFFSET,
-    ARM64_LDST_ADDRESS_POST_INDEX,
-    ARM64_LDST_ADDRESS_PRE_INDEX,
-    ARM64_LDST_ADDRESS_UNPRIVILEGED_OFFSET,
-    ARM64_LDST_ADDRESS_REGISTER_OFFSET,
-    ARM64_LDST_ADDRESS_UNSIGNED_OFFSET,
+    ARM64_DECODE_LDST_ADDRESS_BASE,
+    ARM64_DECODE_LDST_ADDRESS_UNSCALED_OFFSET,
+    ARM64_DECODE_LDST_ADDRESS_NON_TEMPORAL_OFFSET,
+    ARM64_DECODE_LDST_ADDRESS_POST_INDEX,
+    ARM64_DECODE_LDST_ADDRESS_PRE_INDEX,
+    ARM64_DECODE_LDST_ADDRESS_UNPRIVILEGED_OFFSET,
+    ARM64_DECODE_LDST_ADDRESS_REGISTER_OFFSET,
+    ARM64_DECODE_LDST_ADDRESS_UNSIGNED_OFFSET,
 };
 
-static enum arm64_memory_address_mode arm64_normalize_ldst_address_mode(enum arm64_ldst_address_mode address_mode)
+static enum arm64_memory_address_mode arm64_decode_ldst_normalize_address_mode(enum arm64_decode_ldst_address_mode address_mode)
 {
     switch (address_mode)
     {
-    case ARM64_LDST_ADDRESS_POST_INDEX:
+    case ARM64_DECODE_LDST_ADDRESS_POST_INDEX:
         return ARM64_MEMORY_ADDRESS_POST_INDEX;
-    case ARM64_LDST_ADDRESS_PRE_INDEX:
+    case ARM64_DECODE_LDST_ADDRESS_PRE_INDEX:
         return ARM64_MEMORY_ADDRESS_PRE_INDEX;
-    case ARM64_LDST_ADDRESS_REGISTER_OFFSET:
+    case ARM64_DECODE_LDST_ADDRESS_REGISTER_OFFSET:
         return ARM64_MEMORY_ADDRESS_REGISTER_OFFSET;
-    case ARM64_LDST_ADDRESS_BASE:
-    case ARM64_LDST_ADDRESS_UNSCALED_OFFSET:
-    case ARM64_LDST_ADDRESS_NON_TEMPORAL_OFFSET:
-    case ARM64_LDST_ADDRESS_UNPRIVILEGED_OFFSET:
-    case ARM64_LDST_ADDRESS_UNSIGNED_OFFSET:
+    case ARM64_DECODE_LDST_ADDRESS_BASE:
+    case ARM64_DECODE_LDST_ADDRESS_UNSCALED_OFFSET:
+    case ARM64_DECODE_LDST_ADDRESS_NON_TEMPORAL_OFFSET:
+    case ARM64_DECODE_LDST_ADDRESS_UNPRIVILEGED_OFFSET:
+    case ARM64_DECODE_LDST_ADDRESS_UNSIGNED_OFFSET:
         return ARM64_MEMORY_ADDRESS_BASE_OFFSET;
     default:
         return ARM64_MEMORY_ADDRESS_NONE;
     }
 }
 
-static int arm64_ldst_is_prefetch(uint32_t raw, enum arm64_ldst_register_kind register_kind)
+static int arm64_decode_ldst_is_prefetch(uint32_t raw, enum arm64_decode_ldst_register_kind register_kind)
 {
-    return register_kind == ARM64_LDST_REGISTER_GPR && ((raw >> 30) & 0x3) == 3 && ((raw >> 22) & 0x3) == 2;
+    return register_kind == ARM64_DECODE_LDST_REGISTER_GPR && ((raw >> 30) & 0x3) == 3 && ((raw >> 22) & 0x3) == 2;
 }
 
-static enum arm64_instruction arm64_decode_ldst_single_instruction(uint32_t raw, enum arm64_ldst_register_kind register_kind, enum arm64_ldst_address_mode address_mode, int prefetch)
+static enum arm64_instruction arm64_decode_ldst_single_insn(uint32_t raw, enum arm64_decode_ldst_register_kind register_kind, enum arm64_decode_ldst_address_mode address_mode, int prefetch)
 {
     uint32_t opc = (raw >> 22) & 0x3;
 
@@ -148,32 +148,32 @@ static enum arm64_instruction arm64_decode_ldst_single_instruction(uint32_t raw,
     {
         switch (address_mode)
         {
-        case ARM64_LDST_ADDRESS_UNSCALED_OFFSET:
+        case ARM64_DECODE_LDST_ADDRESS_UNSCALED_OFFSET:
             return ARM64_INSN_PRFUM;
-        case ARM64_LDST_ADDRESS_REGISTER_OFFSET:
+        case ARM64_DECODE_LDST_ADDRESS_REGISTER_OFFSET:
             return ARM64_INSN_PRFM_REGISTER_OFFSET;
-        case ARM64_LDST_ADDRESS_UNSIGNED_OFFSET:
+        case ARM64_DECODE_LDST_ADDRESS_UNSIGNED_OFFSET:
             return ARM64_INSN_PRFM_UNSIGNED_OFFSET;
         default:
             return ARM64_INSN_UNKNOWN;
         }
     }
 
-    if (register_kind == ARM64_LDST_REGISTER_FP_SIMD)
+    if (register_kind == ARM64_DECODE_LDST_REGISTER_FP_SIMD)
     {
         if (opc & 1)
         {
             switch (address_mode)
             {
-            case ARM64_LDST_ADDRESS_UNSCALED_OFFSET:
+            case ARM64_DECODE_LDST_ADDRESS_UNSCALED_OFFSET:
                 return ARM64_INSN_LDUR_FP_SIMD;
-            case ARM64_LDST_ADDRESS_POST_INDEX:
+            case ARM64_DECODE_LDST_ADDRESS_POST_INDEX:
                 return ARM64_INSN_LDR_FP_SIMD_POST_INDEX;
-            case ARM64_LDST_ADDRESS_PRE_INDEX:
+            case ARM64_DECODE_LDST_ADDRESS_PRE_INDEX:
                 return ARM64_INSN_LDR_FP_SIMD_PRE_INDEX;
-            case ARM64_LDST_ADDRESS_REGISTER_OFFSET:
+            case ARM64_DECODE_LDST_ADDRESS_REGISTER_OFFSET:
                 return ARM64_INSN_LDR_FP_SIMD_REGISTER_OFFSET;
-            case ARM64_LDST_ADDRESS_UNSIGNED_OFFSET:
+            case ARM64_DECODE_LDST_ADDRESS_UNSIGNED_OFFSET:
                 return ARM64_INSN_LDR_FP_SIMD_UNSIGNED_OFFSET;
             default:
                 return ARM64_INSN_UNKNOWN;
@@ -182,15 +182,15 @@ static enum arm64_instruction arm64_decode_ldst_single_instruction(uint32_t raw,
 
         switch (address_mode)
         {
-        case ARM64_LDST_ADDRESS_UNSCALED_OFFSET:
+        case ARM64_DECODE_LDST_ADDRESS_UNSCALED_OFFSET:
             return ARM64_INSN_STUR_FP_SIMD;
-        case ARM64_LDST_ADDRESS_POST_INDEX:
+        case ARM64_DECODE_LDST_ADDRESS_POST_INDEX:
             return ARM64_INSN_STR_FP_SIMD_POST_INDEX;
-        case ARM64_LDST_ADDRESS_PRE_INDEX:
+        case ARM64_DECODE_LDST_ADDRESS_PRE_INDEX:
             return ARM64_INSN_STR_FP_SIMD_PRE_INDEX;
-        case ARM64_LDST_ADDRESS_REGISTER_OFFSET:
+        case ARM64_DECODE_LDST_ADDRESS_REGISTER_OFFSET:
             return ARM64_INSN_STR_FP_SIMD_REGISTER_OFFSET;
-        case ARM64_LDST_ADDRESS_UNSIGNED_OFFSET:
+        case ARM64_DECODE_LDST_ADDRESS_UNSIGNED_OFFSET:
             return ARM64_INSN_STR_FP_SIMD_UNSIGNED_OFFSET;
         default:
             return ARM64_INSN_UNKNOWN;
@@ -201,17 +201,17 @@ static enum arm64_instruction arm64_decode_ldst_single_instruction(uint32_t raw,
     {
         switch (address_mode)
         {
-        case ARM64_LDST_ADDRESS_UNSCALED_OFFSET:
+        case ARM64_DECODE_LDST_ADDRESS_UNSCALED_OFFSET:
             return ARM64_INSN_STUR_GPR;
-        case ARM64_LDST_ADDRESS_UNPRIVILEGED_OFFSET:
+        case ARM64_DECODE_LDST_ADDRESS_UNPRIVILEGED_OFFSET:
             return ARM64_INSN_STTR_GPR;
-        case ARM64_LDST_ADDRESS_POST_INDEX:
+        case ARM64_DECODE_LDST_ADDRESS_POST_INDEX:
             return ARM64_INSN_STR_GPR_POST_INDEX;
-        case ARM64_LDST_ADDRESS_PRE_INDEX:
+        case ARM64_DECODE_LDST_ADDRESS_PRE_INDEX:
             return ARM64_INSN_STR_GPR_PRE_INDEX;
-        case ARM64_LDST_ADDRESS_REGISTER_OFFSET:
+        case ARM64_DECODE_LDST_ADDRESS_REGISTER_OFFSET:
             return ARM64_INSN_STR_GPR_REGISTER_OFFSET;
-        case ARM64_LDST_ADDRESS_UNSIGNED_OFFSET:
+        case ARM64_DECODE_LDST_ADDRESS_UNSIGNED_OFFSET:
             return ARM64_INSN_STR_GPR_UNSIGNED_OFFSET;
         default:
             return ARM64_INSN_UNKNOWN;
@@ -222,17 +222,17 @@ static enum arm64_instruction arm64_decode_ldst_single_instruction(uint32_t raw,
     {
         switch (address_mode)
         {
-        case ARM64_LDST_ADDRESS_UNSCALED_OFFSET:
+        case ARM64_DECODE_LDST_ADDRESS_UNSCALED_OFFSET:
             return ARM64_INSN_LDUR_GPR;
-        case ARM64_LDST_ADDRESS_UNPRIVILEGED_OFFSET:
+        case ARM64_DECODE_LDST_ADDRESS_UNPRIVILEGED_OFFSET:
             return ARM64_INSN_LDTR_GPR;
-        case ARM64_LDST_ADDRESS_POST_INDEX:
+        case ARM64_DECODE_LDST_ADDRESS_POST_INDEX:
             return ARM64_INSN_LDR_GPR_POST_INDEX;
-        case ARM64_LDST_ADDRESS_PRE_INDEX:
+        case ARM64_DECODE_LDST_ADDRESS_PRE_INDEX:
             return ARM64_INSN_LDR_GPR_PRE_INDEX;
-        case ARM64_LDST_ADDRESS_REGISTER_OFFSET:
+        case ARM64_DECODE_LDST_ADDRESS_REGISTER_OFFSET:
             return ARM64_INSN_LDR_GPR_REGISTER_OFFSET;
-        case ARM64_LDST_ADDRESS_UNSIGNED_OFFSET:
+        case ARM64_DECODE_LDST_ADDRESS_UNSIGNED_OFFSET:
             return ARM64_INSN_LDR_GPR_UNSIGNED_OFFSET;
         default:
             return ARM64_INSN_UNKNOWN;
@@ -241,38 +241,38 @@ static enum arm64_instruction arm64_decode_ldst_single_instruction(uint32_t raw,
 
     switch (address_mode)
     {
-    case ARM64_LDST_ADDRESS_UNSCALED_OFFSET:
+    case ARM64_DECODE_LDST_ADDRESS_UNSCALED_OFFSET:
         return ARM64_INSN_LDUR_SIGNED_GPR;
-    case ARM64_LDST_ADDRESS_UNPRIVILEGED_OFFSET:
+    case ARM64_DECODE_LDST_ADDRESS_UNPRIVILEGED_OFFSET:
         return ARM64_INSN_LDTR_SIGNED_GPR;
-    case ARM64_LDST_ADDRESS_POST_INDEX:
+    case ARM64_DECODE_LDST_ADDRESS_POST_INDEX:
         return ARM64_INSN_LDR_SIGNED_GPR_POST_INDEX;
-    case ARM64_LDST_ADDRESS_PRE_INDEX:
+    case ARM64_DECODE_LDST_ADDRESS_PRE_INDEX:
         return ARM64_INSN_LDR_SIGNED_GPR_PRE_INDEX;
-    case ARM64_LDST_ADDRESS_REGISTER_OFFSET:
+    case ARM64_DECODE_LDST_ADDRESS_REGISTER_OFFSET:
         return ARM64_INSN_LDR_SIGNED_GPR_REGISTER_OFFSET;
-    case ARM64_LDST_ADDRESS_UNSIGNED_OFFSET:
+    case ARM64_DECODE_LDST_ADDRESS_UNSIGNED_OFFSET:
         return ARM64_INSN_LDR_SIGNED_GPR_UNSIGNED_OFFSET;
     default:
         return ARM64_INSN_UNKNOWN;
     }
 }
 
-static enum arm64_instruction arm64_decode_ldst_pair_instruction(enum arm64_ldst_register_kind register_kind, enum arm64_ldst_address_mode address_mode, uint32_t load, uint32_t opc)
+static enum arm64_instruction arm64_decode_ldst_pair_insn(enum arm64_decode_ldst_register_kind register_kind, enum arm64_decode_ldst_address_mode address_mode, uint32_t load, uint32_t opc)
 {
-    if (register_kind == ARM64_LDST_REGISTER_FP_SIMD)
+    if (register_kind == ARM64_DECODE_LDST_REGISTER_FP_SIMD)
     {
         if (load)
         {
             switch (address_mode)
             {
-            case ARM64_LDST_ADDRESS_NON_TEMPORAL_OFFSET:
+            case ARM64_DECODE_LDST_ADDRESS_NON_TEMPORAL_OFFSET:
                 return ARM64_INSN_LDNP_FP_SIMD;
-            case ARM64_LDST_ADDRESS_BASE:
+            case ARM64_DECODE_LDST_ADDRESS_BASE:
                 return ARM64_INSN_LDP_FP_SIMD_OFFSET;
-            case ARM64_LDST_ADDRESS_POST_INDEX:
+            case ARM64_DECODE_LDST_ADDRESS_POST_INDEX:
                 return ARM64_INSN_LDP_FP_SIMD_POST_INDEX;
-            case ARM64_LDST_ADDRESS_PRE_INDEX:
+            case ARM64_DECODE_LDST_ADDRESS_PRE_INDEX:
                 return ARM64_INSN_LDP_FP_SIMD_PRE_INDEX;
             default:
                 return ARM64_INSN_UNKNOWN;
@@ -281,13 +281,13 @@ static enum arm64_instruction arm64_decode_ldst_pair_instruction(enum arm64_ldst
 
         switch (address_mode)
         {
-        case ARM64_LDST_ADDRESS_NON_TEMPORAL_OFFSET:
+        case ARM64_DECODE_LDST_ADDRESS_NON_TEMPORAL_OFFSET:
             return ARM64_INSN_STNP_FP_SIMD;
-        case ARM64_LDST_ADDRESS_BASE:
+        case ARM64_DECODE_LDST_ADDRESS_BASE:
             return ARM64_INSN_STP_FP_SIMD_OFFSET;
-        case ARM64_LDST_ADDRESS_POST_INDEX:
+        case ARM64_DECODE_LDST_ADDRESS_POST_INDEX:
             return ARM64_INSN_STP_FP_SIMD_POST_INDEX;
-        case ARM64_LDST_ADDRESS_PRE_INDEX:
+        case ARM64_DECODE_LDST_ADDRESS_PRE_INDEX:
             return ARM64_INSN_STP_FP_SIMD_PRE_INDEX;
         default:
             return ARM64_INSN_UNKNOWN;
@@ -298,11 +298,11 @@ static enum arm64_instruction arm64_decode_ldst_pair_instruction(enum arm64_ldst
     {
         switch (address_mode)
         {
-        case ARM64_LDST_ADDRESS_BASE:
+        case ARM64_DECODE_LDST_ADDRESS_BASE:
             return ARM64_INSN_LDPSW_OFFSET;
-        case ARM64_LDST_ADDRESS_POST_INDEX:
+        case ARM64_DECODE_LDST_ADDRESS_POST_INDEX:
             return ARM64_INSN_LDPSW_POST_INDEX;
-        case ARM64_LDST_ADDRESS_PRE_INDEX:
+        case ARM64_DECODE_LDST_ADDRESS_PRE_INDEX:
             return ARM64_INSN_LDPSW_PRE_INDEX;
         default:
             return ARM64_INSN_UNKNOWN;
@@ -313,13 +313,13 @@ static enum arm64_instruction arm64_decode_ldst_pair_instruction(enum arm64_ldst
     {
         switch (address_mode)
         {
-        case ARM64_LDST_ADDRESS_NON_TEMPORAL_OFFSET:
+        case ARM64_DECODE_LDST_ADDRESS_NON_TEMPORAL_OFFSET:
             return ARM64_INSN_LDNP_GPR;
-        case ARM64_LDST_ADDRESS_BASE:
+        case ARM64_DECODE_LDST_ADDRESS_BASE:
             return ARM64_INSN_LDP_GPR_OFFSET;
-        case ARM64_LDST_ADDRESS_POST_INDEX:
+        case ARM64_DECODE_LDST_ADDRESS_POST_INDEX:
             return ARM64_INSN_LDP_GPR_POST_INDEX;
-        case ARM64_LDST_ADDRESS_PRE_INDEX:
+        case ARM64_DECODE_LDST_ADDRESS_PRE_INDEX:
             return ARM64_INSN_LDP_GPR_PRE_INDEX;
         default:
             return ARM64_INSN_UNKNOWN;
@@ -328,20 +328,20 @@ static enum arm64_instruction arm64_decode_ldst_pair_instruction(enum arm64_ldst
 
     switch (address_mode)
     {
-    case ARM64_LDST_ADDRESS_NON_TEMPORAL_OFFSET:
+    case ARM64_DECODE_LDST_ADDRESS_NON_TEMPORAL_OFFSET:
         return ARM64_INSN_STNP_GPR;
-    case ARM64_LDST_ADDRESS_BASE:
+    case ARM64_DECODE_LDST_ADDRESS_BASE:
         return ARM64_INSN_STP_GPR_OFFSET;
-    case ARM64_LDST_ADDRESS_POST_INDEX:
+    case ARM64_DECODE_LDST_ADDRESS_POST_INDEX:
         return ARM64_INSN_STP_GPR_POST_INDEX;
-    case ARM64_LDST_ADDRESS_PRE_INDEX:
+    case ARM64_DECODE_LDST_ADDRESS_PRE_INDEX:
         return ARM64_INSN_STP_GPR_PRE_INDEX;
     default:
         return ARM64_INSN_UNKNOWN;
     }
 }
 
-static enum arm64_decode_status arm64_decode_ldst_atomic(uint32_t raw, struct arm64_decoded_insn *decoded)
+static enum arm64_decode_status arm64_decode_ldst_atomic(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
     switch ((raw >> 12) & 0xF)
     {
@@ -405,11 +405,11 @@ static enum arm64_decode_status arm64_decode_ldst_atomic(uint32_t raw, struct ar
     return ARM64_DECODE_OK;
 }
 
-static enum arm64_decode_status arm64_decode_ldst_single(uint32_t raw, struct arm64_decoded_insn *decoded, enum arm64_ldst_register_kind register_kind)
+static enum arm64_decode_status arm64_decode_ldst_single(uint32_t raw, struct arm64_decoded_instruction *decoded, enum arm64_decode_ldst_register_kind register_kind)
 {
     uint32_t size = (raw >> 30) & 0x3;
     uint32_t opc = (raw >> 22) & 0x3;
-    int prefetch = arm64_ldst_is_prefetch(raw, register_kind);
+    int prefetch = arm64_decode_ldst_is_prefetch(raw, register_kind);
 
     if (prefetch)
     {
@@ -420,45 +420,45 @@ static enum arm64_decode_status arm64_decode_ldst_single(uint32_t raw, struct ar
     else
     {
         arm64_decode_ldst_rt_rn(raw, decoded);
-        if (register_kind == ARM64_LDST_REGISTER_FP_SIMD && opc >= 2 && size != 0) return ARM64_DECODE_UNALLOCATED;
-        if (register_kind == ARM64_LDST_REGISTER_FP_SIMD) decoded->access_bytes = size == 0 && (opc & 2) ? 16 : 1U << size;
+        if (register_kind == ARM64_DECODE_LDST_REGISTER_FP_SIMD && opc >= 2 && size != 0) return ARM64_DECODE_UNALLOCATED;
+        if (register_kind == ARM64_DECODE_LDST_REGISTER_FP_SIMD) decoded->access_bytes = size == 0 && (opc & 2) ? 16 : 1U << size;
         else decoded->access_bytes = 1U << size;
-        decoded->operand_width = register_kind == ARM64_LDST_REGISTER_FP_SIMD ? decoded->access_bytes * 8 : (size == 3 || opc == 2 ? 64 : 32);
+        decoded->operand_width = register_kind == ARM64_DECODE_LDST_REGISTER_FP_SIMD ? decoded->access_bytes * 8 : (size == 3 || opc == 2 ? 64 : 32);
     }
 
-    if (register_kind == ARM64_LDST_REGISTER_GPR && opc == 3 && size >= 2) return ARM64_DECODE_UNALLOCATED;
+    if (register_kind == ARM64_DECODE_LDST_REGISTER_GPR && opc == 3 && size >= 2) return ARM64_DECODE_UNALLOCATED;
     return ARM64_DECODE_OK;
 }
 
-static enum arm64_decode_status arm64_decode_ldst_literal(uint32_t raw, struct arm64_decoded_insn *decoded, enum arm64_ldst_register_kind register_kind)
+static enum arm64_decode_status arm64_decode_ldst_literal(uint32_t raw, struct arm64_decoded_instruction *decoded, enum arm64_decode_ldst_register_kind register_kind)
 {
     uint32_t size = (raw >> 30) & 0x3;
-    int prefetch = register_kind == ARM64_LDST_REGISTER_GPR && size == 3;
+    int prefetch = register_kind == ARM64_DECODE_LDST_REGISTER_GPR && size == 3;
 
     if (!prefetch) decoded->rt = raw & 0x1F;
     else decoded->prefetch_operation = raw & 0x1F;
     decoded->memory_address_mode = ARM64_MEMORY_ADDRESS_LITERAL;
-    if (register_kind == ARM64_LDST_REGISTER_FP_SIMD) decoded->access_bytes = size == 0 ? 4 : size == 1 ? 8 : size == 2 ? 16 : 0;
+    if (register_kind == ARM64_DECODE_LDST_REGISTER_FP_SIMD) decoded->access_bytes = size == 0 ? 4 : size == 1 ? 8 : size == 2 ? 16 : 0;
     else decoded->access_bytes = size == 0 ? 4 : size == 1 ? 8 : size == 2 ? 4 : 0;
-    decoded->offset = arm64_sign_extend((uint64_t)((raw >> 5) & 0x7FFFF) << 2, 21);
-    decoded->operand_width = prefetch ? 0 : register_kind == ARM64_LDST_REGISTER_FP_SIMD ? decoded->access_bytes * 8 : (size == 0 ? 32 : 64);
-    if (register_kind == ARM64_LDST_REGISTER_FP_SIMD && !decoded->access_bytes) return ARM64_DECODE_UNALLOCATED;
+    decoded->offset = arm64_decode_sign_extend((uint64_t)((raw >> 5) & 0x7FFFF) << 2, 21);
+    decoded->operand_width = prefetch ? 0 : register_kind == ARM64_DECODE_LDST_REGISTER_FP_SIMD ? decoded->access_bytes * 8 : (size == 0 ? 32 : 64);
+    if (register_kind == ARM64_DECODE_LDST_REGISTER_FP_SIMD && !decoded->access_bytes) return ARM64_DECODE_UNALLOCATED;
     if (prefetch) decoded->instruction = ARM64_INSN_PRFM_LITERAL;
-    else if (register_kind == ARM64_LDST_REGISTER_FP_SIMD) decoded->instruction = ARM64_INSN_LDR_LITERAL_FP_SIMD;
+    else if (register_kind == ARM64_DECODE_LDST_REGISTER_FP_SIMD) decoded->instruction = ARM64_INSN_LDR_LITERAL_FP_SIMD;
     else decoded->instruction = size == 2 ? ARM64_INSN_LDRSW_LITERAL : ARM64_INSN_LDR_LITERAL_GPR;
     return ARM64_DECODE_OK;
 }
 
-static enum arm64_decode_status arm64_decode_ldst_pair(uint32_t raw, struct arm64_decoded_insn *decoded, enum arm64_ldst_register_kind register_kind, enum arm64_ldst_address_mode low_mode, enum arm64_ldst_address_mode high_mode)
+static enum arm64_decode_status arm64_decode_ldst_pair(uint32_t raw, struct arm64_decoded_instruction *decoded, enum arm64_decode_ldst_register_kind register_kind, enum arm64_decode_ldst_address_mode low_mode, enum arm64_decode_ldst_address_mode high_mode)
 {
     uint32_t opc = (raw >> 30) & 0x3;
     uint32_t load = (raw >> 22) & 1;
-    enum arm64_ldst_address_mode address_mode = (raw & 0x00800000U) ? high_mode : low_mode;
+    enum arm64_decode_ldst_address_mode address_mode = (raw & 0x00800000U) ? high_mode : low_mode;
 
     arm64_decode_ldst_rt_rn(raw, decoded);
-    decoded->memory_address_mode = arm64_normalize_ldst_address_mode(address_mode);
+    decoded->memory_address_mode = arm64_decode_ldst_normalize_address_mode(address_mode);
     decoded->rt2 = (raw >> 10) & 0x1F;
-    if (register_kind == ARM64_LDST_REGISTER_FP_SIMD)
+    if (register_kind == ARM64_DECODE_LDST_REGISTER_FP_SIMD)
     {
         if (opc == 3) return ARM64_DECODE_UNALLOCATED;
         decoded->access_bytes = 4U << opc;
@@ -466,19 +466,19 @@ static enum arm64_decode_status arm64_decode_ldst_pair(uint32_t raw, struct arm6
     }
     else
     {
-        if (opc == 3 || (opc == 1 && address_mode == ARM64_LDST_ADDRESS_NON_TEMPORAL_OFFSET)) return ARM64_DECODE_UNALLOCATED;
+        if (opc == 3 || (opc == 1 && address_mode == ARM64_DECODE_LDST_ADDRESS_NON_TEMPORAL_OFFSET)) return ARM64_DECODE_UNALLOCATED;
         if (opc == 1 && !load) return ARM64_DECODE_UNSUPPORTED;
         decoded->access_bytes = opc == 2 ? 8 : 4;
         decoded->operand_width = opc == 0 ? 32 : 64;
     }
-    if (register_kind == ARM64_LDST_REGISTER_GPR && (address_mode == ARM64_LDST_ADDRESS_POST_INDEX || address_mode == ARM64_LDST_ADDRESS_PRE_INDEX) && decoded->rn != 31 && (decoded->rn == decoded->rt || decoded->rn == decoded->rt2)) return ARM64_DECODE_UNPREDICTABLE;
+    if (register_kind == ARM64_DECODE_LDST_REGISTER_GPR && (address_mode == ARM64_DECODE_LDST_ADDRESS_POST_INDEX || address_mode == ARM64_DECODE_LDST_ADDRESS_PRE_INDEX) && decoded->rn != 31 && (decoded->rn == decoded->rt || decoded->rn == decoded->rt2)) return ARM64_DECODE_UNPREDICTABLE;
     if (load && decoded->rt == decoded->rt2) return ARM64_DECODE_UNPREDICTABLE;
-    decoded->offset = arm64_sign_extend((raw >> 15) & 0x7F, 7) * decoded->access_bytes;
-    decoded->instruction = arm64_decode_ldst_pair_instruction(register_kind, address_mode, load, opc);
+    decoded->offset = arm64_decode_sign_extend((raw >> 15) & 0x7F, 7) * decoded->access_bytes;
+    decoded->instruction = arm64_decode_ldst_pair_insn(register_kind, address_mode, load, opc);
     return ARM64_DECODE_OK;
 }
 
-static enum arm64_decode_status arm64_decode_ldst_unsigned(uint32_t raw, struct arm64_decoded_insn *decoded, enum arm64_ldst_register_kind register_kind)
+static enum arm64_decode_status arm64_decode_ldst_unsigned(uint32_t raw, struct arm64_decoded_instruction *decoded, enum arm64_decode_ldst_register_kind register_kind)
 {
     enum arm64_decode_status status = arm64_decode_ldst_single(raw, decoded, register_kind);
     int prefetch;
@@ -486,30 +486,30 @@ static enum arm64_decode_status arm64_decode_ldst_unsigned(uint32_t raw, struct 
     if (status != ARM64_DECODE_OK) return status;
     prefetch = decoded->operand_width == 0;
     decoded->offset = ((raw >> 10) & 0xFFF) * (prefetch ? 8 : decoded->access_bytes);
-    decoded->instruction = arm64_decode_ldst_single_instruction(raw, register_kind, ARM64_LDST_ADDRESS_UNSIGNED_OFFSET, prefetch);
+    decoded->instruction = arm64_decode_ldst_single_insn(raw, register_kind, ARM64_DECODE_LDST_ADDRESS_UNSIGNED_OFFSET, prefetch);
     return ARM64_DECODE_OK;
 }
 
-static enum arm64_decode_status arm64_decode_ldst_unscaled(uint32_t raw, struct arm64_decoded_insn *decoded, enum arm64_ldst_register_kind register_kind)
+static enum arm64_decode_status arm64_decode_ldst_unscaled(uint32_t raw, struct arm64_decoded_instruction *decoded, enum arm64_decode_ldst_register_kind register_kind)
 {
-    enum arm64_ldst_form form;
-    enum arm64_ldst_address_mode address_mode = ARM64_LDST_ADDRESS_BASE;
+    enum arm64_decode_ldst_form form;
+    enum arm64_decode_ldst_address_mode address_mode = ARM64_DECODE_LDST_ADDRESS_BASE;
 
-    if (!(raw & 0x00200000U)) form = ARM64_LDST_FORM_IMMEDIATE;
+    if (!(raw & 0x00200000U)) form = ARM64_DECODE_LDST_FORM_IMMEDIATE;
     else
     {
         uint32_t mode = (raw >> 10) & 0x3;
 
-        if (mode == 2) form = ARM64_LDST_FORM_REGISTER_OFFSET;
-        else if (register_kind == ARM64_LDST_REGISTER_FP_SIMD) return ARM64_DECODE_UNALLOCATED;
-        else if (mode == 0) form = ARM64_LDST_FORM_ATOMIC;
-        else if (((raw >> 30) & 0x3) == 3) form = ARM64_LDST_FORM_PAUTH;
+        if (mode == 2) form = ARM64_DECODE_LDST_FORM_REGISTER_OFFSET;
+        else if (register_kind == ARM64_DECODE_LDST_REGISTER_FP_SIMD) return ARM64_DECODE_UNALLOCATED;
+        else if (mode == 0) form = ARM64_DECODE_LDST_FORM_ATOMIC;
+        else if (((raw >> 30) & 0x3) == 3) form = ARM64_DECODE_LDST_FORM_PAUTH;
         else return ARM64_DECODE_UNALLOCATED;
     }
 
     switch (form)
     {
-    case ARM64_LDST_FORM_IMMEDIATE:
+    case ARM64_DECODE_LDST_FORM_IMMEDIATE:
     {
         enum arm64_decode_status status = arm64_decode_ldst_single(raw, decoded, register_kind);
         uint32_t mode = (raw >> 10) & 0x3;
@@ -517,18 +517,18 @@ static enum arm64_decode_status arm64_decode_ldst_unscaled(uint32_t raw, struct 
 
         if (status != ARM64_DECODE_OK) return status;
         prefetch = decoded->operand_width == 0;
-        if (register_kind == ARM64_LDST_REGISTER_FP_SIMD && mode == 2) return ARM64_DECODE_UNALLOCATED;
+        if (register_kind == ARM64_DECODE_LDST_REGISTER_FP_SIMD && mode == 2) return ARM64_DECODE_UNALLOCATED;
         if (prefetch && mode != 0) return ARM64_DECODE_UNALLOCATED;
-        decoded->offset = arm64_sign_extend((raw >> 12) & 0x1FF, 9);
-        address_mode = mode == 1 ? ARM64_LDST_ADDRESS_POST_INDEX : mode == 2 ? ARM64_LDST_ADDRESS_UNPRIVILEGED_OFFSET : mode == 3 ? ARM64_LDST_ADDRESS_PRE_INDEX : ARM64_LDST_ADDRESS_UNSCALED_OFFSET;
-        decoded->instruction = arm64_decode_ldst_single_instruction(raw, register_kind, address_mode, prefetch);
+        decoded->offset = arm64_decode_sign_extend((raw >> 12) & 0x1FF, 9);
+        address_mode = mode == 1 ? ARM64_DECODE_LDST_ADDRESS_POST_INDEX : mode == 2 ? ARM64_DECODE_LDST_ADDRESS_UNPRIVILEGED_OFFSET : mode == 3 ? ARM64_DECODE_LDST_ADDRESS_PRE_INDEX : ARM64_DECODE_LDST_ADDRESS_UNSCALED_OFFSET;
+        decoded->instruction = arm64_decode_ldst_single_insn(raw, register_kind, address_mode, prefetch);
         break;
     }
-    case ARM64_LDST_FORM_ATOMIC:
+    case ARM64_DECODE_LDST_FORM_ATOMIC:
         return arm64_decode_ldst_atomic(raw, decoded);
-    case ARM64_LDST_FORM_PAUTH:
+    case ARM64_DECODE_LDST_FORM_PAUTH:
         return ARM64_DECODE_UNSUPPORTED;
-    case ARM64_LDST_FORM_REGISTER_OFFSET:
+    case ARM64_DECODE_LDST_FORM_REGISTER_OFFSET:
     {
         enum arm64_decode_status status = arm64_decode_ldst_single(raw, decoded, register_kind);
         int prefetch;
@@ -536,20 +536,20 @@ static enum arm64_decode_status arm64_decode_ldst_unscaled(uint32_t raw, struct 
         if (status != ARM64_DECODE_OK) return status;
         prefetch = decoded->operand_width == 0;
         if (prefetch && (raw & 0x18U) == 0x18U) return ARM64_DECODE_UNSUPPORTED;
-        address_mode = ARM64_LDST_ADDRESS_REGISTER_OFFSET;
+        address_mode = ARM64_DECODE_LDST_ADDRESS_REGISTER_OFFSET;
         decoded->rm = (raw >> 16) & 0x1F;
         decoded->extend_type = (raw >> 13) & 0x7;
         if (decoded->extend_type != 2 && decoded->extend_type != 3 && decoded->extend_type != 6 && decoded->extend_type != 7) return ARM64_DECODE_UNALLOCATED;
         decoded->shift_amount = (raw & 0x1000U) ? (prefetch ? 3 : (uint8_t)__builtin_ctz(decoded->access_bytes)) : 0;
-        decoded->instruction = arm64_decode_ldst_single_instruction(raw, register_kind, address_mode, prefetch);
+        decoded->instruction = arm64_decode_ldst_single_insn(raw, register_kind, address_mode, prefetch);
         break;
     }
     default:
         return ARM64_DECODE_UNALLOCATED;
     }
 
-    if (register_kind == ARM64_LDST_REGISTER_GPR && (address_mode == ARM64_LDST_ADDRESS_PRE_INDEX || address_mode == ARM64_LDST_ADDRESS_POST_INDEX) && decoded->rn != 31 && decoded->rn == decoded->rt) return ARM64_DECODE_UNPREDICTABLE;
-    decoded->memory_address_mode = arm64_normalize_ldst_address_mode(address_mode);
+    if (register_kind == ARM64_DECODE_LDST_REGISTER_GPR && (address_mode == ARM64_DECODE_LDST_ADDRESS_PRE_INDEX || address_mode == ARM64_DECODE_LDST_ADDRESS_POST_INDEX) && decoded->rn != 31 && decoded->rn == decoded->rt) return ARM64_DECODE_UNPREDICTABLE;
+    decoded->memory_address_mode = arm64_decode_ldst_normalize_address_mode(address_mode);
     return ARM64_DECODE_OK;
 }
 
@@ -557,9 +557,9 @@ static enum arm64_decode_status arm64_decode_ldst_unscaled(uint32_t raw, struct 
 解码访存、原子和独占指令。bits[29:24] 先确定唯一编码 owner，叶子只校验
 本族固定字段和寄存器约束，不依赖宽窄掩码的排列顺序。
 */
-enum arm64_decode_status arm64_decode_ldst(uint32_t raw, struct arm64_decoded_insn *decoded)
+enum arm64_decode_status arm64_decode_load_store(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
-    decoded->insn_class = ARM64_INSN_CLASS_LOAD_STORE;
+    decoded->instruction_class = ARM64_INSTRUCTION_CLASS_LOAD_STORE;
     decoded->memory_address_mode = ARM64_MEMORY_ADDRESS_BASE_OFFSET;
 
     switch ((raw >> 24) & 0x3F)
@@ -695,7 +695,7 @@ enum arm64_decode_status arm64_decode_ldst(uint32_t raw, struct arm64_decoded_in
         return ARM64_DECODE_UNSUPPORTED;
 
     case 0x18:
-        return arm64_decode_ldst_literal(raw, decoded, ARM64_LDST_REGISTER_GPR);
+        return arm64_decode_ldst_literal(raw, decoded, ARM64_DECODE_LDST_REGISTER_GPR);
     case 0x19:
         switch (raw & 0x8020FC00U)
         {
@@ -728,33 +728,33 @@ enum arm64_decode_status arm64_decode_ldst(uint32_t raw, struct arm64_decoded_in
             decoded->instruction = opc == 0 ? ARM64_INSN_STLUR : opc == 1 ? ARM64_INSN_LDAPUR : ARM64_INSN_LDAPUR_SIGNED;
             arm64_decode_ldst_rt_rn(raw, decoded);
             decoded->access_bytes = 1U << size;
-            decoded->offset = arm64_sign_extend((raw >> 12) & 0x1FF, 9);
+            decoded->offset = arm64_decode_sign_extend((raw >> 12) & 0x1FF, 9);
             decoded->operand_width = size == 3 || opc == 2 ? 64 : 32;
             return ARM64_DECODE_OK;
         }
         return ARM64_DECODE_UNSUPPORTED;
     case 0x1C:
-        return arm64_decode_ldst_literal(raw, decoded, ARM64_LDST_REGISTER_FP_SIMD);
+        return arm64_decode_ldst_literal(raw, decoded, ARM64_DECODE_LDST_REGISTER_FP_SIMD);
     case 0x1D:
         return ARM64_DECODE_UNSUPPORTED;
 
     case 0x28:
-        return arm64_decode_ldst_pair(raw, decoded, ARM64_LDST_REGISTER_GPR, ARM64_LDST_ADDRESS_NON_TEMPORAL_OFFSET, ARM64_LDST_ADDRESS_POST_INDEX);
+        return arm64_decode_ldst_pair(raw, decoded, ARM64_DECODE_LDST_REGISTER_GPR, ARM64_DECODE_LDST_ADDRESS_NON_TEMPORAL_OFFSET, ARM64_DECODE_LDST_ADDRESS_POST_INDEX);
     case 0x29:
-        return arm64_decode_ldst_pair(raw, decoded, ARM64_LDST_REGISTER_GPR, ARM64_LDST_ADDRESS_BASE, ARM64_LDST_ADDRESS_PRE_INDEX);
+        return arm64_decode_ldst_pair(raw, decoded, ARM64_DECODE_LDST_REGISTER_GPR, ARM64_DECODE_LDST_ADDRESS_BASE, ARM64_DECODE_LDST_ADDRESS_PRE_INDEX);
     case 0x2C:
-        return arm64_decode_ldst_pair(raw, decoded, ARM64_LDST_REGISTER_FP_SIMD, ARM64_LDST_ADDRESS_NON_TEMPORAL_OFFSET, ARM64_LDST_ADDRESS_POST_INDEX);
+        return arm64_decode_ldst_pair(raw, decoded, ARM64_DECODE_LDST_REGISTER_FP_SIMD, ARM64_DECODE_LDST_ADDRESS_NON_TEMPORAL_OFFSET, ARM64_DECODE_LDST_ADDRESS_POST_INDEX);
     case 0x2D:
-        return arm64_decode_ldst_pair(raw, decoded, ARM64_LDST_REGISTER_FP_SIMD, ARM64_LDST_ADDRESS_BASE, ARM64_LDST_ADDRESS_PRE_INDEX);
+        return arm64_decode_ldst_pair(raw, decoded, ARM64_DECODE_LDST_REGISTER_FP_SIMD, ARM64_DECODE_LDST_ADDRESS_BASE, ARM64_DECODE_LDST_ADDRESS_PRE_INDEX);
 
     case 0x38:
-        return arm64_decode_ldst_unscaled(raw, decoded, ARM64_LDST_REGISTER_GPR);
+        return arm64_decode_ldst_unscaled(raw, decoded, ARM64_DECODE_LDST_REGISTER_GPR);
     case 0x39:
-        return arm64_decode_ldst_unsigned(raw, decoded, ARM64_LDST_REGISTER_GPR);
+        return arm64_decode_ldst_unsigned(raw, decoded, ARM64_DECODE_LDST_REGISTER_GPR);
     case 0x3C:
-        return arm64_decode_ldst_unscaled(raw, decoded, ARM64_LDST_REGISTER_FP_SIMD);
+        return arm64_decode_ldst_unscaled(raw, decoded, ARM64_DECODE_LDST_REGISTER_FP_SIMD);
     case 0x3D:
-        return arm64_decode_ldst_unsigned(raw, decoded, ARM64_LDST_REGISTER_FP_SIMD);
+        return arm64_decode_ldst_unsigned(raw, decoded, ARM64_DECODE_LDST_REGISTER_FP_SIMD);
 
     default:
         return ARM64_DECODE_UNALLOCATED;

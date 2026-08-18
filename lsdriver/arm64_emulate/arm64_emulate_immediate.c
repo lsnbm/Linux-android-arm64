@@ -58,7 +58,7 @@ static inline bool emu_move_wide_hw(enum arm64_instruction instruction, uint64_t
 
 /* 每个固定立即数执行模板直接对应缓存条目中的 execute 函数地址。 */
 
-static enum emu_insn_result emu_execute_pc_relative_adr(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_adr(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     uint64_t pc = regs->pc;
     uint64_t base = pc;
@@ -69,7 +69,7 @@ static enum emu_insn_result emu_execute_pc_relative_adr(struct pt_regs *regs, st
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_pc_relative_adrp(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_adrp(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     uint64_t pc = regs->pc;
     uint64_t base = pc & ~0xFFFULL;
@@ -80,7 +80,7 @@ static enum emu_insn_result emu_execute_pc_relative_adrp(struct pt_regs *regs, s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_extract_extr_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_extr_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     bool sf = false;
     uint64_t result;
@@ -92,7 +92,7 @@ static enum emu_insn_result emu_execute_extract_extr_w32(struct pt_regs *regs, s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_extract_extr_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_extr_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     bool sf = true;
     uint64_t result;
@@ -104,7 +104,7 @@ static enum emu_insn_result emu_execute_extract_extr_w64(struct pt_regs *regs, s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_immediate_add_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_add_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADD_IMMEDIATE;
     bool sf = false;
@@ -127,7 +127,7 @@ static enum emu_insn_result emu_execute_addsub_immediate_add_immediate_w32(struc
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_immediate_add_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_add_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADD_IMMEDIATE;
     bool sf = true;
@@ -150,7 +150,7 @@ static enum emu_insn_result emu_execute_addsub_immediate_add_immediate_w64(struc
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_immediate_adds_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_adds_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADDS_IMMEDIATE;
     bool sf = false;
@@ -173,7 +173,7 @@ static enum emu_insn_result emu_execute_addsub_immediate_adds_immediate_w32(stru
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_immediate_adds_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_adds_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ADDS_IMMEDIATE;
     bool sf = true;
@@ -196,7 +196,7 @@ static enum emu_insn_result emu_execute_addsub_immediate_adds_immediate_w64(stru
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_immediate_sub_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_sub_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUB_IMMEDIATE;
     bool sf = false;
@@ -219,7 +219,7 @@ static enum emu_insn_result emu_execute_addsub_immediate_sub_immediate_w32(struc
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_immediate_sub_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_sub_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUB_IMMEDIATE;
     bool sf = true;
@@ -242,7 +242,7 @@ static enum emu_insn_result emu_execute_addsub_immediate_sub_immediate_w64(struc
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_immediate_subs_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_subs_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUBS_IMMEDIATE;
     bool sf = false;
@@ -265,7 +265,7 @@ static enum emu_insn_result emu_execute_addsub_immediate_subs_immediate_w32(stru
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_addsub_immediate_subs_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_subs_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SUBS_IMMEDIATE;
     bool sf = true;
@@ -288,7 +288,7 @@ static enum emu_insn_result emu_execute_addsub_immediate_subs_immediate_w64(stru
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_minmax_immediate_smax_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_smax_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SMAX_IMMEDIATE;
     bool sf = false;
@@ -304,7 +304,7 @@ static enum emu_insn_result emu_execute_minmax_immediate_smax_immediate_w32(stru
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_minmax_immediate_smax_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_smax_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SMAX_IMMEDIATE;
     bool sf = true;
@@ -320,7 +320,7 @@ static enum emu_insn_result emu_execute_minmax_immediate_smax_immediate_w64(stru
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_minmax_immediate_umax_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_umax_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_UMAX_IMMEDIATE;
     bool sf = false;
@@ -336,7 +336,7 @@ static enum emu_insn_result emu_execute_minmax_immediate_umax_immediate_w32(stru
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_minmax_immediate_umax_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_umax_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_UMAX_IMMEDIATE;
     bool sf = true;
@@ -352,7 +352,7 @@ static enum emu_insn_result emu_execute_minmax_immediate_umax_immediate_w64(stru
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_minmax_immediate_smin_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_smin_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SMIN_IMMEDIATE;
     bool sf = false;
@@ -368,7 +368,7 @@ static enum emu_insn_result emu_execute_minmax_immediate_smin_immediate_w32(stru
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_minmax_immediate_smin_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_smin_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_SMIN_IMMEDIATE;
     bool sf = true;
@@ -384,7 +384,7 @@ static enum emu_insn_result emu_execute_minmax_immediate_smin_immediate_w64(stru
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_minmax_immediate_umin_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_umin_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_UMIN_IMMEDIATE;
     bool sf = false;
@@ -400,7 +400,7 @@ static enum emu_insn_result emu_execute_minmax_immediate_umin_immediate_w32(stru
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_minmax_immediate_umin_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_umin_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_UMIN_IMMEDIATE;
     bool sf = true;
@@ -416,7 +416,7 @@ static enum emu_insn_result emu_execute_minmax_immediate_umin_immediate_w64(stru
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_immediate_and_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_and_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_AND_IMMEDIATE;
     bool sf = false;
@@ -432,7 +432,7 @@ static enum emu_insn_result emu_execute_logic_immediate_and_immediate_w32(struct
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_immediate_and_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_and_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_AND_IMMEDIATE;
     bool sf = true;
@@ -448,7 +448,7 @@ static enum emu_insn_result emu_execute_logic_immediate_and_immediate_w64(struct
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_immediate_orr_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_orr_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ORR_IMMEDIATE;
     bool sf = false;
@@ -464,7 +464,7 @@ static enum emu_insn_result emu_execute_logic_immediate_orr_immediate_w32(struct
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_immediate_orr_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_orr_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ORR_IMMEDIATE;
     bool sf = true;
@@ -480,7 +480,7 @@ static enum emu_insn_result emu_execute_logic_immediate_orr_immediate_w64(struct
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_immediate_eor_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_eor_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_EOR_IMMEDIATE;
     bool sf = false;
@@ -496,7 +496,7 @@ static enum emu_insn_result emu_execute_logic_immediate_eor_immediate_w32(struct
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_immediate_eor_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_eor_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_EOR_IMMEDIATE;
     bool sf = true;
@@ -512,7 +512,7 @@ static enum emu_insn_result emu_execute_logic_immediate_eor_immediate_w64(struct
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_immediate_ands_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_ands_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ANDS_IMMEDIATE;
     bool sf = false;
@@ -528,7 +528,7 @@ static enum emu_insn_result emu_execute_logic_immediate_ands_immediate_w32(struc
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_logic_immediate_ands_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_ands_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_ANDS_IMMEDIATE;
     bool sf = true;
@@ -544,7 +544,7 @@ static enum emu_insn_result emu_execute_logic_immediate_ands_immediate_w64(struc
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_move_wide_movn_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_movn_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_MOVN;
     bool sf = false;
@@ -557,7 +557,7 @@ static enum emu_insn_result emu_execute_move_wide_movn_w32(struct pt_regs *regs,
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_move_wide_movn_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_movn_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_MOVN;
     bool sf = true;
@@ -570,7 +570,7 @@ static enum emu_insn_result emu_execute_move_wide_movn_w64(struct pt_regs *regs,
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_move_wide_movz_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_movz_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_MOVZ;
     bool sf = false;
@@ -583,7 +583,7 @@ static enum emu_insn_result emu_execute_move_wide_movz_w32(struct pt_regs *regs,
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_move_wide_movz_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_movz_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_MOVZ;
     bool sf = true;
@@ -596,7 +596,7 @@ static enum emu_insn_result emu_execute_move_wide_movz_w64(struct pt_regs *regs,
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_move_wide_movk_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_movk_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_MOVK;
     bool sf = false;
@@ -609,7 +609,7 @@ static enum emu_insn_result emu_execute_move_wide_movk_w32(struct pt_regs *regs,
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_move_wide_movk_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_movk_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     enum arm64_instruction instruction = (enum arm64_instruction)ARM64_INSN_MOVK;
     bool sf = true;
@@ -622,7 +622,7 @@ static enum emu_insn_result emu_execute_move_wide_movk_w64(struct pt_regs *regs,
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_bitfield_sbfm_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_sbfm_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     static const enum arm64_instruction instructions[] = {
         ARM64_INSN_SBFM,
@@ -642,7 +642,7 @@ static enum emu_insn_result emu_execute_bitfield_sbfm_w32(struct pt_regs *regs, 
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_bitfield_sbfm_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_sbfm_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     static const enum arm64_instruction instructions[] = {
         ARM64_INSN_SBFM,
@@ -662,7 +662,7 @@ static enum emu_insn_result emu_execute_bitfield_sbfm_w64(struct pt_regs *regs, 
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_bitfield_bfm_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_bfm_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     static const enum arm64_instruction instructions[] = {
         ARM64_INSN_SBFM,
@@ -682,7 +682,7 @@ static enum emu_insn_result emu_execute_bitfield_bfm_w32(struct pt_regs *regs, s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_bitfield_bfm_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_bfm_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     static const enum arm64_instruction instructions[] = {
         ARM64_INSN_SBFM,
@@ -702,7 +702,7 @@ static enum emu_insn_result emu_execute_bitfield_bfm_w64(struct pt_regs *regs, s
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_bitfield_ubfm_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_ubfm_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     static const enum arm64_instruction instructions[] = {
         ARM64_INSN_SBFM,
@@ -722,7 +722,7 @@ static enum emu_insn_result emu_execute_bitfield_ubfm_w32(struct pt_regs *regs, 
     return EMU_INSN_HANDLED;
 }
 
-static enum emu_insn_result emu_execute_bitfield_ubfm_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result emu_execute_immediate_ubfm_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     static const enum arm64_instruction instructions[] = {
         ARM64_INSN_SBFM,
@@ -744,7 +744,7 @@ static enum emu_insn_result emu_execute_bitfield_ubfm_w64(struct pt_regs *regs, 
 
 
 
-static enum emu_insn_result (*emu_select_immediate_executor(const struct arm64_decoded_insn *decoded))(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static enum emu_insn_result (*emu_select_immediate_executor(const struct arm64_decoded_instruction *decoded))(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 
 {
 
@@ -754,161 +754,161 @@ static enum emu_insn_result (*emu_select_immediate_executor(const struct arm64_d
 
     case ARM64_INSN_ADR:
 
-        return emu_execute_pc_relative_adr;
+        return emu_execute_immediate_adr;
 
     case ARM64_INSN_ADRP:
 
-        return emu_execute_pc_relative_adrp;
+        return emu_execute_immediate_adrp;
 
     case ARM64_INSN_EXTR:
 
-        if (decoded->operand_width == 32) return emu_execute_extract_extr_w32;
+        if (decoded->operand_width == 32) return emu_execute_immediate_extr_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_extract_extr_w64;
+        if (decoded->operand_width == 64) return emu_execute_immediate_extr_w64;
 
         return NULL;
 
     case ARM64_INSN_ADD_IMMEDIATE:
 
-        if (decoded->operand_width == 32) return emu_execute_addsub_immediate_add_immediate_w32;
+        if (decoded->operand_width == 32) return emu_execute_immediate_add_immediate_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_addsub_immediate_add_immediate_w64;
+        if (decoded->operand_width == 64) return emu_execute_immediate_add_immediate_w64;
 
         return NULL;
 
     case ARM64_INSN_ADDS_IMMEDIATE:
 
-        if (decoded->operand_width == 32) return emu_execute_addsub_immediate_adds_immediate_w32;
+        if (decoded->operand_width == 32) return emu_execute_immediate_adds_immediate_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_addsub_immediate_adds_immediate_w64;
+        if (decoded->operand_width == 64) return emu_execute_immediate_adds_immediate_w64;
 
         return NULL;
 
     case ARM64_INSN_SUB_IMMEDIATE:
 
-        if (decoded->operand_width == 32) return emu_execute_addsub_immediate_sub_immediate_w32;
+        if (decoded->operand_width == 32) return emu_execute_immediate_sub_immediate_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_addsub_immediate_sub_immediate_w64;
+        if (decoded->operand_width == 64) return emu_execute_immediate_sub_immediate_w64;
 
         return NULL;
 
     case ARM64_INSN_SUBS_IMMEDIATE:
 
-        if (decoded->operand_width == 32) return emu_execute_addsub_immediate_subs_immediate_w32;
+        if (decoded->operand_width == 32) return emu_execute_immediate_subs_immediate_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_addsub_immediate_subs_immediate_w64;
+        if (decoded->operand_width == 64) return emu_execute_immediate_subs_immediate_w64;
 
         return NULL;
 
     case ARM64_INSN_SMAX_IMMEDIATE:
 
-        if (decoded->operand_width == 32) return emu_execute_minmax_immediate_smax_immediate_w32;
+        if (decoded->operand_width == 32) return emu_execute_immediate_smax_immediate_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_minmax_immediate_smax_immediate_w64;
+        if (decoded->operand_width == 64) return emu_execute_immediate_smax_immediate_w64;
 
         return NULL;
 
     case ARM64_INSN_UMAX_IMMEDIATE:
 
-        if (decoded->operand_width == 32) return emu_execute_minmax_immediate_umax_immediate_w32;
+        if (decoded->operand_width == 32) return emu_execute_immediate_umax_immediate_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_minmax_immediate_umax_immediate_w64;
+        if (decoded->operand_width == 64) return emu_execute_immediate_umax_immediate_w64;
 
         return NULL;
 
     case ARM64_INSN_SMIN_IMMEDIATE:
 
-        if (decoded->operand_width == 32) return emu_execute_minmax_immediate_smin_immediate_w32;
+        if (decoded->operand_width == 32) return emu_execute_immediate_smin_immediate_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_minmax_immediate_smin_immediate_w64;
+        if (decoded->operand_width == 64) return emu_execute_immediate_smin_immediate_w64;
 
         return NULL;
 
     case ARM64_INSN_UMIN_IMMEDIATE:
 
-        if (decoded->operand_width == 32) return emu_execute_minmax_immediate_umin_immediate_w32;
+        if (decoded->operand_width == 32) return emu_execute_immediate_umin_immediate_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_minmax_immediate_umin_immediate_w64;
+        if (decoded->operand_width == 64) return emu_execute_immediate_umin_immediate_w64;
 
         return NULL;
 
     case ARM64_INSN_AND_IMMEDIATE:
 
-        if (decoded->operand_width == 32) return emu_execute_logic_immediate_and_immediate_w32;
+        if (decoded->operand_width == 32) return emu_execute_immediate_and_immediate_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_logic_immediate_and_immediate_w64;
+        if (decoded->operand_width == 64) return emu_execute_immediate_and_immediate_w64;
 
         return NULL;
 
     case ARM64_INSN_ORR_IMMEDIATE:
 
-        if (decoded->operand_width == 32) return emu_execute_logic_immediate_orr_immediate_w32;
+        if (decoded->operand_width == 32) return emu_execute_immediate_orr_immediate_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_logic_immediate_orr_immediate_w64;
+        if (decoded->operand_width == 64) return emu_execute_immediate_orr_immediate_w64;
 
         return NULL;
 
     case ARM64_INSN_EOR_IMMEDIATE:
 
-        if (decoded->operand_width == 32) return emu_execute_logic_immediate_eor_immediate_w32;
+        if (decoded->operand_width == 32) return emu_execute_immediate_eor_immediate_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_logic_immediate_eor_immediate_w64;
+        if (decoded->operand_width == 64) return emu_execute_immediate_eor_immediate_w64;
 
         return NULL;
 
     case ARM64_INSN_ANDS_IMMEDIATE:
 
-        if (decoded->operand_width == 32) return emu_execute_logic_immediate_ands_immediate_w32;
+        if (decoded->operand_width == 32) return emu_execute_immediate_ands_immediate_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_logic_immediate_ands_immediate_w64;
+        if (decoded->operand_width == 64) return emu_execute_immediate_ands_immediate_w64;
 
         return NULL;
 
     case ARM64_INSN_MOVN:
 
-        if (decoded->operand_width == 32) return emu_execute_move_wide_movn_w32;
+        if (decoded->operand_width == 32) return emu_execute_immediate_movn_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_move_wide_movn_w64;
+        if (decoded->operand_width == 64) return emu_execute_immediate_movn_w64;
 
         return NULL;
 
     case ARM64_INSN_MOVZ:
 
-        if (decoded->operand_width == 32) return emu_execute_move_wide_movz_w32;
+        if (decoded->operand_width == 32) return emu_execute_immediate_movz_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_move_wide_movz_w64;
+        if (decoded->operand_width == 64) return emu_execute_immediate_movz_w64;
 
         return NULL;
 
     case ARM64_INSN_MOVK:
 
-        if (decoded->operand_width == 32) return emu_execute_move_wide_movk_w32;
+        if (decoded->operand_width == 32) return emu_execute_immediate_movk_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_move_wide_movk_w64;
+        if (decoded->operand_width == 64) return emu_execute_immediate_movk_w64;
 
         return NULL;
 
     case ARM64_INSN_SBFM:
 
-        if (decoded->operand_width == 32) return emu_execute_bitfield_sbfm_w32;
+        if (decoded->operand_width == 32) return emu_execute_immediate_sbfm_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_bitfield_sbfm_w64;
+        if (decoded->operand_width == 64) return emu_execute_immediate_sbfm_w64;
 
         return NULL;
 
     case ARM64_INSN_BFM:
 
-        if (decoded->operand_width == 32) return emu_execute_bitfield_bfm_w32;
+        if (decoded->operand_width == 32) return emu_execute_immediate_bfm_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_bitfield_bfm_w64;
+        if (decoded->operand_width == 64) return emu_execute_immediate_bfm_w64;
 
         return NULL;
 
     case ARM64_INSN_UBFM:
 
-        if (decoded->operand_width == 32) return emu_execute_bitfield_ubfm_w32;
+        if (decoded->operand_width == 32) return emu_execute_immediate_ubfm_w32;
 
-        if (decoded->operand_width == 64) return emu_execute_bitfield_ubfm_w64;
+        if (decoded->operand_width == 64) return emu_execute_immediate_ubfm_w64;
 
         return NULL;
 
@@ -922,7 +922,7 @@ static enum emu_insn_result (*emu_select_immediate_executor(const struct arm64_d
 
 /* ======================== 数据处理立即数类：解码结果构建缓存条目 ======================== */
 
-bool emu_build_immediate_executor(const struct arm64_decoded_insn *decoded, struct arm64_executor_entry *entry)
+bool emu_build_immediate_executor(const struct arm64_decoded_instruction *decoded, struct arm64_executor_entry *entry)
 {
     entry->execute = emu_select_immediate_executor(decoded);
     if (!entry->execute) return false;
