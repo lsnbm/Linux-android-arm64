@@ -348,6 +348,9 @@ public: // 共有结构体和锁
         request_op_stepbp_set,    // 设置单步 PC breakpoint
         request_op_stepbp_remove, // 删除单步 PC breakpoint
 
+        request_op_dptdbg_set,    // 设置主线程 UDF shadow-PGD breakpoint
+        request_op_dptdbg_remove, // 删除主线程 UDF shadow-PGD breakpoint
+
         request_op_syscall_monitor_set,    // 监控指定进程的系统调用
         request_op_syscall_monitor_remove, // 取消指定进程的系统调用监控
 
@@ -843,6 +846,14 @@ public: // 外部硬件断点接口
     {
         HandleStepbpEvent(request_op_stepbp_remove);
     }
+    int SetProcessDptdbgRef(std::span<const bp_point> points)
+    {
+        return HandleDptdbgEvent(request_op_dptdbg_set, points);
+    }
+    void RemoveProcessDptdbgRef()
+    {
+        HandleDptdbgEvent(request_op_dptdbg_remove);
+    }
 
 public: // 外部系统调用监控接口
     int StartSyscallMonitor(int pid)
@@ -1163,6 +1174,32 @@ private: // 私有实现，外部无需关系
         StoreRequestOp(op);
         StoreRequestStatus(0);
         if (op == request_op_stepbp_set)
+        {
+            req->tgid = global_pid;
+            req->bp_info.tgid = global_pid;
+            const size_t count = std::min(points.size(), std::size(req->bp_info.points));
+            for (size_t index = 0; index < count; ++index)
+            {
+                req->bp_info.points[index].hit_addr = points[index].hit_addr;
+                req->bp_info.points[index].bt = points[index].bt;
+                req->bp_info.points[index].bl = points[index].bl;
+                req->bp_info.points[index].bs = points[index].bs;
+            }
+        }
+
+        IoCommitAndWait();
+        return LoadRequestStatus();
+    }
+
+    // DPTDBG 复用 bp_info.points 和 records 存储命中现场
+    int HandleDptdbgEvent(request_op op, std::span<const bp_point> points = {})
+    {
+        std::scoped_lock<SpinLock> lock(m_mutex);
+        if (op != request_op_dptdbg_set && op != request_op_dptdbg_remove) return -1;
+
+        StoreRequestOp(op);
+        StoreRequestStatus(0);
+        if (op == request_op_dptdbg_set)
         {
             req->tgid = global_pid;
             req->bp_info.tgid = global_pid;

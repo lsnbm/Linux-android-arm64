@@ -113,13 +113,29 @@ namespace android
         struct SurfaceComposerClientTransaction;
         struct SurfaceComposerClient;
 
-        template <typename any_t> struct StrongPointer
+        template <typename any_t>
+        struct StrongPointer
         {
-            union
+            any_t *pointer;
+
+            StrongPointer() : pointer(nullptr)
             {
-                any_t *pointer;
-                char padding[sizeof(std::max_align_t)];
-            };
+            }
+
+            StrongPointer(const StrongPointer &other) : pointer(other.pointer)
+            {
+            }
+
+            StrongPointer &operator=(const StrongPointer &other)
+            {
+                pointer = other.pointer;
+                return *this;
+            }
+
+            ~StrongPointer()
+            {
+            }
+
             inline any_t *operator->() const
             {
                 return pointer;
@@ -194,6 +210,7 @@ namespace android
                         {
                             {reinterpret_cast<void **>(&LayerMetadata__Constructor), "_ZN7android3gui13LayerMetadataC2Ev"},
                             {reinterpret_cast<void **>(&SurfaceComposerClient__CreateSurface), "_ZN7android21SurfaceComposerClient13createSurfaceERKNS_7String8EjjiiRKNS_2spINS_7IBinderEEENS_3gui13LayerMetadataEPj"},
+                            {reinterpret_cast<void **>(&SurfaceControl__GetSurface), "_ZNK7android14SurfaceControl10getSurfaceEv"},
                         },
                     },
                     {
@@ -201,6 +218,7 @@ namespace android
                         {
                             {reinterpret_cast<void **>(&LayerMetadata__Constructor), "_ZN7android3gui13LayerMetadataC2Ev"},
                             {reinterpret_cast<void **>(&SurfaceComposerClient__CreateSurface), "_ZN7android21SurfaceComposerClient13createSurfaceERKNS_7String8EjjiiRKNS_2spINS_7IBinderEEENS_3gui13LayerMetadataEPj"},
+                            {reinterpret_cast<void **>(&SurfaceControl__GetSurface), "_ZNK7android14SurfaceControl10getSurfaceEv"},
                         },
                     },
                     {
@@ -208,6 +226,7 @@ namespace android
                         {
                             {reinterpret_cast<void **>(&LayerMetadata__Constructor), "_ZN7android3gui13LayerMetadataC2Ev"},
                             {reinterpret_cast<void **>(&SurfaceComposerClient__CreateSurface), "_ZN7android21SurfaceComposerClient13createSurfaceERKNS_7String8EjjiiRKNS_2spINS_7IBinderEEENS_3gui13LayerMetadataEPj"},
+                            {reinterpret_cast<void **>(&SurfaceControl__GetSurface), "_ZNK7android14SurfaceControl10getSurfaceEv"},
                         },
                     },
                     {
@@ -328,7 +347,7 @@ namespace android
 
         struct String8
         {
-            char data[1024];
+            alignas(std::max_align_t) char data[1024];
             bool valid = false;
             String8(const char *const string)
             {
@@ -353,7 +372,7 @@ namespace android
 
         struct LayerMetadata
         {
-            char data[1024];
+            alignas(std::max_align_t) char data[1024];
             bool valid = false;
             LayerMetadata()
             {
@@ -435,7 +454,7 @@ namespace android
 
         struct SurfaceComposerClientTransaction
         {
-            char data[1024];
+            alignas(std::max_align_t) char data[1024];
             bool valid = false;
 
             SurfaceComposerClientTransaction()
@@ -510,7 +529,7 @@ namespace android
 
         struct SurfaceComposerClient
         {
-            char data[1024];
+            alignas(std::max_align_t) char data[1024];
             bool valid = false;
 
             SurfaceComposerClient()

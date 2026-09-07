@@ -2371,7 +2371,7 @@ int main()
         return rc;
     }
 
-    if (!daemonize("/sdcard/log.txt"))
+    if (!daemonize("/storage/emulated/0/log.txt"))
     {
         std::println(stderr, "[错误] 后台化失败。");
         return rc;

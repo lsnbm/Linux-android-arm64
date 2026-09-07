@@ -1,153 +1,258 @@
-#include "arm64_decode_internal.h"
-
-#define ARM64_SYSREG_INSN_MASK 0xFFF00000U
-#define ARM64_SYSREG_MRS_INSN  0xD5300000U
-#define ARM64_SYSREG_MSR_INSN  0xD5100000U
-#define ARM64_HINT_INSN        0xD503201FU
+#include "arm64_decode.h"
 
 /* 分支偏移在这里完成符号扩展和缩放，统一以字节为单位返回。 */
 enum arm64_decode_status arm64_decode_branch_exception_system(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
     decoded->instruction_class = ARM64_INSTRUCTION_CLASS_BRANCH_EXCEPTION_SYSTEM;
 
-    if ((raw & 0x7C000000U) == 0x14000000U)
+    switch (ARM64_DECODE_FIELD(raw, 31, 24))
     {
-        decoded->instruction = (raw & 0x80000000U) ? ARM64_INSN_BL : ARM64_INSN_B;
-        decoded->offset = arm64_decode_sign_extend((uint64_t)(raw & 0x03FFFFFFU) << 2, 28);
+    case 0x14:
+    case 0x15:
+    case 0x16:
+    case 0x17:
+        switch (ARM64_DECODE_BIT(raw, 31))
+        {
+        case 0:
+            decoded->instruction = ARM64_INST_B;
+            break;
+        default:
+            decoded->instruction = ARM64_INST_BL;
+            break;
+        }
+        decoded->offset = ARM64_DECODE_SIGN_EXTEND((uint64_t)ARM64_DECODE_FIELD(raw, 25, 0) << 2, 28);
         return ARM64_DECODE_OK;
-    }
 
-    if ((raw & 0x7E000000U) == 0x34000000U)
-    {
-        decoded->instruction = (raw & 0x01000000U) ? ARM64_INSN_CBNZ : ARM64_INSN_CBZ;
-        decoded->operand_width = (raw & 0x80000000U) ? 64 : 32;
-        decoded->rt = raw & 0x1F;
-        decoded->offset = arm64_decode_sign_extend((uint64_t)((raw >> 5) & 0x7FFFFU) << 2, 21);
+    case 0x34:
+    case 0x35:
+        switch (raw & 0x7E000000U)
+        {
+        case 0x34000000U:
+            switch (ARM64_DECODE_BIT(raw, 24))
+            {
+            case 0:
+                decoded->instruction = ARM64_INST_CBZ;
+                break;
+            default:
+                decoded->instruction = ARM64_INST_CBNZ;
+                break;
+            }
+            decoded->operand_width = ARM64_DECODE_BIT(raw, 31) ? 64 : 32;
+            decoded->rt = ARM64_DECODE_FIELD(raw, 4, 0);
+            decoded->offset = ARM64_DECODE_SIGN_EXTEND((uint64_t)ARM64_DECODE_FIELD(raw, 23, 5) << 2, 21);
+            return ARM64_DECODE_OK;
+
+        default:
+            return ARM64_DECODE_UNSUPPORTED;
+        }
+
+    case 0x36:
+    case 0x37:
+        switch (raw & 0x7E000000U)
+        {
+        case 0x36000000U:
+            switch (ARM64_DECODE_BIT(raw, 24))
+            {
+            case 0:
+                decoded->instruction = ARM64_INST_TBZ;
+                break;
+            default:
+                decoded->instruction = ARM64_INST_TBNZ;
+                break;
+            }
+            decoded->operand_width = ARM64_DECODE_BIT(raw, 31) ? 64 : 32;
+            decoded->rt = ARM64_DECODE_FIELD(raw, 4, 0);
+            decoded->immediate = (ARM64_DECODE_BIT(raw, 31) << 5) | ARM64_DECODE_FIELD(raw, 23, 19);
+            decoded->offset = ARM64_DECODE_SIGN_EXTEND((uint64_t)ARM64_DECODE_FIELD(raw, 18, 5) << 2, 16);
+            return ARM64_DECODE_OK;
+
+        default:
+            return ARM64_DECODE_UNSUPPORTED;
+        }
+
+    case 0x54:
+        switch (raw & 0xFF000010U)
+        {
+        case 0x54000000U:
+            break;
+        default:
+            return ARM64_DECODE_UNSUPPORTED;
+        }
+        decoded->instruction = ARM64_INST_B_COND;
+        decoded->condition = ARM64_DECODE_FIELD(raw, 3, 0);
+        decoded->offset = ARM64_DECODE_SIGN_EXTEND((uint64_t)ARM64_DECODE_FIELD(raw, 23, 5) << 2, 21);
         return ARM64_DECODE_OK;
-    }
 
-    if ((raw & 0x7E000000U) == 0x36000000U)
-    {
-        decoded->instruction = (raw & 0x01000000U) ? ARM64_INSN_TBNZ : ARM64_INSN_TBZ;
-        decoded->operand_width = (raw & 0x80000000U) ? 64 : 32;
-        decoded->rt = raw & 0x1F;
-        decoded->test_bit = ((raw >> 26) & 0x20) | ((raw >> 19) & 0x1F);
-        decoded->offset = arm64_decode_sign_extend((uint64_t)((raw >> 5) & 0x3FFFU) << 2, 16);
+    case 0x94:
+    case 0x95:
+    case 0x96:
+    case 0x97:
+        switch (ARM64_DECODE_BIT(raw, 31))
+        {
+        case 0:
+            decoded->instruction = ARM64_INST_B;
+            break;
+        default:
+            decoded->instruction = ARM64_INST_BL;
+            break;
+        }
+        decoded->offset = ARM64_DECODE_SIGN_EXTEND((uint64_t)ARM64_DECODE_FIELD(raw, 25, 0) << 2, 28);
         return ARM64_DECODE_OK;
-    }
 
-    if ((raw & 0xFF000010U) == 0x54000000U)
-    {
-        decoded->instruction = ARM64_INSN_B_COND;
-        decoded->condition = raw & 0xF;
-        decoded->offset = arm64_decode_sign_extend((uint64_t)((raw >> 5) & 0x7FFFFU) << 2, 21);
-        return ARM64_DECODE_OK;
-    }
+    case 0xB4:
+    case 0xB5:
+        switch (raw & 0x7E000000U)
+        {
+        case 0x34000000U:
+            switch (ARM64_DECODE_BIT(raw, 24))
+            {
+            case 0:
+                decoded->instruction = ARM64_INST_CBZ;
+                break;
+            default:
+                decoded->instruction = ARM64_INST_CBNZ;
+                break;
+            }
+            decoded->operand_width = ARM64_DECODE_BIT(raw, 31) ? 64 : 32;
+            decoded->rt = ARM64_DECODE_FIELD(raw, 4, 0);
+            decoded->offset = ARM64_DECODE_SIGN_EXTEND((uint64_t)ARM64_DECODE_FIELD(raw, 23, 5) << 2, 21);
+            return ARM64_DECODE_OK;
 
-    switch (raw >> 24)
-    {
+        default:
+            return ARM64_DECODE_UNSUPPORTED;
+        }
+
+    case 0xB6:
+    case 0xB7:
+        switch (raw & 0x7E000000U)
+        {
+        case 0x36000000U:
+            switch (ARM64_DECODE_BIT(raw, 24))
+            {
+            case 0:
+                decoded->instruction = ARM64_INST_TBZ;
+                break;
+            default:
+                decoded->instruction = ARM64_INST_TBNZ;
+                break;
+            }
+            decoded->operand_width = ARM64_DECODE_BIT(raw, 31) ? 64 : 32;
+            decoded->rt = ARM64_DECODE_FIELD(raw, 4, 0);
+            decoded->immediate = (ARM64_DECODE_BIT(raw, 31) << 5) | ARM64_DECODE_FIELD(raw, 23, 19);
+            decoded->offset = ARM64_DECODE_SIGN_EXTEND((uint64_t)ARM64_DECODE_FIELD(raw, 18, 5) << 2, 16);
+            return ARM64_DECODE_OK;
+
+        default:
+            return ARM64_DECODE_UNSUPPORTED;
+        }
+
     case 0xD4:
     {
-        enum arm64_instruction instruction;
-
         switch (raw & 0xFFE0001FU)
         {
         case 0xD4000001U:
-            instruction = ARM64_INSN_SVC;
+            decoded->instruction = ARM64_INST_SVC;
             break;
         case 0xD4000002U:
-            instruction = ARM64_INSN_HVC;
+            decoded->instruction = ARM64_INST_HVC;
             break;
         case 0xD4000003U:
-            instruction = ARM64_INSN_SMC;
+            decoded->instruction = ARM64_INST_SMC;
             break;
         case 0xD4200000U:
-            instruction = ARM64_INSN_BRK;
+            decoded->instruction = ARM64_INST_BRK;
             break;
         case 0xD4400000U:
-            instruction = ARM64_INSN_HLT;
+            decoded->instruction = ARM64_INST_HLT;
             break;
         default:
             return ARM64_DECODE_UNSUPPORTED;
         }
 
-        decoded->instruction = instruction;
-        decoded->immediate = (raw >> 5) & 0xFFFF;
+        decoded->immediate = ARM64_DECODE_FIELD(raw, 20, 5);
         return ARM64_DECODE_OK;
     }
+
     case 0xD5:
     {
-        if ((raw & 0xFFFFF01FU) == ARM64_HINT_INSN)
+        switch (raw & 0xFFFFF01FU)
         {
-            switch ((raw >> 5) & 0x7F)
+        case 0xD503201FU:
+        {
+            switch (ARM64_DECODE_FIELD(raw, 11, 5))
             {
             case 0:
-                decoded->instruction = ARM64_INSN_NOP;
+                decoded->instruction = ARM64_INST_NOP;
                 return ARM64_DECODE_OK;
             case 1:
-                decoded->instruction = ARM64_INSN_YIELD;
+                decoded->instruction = ARM64_INST_YIELD;
                 return ARM64_DECODE_OK;
             case 2:
-                decoded->instruction = ARM64_INSN_WFE;
+                decoded->instruction = ARM64_INST_WFE;
                 return ARM64_DECODE_OK;
             case 3:
-                decoded->instruction = ARM64_INSN_WFI;
+                decoded->instruction = ARM64_INST_WFI;
                 return ARM64_DECODE_OK;
             case 4:
-                decoded->instruction = ARM64_INSN_SEV;
+                decoded->instruction = ARM64_INST_SEV;
                 return ARM64_DECODE_OK;
             case 5:
-                decoded->instruction = ARM64_INSN_SEVL;
+                decoded->instruction = ARM64_INST_SEVL;
                 return ARM64_DECODE_OK;
             case 0x19:
-                decoded->instruction = ARM64_INSN_PACIASP;
+                decoded->instruction = ARM64_INST_PACIASP;
                 return ARM64_DECODE_OK;
             case 0x20:
             case 0x22:
             case 0x24:
             case 0x26:
-                decoded->instruction = ARM64_INSN_BTI;
-                decoded->option = ((raw >> 5) & 0x7F) - 0x20;
+                decoded->instruction = ARM64_INST_BTI;
+                decoded->immediate = ARM64_DECODE_FIELD(raw, 11, 5) - 0x20;
                 return ARM64_DECODE_OK;
             default:
                 return ARM64_DECODE_UNSUPPORTED;
             }
         }
+        default:
+            break;
+        }
 
         switch (raw & 0xFFFFF0FFU)
         {
         case 0xD503305FU:
-            decoded->instruction = ARM64_INSN_CLREX;
-            decoded->option = (raw >> 8) & 0xF;
+            decoded->instruction = ARM64_INST_CLREX;
+            decoded->immediate = ARM64_DECODE_FIELD(raw, 11, 8);
             return ARM64_DECODE_OK;
         case 0xD503309FU:
-            decoded->instruction = ARM64_INSN_DSB;
-            decoded->option = (raw >> 8) & 0xF;
+            decoded->instruction = ARM64_INST_DSB;
+            decoded->immediate = ARM64_DECODE_FIELD(raw, 11, 8);
             return ARM64_DECODE_OK;
         case 0xD50330BFU:
-            decoded->instruction = ARM64_INSN_DMB;
-            decoded->option = (raw >> 8) & 0xF;
+            decoded->instruction = ARM64_INST_DMB;
+            decoded->immediate = ARM64_DECODE_FIELD(raw, 11, 8);
             return ARM64_DECODE_OK;
         case 0xD50330DFU:
-            decoded->option = (raw >> 8) & 0xF;
-            if (decoded->option != 0xF) return ARM64_DECODE_UNALLOCATED;
-            decoded->instruction = ARM64_INSN_ISB;
+            decoded->immediate = ARM64_DECODE_FIELD(raw, 11, 8);
+            if (decoded->immediate != 0xF) return ARM64_DECODE_UNALLOCATED;
+            decoded->instruction = ARM64_INST_ISB;
             return ARM64_DECODE_OK;
         default:
             break;
         }
 
-        switch (raw & ARM64_SYSREG_INSN_MASK)
+        switch (raw & 0xFFF00000U)
         {
-        case ARM64_SYSREG_MSR_INSN:
-            decoded->instruction = ARM64_INSN_MSR_REGISTER;
-            decoded->rt = raw & 0x1F;
-            decoded->sysreg = (raw >> 5) & 0xFFFF;
+        case 0xD5100000U:
+            decoded->instruction = ARM64_INST_MSR_REGISTER;
+            decoded->rt = ARM64_DECODE_FIELD(raw, 4, 0);
+            decoded->sysreg = ARM64_DECODE_FIELD(raw, 20, 5);
+            decoded->operand_width = 64;
             return ARM64_DECODE_OK;
-        case ARM64_SYSREG_MRS_INSN:
-            decoded->instruction = ARM64_INSN_MRS;
-            decoded->rt = raw & 0x1F;
-            decoded->sysreg = (raw >> 5) & 0xFFFF;
+        case 0xD5300000U:
+            decoded->instruction = ARM64_INST_MRS;
+            decoded->rt = ARM64_DECODE_FIELD(raw, 4, 0);
+            decoded->sysreg = ARM64_DECODE_FIELD(raw, 20, 5);
+            decoded->operand_width = 64;
             return ARM64_DECODE_OK;
         default:
             return ARM64_DECODE_UNSUPPORTED;
@@ -158,16 +263,19 @@ enum arm64_decode_status arm64_decode_branch_exception_system(uint32_t raw, stru
         switch (raw & 0xFFFFFC1FU)
         {
         case 0xD61F0000U:
-            decoded->rn = (raw >> 5) & 0x1F;
-            decoded->instruction = ARM64_INSN_BR;
+            decoded->rn = ARM64_DECODE_FIELD(raw, 9, 5);
+            decoded->instruction = ARM64_INST_BR;
+            decoded->operand_width = 64;
             return ARM64_DECODE_OK;
         case 0xD63F0000U:
-            decoded->rn = (raw >> 5) & 0x1F;
-            decoded->instruction = ARM64_INSN_BLR;
+            decoded->rn = ARM64_DECODE_FIELD(raw, 9, 5);
+            decoded->instruction = ARM64_INST_BLR;
+            decoded->operand_width = 64;
             return ARM64_DECODE_OK;
         case 0xD65F0000U:
-            decoded->rn = (raw >> 5) & 0x1F;
-            decoded->instruction = ARM64_INSN_RET;
+            decoded->rn = ARM64_DECODE_FIELD(raw, 9, 5);
+            decoded->instruction = ARM64_INST_RET;
+            decoded->operand_width = 64;
             return ARM64_DECODE_OK;
         default:
             break;
@@ -176,10 +284,10 @@ enum arm64_decode_status arm64_decode_branch_exception_system(uint32_t raw, stru
         switch (raw)
         {
         case 0xD69F03E0U:
-            decoded->instruction = ARM64_INSN_ERET;
+            decoded->instruction = ARM64_INST_ERET;
             return ARM64_DECODE_OK;
         case 0xD6BF03E0U:
-            decoded->instruction = ARM64_INSN_DRPS;
+            decoded->instruction = ARM64_INST_DRPS;
             return ARM64_DECODE_OK;
         default:
             return ARM64_DECODE_UNSUPPORTED;

@@ -299,6 +299,9 @@ enum request_op
     request_op_stepbp_set,    // 设置单步 PC breakpoint
     request_op_stepbp_remove, // 删除单步 PC breakpoint
 
+    request_op_dptdbg_set,    // 设置主线程 UDF shadow-PGD breakpoint
+    request_op_dptdbg_remove, // 删除主线程 UDF shadow-PGD breakpoint
+
     request_op_syscall_monitor_set,    // 监控指定进程的系统调用
     request_op_syscall_monitor_remove, // 取消指定进程的系统调用监控
 

@@ -31,13 +31,18 @@ windows/__pycache__/
 # VS Code settings in subdirectories
 **/.vscode/
 
-# Local ARM64 decoder and executor tests
+# Local ARM64 test sources and inputs
 lsdriver/arm64_tests/*
-!lsdriver/arm64_tests/arm64_decode_test.c
-!lsdriver/arm64_tests/arm64_page_reloc_test.c
-!lsdriver/arm64_tests/arm64_encode_test.c
-!lsdriver/arm64_tests/run_tests.sh
+!lsdriver/arm64_tests/instruction.txt
+!lsdriver/arm64_tests/decoder/
+!lsdriver/arm64_tests/decoder/*
+!lsdriver/arm64_tests/executor/
+!lsdriver/arm64_tests/executor/*
 
+# Local ARM64 executor outputs
+lsdriver/arm64_tests/executor/*.ko
+lsdriver/arm64_tests/executor/*.cpio.gz
+lsdriver/arm64_tests/executor/arm64_instruction_table.h
 
 # Android Studio / Gradle / NDK outputs
 .gradle/

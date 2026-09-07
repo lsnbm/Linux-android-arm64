@@ -107,6 +107,12 @@ static int DispatchThreadFunction(void *data)
                 case request_op_stepbp_remove:
                     remove_process_stepbp();
                     break;
+                case request_op_dptdbg_set:
+                    req->status = set_process_dptdbg(&req->bp_info);
+                    break;
+                case request_op_dptdbg_remove:
+                    remove_process_dptdbg();
+                    break;
                 case request_op_syscall_monitor_set:
                     req->status = syscall_monitor_install(req->tgid);
                     break;
@@ -451,6 +457,7 @@ static int do_exit_hook_work(struct pt_regs *regs)
         v_gyro_destroy();             // 清理陀螺仪
         remove_process_hwbp();        // 清理硬件断点
         remove_process_ptebp();       // 清理 PTEBP
+        remove_process_dptdbg();      // 清理 DPTDBG
         remove_process_stepbp();      // 清理单步断点
         syscall_monitor_remove_all(); // 清理全部系统调用监控目标
         cntvct_monitor_remove(0);     // 清理 CNTVCT_EL0 读取监控

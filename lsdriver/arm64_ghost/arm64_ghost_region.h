@@ -264,30 +264,6 @@ static inline int arm64_ghost_region_write(struct arm64_ghost_region *region, co
     return arm64_sync_code_pages_all_cpus(region->pages, region->page_count, region->mapped_size);
 }
 
-// 在幽灵区域内按指令索引写入一个 32 位机器码，不立即同步指令缓存。
-static inline int arm64_ghost_region_store32(struct arm64_ghost_region *region, uint32_t word_index, uint32_t value)
-{
-    if (!region || !region->pages || !region->user_va) return -EINVAL;
-    if ((uint64_t)word_index * sizeof(uint32_t) >= region->mapped_size) return -E2BIG;
-
-    uint32_t words_per_page = PAGE_SIZE / sizeof(uint32_t);
-    unsigned int page_index = word_index / words_per_page;
-    uint32_t page_word_index = word_index % words_per_page;
-    uint32_t *mapping = page_address(region->pages[page_index]);
-
-    mapping[page_word_index] = value;
-    return 0;
-}
-
-// 将指定长度的已写入机器码同步到指令缓存。
-static inline int arm64_ghost_region_sync(struct arm64_ghost_region *region, size_t code_size)
-{
-    if (!region || !region->pages || !region->user_va || !code_size) return -EINVAL;
-    if (code_size > region->mapped_size) return -E2BIG;
-
-    return arm64_sync_code_pages_all_cpus(region->pages, region->page_count, code_size);
-}
-
 // 清除仍指向本区域物理页的页表项，并释放全部物理页。
 static inline void arm64_ghost_region_destroy(struct arm64_ghost_region *region)
 {

@@ -1,0 +1,33 @@
+obj-m += arm64_kernel_executor_test_module.o
+
+ccflags-y += -I$(src)/../..
+ccflags-y += -I$(src)/../../arm64_decode
+ccflags-y += -std=gnu11 -O2 -Wall -Wextra
+ccflags-y += -Wno-error
+ccflags-y += -march=armv8.6-a+bf16+i8mm+fp16fml+fp16+lse+rcpc+crc
+ccflags-y += -fno-vectorize -fno-slp-vectorize -fno-stack-protector
+ccflags-y += -fomit-frame-pointer -ftrivial-auto-var-init=uninitialized
+ccflags-y += -include $(src)/arm64_instruction_table.h
+CFLAGS_REMOVE_../../arm64_emulate/emulate_inst.o += -mgeneral-regs-only
+CFLAGS_REMOVE_../../arm64_emulate/arm64_emulate_ldst.o += -mgeneral-regs-only
+CFLAGS_REMOVE_../../arm64_emulate/arm64_emulate_simd.o += -mgeneral-regs-only
+CFLAGS_REMOVE_../../arm64_emulate/arm64_emulate_immediate.o += -mgeneral-regs-only
+CFLAGS_REMOVE_../../arm64_emulate/arm64_emulate_register.o += -mgeneral-regs-only
+CFLAGS_REMOVE_../../arm64_emulate/arm64_emulate_branch.o += -mgeneral-regs-only
+arm64_kernel_executor_test_module-objs := arm64_kernel_executor_test.o \
+	../../arm64_emulate/emulate_inst.o \
+	../../arm64_emulate/arm64_emulate_branch.o \
+	../../arm64_emulate/arm64_emulate_ldst.o \
+	../../arm64_emulate/arm64_emulate_simd.o \
+	../../arm64_emulate/arm64_emulate_immediate.o \
+	../../arm64_emulate/arm64_emulate_register.o \
+	../../arm64_decode/arm64_decode.o \
+	../../arm64_decode/arm64_decode_immediate.o \
+	../../arm64_decode/arm64_decode_register.o \
+	../../arm64_decode/arm64_decode_ldst.o \
+	../../arm64_decode/arm64_decode_branch.o \
+	../../arm64_decode/arm64_decode_simd.o \
+	../../arm64_decode/arm64_decode_sve.o \
+	../../arm64_decode/arm64_decode_sme.o
+
+CFLAGS_arm64_kernel_executor_test.o += -mgeneral-regs-only

@@ -218,6 +218,12 @@ struct fp_regs
     uint32_t fpsr;
 };
 
+_Static_assert(__builtin_offsetof(struct fp_regs, q) == 0, "fp_regs q offset must match register assembly");
+_Static_assert(__builtin_offsetof(struct fp_regs, fpcr) == 512, "fp_regs fpcr offset must follow Q0-Q31");
+_Static_assert(__builtin_offsetof(struct fp_regs, fpsr) == 516, "fp_regs fpsr offset must follow FPCR");
+_Static_assert(sizeof(struct fp_regs) == 528, "fp_regs size must preserve 16-byte alignment");
+_Static_assert(__alignof__(struct fp_regs) == 16, "fp_regs must remain 16-byte aligned");
+
 // Q寄存器名称拼接辅助宏：QREG(0) → q0, QREG(1) → q1, ...
 #define QREG(n) q##n
 #define VREG(n) v##n

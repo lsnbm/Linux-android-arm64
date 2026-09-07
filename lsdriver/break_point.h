@@ -103,7 +103,7 @@ static inline struct bp_point *bp_info_find_active_point(struct break_point *inf
     return NULL;
 }
 
-// 查找下一个指定类型的已配置断点；next_slot 非空时由函数自动推进迭代位置。
+// 查找指定类型的已配置断点；next_slot 为空时返回首个匹配项，非空时由调用方持有并自动推进迭代位置。
 static inline struct bp_point *bp_info_find_configured_type(struct break_point *info, enum bp_type type, size_t *next_slot)
 {
     if (!bp_info_is_valid(info)) return NULL;
@@ -650,8 +650,7 @@ static inline void remove_process_hwbp(void)
     if (info) __builtin_memset(info, 0, sizeof(*info));
 }
 
-//#include "arm64_ptedbg.h"
-#include "arm64_ptedbg-20260709-000359.h"
+#include "arm64_ptedbg.h"
 static inline int set_process_ptebp(struct break_point *info)
 {
     if (!info) return -EINVAL;
@@ -667,6 +666,23 @@ static inline void remove_process_ptebp(void)
 
     stop_ptebp_monitor();
     if (info) __builtin_memset(info, 0, sizeof(*info));
+}
+
+//#include "arm64_dptdbg.h"
+static inline int set_process_dptdbg(struct break_point *info)
+{
+    return -EINVAL;
+    // if (!info) return -EINVAL;
+    // prepare_break_point_handlers(info);
+    // return dptdbg_start_monitor(info);
+}
+
+static inline void remove_process_dptdbg(void)
+{
+    // struct break_point *info = g_dptdbg_info;
+    // dptdbg_stop_monitor();
+    // if (info) __builtin_memset(info, 0, sizeof(*info));
+
 }
 
 #include "arm64_stepdbg.h"

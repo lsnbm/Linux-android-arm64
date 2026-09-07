@@ -1,26 +1,24 @@
 #include <linux/mm.h>
 #include <asm/uaccess.h>
-#include "arm64_emulate_internal.h"
+#include "emulate_inst.h"
 #include "../lsdriver_log.h"
 
-enum
-{
-    ARM64_EXECUTOR_CACHE_BITS = 16,
-    ARM64_EXECUTOR_CACHE_SIZE = 1U << ARM64_EXECUTOR_CACHE_BITS,
-    ARM64_EXECUTOR_CACHE_WAYS = 16,
-    ARM64_EXECUTOR_CACHE_WAY_BITS = 4,
-    ARM64_EXECUTOR_CACHE_BUCKETS = ARM64_EXECUTOR_CACHE_SIZE / ARM64_EXECUTOR_CACHE_WAYS,
-    ARM64_EXECUTOR_TAG_EMPTY = 0,
-    ARM64_EXECUTOR_TAG_BUSY = 1,
-};
+#define ARM64_EXECUTOR_CACHE_BITS     13U
+#define ARM64_EXECUTOR_CACHE_SIZE     (1U << ARM64_EXECUTOR_CACHE_BITS)
+#define ARM64_EXECUTOR_CACHE_WAYS     16U
+#define ARM64_EXECUTOR_CACHE_WAY_BITS 4U
+#define ARM64_EXECUTOR_CACHE_BUCKETS  (ARM64_EXECUTOR_CACHE_SIZE / ARM64_EXECUTOR_CACHE_WAYS)
+
+#define ARM64_EXECUTOR_TAG_EMPTY 0x00000000U
+#define ARM64_EXECUTOR_TAG_BUSY  0x00000001U
 
 /*
-16 个 tag 对齐到单个 64 字节 cache line。payload 发布后不可变，命中路径直接
-返回条目指针，不复制 32 字节 payload。
+每个 bucket 保存 16 个 tag 和对应的 payload。payload 发布后不可变，命中路径
+直接返回条目指针，不复制执行缓存条目。
 */
 struct arm64_executor_cache_bucket
 {
-    uint32_t tags[ARM64_EXECUTOR_CACHE_WAYS] __attribute__((aligned(64)));
+    uint32_t tags[ARM64_EXECUTOR_CACHE_WAYS];
     struct arm64_executor_entry payloads[ARM64_EXECUTOR_CACHE_WAYS];
 };
 
@@ -32,16 +30,13 @@ static struct arm64_executor_cache_bucket g_arm64_executor_cache[ARM64_EXECUTOR_
 
 static inline uint32_t arm64_executor_cache_hash(uint32_t raw)
 {
-    uint32_t hash = raw ^ (raw >> 16);
-
-    return (hash * 0x9E3779B1U) >> (32U - (ARM64_EXECUTOR_CACHE_BITS - ARM64_EXECUTOR_CACHE_WAY_BITS));
+    return ((raw ^ (raw >> 16)) * 0x9E3779B1U) >> (32U - (ARM64_EXECUTOR_CACHE_BITS - ARM64_EXECUTOR_CACHE_WAY_BITS));
 }
 
 /* 每轮并行读取和比较 4 个 tag；命中后通过 acquire fence 读取不可变 payload。 */
-static const struct arm64_executor_entry *arm64_executor_cache_lookup(uint32_t raw)
+static inline const struct arm64_executor_entry *arm64_executor_cache_lookup(uint32_t raw)
 {
-    uint32_t bucket_index = arm64_executor_cache_hash(raw);
-    const struct arm64_executor_cache_bucket *bucket = &g_arm64_executor_cache[bucket_index];
+    const struct arm64_executor_cache_bucket *bucket = &g_arm64_executor_cache[arm64_executor_cache_hash(raw)];
     uint32_t way;
 
     if (__builtin_expect(raw == ARM64_EXECUTOR_TAG_EMPTY || raw == ARM64_EXECUTOR_TAG_BUSY, 0)) return NULL;
@@ -74,18 +69,17 @@ static const struct arm64_executor_entry *arm64_executor_cache_lookup(uint32_t r
     return NULL;
 
 hit:
-    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    if (__builtin_expect(__atomic_load_n(&bucket->tags[way], __ATOMIC_ACQUIRE) != raw, 0)) return NULL;
     return &bucket->payloads[way];
 }
 
 /* CAS 抢占空槽，先写完整 payload，再用 release store 发布机器码 tag。 */
-static void arm64_executor_cache_insert(uint32_t raw, const struct arm64_executor_entry *entry)
+static inline void arm64_executor_cache_insert(uint32_t raw, const struct arm64_executor_entry *entry)
 {
     uint32_t bucket_index;
     struct arm64_executor_cache_bucket *bucket;
     int empty_way = -1;
     uint32_t way;
-    uint32_t expected;
 
     if (__builtin_expect(raw == ARM64_EXECUTOR_TAG_EMPTY || raw == ARM64_EXECUTOR_TAG_BUSY, 0)) return;
 
@@ -100,8 +94,8 @@ static void arm64_executor_cache_insert(uint32_t raw, const struct arm64_executo
     }
     if (empty_way < 0) return;
 
-    expected = ARM64_EXECUTOR_TAG_EMPTY;
-    if (!__atomic_compare_exchange_n(&bucket->tags[empty_way], &expected, ARM64_EXECUTOR_TAG_BUSY, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) return;
+    uint32_t expected = ARM64_EXECUTOR_TAG_EMPTY;
+    if (!__atomic_compare_exchange_n(&bucket->tags[empty_way], &expected, ARM64_EXECUTOR_TAG_BUSY, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) return;
 
     bucket->payloads[empty_way] = *entry;
     __atomic_store_n(&bucket->tags[empty_way], raw, __ATOMIC_RELEASE);
@@ -112,28 +106,69 @@ static void arm64_executor_cache_insert(uint32_t raw, const struct arm64_executo
 bool emu_build_executor_entry(const struct arm64_decoded_instruction *decoded, struct arm64_executor_entry *entry)
 {
     __builtin_memset(entry, 0, sizeof(*entry));
+    entry->decoded = *decoded;
 
     switch (decoded->instruction_class)
     {
     case ARM64_INSTRUCTION_CLASS_LOAD_STORE:
-        return emu_build_ldst_executor(decoded, entry);
+        entry->execute = emu_build_ldst_executor(decoded);
+        break;
     case ARM64_INSTRUCTION_CLASS_DATA_PROCESSING_REGISTER:
-        return emu_build_register_executor(decoded, entry);
+        entry->execute = emu_build_register_executor(decoded);
+        break;
     case ARM64_INSTRUCTION_CLASS_DATA_PROCESSING_SIMD_FP:
-        return emu_build_simd_executor(decoded, entry);
+        entry->execute = emu_build_simd_executor(decoded);
+        break;
     case ARM64_INSTRUCTION_CLASS_DATA_PROCESSING_IMMEDIATE:
-        return emu_build_immediate_executor(decoded, entry);
+        entry->execute = emu_build_immediate_executor(decoded);
+        break;
     case ARM64_INSTRUCTION_CLASS_BRANCH_EXCEPTION_SYSTEM:
-        return emu_build_branch_executor(decoded, entry);
+        entry->execute = emu_build_branch_executor(decoded);
+        break;
     default:
         return false;
     }
+
+    return entry->execute != NULL;
 }
 
-__nocfi enum emu_insn_result emu_execute_executor_entry(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+__nocfi enum emu_inst_result emu_execute_executor_entry(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    if (!entry || !entry->execute) return EMU_INSN_SKIP;
-    return entry->execute(regs, fp_regs, entry);
+    const struct arm64_decoded_instruction *decoded;
+    uint32_t initial_fpcr;
+    uint32_t initial_fpsr;
+    enum emu_inst_result result;
+
+    if (!entry || !entry->execute) return EMU_INST_SKIP;
+    decoded = &entry->decoded;
+    //如果当前指令不需要 FPCR/FPSR 状态同步，就直接执行并返回。
+    if (decoded->instruction_class != ARM64_INSTRUCTION_CLASS_DATA_PROCESSING_SIMD_FP && (decoded->instruction_class != ARM64_INSTRUCTION_CLASS_BRANCH_EXCEPTION_SYSTEM || (decoded->instruction != ARM64_INST_MSR_REGISTER && decoded->instruction != ARM64_INST_MRS) || (decoded->sysreg != ARM64_SYSREG_KEY(3, 3, 4, 4, 0) && decoded->sysreg != ARM64_SYSREG_KEY(3, 3, 4, 4, 1)))) return entry->execute(regs, fp_regs, entry);
+
+    initial_fpcr = fp_regs->fpcr;
+    initial_fpsr = fp_regs->fpsr;
+
+    /*
+    FP/SIMD 模板不会显式执行 MRS/MSR，但其指令会隐式读取 FPCR，
+    并可能隐式更新 FPSR。执行前先装入软件现场，避免沿用上一次
+    模板执行遗留的硬件状态，并保证本次指令使用调用者保存的状态。
+    */
+    write_fpcr(initial_fpcr);
+    write_fpsr(initial_fpsr);
+
+    result = entry->execute(regs, fp_regs, entry);
+
+    /*
+    执行期间可能产生 FPSR 异常/QC 标志，MSR FPCR/FPSR 也可能改变
+    硬件寄存器。只有值发生变化时才需要写回；之后始终读回硬件，
+    以捕获隐式副作用以及硬件清除保留位后的最终值。
+    */
+    if (fp_regs->fpcr != initial_fpcr) write_fpcr(fp_regs->fpcr);
+    fp_regs->fpcr = read_fpcr();
+
+    if (fp_regs->fpsr != initial_fpsr) write_fpsr(fp_regs->fpsr);
+    fp_regs->fpsr = read_fpsr();
+
+    return result;
 }
 
 /*
@@ -149,15 +184,14 @@ COW:当前进程准备写入一个仍与其他进程或映射共享的物理页�
 
 /* ======================== 总入口：执行器缓存、解码、构建与执行 ======================== */
 
-// clang-format off
-bool emulate_insn(struct pt_regs *regs, struct fp_regs *fp_regs, uint32_t specified_insn)
+bool emulate_inst(struct pt_regs *regs, struct fp_regs *fp_regs, uint32_t specified_inst)
 {
     struct arm64_decoded_instruction decoded __attribute__((__uninitialized__));
     struct arm64_executor_entry local_entry __attribute__((__uninitialized__));
     const struct arm64_executor_entry *entry;
     uint64_t pc = regs->pc;
-    uint32_t insn = specified_insn;
-    enum emu_insn_result result = EMU_INSN_SKIP;
+    uint32_t inst = specified_inst;
+    enum emu_inst_result result = EMU_INST_SKIP;
 
     /* 生产调用点来自异常/内核上下文 不建议硬编码
     asm volatile("msr PAN, #0x0" ::: "memory");
@@ -170,26 +204,28 @@ bool emulate_insn(struct pt_regs *regs, struct fp_regs *fp_regs, uint32_t specif
     支持硬件PAN就不会去走软件PAN,而是快速判断进行返回
     */
     uaccess_enable_privileged();
-    if (!insn) insn = (uint32_t)emu_template_ldr_w(pc);
+    if (!inst)
+    {
+        inst = READ_ONCE(*(const uint32_t *)(uintptr_t)regs->pc);
+    }
 
-    entry = arm64_executor_cache_lookup(insn);
+    entry = arm64_executor_cache_lookup(inst);
     if (entry)
     {
         result = emu_execute_executor_entry(regs, fp_regs, entry);
     }
-    else if (arm64_decode_instruction(insn, &decoded) == ARM64_DECODE_OK && emu_build_executor_entry(&decoded, &local_entry))
+    else if (arm64_decode_instruction(inst, &decoded) == ARM64_DECODE_OK && emu_build_executor_entry(&decoded, &local_entry))
     {
         result = emu_execute_executor_entry(regs, fp_regs, &local_entry);
-        if (result == EMU_INSN_HANDLED) arm64_executor_cache_insert(insn, &local_entry);
+        if (result == EMU_INST_HANDLED) arm64_executor_cache_insert(inst, &local_entry);
     }
 
     uaccess_disable_privileged();
 
-    if (unlikely(result != EMU_INSN_HANDLED))
+    if (unlikely(result != EMU_INST_HANDLED))
     {
-        ls_log_always_tag("emulate_insn", "failed pc=0x%llx insn=0x%08x bytes=%02x %02x %02x %02x\n", (unsigned long long)pc, insn, insn & 0xff, (insn >> 8) & 0xff, (insn >> 16) & 0xff, insn >> 24);
+        ls_log_always_tag("emulate_inst", "failed pc=0x%llx inst=0x%08x bytes=%02x %02x %02x %02x\n", (unsigned long long)pc, inst, inst & 0xff, (inst >> 8) & 0xff, (inst >> 16) & 0xff, inst >> 24);
     }
 
-    return result == EMU_INSN_HANDLED;
+    return result == EMU_INST_HANDLED;
 }
-// clang-format on

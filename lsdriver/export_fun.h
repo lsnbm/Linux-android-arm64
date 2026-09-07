@@ -44,7 +44,7 @@ __attribute__((no_sanitize("cfi"))) static unsigned long generic_kallsyms_lookup
 
     return fn_kallsyms_lookup_name(name);
 }
-int (*fn_aarch64_insn_patch_text)(void *addrs[], uint32_t insns[], int cnt);
+int (*fn_aarch64_insn_patch_text)(void *addrs[], uint32_t insts[], int cnt);
 
 /*
 
@@ -118,13 +118,13 @@ __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
       消除bti c 和pac认证的2者差异
     */
     void *patch_addrs[ARRAY_SIZE(cfi_symbols) * 2];
-    uint32_t patch_insns[ARRAY_SIZE(cfi_symbols) * 2];
-    uint32_t bti_c_insn;
-    uint32_t ret_insn;
+    uint32_t patch_insts[ARRAY_SIZE(cfi_symbols) * 2];
+    uint32_t bti_c_inst;
+    uint32_t ret_inst;
     int patch_count = 0;
 
-    if (arm64_encode_bti_c(&bti_c_insn)) return false;
-    if (arm64_encode_ret(30, &ret_insn)) return false;
+    if (arm64_encode_bti_c(&bti_c_inst)) return false;
+    if (arm64_encode_ret(30, &ret_inst)) return false;
 
     for (int symbol_index = 0; symbol_index < ARRAY_SIZE(cfi_symbols); symbol_index++)
     {
@@ -133,13 +133,13 @@ __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
         if (!cfi_addr) continue;
 
         patch_addrs[patch_count] = (void *)cfi_addr;                      // 补丁地址：CFI 函数入口。
-        patch_insns[patch_count++] = bti_c_insn;                          // 补丁指令：BTI C；记录完成后 patch_count 加 1。
+        patch_insts[patch_count++] = bti_c_inst;                          // 补丁指令：BTI C；记录完成后 patch_count 加 1。
         patch_addrs[patch_count] = (void *)(cfi_addr + sizeof(uint32_t)); // 补丁地址：函数入口后的下一条 ARM64 指令，即入口加 4 字节。
-        patch_insns[patch_count++] = ret_insn;                            // 补丁指令：RET X30；记录完成后 patch_count 加 1。
+        patch_insts[patch_count++] = ret_inst;                            // 补丁指令：RET X30；记录完成后 patch_count 加 1。
     }
 
     if (!patch_count) return false;
-    if (fn_aarch64_insn_patch_text(patch_addrs, patch_insns, patch_count) != 0) return false;
+    if (fn_aarch64_insn_patch_text(patch_addrs, patch_insts, patch_count) != 0) return false;
 
     is_cfi_bypassed = true;
     return true;
@@ -449,6 +449,38 @@ static inline int read_user_pte_value(struct mm_struct *mm, uint64_t addr, pteva
     return 0;
 }
 
+static inline int get_present_user_pages(struct mm_struct *mm, unsigned long start, int page_count, struct page **pages)
+{
+    if (!mm || !pages || page_count <= 0) return -EINVAL;
+
+    for (int page_index = 0; page_index < page_count; page_index++)
+    {
+        unsigned long page_addr = start + (unsigned long)page_index * PAGE_SIZE;
+        pte_t *ptep = get_user_pte(mm, page_addr);
+        struct page *page;
+
+        if (!ptep) return page_index;
+        pte_t pte = READ_ONCE(*ptep);
+        if (!pte_present(pte) || !pfn_valid(pte_pfn(pte))) return page_index;
+
+        page = pfn_to_page(pte_pfn(pte));
+        if (!try_get_page(page)) return page_index;
+        pages[page_index] = page;
+    }
+    return page_count;
+}
+
+static inline void put_present_user_pages(struct page **pages, int page_count)
+{
+    if (!pages || page_count <= 0) return;
+
+    for (int page_index = 0; page_index < page_count; page_index++)
+    {
+        if (pages[page_index]) page_ref_dec(compound_head(pages[page_index]));
+        pages[page_index] = NULL;
+    }
+}
+
 // 写入用户地址所在页的 PTE，并用汇编刷新该用户页 TLB。
 static inline int write_user_pte_value(struct mm_struct *mm, uint64_t addr, pteval_t new_pte)
 {
@@ -630,18 +662,18 @@ R_AARCH64_CALL26
 R_AARCH64_JUMP26
 loader 先尝试直接把目标地址写进 26-bit branch immediate：
 
-ovf = reloc_insn_imm(RELOC_OP_PREL, loc, val, 2, 26, AARCH64_INSN_IMM_26);
+ovf = reloc_inst_imm(RELOC_OP_PREL, loc, val, 2, 26, aarch64_insn_IMM_26);
 如果超出 ±128M：
 if (ovf == -ERANGE) {
     val = module_emit_plt_entry(...);
     ...
-    ovf = reloc_insn_imm(... loc, val, 2, 26, ...);
+    ovf = reloc_inst_imm(... loc, val, 2, 26, ...);
 }
 意思是：原本 bl 内核API 跳不到内核 API，就在模块自己的 .plt 里生成一个近处跳板，然后把 bl 改成跳这个 .plt entry。
 
 PLT entry 在 arch/arm64/kernel/module-plts.c：
 
-plt = __get_adrp_add_pair(dst, (u64)pc, AARCH64_INSN_REG_16);
+plt = __get_adrp_add_pair(dst, (u64)pc, aarch64_insn_REG_16);
 plt.br = cpu_to_le32(br);
 也就是类似：
 adrp x16, target_page

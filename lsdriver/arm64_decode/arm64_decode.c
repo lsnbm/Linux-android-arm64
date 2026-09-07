@@ -1,21 +1,20 @@
 #include "arm64_decode.h"
 
-#define ARM64_DECODE_CACHE_BITS     16U
+#define ARM64_DECODE_CACHE_BITS     13U
 #define ARM64_DECODE_CACHE_SIZE     (1U << ARM64_DECODE_CACHE_BITS)
 #define ARM64_DECODE_CACHE_WAYS     16U
 #define ARM64_DECODE_CACHE_WAY_BITS 4U
 #define ARM64_DECODE_CACHE_BUCKETS  (ARM64_DECODE_CACHE_SIZE / ARM64_DECODE_CACHE_WAYS)
 
-// 哨兵状态值
 #define TAG_EMPTY 0x00000000U
 #define TAG_BUSY  0x00000001U
 
 /*
-强制 64 字节对齐，让 16 个 32-bit tag 恰好占据单个 L1 D-Cache Line。
+每个 bucket 保存 16 个 32-bit tag 和对应的解码结果。
  */
 struct arm64_decode_cache_bucket
 {
-    uint32_t tags[ARM64_DECODE_CACHE_WAYS] __attribute__((aligned(64)));
+    uint32_t tags[ARM64_DECODE_CACHE_WAYS];
     struct arm64_decoded_instruction payloads[ARM64_DECODE_CACHE_WAYS];
 };
 
@@ -36,7 +35,7 @@ static inline uint32_t arm64_decode_cache_hash(uint32_t raw)
 /*
 无 NEON 的纯 GPR 查找路径，每轮并行读取和比较 4 个 tag。
  */
-static int arm64_decode_cache_lookup(uint32_t raw, struct arm64_decoded_instruction *decoded)
+static inline int arm64_decode_cache_lookup(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
     uint32_t bucket_idx = arm64_decode_cache_hash(raw);
     const struct arm64_decode_cache_bucket *bucket = &g_arm64_decode_cache[bucket_idx];
@@ -87,7 +86,7 @@ static int arm64_decode_cache_lookup(uint32_t raw, struct arm64_decoded_instruct
 
 hit:
     // 与发布 tag 的 release store 配对，保证 payload 已经完整可见。
-    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    if (__builtin_expect(__atomic_load_n(&bucket->tags[way], __ATOMIC_ACQUIRE) != raw, 0)) return 0;
     *decoded = bucket->payloads[way];
     return 1;
 }
@@ -96,7 +95,7 @@ hit:
 使用 CAS 抢占空槽并通过 release store 发布。bucket 满时放弃缓存，
 调用方仍会正常返回本次解码结果，后续相同指令继续走常规解码路径。
  */
-static void arm64_decode_cache_insert(uint32_t raw, const struct arm64_decoded_instruction *decoded)
+static inline void arm64_decode_cache_insert(uint32_t raw, const struct arm64_decoded_instruction *decoded)
 {
     if (__builtin_expect(raw == TAG_EMPTY || raw == TAG_BUSY, 0)) return;
 
@@ -148,7 +147,7 @@ enum arm64_decode_status arm64_decode_instruction(uint32_t raw, struct arm64_dec
     __builtin_memset(decoded, 0, sizeof(*decoded));
 
     // A64 主编码 raw[28:25] 直接确定唯一子解码器。
-    switch ((raw >> 25) & 0xF)
+    switch (ARM64_DECODE_FIELD(raw, 28, 25))
     {
     case 0x0:
         status = arm64_decode_sme(raw, decoded);

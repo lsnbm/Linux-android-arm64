@@ -4,13 +4,14 @@ obj-m += lsdriver.o
 lsdriver-y := lsdriver_main.o \
 			  arm64_encode/arm64_encode.o \
 			  arm64_decode/arm64_decode.o \
-			  arm64_decode/arm64_decode_base.o \
+			  arm64_decode/arm64_decode_immediate.o \
+			  arm64_decode/arm64_decode_register.o \
 			  arm64_decode/arm64_decode_ldst.o \
 			  arm64_decode/arm64_decode_branch.o \
 			  arm64_decode/arm64_decode_simd.o \
 			  arm64_decode/arm64_decode_sve.o \
 			  arm64_decode/arm64_decode_sme.o \
-			  arm64_emulate/arm64_emulate.o \
+			  arm64_emulate/emulate_inst.o \
 			  arm64_emulate/arm64_emulate_branch.o \
 			  arm64_emulate/arm64_emulate_ldst.o \
 			  arm64_emulate/arm64_emulate_simd.o \
@@ -43,7 +44,7 @@ ccflags-y += -fno-vectorize -fno-slp-vectorize
 # ARM64 Kbuild 默认添加 -mgeneral-regs-only，它也会禁止显式 FP/SIMD 内联汇编；
 # 仅从显式使用 FP/SIMD 汇编的目标中移除此限制，不影响模块的其他目标文件。
 CFLAGS_REMOVE_lsdriver_main.o += -mgeneral-regs-only
-CFLAGS_REMOVE_arm64_emulate/arm64_emulate.o += -mgeneral-regs-only
+CFLAGS_REMOVE_arm64_emulate/emulate_inst.o += -mgeneral-regs-only
 CFLAGS_REMOVE_arm64_emulate/arm64_emulate_ldst.o += -mgeneral-regs-only
 CFLAGS_REMOVE_arm64_emulate/arm64_emulate_simd.o += -mgeneral-regs-only
 CFLAGS_REMOVE_arm64_emulate/arm64_emulate_immediate.o += -mgeneral-regs-only
@@ -52,7 +53,7 @@ CFLAGS_REMOVE_arm64_emulate/arm64_emulate_register.o += -mgeneral-regs-only
 # 移除 -mgeneral-regs-only 后，仍禁止编译器自动生成或自动向量化为 FP/SIMD 指令；
 # FP/SIMD 寄存器只允许由源码中可审计的显式内联汇编使用。
 CFLAGS_lsdriver_main.o += -mno-implicit-float
-CFLAGS_arm64_emulate/arm64_emulate.o += -mno-implicit-float
+CFLAGS_arm64_emulate/emulate_inst.o += -mno-implicit-float
 CFLAGS_arm64_emulate/arm64_emulate_ldst.o += -mno-implicit-float
 CFLAGS_arm64_emulate/arm64_emulate_simd.o += -mno-implicit-float
 CFLAGS_arm64_emulate/arm64_emulate_immediate.o += -mno-implicit-float

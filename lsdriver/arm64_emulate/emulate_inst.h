@@ -1,15 +1,17 @@
-#ifndef EMULATE_INSN_H
-#define EMULATE_INSN_H
+#ifndef EMULATE_INST_H
+#define EMULATE_INST_H
 
 #include <asm/ptrace.h>
 #include <asm/sysreg.h>
 #include <linux/bits.h>
 #include "../arm64_reg.h"
+#include "../arm64_decode/arm64_decode.h"
+#include "arm64_emulate_hw_templates.h"
 
-enum emu_insn_result
+enum emu_inst_result
 {
-    EMU_INSN_HANDLED, // 模拟函数已完成指令语义，并自行更新现场和 PC
-    EMU_INSN_SKIP,    // 不支持或无法执行，不能推进 PC
+    EMU_INST_HANDLED, // 模拟函数已完成指令语义，并自行更新现场和 PC
+    EMU_INST_SKIP,    // 不支持或无法执行，不能推进 PC
 };
 
 /* =========================================================================
@@ -37,47 +39,39 @@ enum emu_insn_result
   - SVE、SME，以及 decoder 未识别或执行器尚无硬件模板的编码。
   ========================================================================= */
 
-/* ======================== 跨大类通用现场辅助 ======================== */
-
-// 读取数据运算使用的通用寄存器；寄存器 31 按 XZR/WZR 语义返回 0。
-static inline uint64_t reg_read(struct pt_regs *regs, uint32_t n)
+static inline uint64_t read_gpr_or_zr(struct pt_regs *regs, uint32_t n)
 {
     return (n == 31) ? 0ULL : regs->regs[n];
 }
 
-// 写入数据运算使用的通用寄存器；寄存器 31 丢弃写入，32 位结果按架构语义零扩展。
-static inline void reg_write(struct pt_regs *regs, uint32_t n, uint64_t val, bool sf)
+static inline void write_gpr_or_zr(struct pt_regs *regs, uint32_t n, uint64_t val, bool sf)
 {
     if (n != 31) regs->regs[n] = sf ? val : (uint64_t)(uint32_t)val;
 }
 
-// 读取地址计算使用的基址寄存器；寄存器 31 按 读SP 语义处理。
-static inline uint64_t addr_reg_read(struct pt_regs *regs, uint32_t n)
+static inline uint64_t read_gpr_or_sp(struct pt_regs *regs, uint32_t n)
 {
     return (n == 31) ? regs->sp : regs->regs[n];
 }
 
-// 写入地址计算使用的基址寄存器；寄存器 31 按写 SP处理
-static inline void addr_reg_write(struct pt_regs *regs, uint32_t n, uint64_t val)
+static inline void write_gpr_or_sp(struct pt_regs *regs, uint32_t n, uint64_t val)
 {
     if (n == 31) regs->sp = val;
     else regs->regs[n] = val;
 }
 
-// 读取异常现场中的 N/Z/C/V 条件标志，不包含 PSTATE 的其他位。
-static inline uint64_t emu_read_nzcv(const struct pt_regs *regs)
+static inline uint64_t read_nzcv(const struct pt_regs *regs)
 {
     return regs->pstate & GENMASK_ULL(31, 28);
 }
 
-// 更新异常现场中的 N/Z/C/V 条件标志，同时保留 PSTATE 的其他位。
-static inline void emu_write_nzcv(struct pt_regs *regs, uint64_t nzcv)
+static inline void write_nzcv(struct pt_regs *regs, uint64_t nzcv)
 {
     regs->pstate = (regs->pstate & ~GENMASK_ULL(31, 28)) | (nzcv & GENMASK_ULL(31, 28));
 }
 
 // 直接根据异常现场的 NZCV 计算 A64 条件码是否成立
-static inline bool emu_cond_holds(uint64_t nzcv, uint32_t cond)
+static inline bool cond_holds(uint64_t nzcv, uint32_t cond)
 {
     switch (cond >> 1)
     {
@@ -100,6 +94,30 @@ static inline bool emu_cond_holds(uint64_t nzcv, uint32_t cond)
     }
 }
 
-bool emulate_insn(struct pt_regs *regs, struct fp_regs *fp_regs, uint32_t specified_insn);
+struct arm64_hw_template_output
+{
+    uint64_t value0;
+    uint64_t value1;
+    uint64_t value2;
+    uint64_t value3;
+    uint64_t writeback_value;
+};
 
-#endif // EMULATE_INSN_H
+struct arm64_executor_entry
+{
+    enum emu_inst_result (*execute)(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry);
+    struct arm64_decoded_instruction decoded;
+};
+
+bool emu_build_executor_entry(const struct arm64_decoded_instruction *decoded, struct arm64_executor_entry *entry);
+__nocfi enum emu_inst_result emu_execute_executor_entry(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry);
+
+enum emu_inst_result (*emu_build_branch_executor(const struct arm64_decoded_instruction *decoded))(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry);
+enum emu_inst_result (*emu_build_ldst_executor(const struct arm64_decoded_instruction *decoded))(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry);
+enum emu_inst_result (*emu_build_simd_executor(const struct arm64_decoded_instruction *decoded))(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry);
+enum emu_inst_result (*emu_build_immediate_executor(const struct arm64_decoded_instruction *decoded))(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry);
+enum emu_inst_result (*emu_build_register_executor(const struct arm64_decoded_instruction *decoded))(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry);
+
+bool emulate_inst(struct pt_regs *regs, struct fp_regs *fp_regs, uint32_t specified_inst);
+
+#endif // EMULATE_INST_H

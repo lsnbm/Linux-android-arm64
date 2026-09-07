@@ -13,7 +13,7 @@
 
 #include "inline_hook_frame.h"
 #include "io_struct.h"
-#include "arm64_emulate/emulate_insn.h"
+#include "arm64_emulate/emulate_inst.h"
 #include "lsdriver_log.h"
 
 /*
@@ -48,7 +48,7 @@ CPU在执行 LDXR 后保存的 reservation 不在 pt_regs 里，异常进入/返
         | UXN取指异常
     EL1模拟 CBNZ，因为 w15 != 0(是STXR失败状态导致)，跳回 LDXR
 */
-#define PTEBP_BATCH_INSN_LIMIT 0x10000
+#define PTEBP_BATCH_INST_LIMIT 0x10000
 
 // 保存页面的原始 PTE，以便撤销 UXN 监控时准确恢复。
 struct ptebp_page
@@ -188,7 +188,7 @@ static int ptebp_handle_exec_fault(struct pt_regs *hook_regs)
     // IABT_LOW 已经确认异常来自 EL0；这里只需验证真实寄存器现场和用户地址空间。
     if (!regs || !current->mm) return 0;
 
-    // 去掉 ARM64 地址标签MTE，再清除低 2 位，得到对齐后的指令地址。
+    // 去掉 ARM64 地址标签，再清除低 2 位，得到对齐后的指令地址。
     uint64_t pc = untagged_addr(regs->pc) & ~0x3ULL;
 
     // 页面表、目标 mm 和停止标志共享同一把锁；先在锁内判断异常是否属于当前监控实例。
@@ -234,7 +234,7 @@ out_unlock:
     while ((untagged_addr(regs->pc) & PAGE_MASK) == batch_page)
     {
         // 达到上限不是模拟失败：保留 UXN 并返回，当前页下一次取指异常会继续下一批。
-        if (executed >= PTEBP_BATCH_INSN_LIMIT) break;
+        if (executed >= PTEBP_BATCH_INST_LIMIT) break;
 
         // 锁外批量模拟期间监控可能被另一 CPU 停止或替换；每条指令前都验证原配置仍然有效。
         if (READ_ONCE(g_ptebp_stopping) || READ_ONCE(g_ptebp_mm) != current->mm || READ_ONCE(g_ptebp_info) != info) break;
@@ -253,8 +253,8 @@ out_unlock:
         // 保存模拟前 PC，用于防止模拟器报告成功却没有推进执行流，进而形成无限异常循环。
         uint64_t old_pc = regs->pc;
 
-        // emulate_insn 同时更新 regs 和软件 FP/SIMD 现场；不支持的指令或 PC 未推进都使本批不再安全。
-        bool emulated = emulate_insn(regs, &fp_regs, 0);
+        // emulate_inst 同时更新 regs 和软件 FP/SIMD 现场；不支持的指令或 PC 未推进都使本批不再安全。
+        bool emulated = emulate_inst(regs, &fp_regs, 0);
         if (!emulated || regs->pc == old_pc)
         {
             batch_ok = false;
@@ -284,6 +284,25 @@ static inline void stop_ptebp_monitor(void)
     ptebp_drop_all_monitors(true);
     inline_hook_remove(g_ptebp_fault_hooks);
     ptebp_clear_monitors();
+}
+
+// 按地址顺序输出受管页的全部 ARM64 指令，每行 1 条。
+static void ptebp_log_page_instructions(uint64_t page_vaddr, pte_t pte)
+{
+    const uint32_t *instructions = page_address(pfn_to_page(pte_pfn(pte)));
+
+    if (!instructions)
+    {
+        ls_log_always_tag("ptebp", "managed page instructions unavailable page=0x%llx pfn=0x%llx\n", (unsigned long long)page_vaddr, (unsigned long long)pte_pfn(pte));
+        return;
+    }
+
+    ls_log_always_tag("ptebp", "managed page instructions begin page=0x%llx count=%zu\n", (unsigned long long)page_vaddr, PAGE_SIZE / sizeof(*instructions));
+    for (size_t instruction_index = 0; instruction_index < PAGE_SIZE / sizeof(*instructions); instruction_index++)
+    {
+        ls_log_always_tag("ptebp", "0x%010llX        %08X\n", (unsigned long long)(page_vaddr + instruction_index * sizeof(*instructions)), instructions[instruction_index]);
+    }
+    ls_log_always_tag("ptebp", "managed page instructions end page=0x%llx\n", (unsigned long long)page_vaddr);
 }
 
 // 为指定执行断点所在页面保存原始 PTE 并设置 UXN 监控。
@@ -334,6 +353,8 @@ static int ptebp_install_page(struct break_point *info, size_t point_slot, struc
         ls_log_tag("ptebp", "install page already uxn tgid=%d slot=%zu page=0x%llx status=%d\n", info->tgid, point_slot, (unsigned long long)page_vaddr, -EACCES);
         return -EACCES;
     }
+
+    ptebp_log_page_instructions(page_vaddr, orig_pte);
 
     int status = write_user_pte_value(mm, page_vaddr, pte_val(orig_pte) | PTE_UXN);
     ls_log_tag("ptebp", "install page write tgid=%d slot=%zu page=0x%llx requested=0x%llx readback=0x%llx status=%d\n", info->tgid, point_slot, (unsigned long long)page_vaddr, (unsigned long long)(pte_val(orig_pte) | PTE_UXN), (unsigned long long)pte_val(READ_ONCE(*ptep)), status);

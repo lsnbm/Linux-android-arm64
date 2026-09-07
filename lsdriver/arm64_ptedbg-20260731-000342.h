@@ -2,8 +2,7 @@
 #define ARM64_PTEDBG_H
 
 /*
-本头文件直接实现基于 UXN 页异常和幽灵页的 ARM64 页表执行断点。
-安装、异常接管、断点回调、指令模拟和停止处理均集中在此处。
+ UXN 页异常和幽灵页的 ARM64 页表执行断点。
 */
 
 #include <linux/atomic.h>
@@ -20,7 +19,7 @@
 
 #include "arm64_ghost/arm64_ghost_region.h"
 #include "arm64_ghost/arm64_page_reloc.h"
-#include "arm64_emulate/emulate_insn.h"
+#include "arm64_emulate/emulate_inst.h"
 #include "inline_hook_frame.h"
 #include "io_struct.h"
 #include "lsdriver_log.h"
@@ -52,7 +51,7 @@ struct ptebp_point
 {
     uint64_t source_pc; //用户配置的源指令地址，会进行地址标签清理和 4 字节对齐
     uint64_t ghost_pc;  //source_pc 在幽灵页中的同偏移地址
-    uint32_t orig_insn; //source_pc 原本的 32 位机器码。
+    uint32_t orig_inst; //source_pc 原本的 32 位机器码。
     bool used;          //表示这个监控点状态是否有效
 };
 
@@ -315,13 +314,13 @@ static int ptebp_handle_brk(struct pt_regs *hook_regs)
     page       表示 ghost_pc 所属的源页/幽灵页运行状态；
     hit_point  表示该 BRK 对应的外部监控点，停止期间保持为 NULL，不再调用回调；
     source_pc  是 ghost_pc 映射回去的真实源指令地址；
-    orig_insn  是该源地址在安装 PTEBP 前的原始机器码；
+    orig_inst  是该源地址在安装 PTEBP 前的原始机器码；
     managed    表示该 BRK 已确认属于当前 PTEBP，需要由本函数继续处理。
     */
     struct ptebp_page *page;
     struct bp_point *hit_point = NULL;
     uint64_t source_pc = 0;
-    uint32_t orig_insn = 0;
+    uint32_t orig_inst = 0;
     bool managed = false;
     {
         unsigned long flags;
@@ -341,7 +340,7 @@ static int ptebp_handle_brk(struct pt_regs *hook_regs)
             */
             source_pc = arm64_page_reloc_to_source(&page->relocation, ghost_pc);
             uint32_t source_index = (source_pc - page->source_page) / sizeof(uint32_t);
-            orig_insn = page->source_code[source_index];
+            orig_inst = page->source_code[source_index];
 
             /*
             查找安装阶段明确替换为 BRK #0 的监控点。命中后以 point_state 中保存的地址和
@@ -354,7 +353,7 @@ static int ptebp_handle_brk(struct pt_regs *hook_regs)
 
                 if (!point_state->used || point_state->ghost_pc != ghost_pc) continue;
                 source_pc = point_state->source_pc;
-                orig_insn = point_state->orig_insn;
+                orig_inst = point_state->orig_inst;
                 if (!g_ptebp_stopping && g_ptebp_info) hit_point = &g_ptebp_info->points[point_index];
                 managed = true;
                 break;
@@ -364,7 +363,7 @@ static int ptebp_handle_brk(struct pt_regs *hook_regs)
             幽灵页中也可能执行到源代码本来就包含的 BRK。它不是配置的监控点，但仍属于
             当前幽灵页执行流，必须先映射回源 PC，随后再交给原 brk_handler() 保持原始语义。
             */
-            if (!managed && ptebp_is_brk(orig_insn)) managed = true;
+            if (!managed && ptebp_is_brk(orig_inst)) managed = true;
         }
         spin_unlock_irqrestore(&g_ptebp_lock, flags);
     }
@@ -377,7 +376,7 @@ static int ptebp_handle_brk(struct pt_regs *hook_regs)
     建立正确的架构 PC。这里不是让 CPU 返回源页原生执行：当前幽灵地址上的原指令已经
     被 BRK 覆盖，直接返回 ghost_pc 只会再次触发同一 BRK。B/BL/B.cond、ADR/ADRP 和
     LDR literal 等指令依赖原指令地址，BL 还必须生成 source_pc + 4 的返回地址，因此不能
-    以 ghost_pc 作为模拟基准。模拟器读取单独保存的 orig_insn，在内核中更新寄存器和最终
+    以 ghost_pc 作为模拟基准。模拟器读取单独保存的 orig_inst，在内核中更新寄存器和最终
     regs->pc；普通顺序指令通常得到 source_pc + 4，返回用户态后再由源页 UXN 执行异常
     映射到下一条幽灵指令。回调若主动修改 regs->pc，就表示它接管了后续控制流。
     */
@@ -391,13 +390,13 @@ static int ptebp_handle_brk(struct pt_regs *hook_regs)
     // 只有回调没有修改源 PC 时，才执行或传递被 BRK 替换位置原本的那条指令。
     if ((untagged_addr(regs->pc) & ~0x3ULL) == source_pc)
     {
-        if (ptebp_is_brk(orig_insn))
+        if (ptebp_is_brk(orig_inst))
         {
             /*
             源代码原本就是 BRK 时不能把它当作监控 BRK 消费掉。将原指令 imm16 写回
             ESR.ISS[15:0]，并让本函数返回 0，使原 brk_handler() 按真实 BRK 继续处理。
             */
-            hook_regs->regs[1] = (hook_regs->regs[1] & ~0xFFFFULL) | ((orig_insn >> 5) & 0xFFFFU);
+            hook_regs->regs[1] = (hook_regs->regs[1] & ~0xFFFFULL) | ((orig_inst >> 5) & 0xFFFFU);
             pass_to_original = true;
         }
         else
@@ -407,7 +406,7 @@ static int ptebp_handle_brk(struct pt_regs *hook_regs)
             模拟器可能读写 SIMD/FP 寄存器，因此先快照 Q0-Q31，模拟后再将完整现场写回硬件。
             若原指令无法模拟，则进入紧急停止模式并恢复源页执行权限，避免线程反复命中同一 BRK。
             */
-            bool emulated = emulate_insn(regs, &fp_regs, orig_insn);
+            bool emulated = emulate_inst(regs, &fp_regs, orig_inst);
             if (!emulated && page) ptebp_disable_from_handler();
         }
     }
@@ -619,7 +618,7 @@ static int ptebp_prepare_page(struct break_point *info, struct mm_struct *mm, ui
         g_ptebp_points[point_index] = (struct ptebp_point){
             .source_pc = source_pc,
             .ghost_pc = page->ghost.user_va + (source_pc - source_page),
-            .orig_insn = source_code[source_index],
+            .orig_inst = source_code[source_index],
             .used = true,
         };
     }

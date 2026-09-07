@@ -533,7 +533,7 @@ inline hook 表：
 - `target_addr`：运行时解析出的目标地址
 - `work_fn`：被 hook 后先执行的工作函数
 - `trampoline`：模块 `.text` 中分配到的跳板槽位
-- `saved_insn`：目标入口被覆盖前的原始 4 字节指令
+- `saved_inst`：目标入口被覆盖前的原始 4 字节指令
 - `installed`：安装状态
 
 便捷宏 `HOOK_ENTRY(sym, fn)` 用来声明 hook 表。当前 hook 表在 `arm64_debug_monitor.h` 中定义：
@@ -583,7 +583,7 @@ inline hook 表：
 
 ### 10.5 卸载流程
 
-`hook_entry_remove()` 会把 `saved_insn` patch 回 `target_addr`，清空 trampoline 指针并标记未安装。
+`hook_entry_remove()` 会把 `saved_inst` patch 回 `target_addr`，清空 trampoline 指针并标记未安装。
 
 `inline_hook_install()` 负责批量安装 hook 表，任何一条安装失败都会回滚已经安装的项。`inline_hook_remove()` 负责逆序卸载。
 
