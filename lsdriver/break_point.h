@@ -148,20 +148,17 @@ static inline struct bp_point *bp_info_find_type_for_task(struct break_point *in
     return NULL;
 }
 
-// 按规范化 PC 查找执行断点配置。
-static inline struct bp_point *bp_info_find_point_by_pc(struct break_point *info, uint64_t raw_pc)
+// 按 PC 查找执行断点配置。
+static inline struct bp_point *bp_info_find_point_by_pc(struct break_point *info, uint64_t pc)
 {
-    uint64_t pc;
-
     if (!bp_info_is_valid(info)) return NULL;
-    pc = untagged_addr(raw_pc) & ~0x3ULL;
 
     for (size_t slot = 0; slot < BP_CONFIG_MAX; slot++)
     {
         struct bp_point *point = &info->points[slot];
 
         if (!bp_point_is_configured_type(point, BP_BREAKPOINT_X)) continue;
-        if ((untagged_addr(READ_ONCE(point->hit_addr)) & ~0x3ULL) != pc) continue;
+        if (READ_ONCE(point->hit_addr) != pc) continue;
         return point;
     }
 

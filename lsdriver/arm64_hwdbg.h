@@ -164,7 +164,6 @@ static uint64_t get_distance_from_watchpoint(uint64_t fault_addr, uint64_t watch
 {
     if (!ctrl || !ctrl->len) return ~0ULL;
 
-    fault_addr = untagged_addr(fault_addr);
     uint32_t lens = __ffs(ctrl->len);
     uint32_t lene = __fls(ctrl->len);
 
@@ -191,8 +190,8 @@ static bool watchpoint_access_matches(struct arch_hw_breakpoint *info, uint64_t 
 // 默认回调表示异常处理后仍需执行被断住的原指令；trigger 只记录命中地址，不能作为单步标志。
 static bool perf_breakpoint_requires_step(struct perf_event *event)
 {
-    static void (*default_forward)(struct perf_event *, struct perf_sample_data *, struct pt_regs *) __read_mostly;
-    static void (*default_backward)(struct perf_event *, struct perf_sample_data *, struct pt_regs *) __read_mostly;
+    static void (*default_forward)(struct perf_event *, struct perf_sample_data *, struct pt_regs *) __attribute__((__section__(".data..read_mostly")));
+    static void (*default_backward)(struct perf_event *, struct perf_sample_data *, struct pt_regs *) __attribute__((__section__(".data..read_mostly")));
 
     if (!event) return false;
 
@@ -218,7 +217,7 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
     read_all_q_regs(&fp_regs);
 
     // 执行断点没有独立的命中地址参数，内核使用异常现场的 PC 进行派发。
-    uint64_t current_pc = untagged_addr(regs->pc) & ~0x3ULL;
+    uint64_t current_pc = regs->pc;
     struct perf_event **perf_slots = this_cpu_ptr(bp_on_reg);
     bool own_hit = false;
     bool perf_hit = false;
@@ -238,27 +237,22 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
 
     for (int slot = 0; slot < num_brps; slot++)
     {
-        rcu_read_lock();
         struct perf_event *event = READ_ONCE(perf_slots[slot]);
-        if (!event) goto next_perf_breakpoint;
+        if (!event) continue;
 
         struct arch_hw_breakpoint *perf_info = &event->hw.info;
-        if (perf_info->ctrl.type != ARM_BREAKPOINT_EXECUTE || perf_info->address != current_pc) goto next_perf_breakpoint;
+        if (perf_info->ctrl.type != ARM_BREAKPOINT_EXECUTE || perf_info->address != current_pc) continue;
 
         perf_hit = true;
         perf_info->trigger = current_pc;
         fn_perf_bp_event(event, regs);
         if (perf_breakpoint_requires_step(event)) perf_requires_step = true;
-
-    next_perf_breakpoint:
-        rcu_read_unlock();
     }
 
     if (!own_hit && !perf_hit) return 0;
 
-    // 存在 perf 命中时沿用原 handler 的 step 决策；纯自有命中始终模拟步过。
-    bool requires_step = perf_hit ? perf_requires_step : own_hit;
-    if (requires_step) emulate_inst(regs, &fp_regs, 0);
+    // 只有自有命中时强制模拟步过；同时命中自有和 perf 时，按 perf 的步过决策。
+    if (!perf_hit || perf_requires_step) emulate_inst(regs, &fp_regs, 0);
     write_all_q_regs(&fp_regs);
 
     // 不需要步过时保留异常现场；两种情况都跳过原 handler，避免重复发送 perf 事件。
@@ -270,7 +264,7 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
 static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
 {
     // watchpoint_handler(addr, esr, regs)，
-    uint64_t fault_addr = untagged_addr(hook_regs->regs[0]);
+    uint64_t fault_addr = hook_regs->regs[0];
     uint64_t esr = hook_regs->regs[1];
     struct break_point *bp_info = g_bp_info;
     struct pt_regs *regs = (struct pt_regs *)hook_regs->regs[2];
@@ -296,7 +290,6 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
         point->on_hit(regs, &fp_regs, point);
     }
 
-    rcu_read_lock();
     for (int slot = 0; slot < num_wrps; slot++)
     {
         struct perf_event *event = READ_ONCE(perf_slots[slot]);
@@ -316,13 +309,11 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
         fn_perf_bp_event(event, regs);
         if (perf_breakpoint_requires_step(event)) perf_requires_step = true;
     }
-    rcu_read_unlock();
 
     if (!own_hit && !perf_hit) return 0;
 
-    // 存在 perf 命中时沿用原 handler 的 step 决策；纯自有命中始终模拟步过。
-    bool requires_step = perf_hit ? perf_requires_step : own_hit;
-    if (requires_step) emulate_inst(regs, &fp_regs, 0);
+    // 只有自有命中时强制模拟步过；同时命中自有和 perf 时，按 perf 的步过决策。
+    if (!perf_hit || perf_requires_step) emulate_inst(regs, &fp_regs, 0);
     write_all_q_regs(&fp_regs);
 
     // 不需要步过时保留异常现场；两种情况都跳过原 handler，避免重复发送 perf 事件。

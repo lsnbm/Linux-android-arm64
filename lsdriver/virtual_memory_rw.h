@@ -224,7 +224,7 @@ static inline int pte_write_physical(phys_addr_t paddr, const void *buffer, size
     return 0;
 }
 
-// 硬件mmu翻译
+// 硬件mmu翻译，手动切换 TTBR0_EL1，然后让硬件遍历目标进程页表；这时目标进程不能崩溃和退出，不然页表遍历访问到了无效或已释放的物理页表，触发不可恢复的同步外部中止
 static inline int mmu_translate_va_to_pa(struct mm_struct *mm, uint64_t va, phys_addr_t *pa)
 {
     int ret;

@@ -40,9 +40,10 @@ lsdriver/arm64_tests/*
 !lsdriver/arm64_tests/executor/*
 
 # Local ARM64 executor outputs
-lsdriver/arm64_tests/executor/*.ko
-lsdriver/arm64_tests/executor/*.cpio.gz
 lsdriver/arm64_tests/executor/arm64_instruction_table.h
+lsdriver/arm64_tests/executor/arm64_kernel_executor_test_module.ko
+lsdriver/arm64_tests/executor/executor_test_runner_android
+lsdriver/arm64_tests/executor/real-device-executor-test.log
 
 # Android Studio / Gradle / NDK outputs
 .gradle/

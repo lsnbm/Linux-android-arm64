@@ -19,6 +19,7 @@ from typing import Any
 DEFAULT_ANDROID_HOST = os.getenv("ANDROID_HTTP_HOST", "auto").strip() or "auto"
 DEFAULT_ANDROID_PORT = int(os.getenv("ANDROID_HTTP_PORT", "9494"))
 DEFAULT_ANDROID_TIMEOUT_SECONDS = float(os.getenv("ANDROID_HTTP_TIMEOUT", "4"))
+SIGNATURE_TIMEOUT_SECONDS = 20.0
 MIN_HTTPS_TIMEOUT_SECONDS = 15.0
 LAN_DISCOVERY_MAX_WORKERS = 24
 LAN_DISCOVERY_PING_TIMEOUT_MS = 150
@@ -580,7 +581,8 @@ class AndroidHttpBridge(AndroidProtocolMixin):
 
             request_body = json.dumps(request_obj, ensure_ascii=False).encode("utf-8")
             operation = str(request_obj.get("operation") or "")
-            timeout_seconds = max(self.timeout_seconds, MIN_HTTPS_TIMEOUT_SECONDS) if endpoint.scheme == "https" else self.timeout_seconds
+            timeout_seconds = SIGNATURE_TIMEOUT_SECONDS if operation.startswith("signature.") else self.timeout_seconds
+            timeout_seconds = max(timeout_seconds, MIN_HTTPS_TIMEOUT_SECONDS) if endpoint.scheme == "https" else timeout_seconds
             connection_class = http.client.HTTPSConnection if endpoint.scheme == "https" else http.client.HTTPConnection
             connection = connection_class(endpoint.host, endpoint.port, timeout=timeout_seconds)
             try:

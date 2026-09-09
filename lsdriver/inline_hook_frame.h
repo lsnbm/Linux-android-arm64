@@ -158,7 +158,7 @@ static int hook_relocate_replay_insts(uint64_t source_addr, uint64_t replay_addr
             if (!fn_get_kprobe) fn_get_kprobe = (void *)generic_kallsyms_lookup_name("get_kprobe");
             if (!fn_get_kprobe)
             {
-                ls_log_tag("hook", "get_kprobe symbol not found for source=0x%llx\n", (unsigned long long)source_pc);
+                ls_log_always_tag("hook", "get_kprobe symbol not found for source=0x%llx\n", (unsigned long long)source_pc);
                 return -ENOENT;
             }
 
@@ -176,17 +176,17 @@ static int hook_relocate_replay_insts(uint64_t source_addr, uint64_t replay_addr
 
             if (!resolved)
             {
-                ls_log_tag("hook", "kprobe BRK has no matching live probe source=0x%llx\n", (unsigned long long)source_pc);
+                ls_log_always_tag("hook", "kprobe BRK has no matching live probe source=0x%llx\n", (unsigned long long)source_pc);
                 return -EBUSY;
             }
             // 防止异常或嵌套状态把另一个 BRK #4 再次复制到跳板，形成同样的崩溃路径。
             if (original_inst == kprobe_brk_inst)
             {
-                ls_log_tag("hook", "kprobe opcode recursively contains BRK source=0x%llx\n", (unsigned long long)source_pc);
+                ls_log_always_tag("hook", "kprobe opcode recursively contains BRK source=0x%llx\n", (unsigned long long)source_pc);
                 return -ELOOP;
             }
 
-            ls_log_tag("hook", "resolved kprobe BRK source=0x%llx opcode=%08x\n", (unsigned long long)source_pc, original_inst);
+            ls_log_always_tag("hook", "resolved kprobe BRK source=0x%llx opcode=%08x\n", (unsigned long long)source_pc, original_inst);
             // 只替换回放副本；e->saved_inst[] 仍保存 BRK 现场，卸载时按原现场恢复。
             insts[i] = original_inst;
         }
@@ -195,7 +195,7 @@ static int hook_relocate_replay_insts(uint64_t source_addr, uint64_t replay_addr
         enum arm64_decode_status decode_status = arm64_decode_instruction(insts[i], &decoded);
         if (decode_status != ARM64_DECODE_OK)
         {
-            ls_log_tag("hook", "instruction cannot be replayed status=%u addr=0x%llx inst=%08x\n", decode_status, (unsigned long long)source_pc, insts[i]);
+            ls_log_always_tag("hook", "instruction cannot be replayed status=%u addr=0x%llx inst=%08x\n", decode_status, (unsigned long long)source_pc, insts[i]);
             return -EOPNOTSUPP;
         }
 
@@ -212,22 +212,30 @@ static int hook_relocate_replay_insts(uint64_t source_addr, uint64_t replay_addr
 
             if (status)
             {
-                ls_log_tag("hook", "%s relocation out of range source=0x%llx replay=0x%llx target=0x%llx inst=%08x\n", page_relative ? "adrp" : "adr", (unsigned long long)source_pc, (unsigned long long)replay_pc, (unsigned long long)target, insts[i]);
+                ls_log_always_tag("hook", "%s relocation out of range source=0x%llx replay=0x%llx target=0x%llx inst=%08x\n", page_relative ? "adrp" : "adr", (unsigned long long)source_pc, (unsigned long long)replay_pc, (unsigned long long)target, insts[i]);
                 return status;
             }
             break;
         }
         case ARM64_INSTRUCTION_CLASS_BRANCH_EXCEPTION_SYSTEM:
+            // B/BL/B.cond/CBZ/CBNZ/TBZ/TBNZ 等立即数分支使用当前PC计算目标，不能原样搬到跳板回放区，
+            // 否则会基于 replay_pc 跳到错误地址；只有完成目标重定位后才能安全回放。
+            // BR/BLR 等寄存器间接跳转不依赖当前PC，回放前寄存器现场已恢复，可以保留原指令执行。
             switch (decoded.instruction)
             {
             case ARM64_INST_B:
+                // 无条件立即数跳转B出现在函数入口被覆盖区时，正常函数序言绝对不可能出现这种指令，进来立马无条件立即数跳
+                // 出现就说明目标入口已经被其他代码、ftrace或厂商插桩改写为跳板。
+                // B使用当前PC计算目标，原样搬到回放区会跳到错误地址，因此拒绝安装。然后也是暂时不做适配和重编码
             case ARM64_INST_BL:
+                // 无条件带链接立即数跳转BL，同样依赖当前PC；正常函数会出现这种情况，然后也是暂时不做适配
             case ARM64_INST_B_COND:
             case ARM64_INST_CBZ:
             case ARM64_INST_CBNZ:
             case ARM64_INST_TBZ:
             case ARM64_INST_TBNZ:
-                ls_log_tag("hook", "pc-relative instruction cannot be replayed addr=0x%llx inst=%08x\n", (unsigned long long)source_pc, insts[i]);
+                // 条件直接跳转同样使用当前PC计算目标，必须完成重定位后才能安全回放；这里我先暂时不写
+                ls_log_always_tag("hook", "pc-relative instruction cannot be replayed addr=0x%llx inst=%08x\n", (unsigned long long)source_pc, insts[i]);
                 return -EOPNOTSUPP;
             default:
                 continue;
@@ -239,7 +247,11 @@ static int hook_relocate_replay_insts(uint64_t source_addr, uint64_t replay_addr
             case ARM64_INST_LDRSW_LITERAL:
             case ARM64_INST_LDR_FP_SIMD_LITERAL:
             case ARM64_INST_PRFM_LITERAL:
-                ls_log_tag("hook", "pc-relative instruction cannot be replayed addr=0x%llx inst=%08x\n", (unsigned long long)source_pc, insts[i]);
+                /*
+            PC 相对 literal load / prefetch也是暂时不支持重编码
+            普通寄存器基址/栈基址 load/store可以原样回放
+            */
+                ls_log_always_tag("hook", "pc-relative instruction cannot be replayed addr=0x%llx inst=%08x\n", (unsigned long long)source_pc, insts[i]);
                 return -EOPNOTSUPP;
             default:
                 continue;
@@ -460,7 +472,7 @@ static int hook_entry_install(struct hook_entry *e)
         e->target_addr = generic_kallsyms_lookup_name(e->target_sym);
         if (!e->target_addr)
         {
-            ls_log_tag("hook", "symbol not found: %s\n", e->target_sym);
+            ls_log_always_tag("hook", "symbol not found: %s\n", e->target_sym);
             return -ENOENT;
         }
     }
@@ -468,7 +480,7 @@ static int hook_entry_install(struct hook_entry *e)
 
     // 保存入口即将被覆盖的原始指令。
     hook_save_orig_insts(e->target_addr, e->saved_inst, HOOK_STUB_WORDS);
-    ls_log_tag("hook", "original %s: 0x%llx: %08x %08x %08x %08x\n", e->target_sym ? e->target_sym : "<addr>", e->target_addr, e->saved_inst[0], e->saved_inst[1], e->saved_inst[2], e->saved_inst[3]);
+    ls_log_always_tag("hook", "original %s: 0x%llx: %08x %08x %08x %08x\n", e->target_sym ? e->target_sym : "<addr>", e->target_addr, e->saved_inst[0], e->saved_inst[1], e->saved_inst[2], e->saved_inst[3]);
 
     // 分配并获取一个槽位
     slot = slot_alloc(e, &e->trampoline);
@@ -524,7 +536,7 @@ static int hook_entry_install(struct hook_entry *e)
     }
 
     e->installed = true;
-    ls_log_tag("hook", "installed %s: target=0x%llx trampoline=0x%llx slot=%d work=0x%llx return=0x%llx hook=%08x %08x %08x %08x\n", e->target_sym ? e->target_sym : "<addr>", e->target_addr, (uint64_t)e->trampoline, e->slot_index, (uint64_t)e->work_fn, return_addr, hook_code[0], hook_code[1], hook_code[2], hook_code[3]);
+    ls_log_always_tag("hook", "installed %s: target=0x%llx trampoline=0x%llx slot=%d work=0x%llx return=0x%llx hook=%08x %08x %08x %08x\n", e->target_sym ? e->target_sym : "<addr>", e->target_addr, (uint64_t)e->trampoline, e->slot_index, (uint64_t)e->work_fn, return_addr, hook_code[0], hook_code[1], hook_code[2], hook_code[3]);
     return 0;
 }
 
@@ -538,7 +550,7 @@ static void hook_entry_remove(struct hook_entry *e)
     e->slot_index = -1;
     e->trampoline = NULL;
     e->installed = false;
-    ls_log_tag("hook", "removed %s\n", e->target_sym);
+    ls_log_always_tag("hook", "removed %s\n", e->target_sym);
 }
 
 // 批量安装卸载接口

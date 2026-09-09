@@ -1,49 +1,77 @@
-#!/usr/bin/env bash
+#!/bin/bash
+
+# ==============================================================
+#  ARM64 执行器测试模块多版本批量编译脚本
+# ==============================================================
+#
+#  支持的内核版本:
+#    Bazel 构建:  6.12-Android16 / 6.6-Android15 / 6.1-Android14 / 5.15-Android13 / 5.10-Android13
+#    Legacy 构建: 5.10-Android12
+#
+#  用法:
+#    chmod +x build.sh && ./build.sh
+#
+# ==============================================================
 
 set -euo pipefail
 
-VERSION="${1:-6.1-Android14}"
+BUILD_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+# 内核源码根目录 (各版本源码存放在此目录下的子文件夹)
 KERNELS_ROOT="${KERNELS_ROOT:-/root}"
-TEST_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-KERNEL_DIR="$KERNELS_ROOT/$VERSION"
-DRIVER_SRC="$(cd -- "$TEST_DIR/../.." && pwd)"
 
-case "$VERSION" in
-    6.1-Android14)
-        CLANG_PATH="$KERNEL_DIR/prebuilts/clang/host/linux-x86/clang-r487747c"
-        ;;
-    *)
-        echo "unsupported executor test kernel: $VERSION" >&2
-        exit 2
-        ;;
-esac
+# 测试模块源码和输出路径
+DRIVER_SRC="$BUILD_ROOT"
+MODULE_NAME="arm64_kernel_executor_test_module"
 
-if [[ ! -d "$KERNEL_DIR" || ! -x "$CLANG_PATH/bin/clang" ]]; then
-    echo "kernel or clang toolchain not found for $VERSION" >&2
-    exit 1
-fi
+# 强制不剥离符号的版本列表 (剥离后无法加载)
+NO_STRIP_VERSIONS=("6.12-Android16" "6.6-Android15")
 
-clean_test_build() {
-    find "$TEST_DIR" -type f \( \
-        -name '*.o' -o \
-        -name '*.o.d' -o \
-        -name '*.mod' -o \
-        -name '*.mod.c' -o \
-        -name '*.order' -o \
-        -name '*.symvers' -o \
-        -name '*.cmd' -o \
-        -name '*.usyms' \
-    \) -delete
-    find "$TEST_DIR" -type d -name '.tmp_versions' -prune -exec rm -rf -- {} +
+# 编译外部模块时不导入内核导出的 Module.symvers，生成空 __versions 的版本列表。
+# 这样 ko 的 vermagic 仍然带 modversions，但不会携带具体符号 CRC
+NO_CRC_VERSIONS=(
+    "6.12-Android16"
+    "6.6-Android15"
+    "6.1-Android14"
+    "5.15-Android13"
+    "5.10-Android13"
+    "5.10-Android12"
+)
+
+
+GREEN='\e[32m'
+RED='\e[31m'
+YELLOW='\e[33m'
+BLUE='\e[34m'
+NC='\e[0m'
+
+# 编译结果收集
+declare -a BUILD_RESULTS=()
+
+
+log_info()  { echo -e "${GREEN}$*${NC}"; }
+log_warn()  { echo -e "${YELLOW}$*${NC}"; }
+log_error() { echo -e "${RED}$*${NC}"; }
+log_title() { echo -e "${BLUE}====================================================${NC}"; }
+
+contains_version() {
+    local version="$1"
+    shift
+
+    local item
+    for item in "$@"; do
+        [[ "$version" == "$item" ]] && return 0
+    done
+
+    return 1
 }
 
-trap clean_test_build EXIT
+generate_instruction_table() {
+    local instruction_file="$DRIVER_SRC/../instruction.txt"
+    local output_file="$DRIVER_SRC/arm64_instruction_table.h"
+    local output_temp="$output_file.tmp.$$"
+    local instruction_count
 
-cd "$KERNEL_DIR"
-
-{
-    echo '#ifndef ARM64_INSTRUCTION_TABLE_H'
-    echo '#define ARM64_INSTRUCTION_TABLE_H'
     instruction_count="$(awk '
         {
             gsub(/\r/, "")
@@ -59,67 +87,542 @@ cd "$KERNEL_DIR"
             if (invalid) exit 1
             print count + 0
         }
-    ' "$TEST_DIR/../instruction.txt")" || exit 1
-    echo "#define ARM64_TEST_INSTRUCTION_COUNT ${instruction_count}U"
-    echo '#include <linux/types.h>'
-    echo 'static const u32 arm64_test_instructions[ARM64_TEST_INSTRUCTION_COUNT] = {'
-    while IFS= read -r raw_instruction; do
-        raw_instruction="${raw_instruction%$'\r'}"
-        [[ "$raw_instruction" =~ [^[:space:]] ]] || continue
-        [[ "$raw_instruction" =~ ^[[:xdigit:]]{8}$ ]] || exit 1
-        printf '    0x%sU,\n' "$raw_instruction"
-    done < "$TEST_DIR/../instruction.txt"
-    echo '};'
-    echo '#endif'
-} > "$TEST_DIR/arm64_instruction_table.h"
+    ' "$instruction_file")" || return 1
 
-bazel_out="$(readlink -f bazel-bin/common/kernel_aarch64 2>/dev/null || true)"
-if [[ -z "$bazel_out" || ! -d "$bazel_out" || \
-      ! -f "$bazel_out/../kernel_aarch64_modules_prepare/modules_prepare_outdir.tar.gz" ]]; then
-    tools/bazel build //common:kernel_aarch64 //common:kernel_aarch64_modules_prepare
-    bazel_out="$(readlink -f bazel-bin/common/kernel_aarch64)"
-fi
+    {
+        echo '#ifndef ARM64_INSTRUCTION_TABLE_H'
+        echo '#define ARM64_INSTRUCTION_TABLE_H'
+        echo "#define ARM64_TEST_INSTRUCTION_COUNT ${instruction_count}U"
+        echo '#include <linux/types.h>'
+        echo 'static const u32 arm64_test_instructions[ARM64_TEST_INSTRUCTION_COUNT] = {'
+        while IFS= read -r raw_instruction; do
+            raw_instruction="${raw_instruction%$'\r'}"
+            [[ "$raw_instruction" =~ [^[:space:]] ]] || continue
+            printf '    0x%sU,\n' "$raw_instruction"
+        done < "$instruction_file"
+        echo '};'
+        echo '#endif'
+    } > "$output_temp"
+    mv "$output_temp" "$output_file"
+}
 
-if [[ -f "$bazel_out/../kernel_aarch64_modules_prepare/modules_prepare_outdir.tar.gz" ]]; then
-    tar -xzf "$bazel_out/../kernel_aarch64_modules_prepare/modules_prepare_outdir.tar.gz" -C "$bazel_out"
-fi
+calculate_build_id() {
+    local version="$1"
 
-if [[ ! -f "$bazel_out/include/config/auto.conf" || \
-      ! -f "$bazel_out/include/generated/asm-offsets.h" ]]; then
-    echo "modules_prepare output is incomplete: $bazel_out" >&2
-    exit 1
-fi
+    {
+        printf '%s\n' "$version"
+        sha256sum "$DRIVER_SRC/arm64_kernel_executor_test.c" \
+            "$DRIVER_SRC/executor_protocol.h" \
+            "$DRIVER_SRC/arm64_instruction_table.h" \
+            "$DRIVER_SRC/Kbuild"
+        find "$DRIVER_SRC/../../arm64_decode" "$DRIVER_SRC/../../arm64_emulate" \
+            -type f \( -name '*.c' -o -name '*.h' \) -print0 |
+            sort -z | xargs -0 sha256sum
+    } | sha256sum | awk '{print $1}'
+}
 
-symvers_file="$bazel_out/Module.symvers"
-symvers_backup=""
-if [[ -f "$symvers_file" ]]; then
-    symvers_backup="$symvers_file.executor_test_bak.$$"
-    mv "$symvers_file" "$symvers_backup"
-fi
+fix_empty_ext_modversions() {
+    local mod_c="$DRIVER_SRC/${MODULE_NAME}.mod.c"
 
-set +e
-env PATH="$CLANG_PATH/bin:$PATH" \
-    make -C "$KERNEL_DIR/common" \
-        O="$bazel_out" \
-        M="$TEST_DIR" \
+    if [[ ! -f "$mod_c" ]]; then
+        return 1
+    fi
+
+    # Android 16 / 6.12 开启扩展 modversions 时，空 CRC 构建可能生成非法的：
+    #   ____version_ext_names[] = ;
+    # 这里把它修成空字符串，让最后的 mod.o/ko 链接继续完成。
+    if grep -q '__section("__version_ext_names")' "$mod_c" && \
+       grep -q '^[[:space:]]*;[[:space:]]*$' "$mod_c"; then
+        perl -0pi -e 's/(__used __section\("__version_ext_names"\) =\n);/$1"";/' "$mod_c"
+        return 0
+    fi
+
+    return 1
+}
+
+# 清理 Kbuild 中间文件，保留源码、构建脚本和所有 .ko
+clean_driver_build() {
+    if [[ ! -d "$DRIVER_SRC" ]]; then
+        log_error "driver source directory not found: $DRIVER_SRC"
+        return 1
+    fi
+
+    find "$DRIVER_SRC" "$DRIVER_SRC/../../arm64_decode" \
+        "$DRIVER_SRC/../../arm64_emulate" -type f \( \
+        -name '*.o' -o \
+        -name '*.o.d' -o \
+        -name '*.mod' -o \
+        -name '*.mod.c' -o \
+        -name '*.order' -o \
+        -name '*.symvers' -o \
+        -name '*.cmd' -o \
+        -name '*.usyms' -o \
+        -name '*.o.tmp' \
+    \) -delete
+
+    find "$DRIVER_SRC" -type d -name '.tmp_versions' -prune -exec rm -rf -- {} +
+    rm -f "$DRIVER_SRC/${MODULE_NAME}.lds"
+}
+
+cleanup_driver_build_on_exit() {
+    local status=$?
+
+    trap - EXIT
+    clean_driver_build || true
+    exit "$status"
+}
+
+# 处理编译产物: 剥离符号 / 复制 / 重命名
+# 参数: $1=版本名  $2=clang工具链路径(可选, 为空则从PATH找)
+handle_output() {
+    local version="$1"
+    local clang_path="${2:-}"
+    local build_id="$3"
+    local source_ko="$DRIVER_SRC/${MODULE_NAME}.ko"
+    local target_ko="$DRIVER_SRC/${version}.ko"
+    local build_result="$version: ✅"
+    local embedded_build_id_count
+
+    if [[ ! -f "$source_ko" ]]; then
+        log_error "编译 $version 失败! (未生成 ko 文件)"
+        BUILD_RESULTS+=("$version: ❌ 编译失败")
+        return 1
+    fi
+    embedded_build_id_count="$(strings "$source_ko" |
+        grep -Fxc "arm64_executor_build_id=$build_id" || true)"
+    if [[ "$embedded_build_id_count" -lt 1 ]]; then
+        log_error "编译 $version 失败! (模块构建身份不匹配)"
+        rm -f "$source_ko" "$target_ko"
+        BUILD_RESULTS+=("$version: ❌ 构建身份不匹配")
+        return 1
+    fi
+
+    # 检查是否属于强制不剥离版本
+    local force_no_strip=false
+    if contains_version "$version" "${NO_STRIP_VERSIONS[@]}"; then
+        force_no_strip=true
+    fi
+
+    if [[ "$force_no_strip" == "true" ]]; then
+        log_warn "注意: 版本 $version 强制保留符号 (剥离后无法加载)"
+        cp "$source_ko" "$target_ko"
+    elif [[ "$STRIP_CHOICE" == "y" || "$STRIP_CHOICE" == "Y" ]]; then
+        # 确定 strip 工具路径
+        local strip_cmd=""
+        if [[ -n "$clang_path" && -x "$clang_path/bin/llvm-strip" ]]; then
+            strip_cmd="$clang_path/bin/llvm-strip"
+        elif command -v llvm-strip &>/dev/null; then
+            strip_cmd="llvm-strip"
+        else
+            log_warn "未找到 llvm-strip，跳过剥离"
+            cp "$source_ko" "$target_ko"
+            build_result="$version: ✅ (未剥离, 工具缺失)"
+        fi
+        if [[ -n "$strip_cmd" ]]; then
+            log_info "正在剥离符号..."
+            "$strip_cmd" --strip-debug -o "$target_ko" "$source_ko"
+        fi
+    else
+        log_info "保留符号，创建副本..."
+        cp "$source_ko" "$target_ko"
+    fi
+
+    embedded_build_id_count="$(strings "$target_ko" |
+        grep -Fxc "arm64_executor_build_id=$build_id" || true)"
+    if [[ "$embedded_build_id_count" -lt 1 ]]; then
+        log_error "编译 $version 失败! (版本成品构建身份不匹配)"
+        rm -f "$source_ko" "$target_ko"
+        BUILD_RESULTS+=("$version: ❌ 成品身份不匹配")
+        return 1
+    fi
+    rm -f "$source_ko"
+    BUILD_RESULTS+=("$build_result")
+    log_info "生成完成: $target_ko"
+}
+
+# ======================== Bazel 构建 =========================
+# 适用于: Android 13+ 内核 (6.12-Android16 / 6.6-Android15 / 6.1-Android14 / 5.15-Android13 / 5.10-Android13)
+
+build_kernel() {
+    local version="$1"
+    local clang_path="$2"
+    local cross_prefix="$3"
+    local extra_params="${4:-}"
+
+    local kernel_dir="$KERNELS_ROOT/$version"
+    local build_id
+
+    log_title
+    log_warn "正在开始编译内核版本: $version"
+
+    if [[ ! -d "$kernel_dir" ]]; then
+        log_error "错误: 找不到内核目录 $kernel_dir"
+        BUILD_RESULTS+=("$version: ❌ 目录不存在")
+        return 1
+    fi
+
+    log_warn "正在清理旧的构建产物..."
+    clean_driver_build
+    rm -f "$DRIVER_SRC/${MODULE_NAME}.ko" "$DRIVER_SRC/${version}.ko"
+    build_id="$(calculate_build_id "$version")"
+
+    # --- 准备 Bazel 环境 ---
+    cd "$kernel_dir" || return 1
+    local bazel_out
+    bazel_out=$(readlink -f bazel-bin/common/kernel_aarch64 2>/dev/null || true)
+
+    if [[ -z "$bazel_out" || ! -d "$bazel_out" ]]; then
+        log_warn "检测到 $version 未进行内核编译，尝试 Bazel build..."
+        tools/bazel build //common:kernel_aarch64 //common:kernel_aarch64_modules_prepare
+        bazel_out=$(readlink -f bazel-bin/common/kernel_aarch64)
+    fi
+
+    # 解压 modules_prepare 环境
+    cd "$bazel_out" || return 1
+    if [[ -f "../kernel_aarch64_modules_prepare/modules_prepare_outdir.tar.gz" ]]; then
+        tar -xzf ../kernel_aarch64_modules_prepare/modules_prepare_outdir.tar.gz
+    fi
+
+    # --- 编译模块 ---
+    cd "$kernel_dir" || return 1
+
+    log_info "执行 Make 编译 ($version)..."
+
+    local symvers_file="$bazel_out/Module.symvers"
+    local symvers_backup=""
+    local modpost_warn_param=""
+
+    if contains_version "$version" "${NO_CRC_VERSIONS[@]}"; then
+        # Kbuild/modpost 会从输出目录的 Module.symvers 读取符号 CRC 并写入 ko 的 __versions。
+        # 临时改名隐藏它，配合 KBUILD_MODPOST_WARN=1，把未解析符号降级为 warning，最终得到空 CRC ko。
+        modpost_warn_param="KBUILD_MODPOST_WARN=1 CONFIG_EXTENDED_MODVERSIONS=n"
+        if [[ -f "$symvers_file" ]]; then
+            symvers_backup="$symvers_file.no_crc_bak.$$"
+            log_warn "临时隐藏 $symvers_file，避免 modpost 导入 CRC"
+            mv "$symvers_file" "$symvers_backup"
+        else
+            log_warn "未找到 $symvers_file，modpost 将不会导入 CRC"
+        fi
+    fi
+
+    # 注意: extra_params 故意不加引号, 依赖 word splitting 拆分多参数
+    # shellcheck disable=SC2086
+    set +e
+    env PATH="$clang_path/bin:$PATH" \
+        make -C "$kernel_dir/common" \
+            O="$bazel_out" \
+            M="$DRIVER_SRC" \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CONFIG_DEBUG_INFO_BTF_MODULES= \
+            CROSS_COMPILE="$cross_prefix" \
+            $extra_params \
+            $modpost_warn_param \
+            KCFLAGS="-DARM64_EXECUTOR_BUILD_ID=\\\"$build_id\\\" -frandom-seed=$build_id" \
+            modules -j"$(nproc)"
+    local make_status=$?
+    #make 第一次失败后，判断需要“无 CRC”构建。用 fix_empty_ext_modversions() 去修 lsdriver.mod.c 里那个空的 __version_ext_names 初始化问题，在重试最终链接阶段
+    if [[ $make_status -ne 0 ]] && contains_version "$version" "${NO_CRC_VERSIONS[@]}" && fix_empty_ext_modversions; then
+        # 第一次 make 已经完成 modpost 并留下 lsdriver.mod.c；这里只重试最终编译/链接阶段。
+        log_warn "检测到空 __version_ext_names，已修补 lsdriver.mod.c 并重试最终链接"
+        env PATH="$clang_path/bin:$PATH" \
+            make -C "$kernel_dir/common" \
+                O="$bazel_out" \
+                M="$DRIVER_SRC" \
+                ARCH=arm64 \
+                LLVM=1 \
+                LLVM_IAS=1 \
+                CONFIG_DEBUG_INFO_BTF_MODULES= \
+                CROSS_COMPILE="$cross_prefix" \
+                $extra_params \
+                $modpost_warn_param \
+                KCFLAGS="-DARM64_EXECUTOR_BUILD_ID=\\\"$build_id\\\" -frandom-seed=$build_id" \
+                modules -j"$(nproc)"
+        make_status=$?
+    fi
+
+    set -e
+
+    if [[ -n "$symvers_backup" ]]; then
+        mv "$symvers_backup" "$symvers_file"
+        log_info "已恢复 $symvers_file"
+    fi
+
+    if [[ $make_status -ne 0 ]]; then
+        BUILD_RESULTS+=("$version: ❌ 编译失败")
+        clean_driver_build
+        return "$make_status"
+    fi
+
+    local output_status=0
+    handle_output "$version" "$clang_path" "$build_id" || output_status=$?
+    clean_driver_build
+    return "$output_status"
+}
+
+# ======================== Legacy 构建 ========================
+# 适用于: Android 12 及以下 (5.10-Android12)
+build_legacy_kernel() {
+    local version="5.10-Android12"
+    local kernel_dir="$KERNELS_ROOT/$version"
+    local build_id
+
+    log_title
+    log_warn "正在开始编译内核版本: $version (Legacy)"
+
+    if [[ ! -d "$kernel_dir" ]]; then
+        log_error "错误: 找不到内核目录 $kernel_dir"
+        BUILD_RESULTS+=("$version: ❌ 目录不存在")
+        return 1
+    fi
+
+    log_warn "正在清理旧的构建产物..."
+    clean_driver_build
+    rm -f "$DRIVER_SRC/${MODULE_NAME}.ko" "$DRIVER_SRC/${version}.ko"
+    build_id="$(calculate_build_id "$version")"
+
+    cd "$kernel_dir" || return 1
+
+    local common_out_dir
+    common_out_dir="$(pwd)/out/$version/common"
+    local kernel_build_dir="$common_out_dir/common"
+    local kernel_config="$kernel_build_dir/.config"
+    local kernel_image="$kernel_build_dir/arch/arm64/boot/Image"
+    local dist_image="$common_out_dir/dist/Image"
+    local kernel_src="$kernel_dir/common"
+
+    # ============ 与 build.config.common 完全一致的工具链 ============
+    local legacy_clang="$kernel_dir/prebuilts-master/clang/host/linux-x86/clang-r416183b"
+    local build_tools="$kernel_dir/build/build-tools/path/linux-x86"
+    local FULL_PATH="$legacy_clang/bin:$build_tools:$PATH"
+
+    if [[ ! -x "$legacy_clang/bin/clang" ]]; then
+        log_error "❌ 找不到 clang"
+        BUILD_RESULTS+=("$version: ❌ clang 不存在")
+        return 1
+    fi
+
+    log_info "使用 clang: $legacy_clang"
+
+    # --- 编译前检查 ---
+    # 外部模块只需要已经配置/准备好的输出目录，不需要每次链接完整 vmlinux。
+    # Android12 的 vmlinux LTO 很吃内存，WSL 容易在这里被 OOM kill，所以优先复用已有 .config。
+    if [[ -f "$kernel_config" ]]; then
+        log_info "✅ 检测到内核配置 (.config)，跳过全量内核链接..."
+    elif [[ -f "$kernel_image" ]] || [[ -f "$dist_image" ]]; then
+        log_info "✅ 检测到内核产物 (Image)，跳过全量编译..."
+    else
+        log_warn "🚀 未找到内核配置，执行 build/build.sh 初始化输出目录..."
+        BUILD_CONFIG=common/build.config.gki.aarch64 \
+            OUT_DIR="$common_out_dir" \
+            build/build.sh
+        if [[ ! -f "$kernel_config" ]]; then
+            log_error "❌ 内核输出目录初始化失败"
+            BUILD_RESULTS+=("$version: ❌ 内核编译失败")
+            return 1
+        fi
+    fi
+
+
+    # --- modules_prepare ---
+    log_warn "⚡ 正在准备模块构建环境..."
+    env PATH="$FULL_PATH" \
+        HOSTCFLAGS="--sysroot=$kernel_dir/build/build-tools/sysroot -I$kernel_dir/prebuilts/kernel-build-tools/linux-x86/include" \
+        HOSTLDFLAGS="--sysroot=$kernel_dir/build/build-tools/sysroot -L$kernel_dir/prebuilts/kernel-build-tools/linux-x86/lib64 -fuse-ld=lld --rtlib=compiler-rt" \
+    make -C "$kernel_src" \
+        O="$kernel_build_dir" \
         ARCH=arm64 \
         LLVM=1 \
         LLVM_IAS=1 \
         CONFIG_DEBUG_INFO_BTF_MODULES= \
         CROSS_COMPILE=aarch64-linux-gnu- \
-        KBUILD_MODPOST_WARN=1 \
-        CONFIG_EXTENDED_MODVERSIONS=n \
+        HOSTCC=clang \
+        HOSTCXX=clang++ \
+        HOSTLD=ld.lld \
+        modules_prepare
+
+    # --- 编译外部模块 ---
+    log_info "正在编译外部模块 ($version)..."
+
+    local symvers_file="$kernel_build_dir/Module.symvers"
+    local symvers_backup=""
+    local modpost_warn_param=""
+
+    if contains_version "$version" "${NO_CRC_VERSIONS[@]}"; then
+        # Legacy 构建同样依赖输出目录 Module.symvers 写入 __versions，处理方式与 Bazel 分支一致。
+        modpost_warn_param="KBUILD_MODPOST_WARN=1 CONFIG_EXTENDED_MODVERSIONS=n"
+        if [[ -f "$symvers_file" ]]; then
+            symvers_backup="$symvers_file.no_crc_bak.$$"
+            log_warn "临时隐藏 $symvers_file，避免 modpost 导入 CRC"
+            mv "$symvers_file" "$symvers_backup"
+        else
+            log_warn "未找到 $symvers_file，modpost 将不会导入 CRC"
+        fi
+    fi
+
+    set +e
+    env PATH="$FULL_PATH" \
+        HOSTCFLAGS="--sysroot=$kernel_dir/build/build-tools/sysroot -I$kernel_dir/prebuilts/kernel-build-tools/linux-x86/include" \
+        HOSTLDFLAGS="--sysroot=$kernel_dir/build/build-tools/sysroot -L$kernel_dir/prebuilts/kernel-build-tools/linux-x86/lib64 -fuse-ld=lld --rtlib=compiler-rt" \
+    make -C "$kernel_src" \
+        O="$kernel_build_dir" \
+        M="$DRIVER_SRC" \
+        ARCH=arm64 \
+        LLVM=1 \
+        LLVM_IAS=1 \
+        CROSS_COMPILE=aarch64-linux-gnu- \
+        HOSTCC=clang \
+        HOSTCXX=clang++ \
+        HOSTLD=ld.lld \
+        $modpost_warn_param \
+        KCFLAGS="-DARM64_EXECUTOR_BUILD_ID=\\\"$build_id\\\" -frandom-seed=$build_id" \
         modules -j"$(nproc)"
-make_status=$?
-set -e
+    local make_status=$?
 
-if [[ -n "$symvers_backup" ]]; then
-    mv "$symvers_backup" "$symvers_file"
-fi
+    if [[ $make_status -ne 0 ]] && contains_version "$version" "${NO_CRC_VERSIONS[@]}" && fix_empty_ext_modversions; then
+        # 以防万一兼容 Legacy 内核开启扩展 modversions 的情况。
+        log_warn "检测到空 __version_ext_names，已修补 lsdriver.mod.c 并重试最终链接"
+        env PATH="$FULL_PATH" \
+            HOSTCFLAGS="--sysroot=$kernel_dir/build/build-tools/sysroot -I$kernel_dir/prebuilts/kernel-build-tools/linux-x86/include" \
+            HOSTLDFLAGS="--sysroot=$kernel_dir/build/build-tools/sysroot -L$kernel_dir/prebuilts/kernel-build-tools/linux-x86/lib64 -fuse-ld=lld --rtlib=compiler-rt" \
+        make -C "$kernel_src" \
+            O="$kernel_build_dir" \
+            M="$DRIVER_SRC" \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CONFIG_DEBUG_INFO_BTF_MODULES= \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            HOSTCC=clang \
+            HOSTCXX=clang++ \
+            HOSTLD=ld.lld \
+            $modpost_warn_param \
+            KCFLAGS="-DARM64_EXECUTOR_BUILD_ID=\\\"$build_id\\\" -frandom-seed=$build_id" \
+            modules -j"$(nproc)"
+        make_status=$?
+    fi
 
-if [[ $make_status -ne 0 ]]; then
-    exit "$make_status"
-fi
+    set -e
 
-test -f "$TEST_DIR/arm64_kernel_executor_test_module.ko"
-echo "built: $TEST_DIR/arm64_kernel_executor_test_module.ko"
+    if [[ -n "$symvers_backup" ]]; then
+        mv "$symvers_backup" "$symvers_file"
+        log_info "已恢复 $symvers_file"
+    fi
+
+    if [[ $make_status -ne 0 ]]; then
+        BUILD_RESULTS+=("$version: ❌ 编译失败")
+        clean_driver_build
+        return "$make_status"
+    fi
+
+    local output_status=0
+    handle_output "$version" "$legacy_clang" "$build_id" || output_status=$?
+    clean_driver_build
+    return "$output_status"
+}
+
+
+
+
+
+main() {
+    local requested_versions=("$@")
+    local build_failed=0
+
+    trap cleanup_driver_build_on_exit EXIT
+    generate_instruction_table
+
+    STRIP_CHOICE="${STRIP_CHOICE:-}"
+    if [[ -z "$STRIP_CHOICE" ]]; then
+        log_warn "是否需要剥离(strip)符号？"
+        echo -e "  输入 ${GREEN}'y'${NC} 进行剥离 (减小体积)"
+        echo -e "  输入 ${GREEN}'n'${NC} 不剥离 (保留调试符号)"
+        read -rp "请输入 (y/n): " STRIP_CHOICE
+    fi
+
+
+    if [[ "$STRIP_CHOICE" != "y" && "$STRIP_CHOICE" != "Y" && \
+          "$STRIP_CHOICE" != "n" && "$STRIP_CHOICE" != "N" ]]; then
+        log_warn "无效输入，默认不剥离"
+        STRIP_CHOICE="n"
+    fi
+
+    # 导出给子函数使用 (非 export, 同进程内可见)
+    readonly STRIP_CHOICE
+
+    if [[ ${#requested_versions[@]} -gt 0 ]]; then
+        log_warn "仅编译指定版本: ${requested_versions[*]}"
+    fi
+
+    should_build() {
+        [[ ${#requested_versions[@]} -eq 0 ]] || contains_version "$1" "${requested_versions[@]}"
+    }
+
+    # 内核 6.12-Android16
+    if should_build "6.12-Android16" && ! build_kernel "6.12-Android16" \
+        "$KERNELS_ROOT/6.12-Android16/prebuilts/clang/host/linux-x86/clang-r536225" \
+        "aarch64-linux-gnu-" \
+        "CLANG_TRIPLE=aarch64-linux-gnu-"; then
+        build_failed=1
+    fi
+
+    # 2. 内核 6.6-Android15
+    if should_build "6.6-Android15" && ! build_kernel "6.6-Android15" \
+        "$KERNELS_ROOT/6.6-Android15/prebuilts/clang/host/linux-x86/clang-r510928" \
+        "aarch64-linux-gnu-" \
+        "CLANG_TRIPLE=aarch64-linux-gnu-"; then
+        build_failed=1
+    fi
+
+    # 3. 内核 6.1-Android14
+    if should_build "6.1-Android14" && ! build_kernel "6.1-Android14" \
+        "$KERNELS_ROOT/6.1-Android14/prebuilts/clang/host/linux-x86/clang-r487747c" \
+        "aarch64-linux-gnu-" \
+        "LLVM_TOOLCHAIN_PATH=$KERNELS_ROOT/6.1-Android14/prebuilts/clang/host/linux-x86/clang-r487747c"; then
+        build_failed=1
+    fi
+
+    # 4. 内核 5.15-Android13
+    if should_build "5.15-Android13" && ! build_kernel "5.15-Android13" \
+        "$KERNELS_ROOT/5.15-Android13/prebuilts/clang/host/linux-x86/clang-r450784e" \
+        "aarch64-linux-gnu-" \
+        "LLVM_TOOLCHAIN_PATH=$KERNELS_ROOT/5.15-Android13/prebuilts/clang/host/linux-x86/clang-r450784e"; then
+        build_failed=1
+    fi
+
+    # 5. 5.10-Android13
+    if should_build "5.10-Android13" && ! build_kernel "5.10-Android13" \
+        "$KERNELS_ROOT/5.10-Android13/prebuilts/clang/host/linux-x86/clang-r450784e" \
+        "aarch64-linux-gnu-" \
+        "LLVM_TOOLCHAIN_PATH=$KERNELS_ROOT/5.10-Android13/prebuilts/clang/host/linux-x86/clang-r450784e KBUILD_MODPOST_WARN=1"; then
+        build_failed=1
+    fi
+
+    # 6. 5.10-Android12 (Legacy)
+    if should_build "5.10-Android12" && ! build_legacy_kernel; then
+        build_failed=1
+    fi
+
+    log_title
+    echo ""
+    echo -e "${BLUE}编译结果汇总:${NC}"
+    echo -e "${BLUE}----------------------------------------------------${NC}"
+    for result in "${BUILD_RESULTS[@]}"; do
+        echo -e "  $result"
+    done
+    echo -e "${BLUE}----------------------------------------------------${NC}"
+    echo ""
+
+    clean_driver_build
+
+    echo -e "${BLUE}产物列表:${NC}"
+    # shellcheck disable=SC2086
+    ls -lh "$DRIVER_SRC"/[0-9]*-Android*.ko 2>/dev/null || \
+        log_error "未找到任何 .ko 文件"
+
+    log_title
+    return "$build_failed"
+}
+
+main "$@"

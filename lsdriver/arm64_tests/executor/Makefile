@@ -5,30 +5,37 @@ SHELL := /bin/bash
 VERSION ?= 6.1-Android14
 KERNELS_ROOT ?= /root
 
-.PHONY: help module initramfs build clean
+.PHONY: help module modules device-binaries build clean
 
 help:
 	@printf '%s\n' \
 		'usage: make [VERSION=6.1-Android14] <target>' \
 		'' \
-		'  module     build the kernel test module' \
-		'  initramfs  build the initramfs (also builds module)' \
-		'  build      build module and initramfs' \
-		'  clean      remove generated headers, images, and Kbuild output'
+		'  module     build one kernel test module selected by VERSION' \
+		'  modules    build kernel test modules for all supported versions' \
+		'  device-binaries  build Android ARM64 test binaries' \
+		'  build      build all kernel modules and Android test binaries' \
+		'  clean      remove generated headers, binaries, and Kbuild output'
 
 module:
 	KERNELS_ROOT='$(KERNELS_ROOT)' ./build_kernel_executor_test.sh '$(VERSION)'
 
-initramfs: module
-	KERNELS_ROOT='$(KERNELS_ROOT)' ./build_executor_initramfs.sh '$(VERSION)'
+modules:
+	KERNELS_ROOT='$(KERNELS_ROOT)' ./build_kernel_executor_test.sh
 
-build: initramfs
+device-binaries:
+	KERNELS_ROOT='$(KERNELS_ROOT)' ./build_android_executor_tests.sh
+
+build: modules device-binaries
 
 clean:
 	rm -f arm64_instruction_table.h \
 		arm64_kernel_executor_test_module.ko \
-		executor-test-initramfs.cpio.gz
-	find . -type f \( \
+		arm64_kernel_executor_test_module.lds \
+		[0-9]*-Android*.ko \
+		executor_test_runner \
+		real-device-executor-test.log
+	find . ../../arm64_decode ../../arm64_emulate -type f \( \
 		-name '*.o' -o \
 		-name '*.o.d' -o \
 		-name '*.mod' -o \
@@ -36,6 +43,7 @@ clean:
 		-name '*.order' -o \
 		-name '*.symvers' -o \
 		-name '*.cmd' -o \
-		-name '*.usyms' \
+		-name '*.usyms' -o \
+		-name '*.o.tmp' \
 	\) -delete
 	find . -type d -name '.tmp_versions' -prune -exec rm -rf -- {} +

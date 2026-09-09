@@ -7,9 +7,9 @@ DRIVER_DIR := $(abspath $(TEST_DIR)/../..)
 CC ?= gcc
 PYTHON ?= python3
 LLVM_TOOLCHAIN ?= /root/6.1-Android14/prebuilts/clang/host/linux-x86/clang-r487747c
-override EXPECTED_ROWS := 8339
-override EXPECTED_UNIQUE_WORDS := 2423
-override EXPECTED_INPUT_SHA256 := 0351EFC1317351C13479F3B74ED015F4C7CB8897A22D357896282811F0C067B1
+override EXPECTED_ROWS := 9362
+override EXPECTED_UNIQUE_WORDS := 2938
+override EXPECTED_INPUT_SHA256 := 2EB84464AA498B65014CE0C115C9A7948450A4E1C5039ADEC818037A9015BBEC
 LLVM_SOURCE_REVISION := d9f89f4d16663d5012e5c09495f3b30ece3d2362
 
 DECODER_CFLAGS := -std=gnu11 -O2 -Wall -Wextra -Werror
@@ -23,8 +23,9 @@ DECODER_SOURCES := \
 	$(DRIVER_DIR)/arm64_decode/arm64_decode_sve.c \
 	$(DRIVER_DIR)/arm64_decode/arm64_decode_sme.c
 
-.PHONY: strict-test dynamic-bitfield-test test
+.PHONY: strict-test test
 
+# Decoder validation is host-only; it never executes target instructions.
 strict-test test:
 	set -euo pipefail
 	instruction_file='$(TEST_DIR)/../instruction.txt'
@@ -74,16 +75,3 @@ strict-test test:
 		'$(DRIVER_DIR)/arm64_decode/arm64_decode.h' \
 		"$$build_dir/decoder.tsv"
 	echo 'ARM64 instruction.txt decoder/LLVM strict audit: PASS'
-
-dynamic-bitfield-test:
-	set -euo pipefail
-	build_dir="$$(mktemp -d "$${TMPDIR:-/tmp}/lsdriver-arm64-bitfield.XXXXXX")"
-	trap 'rm -rf "$$build_dir"' EXIT
-	'$(LLVM_TOOLCHAIN)/bin/clang' --target=aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu \
-		-I/root/6.1-Android14/prebuilts/build-tools/sysroots/aarch64-unknown-linux-musl/include \
-		-I/root/6.1-Android14/common/include -O2 \
-		-ffreestanding -fno-stack-protector -fno-pic -nostdlib -static \
-		-Wall -Wextra -Werror '$(TEST_DIR)/arm64_dynamic_bitfield_test.c' \
-		-fuse-ld=lld -Wl,-e,_start -o "$$build_dir/arm64_dynamic_bitfield_test"
-	qemu-aarch64 "$$build_dir/arm64_dynamic_bitfield_test"
-	echo 'ARM64 dynamic bitfield templates: PASS (32/64-bit all immr/imms combinations)'

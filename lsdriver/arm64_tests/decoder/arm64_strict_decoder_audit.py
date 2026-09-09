@@ -94,7 +94,7 @@ def non_negative_int(value):
 def load_identity_pairs(path):
     with open(path, newline="", encoding="utf-8") as mapping_file:
         rows = list(csv.DictReader(mapping_file, delimiter="\t"))
-    return {(normalize_instruction_name(row["instruction"].strip()), row["llvm_opcode"].strip()) for row in rows}
+    return {(row["instruction"].strip(), row["llvm_opcode"].strip()) for row in rows}
 
 
 def llvm_operands(row):
@@ -230,7 +230,7 @@ def llvm_project_fields(decoder_row, llvm_row, name):
                 scale = 8
             elif opcode.startswith(("LDRW", "STRW", "LDRSW")) and opcode.endswith("ui"):
                 scale = 4
-            elif opcode.startswith(("LDRH", "STRH")) and opcode.endswith("ui"):
+            elif opcode.startswith(("LDRH", "LDRSH", "STRH")) and opcode.endswith("ui"):
                 scale = 2
             elif opcode.startswith(("LDRB", "STRB")) and opcode.endswith("ui"):
                 scale = 1
@@ -292,61 +292,6 @@ def audit_llvm_projected_fields(rows, llvm_rows, names):
     return failures, covered
 
 
-def normalize_instruction_name(name):
-    replacements = {
-        "ARM64_INST_LD1_SINGLE_STRUCTURE_S": "ARM64_INST_LD1",
-        "ARM64_INST_LDADDAL_X": "ARM64_INST_LDADDAL",
-        "ARM64_INST_LDAPR_X": "ARM64_INST_LDAPR",
-        "ARM64_INST_LDAR_X": "ARM64_INST_LDAR",
-        "ARM64_INST_LDNPX_GPR": "ARM64_INST_LDNP_GPR",
-        "ARM64_INST_LDPX_GPR_OFFSET": "ARM64_INST_LDP_GPR_OFFSET",
-        "ARM64_INST_LDPX_GPR_POST_INDEX": "ARM64_INST_LDP_GPR_POST_INDEX",
-        "ARM64_INST_LDPD_FP_SIMD_OFFSET": "ARM64_INST_LDP_FP_SIMD_OFFSET",
-        "ARM64_INST_LDPQ_FP_SIMD_OFFSET": "ARM64_INST_LDP_FP_SIMD_OFFSET",
-        "ARM64_INST_LDPS_FP_SIMD_OFFSET": "ARM64_INST_LDP_FP_SIMD_OFFSET",
-        "ARM64_INST_LDPD_FP_SIMD_POST_INDEX": "ARM64_INST_LDP_FP_SIMD_POST_INDEX",
-        "ARM64_INST_LDRB_GPR_UNSIGNED_OFFSET": "ARM64_INST_LDR_GPR_UNSIGNED_OFFSET",
-        "ARM64_INST_LDRH_GPR_UNSIGNED_OFFSET": "ARM64_INST_LDR_GPR_UNSIGNED_OFFSET",
-        "ARM64_INST_LDRW_GPR_UNSIGNED_OFFSET": "ARM64_INST_LDR_GPR_UNSIGNED_OFFSET",
-        "ARM64_INST_LDRX_GPR_UNSIGNED_OFFSET": "ARM64_INST_LDR_GPR_UNSIGNED_OFFSET",
-        "ARM64_INST_LDRX_GPR_REGISTER_OFFSET": "ARM64_INST_LDR_GPR_REGISTER_OFFSET",
-        "ARM64_INST_LDRX_LITERAL_GPR": "ARM64_INST_LDR_GPR_LITERAL",
-        "ARM64_INST_LDRSW_X_GPR_UNSIGNED_OFFSET": "ARM64_INST_LDRSW_GPR_UNSIGNED_OFFSET",
-        "ARM64_INST_LDTRX_GPR": "ARM64_INST_LDTR_GPR",
-        "ARM64_INST_LDURD_FP_SIMD": "ARM64_INST_LDUR_FP_SIMD",
-        "ARM64_INST_LDURS_FP_SIMD": "ARM64_INST_LDUR_FP_SIMD",
-        "ARM64_INST_LDURX_GPR": "ARM64_INST_LDUR_GPR",
-        "ARM64_INST_LDXRX": "ARM64_INST_LDXR",
-        "ARM64_INST_STLR_X": "ARM64_INST_STLR",
-        "ARM64_INST_STNPX_GPR": "ARM64_INST_STNP_GPR",
-        "ARM64_INST_STPX_GPR_OFFSET": "ARM64_INST_STP_GPR_OFFSET",
-        "ARM64_INST_STPX_GPR_PRE_INDEX": "ARM64_INST_STP_GPR_PRE_INDEX",
-        "ARM64_INST_STPD_FP_SIMD_OFFSET": "ARM64_INST_STP_FP_SIMD_OFFSET",
-        "ARM64_INST_STPQ_FP_SIMD_OFFSET": "ARM64_INST_STP_FP_SIMD_OFFSET",
-        "ARM64_INST_STPS_FP_SIMD_OFFSET": "ARM64_INST_STP_FP_SIMD_OFFSET",
-        "ARM64_INST_STPD_FP_SIMD_PRE_INDEX": "ARM64_INST_STP_FP_SIMD_PRE_INDEX",
-        "ARM64_INST_STRD_FP_SIMD_PRE_INDEX": "ARM64_INST_STR_FP_SIMD_PRE_INDEX",
-        "ARM64_INST_STRQ_FP_SIMD_PRE_INDEX": "ARM64_INST_STR_FP_SIMD_PRE_INDEX",
-        "ARM64_INST_STRD_FP_SIMD_UNSIGNED_OFFSET": "ARM64_INST_STR_FP_SIMD_UNSIGNED_OFFSET",
-        "ARM64_INST_STRQ_FP_SIMD_UNSIGNED_OFFSET": "ARM64_INST_STR_FP_SIMD_UNSIGNED_OFFSET",
-        "ARM64_INST_STRS_FP_SIMD_UNSIGNED_OFFSET": "ARM64_INST_STR_FP_SIMD_UNSIGNED_OFFSET",
-        "ARM64_INST_STRX_GPR_PRE_INDEX": "ARM64_INST_STR_GPR_PRE_INDEX",
-        "ARM64_INST_STRX_GPR_REGISTER_OFFSET": "ARM64_INST_STR_GPR_REGISTER_OFFSET",
-        "ARM64_INST_STRB_GPR_UNSIGNED_OFFSET": "ARM64_INST_STR_GPR_UNSIGNED_OFFSET",
-        "ARM64_INST_STRH_GPR_UNSIGNED_OFFSET": "ARM64_INST_STR_GPR_UNSIGNED_OFFSET",
-        "ARM64_INST_STRW_GPR_UNSIGNED_OFFSET": "ARM64_INST_STR_GPR_UNSIGNED_OFFSET",
-        "ARM64_INST_STRX_GPR_UNSIGNED_OFFSET": "ARM64_INST_STR_GPR_UNSIGNED_OFFSET",
-        "ARM64_INST_STTRX_GPR": "ARM64_INST_STTR_GPR",
-        "ARM64_INST_STURD_FP_SIMD": "ARM64_INST_STUR_FP_SIMD",
-        "ARM64_INST_STURS_FP_SIMD": "ARM64_INST_STUR_FP_SIMD",
-        "ARM64_INST_STURX_GPR": "ARM64_INST_STUR_GPR",
-        "ARM64_INST_STXRX": "ARM64_INST_STXR",
-        "ARM64_INST_CASALX": "ARM64_INST_CASAL",
-        "ARM64_INST_CASPALX": "ARM64_INST_CASPAL",
-    }
-    return replacements.get(name, name)
-
-
 def expected_instruction_class(raw):
     owner = bits(raw, 28, 25)
     classes = {
@@ -375,7 +320,7 @@ def audit_llvm_rows(rows, llvm_rows, names, identity_path):
     for index, (decoder_row, llvm_row) in enumerate(zip(rows, llvm_rows)):
         name = names[int(decoder_row["instruction"], 0)]
         raw = int(decoder_row["raw"], 0)
-        pair = (normalize_instruction_name(name.strip()), llvm_row["opcode"].strip())
+        pair = (name.strip(), llvm_row["opcode"].strip())
         observed_pairs.add(pair)
         if int(llvm_row["index"]) != index or int(decoder_row["index"]) != index:
             failures.append((index, "index", llvm_row["index"], index))
@@ -450,6 +395,16 @@ def audit_row(row, name):
     elif name in {"ARM64_INST_CLREX", "ARM64_INST_DSB", "ARM64_INST_DMB", "ARM64_INST_ISB"}:
         expect("immediate", bits(raw, 11, 8))
     elif name in {"ARM64_INST_NOP", "ARM64_INST_YIELD", "ARM64_INST_WFE", "ARM64_INST_WFI", "ARM64_INST_SEV", "ARM64_INST_SEVL"}:
+        expected_name = {
+            0: "ARM64_INST_NOP",
+            1: "ARM64_INST_YIELD",
+            2: "ARM64_INST_WFE",
+            3: "ARM64_INST_WFI",
+            4: "ARM64_INST_SEV",
+            5: "ARM64_INST_SEVL",
+        }.get(bits(raw, 11, 5))
+        if name != expected_name:
+            failures.append(("instruction", name, expected_name))
         covered.add("encoding_identity_only")
     elif name in {"ARM64_INST_MRS", "ARM64_INST_MSR_REGISTER"}:
         expect("sysreg", bits(raw, 20, 5)); expect("rt", bits(raw, 4, 0)); expect("operand_width", 64)
@@ -503,9 +458,9 @@ def audit_row(row, name):
         expect("rn", bits(raw, 9, 5)); expect("rm", bits(raw, 20, 16))
         expect("immediate", bits(raw, 3, 0)); expect("condition", bits(raw, 15, 12))
         expect("element_width", width); expect("operand_width", width)
-    elif name in {"ARM64_INST_FADD_SCALAR", "ARM64_INST_FMUL_SCALAR", "ARM64_INST_FDIV_SCALAR", "ARM64_INST_FSUB_SCALAR", "ARM64_INST_FMAX_SCALAR", "ARM64_INST_FMIN_SCALAR", "ARM64_INST_FMAXNM_SCALAR", "ARM64_INST_FMINNM_SCALAR", "ARM64_INST_FNMUL_SCALAR", "ARM64_INST_FCSEL_SCALAR"}:
+    elif name in {"ARM64_INST_FABD_SCALAR", "ARM64_INST_FADD_SCALAR", "ARM64_INST_FMUL_SCALAR", "ARM64_INST_FDIV_SCALAR", "ARM64_INST_FSUB_SCALAR", "ARM64_INST_FMAX_SCALAR", "ARM64_INST_FMIN_SCALAR", "ARM64_INST_FMAXNM_SCALAR", "ARM64_INST_FMINNM_SCALAR", "ARM64_INST_FNMUL_SCALAR", "ARM64_INST_FCSEL_SCALAR"}:
         expect("rd", bits(raw, 4, 0)); expect("rn", bits(raw, 9, 5)); expect("rm", bits(raw, 20, 16))
-        fp_width = {0: 32, 1: 64, 3: 16}[bits(raw, 23, 22)]
+        fp_width = 32 << bits(raw, 22) if name == "ARM64_INST_FABD_SCALAR" else {0: 32, 1: 64, 3: 16}[bits(raw, 23, 22)]
         expect("element_width", fp_width); expect("operand_width", fp_width)
         if name == "ARM64_INST_FCSEL_SCALAR": expect("condition", bits(raw, 15, 12))
     elif name in {"ARM64_INST_FMOV_SCALAR", "ARM64_INST_FABS_SCALAR", "ARM64_INST_FNEG_SCALAR", "ARM64_INST_FSQRT_SCALAR", "ARM64_INST_FRINTN_SCALAR", "ARM64_INST_FRINTP_SCALAR", "ARM64_INST_FRINTM_SCALAR", "ARM64_INST_FRINTZ_SCALAR", "ARM64_INST_FRINTA_SCALAR", "ARM64_INST_FRINTX_SCALAR", "ARM64_INST_FRINTI_SCALAR"}:
@@ -653,7 +608,7 @@ def audit_row(row, name):
     elif re.fullmatch(
         r"ARM64_INST_(?:(?:LDUR|LDTR)(?:[BHWX]|SB_[WX]|SH_[WX]|SW_X)_GPR|"
         r"(?:STUR|STTR)[BHWX]_GPR|"
-        r"LDR(?:[BHWX]|SB_[WX]|SH_[WX]|SW_X)_GPR_(?:POST_INDEX|PRE_INDEX|REGISTER_OFFSET|UNSIGNED_OFFSET)|"
+        r"LDR(?:[BHWX]|SB(?:_[WX])?|SH(?:_[WX])?|SW(?:_X)?)_GPR_(?:POST_INDEX|PRE_INDEX|REGISTER_OFFSET|UNSIGNED_OFFSET)|"
         r"STR[BHWX]_GPR_(?:POST_INDEX|PRE_INDEX|REGISTER_OFFSET|UNSIGNED_OFFSET)|"
         r"(?:LDUR|STUR)[BHSDQ]_FP_SIMD|"
         r"(?:LDR|STR)[BHSDQ]_FP_SIMD_(?:POST_INDEX|PRE_INDEX|REGISTER_OFFSET|UNSIGNED_OFFSET))",
@@ -719,16 +674,14 @@ def main():
     parser.add_argument("decoder_tsv", help="decoder output TSV with a header row")
     parser.add_argument("--llvm-tsv", help="LLVM strict audit TSV")
     parser.add_argument("--identity-map", help="instruction/opcode identity allowlist TSV")
-    parser.add_argument("--skip-rows", type=non_negative_int, default=0, help="number of leading decoder rows to skip")
     parser.add_argument("--expected-rows", type=non_negative_int, help="require exactly this many audited rows")
     args = parser.parse_args()
 
     names = instruction_names(args.header)
     with open(args.decoder_tsv, newline="", encoding="utf-8") as decoder_file:
-        all_rows = list(csv.DictReader(decoder_file, delimiter="\t"))
-    rows = all_rows[args.skip_rows:]
+        rows = list(csv.DictReader(decoder_file, delimiter="\t"))
     if not rows:
-        parser.error("no decoder rows remain after --skip-rows")
+        parser.error("decoder output contains no rows")
     if args.expected_rows is not None and len(rows) != args.expected_rows:
         parser.error(f"audited row count is {len(rows)}, expected {args.expected_rows}")
     covered = Counter(); failures = []; identity_only = Counter()

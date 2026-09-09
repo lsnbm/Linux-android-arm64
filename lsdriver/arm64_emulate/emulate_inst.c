@@ -135,14 +135,31 @@ bool emu_build_executor_entry(const struct arm64_decoded_instruction *decoded, s
 __nocfi enum emu_inst_result emu_execute_executor_entry(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     const struct arm64_decoded_instruction *decoded;
+    uint64_t initial_btype;
     uint32_t initial_fpcr;
     uint32_t initial_fpsr;
     enum emu_inst_result result;
 
     if (!entry || !entry->execute) return EMU_INST_SKIP;
     decoded = &entry->decoded;
+
+    /*
+    PSTATE.BTYPE 描述当前落点的分支类型，并在当前指令成功执行后被消费。
+    执行模板前先清除入口 BTYPE，使普通指令得到与实体 CPU 一致的执行后
+    状态；分支模板仍可按目标落点写入新的 BTYPE。若执行器返回 SKIP，说明
+    本层没有提交该指令，必须恢复入口值供后续处理路径继续使用。
+    */
+    initial_btype = regs->pstate & (3ULL << 10);
+    regs->pstate &= ~(3ULL << 10);
     //如果当前指令不需要 FPCR/FPSR 状态同步，就直接执行并返回。
-    if (decoded->instruction_class != ARM64_INSTRUCTION_CLASS_DATA_PROCESSING_SIMD_FP && (decoded->instruction_class != ARM64_INSTRUCTION_CLASS_BRANCH_EXCEPTION_SYSTEM || (decoded->instruction != ARM64_INST_MSR_REGISTER && decoded->instruction != ARM64_INST_MRS) || (decoded->sysreg != ARM64_SYSREG_KEY(3, 3, 4, 4, 0) && decoded->sysreg != ARM64_SYSREG_KEY(3, 3, 4, 4, 1)))) return entry->execute(regs, fp_regs, entry);
+    if (decoded->instruction_class != ARM64_INSTRUCTION_CLASS_DATA_PROCESSING_SIMD_FP && (decoded->instruction_class != ARM64_INSTRUCTION_CLASS_BRANCH_EXCEPTION_SYSTEM || (decoded->instruction != ARM64_INST_MSR_REGISTER && decoded->instruction != ARM64_INST_MRS) || (decoded->sysreg != ARM64_SYSREG_KEY(3, 3, 4, 4, 0) && decoded->sysreg != ARM64_SYSREG_KEY(3, 3, 4, 4, 1))))
+    {
+        result = entry->execute(regs, fp_regs, entry);
+        /* 未提交指令时回滚入口阶段消费的 BTYPE。 */
+        if (result != EMU_INST_HANDLED)
+            regs->pstate |= initial_btype;
+        return result;
+    }
 
     initial_fpcr = fp_regs->fpcr;
     initial_fpsr = fp_regs->fpsr;
@@ -168,6 +185,9 @@ __nocfi enum emu_inst_result emu_execute_executor_entry(struct pt_regs *regs, st
     if (fp_regs->fpsr != initial_fpsr) write_fpsr(fp_regs->fpsr);
     fp_regs->fpsr = read_fpsr();
 
+    /* 未提交指令时回滚入口阶段消费的 BTYPE。 */
+    if (result != EMU_INST_HANDLED)
+        regs->pstate |= initial_btype;
     return result;
 }
 
