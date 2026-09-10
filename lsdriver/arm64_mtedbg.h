@@ -1,5 +1,5 @@
-#ifndef ARM64_PTEDBG_H
-#define ARM64_PTEDBG_H
+#ifndef ARM64_MTEDBG_H
+#define ARM64_MTEDBG_H
 /*
 直接patch为udf,MTE不可访问伪造数据读返回
 
@@ -23,11 +23,11 @@
 #include "arm64_emulate/emulate_inst.h"
 #include "virtual_memory_rw.h"
 
-#define PTEBP_UDF_INST     0x00000000U
-#define PTEBP_IC_IVAU_MASK 0xFFFFFFE0U
-#define PTEBP_IC_IVAU_INST 0xD50B7520U
+#define MTEBP_UDF_INST     0x00000000U
+#define MTEBP_IC_IVAU_MASK 0xFFFFFFE0U
+#define MTEBP_IC_IVAU_INST 0xD50B7520U
 
-static inline uint8_t ptebp_instruction_bytes(const struct arm64_decoded_instruction *decoded)
+static inline uint8_t mtebp_instruction_bytes(const struct arm64_decoded_instruction *decoded)
 {
     switch (decoded->instruction)
     {
@@ -39,7 +39,7 @@ static inline uint8_t ptebp_instruction_bytes(const struct arm64_decoded_instruc
     return decoded->operand_width ? (uint8_t)(decoded->operand_width / 8) : 0;
 }
 
-static inline bool ptebp_gpr_single_leaf(uint32_t raw_inst)
+static inline bool mtebp_gpr_single_leaf(uint32_t raw_inst)
 {
     uint32_t owner = (raw_inst >> 24) & 0x3F;
 
@@ -49,7 +49,7 @@ static inline bool ptebp_gpr_single_leaf(uint32_t raw_inst)
 }
 
 /*
-PTEBP 同时使用两条互不替代的路径：
+MTEBP 同时使用两条互不替代的路径：
 1. 执行断点：把目标地址的原始指令替换为 UDF #0，由同步异常入口捕获执行；
 2. 数据断点：把目标地址所在 16-byte MTE granule 的 allocation tag 改成监控值，
    由同步 MTE tag-check fault 捕获对该 granule 的 load/store。
@@ -57,7 +57,7 @@ PTEBP 同时使用两条互不替代的路径：
 两条路径共享槽位中的原始指令和物理映射状态。UDF 路径模拟原始执行，MTE 路径模拟原始访存；
 无法安全模拟时撤销整组监控，让处理器重新执行未修改的原始代码。
 */
-struct ptebp_slot
+struct mtebp_slot
 {
     phys_addr_t inst_paddr; // 安装时 hook_addr 对应的物理指令地址，用于检测映射是否被替换。
     phys_addr_t tag_paddr;  // hook_addr 所在 16-byte MTE granule 的物理起始地址。
@@ -67,13 +67,13 @@ struct ptebp_slot
     uint8_t monitor_tag;    // 监控期间写入该 granule 的 allocation tag，通常为 orig_tag ^ 1。
 };
 
-// 当前只允许存在一组 PTEBP 监控；配置、目标 mm 和槽位状态由同一把锁保护。
-static struct break_point *g_ptebp_info;
-static struct mm_struct *g_ptebp_mm;
-static struct ptebp_slot g_ptebp_slots[BP_CONFIG_MAX];
-static DEFINE_SPINLOCK(g_ptebp_lock);
+// 当前只允许存在一组 MTEBP 监控；配置、目标 mm 和槽位状态由同一把锁保护。
+static struct break_point *g_mtebp_info;
+static struct mm_struct *g_mtebp_mm;
+static struct mtebp_slot g_mtebp_slots[BP_CONFIG_MAX];
+static DEFINE_SPINLOCK(g_mtebp_lock);
 // 标记整组撤销已经开始；停止路径和异常回退路径可能并发进入，只允许一方恢复资源。
-static bool g_ptebp_stopping;
+static bool g_mtebp_stopping;
 
 /* ======================== UDF 与 MTE tag 基础操作 ======================== */
 
@@ -82,16 +82,16 @@ static bool g_ptebp_stopping;
 这样不需要内核直接用用户 VA 访问受 MTE 监控的内存，也不依赖用户页当前是否允许 EL0 数据访问。
 首次读取时记录 inst_paddr；后续访问必须仍得到相同物理地址，否则返回 -ESTALE，避免写入新映射。
 写入指令后同步所有 CPU 的指令缓存并回读校验，确保 UDF #0 或原始指令真实落到代码页。
-调用方通常持有 g_ptebp_lock；本函数不获取该锁。
+调用方通常持有 g_mtebp_lock；本函数不获取该锁。
 */
-static inline int ptebp_access_inst(struct ptebp_slot *slot, uint32_t *inst, bool write)
+static inline int mtebp_access_inst(struct mtebp_slot *slot, uint32_t *inst, bool write)
 {
     phys_addr_t paddr;
     uint32_t readback;
     int status;
 
-    if (!g_ptebp_mm) return -ESTALE;
-    status = walk_translate_va_to_pa(g_ptebp_mm, slot->hook_addr, &paddr);
+    if (!g_mtebp_mm) return -ESTALE;
+    status = walk_translate_va_to_pa(g_mtebp_mm, slot->hook_addr, &paddr);
     if (status) return status;
     if (slot->inst_paddr && slot->inst_paddr != paddr) return -ESTALE;
     if (!slot->inst_paddr) slot->inst_paddr = paddr;
@@ -107,7 +107,7 @@ static inline int ptebp_access_inst(struct ptebp_slot *slot, uint32_t *inst, boo
     return readback == *inst ? 0 : -EIO;
 }
 
-static inline uint8_t ptebp_read_allocation_tag(phys_addr_t tag_paddr)
+static inline uint8_t mtebp_read_allocation_tag(phys_addr_t tag_paddr)
 {
     uint64_t tagged_addr = (uint64_t)(uintptr_t)phys_to_virt(tag_paddr);
 
@@ -116,7 +116,7 @@ static inline uint8_t ptebp_read_allocation_tag(phys_addr_t tag_paddr)
     return (tagged_addr & MTE_TAG_MASK) >> MTE_TAG_SHIFT;
 }
 
-static inline int ptebp_write_allocation_tag(phys_addr_t tag_paddr, uint8_t tag)
+static inline int mtebp_write_allocation_tag(phys_addr_t tag_paddr, uint8_t tag)
 {
     uint64_t tagged_addr = (uint64_t)(uintptr_t)phys_to_virt(tag_paddr);
 
@@ -125,11 +125,11 @@ static inline int ptebp_write_allocation_tag(phys_addr_t tag_paddr, uint8_t tag)
     asm volatile(__MTE_PREAMBLE "stg %0, [%0]" : : "r"(tagged_addr) : "memory");
     dsb(ish);
     // 读回确认硬件接受了写入；失败时上层必须回滚已经改写的状态。
-    return ptebp_read_allocation_tag(tag_paddr) == (tag & 0xFU) ? 0 : -EIO;
+    return mtebp_read_allocation_tag(tag_paddr) == (tag & 0xFU) ? 0 : -EIO;
 }
 
 // 只验证 hook_addr 当前仍映射到安装时的物理指令地址，不检查 allocation tag。
-static bool ptebp_slot_mapping_matches(struct mm_struct *mm, const struct ptebp_slot *slot)
+static bool mtebp_slot_mapping_matches(struct mm_struct *mm, const struct mtebp_slot *slot)
 {
     phys_addr_t paddr;
 
@@ -137,16 +137,16 @@ static bool ptebp_slot_mapping_matches(struct mm_struct *mm, const struct ptebp_
 }
 
 // 先验证物理映射，再验证 monitor_tag；任一失配都禁止继续模拟，避免对错误页面产生副作用。
-static bool ptebp_slot_tag_matches(struct mm_struct *mm, const struct ptebp_slot *slot)
+static bool mtebp_slot_tag_matches(struct mm_struct *mm, const struct mtebp_slot *slot)
 {
-    if (!ptebp_slot_mapping_matches(mm, slot)) return false;
+    if (!mtebp_slot_mapping_matches(mm, slot)) return false;
 
-    return ptebp_read_allocation_tag(slot->tag_paddr) == slot->monitor_tag;
+    return mtebp_read_allocation_tag(slot->tag_paddr) == slot->monitor_tag;
 }
 
 /* ======================== MTE fault 逻辑内存与访存模拟 ======================== */
 
-struct ptebp_slot_overlap
+struct mtebp_slot_overlap
 {
     // 数据访问与 UDF 四字节补丁重叠时，用这三个偏移定位需要覆盖的字节。
     size_t data_offset;
@@ -154,7 +154,7 @@ struct ptebp_slot_overlap
     size_t copy_size;
 };
 
-struct ptebp_physical_chunk
+struct mtebp_physical_chunk
 {
     // 一次最多 16-byte 的访问最多拆成两个页内物理片段。
     phys_addr_t paddr;
@@ -162,22 +162,22 @@ struct ptebp_physical_chunk
     size_t size;
 };
 
-// 调用方持有 g_ptebp_lock；只判断当前监控是否归属于指定 mm，不包含 stopping 状态。
-static bool ptebp_monitor_active_locked(struct mm_struct *mm)
+// 调用方持有 g_mtebp_lock；只判断当前监控是否归属于指定 mm，不包含 stopping 状态。
+static bool mtebp_monitor_active_locked(struct mm_struct *mm)
 {
-    return g_ptebp_info && g_ptebp_mm == mm;
+    return g_mtebp_info && g_mtebp_mm == mm;
 }
 
-// 调用方持有 g_ptebp_lock；逐槽验证物理映射和 monitor_tag，供 fault 与逻辑取指共享。
-static bool ptebp_all_slots_valid_locked(struct mm_struct *mm)
+// 调用方持有 g_mtebp_lock；逐槽验证物理映射和 monitor_tag，供 fault 与逻辑取指共享。
+static bool mtebp_all_slots_valid_locked(struct mm_struct *mm)
 {
-    for (size_t slot_index = 0; slot_index < ARRAY_SIZE(g_ptebp_slots); slot_index++)
-        if (g_ptebp_slots[slot_index].hook_addr && !ptebp_slot_tag_matches(mm, &g_ptebp_slots[slot_index])) return false;
+    for (size_t slot_index = 0; slot_index < ARRAY_SIZE(g_mtebp_slots); slot_index++)
+        if (g_mtebp_slots[slot_index].hook_addr && !mtebp_slot_tag_matches(mm, &g_mtebp_slots[slot_index])) return false;
     return true;
 }
 
 // 规范化模拟访问范围：去除用户指针 tag，限制访问宽度，并拒绝地址整数回绕。
-static int ptebp_emu_prepare_range(uint64_t raw_addr, int bytes, uint64_t *addr)
+static int mtebp_emu_prepare_range(uint64_t raw_addr, int bytes, uint64_t *addr)
 {
     if (bytes <= 0 || bytes > sizeof(__uint128_t)) return -EINVAL;
 
@@ -187,8 +187,8 @@ static int ptebp_emu_prepare_range(uint64_t raw_addr, int bytes, uint64_t *addr)
 }
 
 // 将一次最多 16 字节的模拟访问预先翻译为页内物理片段；相邻虚拟页不假设物理连续。
-// 调用方持有 g_ptebp_lock。
-static int ptebp_emu_translate_range(uint64_t addr, size_t bytes, struct ptebp_physical_chunk chunks[2], size_t *chunk_count)
+// 调用方持有 g_mtebp_lock。
+static int mtebp_emu_translate_range(uint64_t addr, size_t bytes, struct mtebp_physical_chunk chunks[2], size_t *chunk_count)
 {
     size_t data_offset = 0;
 
@@ -212,7 +212,7 @@ static int ptebp_emu_translate_range(uint64_t addr, size_t bytes, struct ptebp_p
 }
 
 // 计算一次数据访问与槽位原始指令四字节补丁的交集，供读视图和写后槽位更新共用。
-static bool ptebp_get_patch_overlap(uint64_t patch_addr, size_t patch_size, uint64_t addr, uint64_t end, struct ptebp_slot_overlap *overlap)
+static bool mtebp_get_patch_overlap(uint64_t patch_addr, size_t patch_size, uint64_t addr, uint64_t end, struct mtebp_slot_overlap *overlap)
 {
     uint64_t start;
     uint64_t stop;
@@ -234,7 +234,7 @@ static bool ptebp_get_patch_overlap(uint64_t patch_addr, size_t patch_size, uint
 如果 PC 正好是本模块写入 UDF 的地址，则把物理内存中的 marker 替换为槽位保存的 orig_inst，
 让 load/store 模拟器看到程序原本要执行的指令。
 */
-static int ptebp_read_user_inst(uint64_t raw_pc, uint32_t *inst)
+static int mtebp_read_user_inst(uint64_t raw_pc, uint32_t *inst)
 {
     uint64_t pc = untagged_addr(raw_pc);
     phys_addr_t paddr;
@@ -243,8 +243,8 @@ static int ptebp_read_user_inst(uint64_t raw_pc, uint32_t *inst)
 
     if (!inst || !current->mm || !IS_ALIGNED(pc, sizeof(*inst)) || pc >= READ_ONCE(current->mm->task_size) || READ_ONCE(current->mm->task_size) - pc < sizeof(*inst)) return -EFAULT;
 
-    spin_lock_irqsave(&g_ptebp_lock, flags);
-    if (!ptebp_monitor_active_locked(current->mm) || g_ptebp_stopping || !ptebp_all_slots_valid_locked(current->mm))
+    spin_lock_irqsave(&g_mtebp_lock, flags);
+    if (!mtebp_monitor_active_locked(current->mm) || g_mtebp_stopping || !mtebp_all_slots_valid_locked(current->mm))
     {
         status = -ESTALE;
         goto out_unlock;
@@ -255,15 +255,15 @@ static int ptebp_read_user_inst(uint64_t raw_pc, uint32_t *inst)
     status = linear_read_physical(paddr, inst, sizeof(*inst));
     if (status) goto out_unlock;
 
-    for (size_t slot_index = 0; slot_index < ARRAY_SIZE(g_ptebp_slots); slot_index++)
-        if (g_ptebp_slots[slot_index].hook_addr == pc)
+    for (size_t slot_index = 0; slot_index < ARRAY_SIZE(g_mtebp_slots); slot_index++)
+        if (g_mtebp_slots[slot_index].hook_addr == pc)
         {
-            *inst = g_ptebp_slots[slot_index].orig_inst;
+            *inst = g_mtebp_slots[slot_index].orig_inst;
             break;
         }
 
 out_unlock:
-    spin_unlock_irqrestore(&g_ptebp_lock, flags);
+    spin_unlock_irqrestore(&g_mtebp_lock, flags);
     return status;
 }
 
@@ -273,22 +273,22 @@ out_unlock:
 读取范围覆盖 UDF 补丁时，用对应 orig_inst 字节覆盖物理内存中的 marker，
 确保被模拟的 load 看到目标进程应有的最新指令内容。
 */
-static int ptebp_emu_read_mem(uint64_t addr, int bytes, __uint128_t *out)
+static int mtebp_emu_read_mem(uint64_t addr, int bytes, __uint128_t *out)
 {
     uint8_t data[sizeof(__uint128_t)];
-    struct ptebp_physical_chunk chunks[2];
+    struct mtebp_physical_chunk chunks[2];
     uint64_t end;
     __uint128_t value = 0;
     size_t chunk_count;
     unsigned long flags;
     int status;
 
-    status = ptebp_emu_prepare_range(addr, bytes, &addr);
+    status = mtebp_emu_prepare_range(addr, bytes, &addr);
     if (status) return status;
     end = addr + (uint64_t)bytes;
 
-    spin_lock_irqsave(&g_ptebp_lock, flags);
-    status = ptebp_emu_translate_range(addr, bytes, chunks, &chunk_count);
+    spin_lock_irqsave(&g_mtebp_lock, flags);
+    status = mtebp_emu_translate_range(addr, bytes, chunks, &chunk_count);
     if (status) goto out_unlock;
 
     for (size_t chunk_index = 0; chunk_index < chunk_count; chunk_index++)
@@ -297,19 +297,19 @@ static int ptebp_emu_read_mem(uint64_t addr, int bytes, __uint128_t *out)
         if (status) goto out_unlock;
     }
 
-    for (size_t slot_index = 0; slot_index < ARRAY_SIZE(g_ptebp_slots); slot_index++)
+    for (size_t slot_index = 0; slot_index < ARRAY_SIZE(g_mtebp_slots); slot_index++)
     {
-        const struct ptebp_slot *slot = &g_ptebp_slots[slot_index];
-        struct ptebp_slot_overlap overlap;
+        const struct mtebp_slot *slot = &g_mtebp_slots[slot_index];
+        struct mtebp_slot_overlap overlap;
 
-        if (!slot->hook_addr || !ptebp_get_patch_overlap(slot->hook_addr, sizeof(slot->orig_inst), addr, end, &overlap)) continue;
+        if (!slot->hook_addr || !mtebp_get_patch_overlap(slot->hook_addr, sizeof(slot->orig_inst), addr, end, &overlap)) continue;
         __builtin_memcpy(data + overlap.data_offset, (uint8_t *)&slot->orig_inst + overlap.inst_offset, overlap.copy_size);
     }
 
     __builtin_memcpy(&value, data, bytes);
     *out = value;
 out_unlock:
-    spin_unlock_irqrestore(&g_ptebp_lock, flags);
+    spin_unlock_irqrestore(&g_mtebp_lock, flags);
     return status;
 }
 
@@ -318,36 +318,36 @@ out_unlock:
 再写入完整访存范围，最后同步指令缓存并提交新的槽位状态。
 这样一次跨越多个断点的 store 不会留下物理内存已更新而槽位逻辑视图过期的状态。
 */
-static int ptebp_emu_write_mem(uint64_t addr, int bytes, __uint128_t value)
+static int mtebp_emu_write_mem(uint64_t addr, int bytes, __uint128_t value)
 {
     uint8_t write_data[sizeof(__uint128_t)];
     uint32_t updated_orig_inst[BP_CONFIG_MAX];
     bool slot_updated[BP_CONFIG_MAX] = {false};
-    struct ptebp_physical_chunk chunks[2];
+    struct mtebp_physical_chunk chunks[2];
     uint64_t end;
     size_t chunk_count;
     unsigned long flags;
     int status;
 
-    status = ptebp_emu_prepare_range(addr, bytes, &addr);
+    status = mtebp_emu_prepare_range(addr, bytes, &addr);
     if (status) return status;
     end = addr + (uint64_t)bytes;
     __builtin_memcpy(write_data, &value, bytes);
 
-    spin_lock_irqsave(&g_ptebp_lock, flags);
-    for (size_t slot_index = 0; slot_index < ARRAY_SIZE(g_ptebp_slots); slot_index++)
+    spin_lock_irqsave(&g_mtebp_lock, flags);
+    for (size_t slot_index = 0; slot_index < ARRAY_SIZE(g_mtebp_slots); slot_index++)
     {
-        struct ptebp_slot *slot = &g_ptebp_slots[slot_index];
-        struct ptebp_slot_overlap overlap;
+        struct mtebp_slot *slot = &g_mtebp_slots[slot_index];
+        struct mtebp_slot_overlap overlap;
 
-        if (!slot->hook_addr || !ptebp_get_patch_overlap(slot->hook_addr, sizeof(slot->orig_inst), addr, end, &overlap)) continue;
+        if (!slot->hook_addr || !mtebp_get_patch_overlap(slot->hook_addr, sizeof(slot->orig_inst), addr, end, &overlap)) continue;
 
         updated_orig_inst[slot_index] = slot->orig_inst;
         __builtin_memcpy((uint8_t *)&updated_orig_inst[slot_index] + overlap.inst_offset, write_data + overlap.data_offset, overlap.copy_size);
         slot_updated[slot_index] = true;
     }
 
-    status = ptebp_emu_translate_range(addr, bytes, chunks, &chunk_count);
+    status = mtebp_emu_translate_range(addr, bytes, chunks, &chunk_count);
     if (status) goto out_unlock;
 
     for (size_t chunk_index = 0; chunk_index < chunk_count; chunk_index++)
@@ -361,11 +361,11 @@ static int ptebp_emu_write_mem(uint64_t addr, int bytes, __uint128_t value)
         if (status) goto out_unlock;
     }
 
-    for (size_t slot_index = 0; slot_index < ARRAY_SIZE(g_ptebp_slots); slot_index++)
-        if (slot_updated[slot_index]) g_ptebp_slots[slot_index].orig_inst = updated_orig_inst[slot_index];
+    for (size_t slot_index = 0; slot_index < ARRAY_SIZE(g_mtebp_slots); slot_index++)
+        if (slot_updated[slot_index]) g_mtebp_slots[slot_index].orig_inst = updated_orig_inst[slot_index];
 
 out_unlock:
-    spin_unlock_irqrestore(&g_ptebp_lock, flags);
+    spin_unlock_irqrestore(&g_mtebp_lock, flags);
     return status;
 }
 
@@ -384,14 +384,14 @@ MTE allocation tag 与访问指针的逻辑 tag 不匹配时，处理器在 load
 - IC IVAU 将 Xt 指定的用户 VA 翻译到物理别名后执行缓存同步；
 - exclusive、CAS/CASP、LSE RMW、SWP 等原子指令没有 case，返回 SKIP 触发整组回退。
 */
-static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint32_t raw_inst)
+static enum emu_inst_result mtebp_emulate_load_store(struct pt_regs *regs, uint32_t raw_inst)
 {
     struct arm64_decoded_instruction decoded_result __attribute__((__uninitialized__));
     const struct arm64_decoded_instruction *decoded = &decoded_result;
     uint64_t pc = regs->pc;
     uint64_t base, address;
 
-    if ((raw_inst & PTEBP_IC_IVAU_MASK) == PTEBP_IC_IVAU_INST)
+    if ((raw_inst & MTEBP_IC_IVAU_MASK) == MTEBP_IC_IVAU_INST)
     {
         phys_addr_t paddr;
 
@@ -422,7 +422,7 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
         break;
     }
 
-    if (ptebp_gpr_single_leaf(raw_inst))
+    if (mtebp_gpr_single_leaf(raw_inst))
     {
         uint32_t owner = (raw_inst >> 24) & 0x3F;
         uint32_t mode = (raw_inst >> 10) & 0x3;
@@ -451,14 +451,14 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
             address = owner == 0x38 && mode == 1 ? base : base + decoded->offset;
         }
 
-        ls_log_always_tag("ptebp", "emulate pc=0x%llx inst=0x%08x type=%d bytes=%u addr=0x%llx\n", (unsigned long long)pc, raw_inst, (int)decoded->instruction, (unsigned int)bytes, (unsigned long long)address);
+        ls_log_always_tag("mtebp", "emulate pc=0x%llx inst=0x%08x type=%d bytes=%u addr=0x%llx\n", (unsigned long long)pc, raw_inst, (int)decoded->instruction, (unsigned int)bytes, (unsigned long long)address);
         if (opc == 0)
         {
-            if (ptebp_emu_write_mem(address, bytes, reg_read(regs, decoded->rt))) goto emulate_failed;
+            if (mtebp_emu_write_mem(address, bytes, reg_read(regs, decoded->rt))) goto emulate_failed;
         }
         else
         {
-            if (ptebp_emu_read_mem(address, bytes, &value)) goto emulate_failed;
+            if (mtebp_emu_read_mem(address, bytes, &value)) goto emulate_failed;
             reg_write(regs, decoded->rt, opc >= 2 ? sign_extend64((uint64_t)value, bytes * 8 - 1) : (uint64_t)value, decoded->operand_width == 64);
         }
 
@@ -545,7 +545,7 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
     }
 
     // 当前 PC 和原始指令在这里仍然成对可用；后续读写、寄存器写回和寻址更新都由 decoder 结果驱动。
-    ls_log_always_tag("ptebp", "emulate pc=0x%llx inst=0x%08x type=%d bytes=%u addr=0x%llx\n", (unsigned long long)pc, raw_inst, (int)decoded->instruction, (unsigned int)ptebp_instruction_bytes(decoded), (unsigned long long)address);
+    ls_log_always_tag("mtebp", "emulate pc=0x%llx inst=0x%08x type=%d bytes=%u addr=0x%llx\n", (unsigned long long)pc, raw_inst, (int)decoded->instruction, (unsigned int)mtebp_instruction_bytes(decoded), (unsigned long long)address);
 
     // 按指令类别执行数据读写；成功分支汇聚到尾部统一推进 PC，无法安全模拟则返回 SKIP。
     switch (decoded->instruction)
@@ -564,7 +564,7 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
     case ARM64_INST_LDR_GPR_UNSIGNED_OFFSET:
     {
         __uint128_t raw;
-        if (ptebp_emu_read_mem(address, ptebp_instruction_bytes(decoded), &raw)) goto emulate_failed;
+        if (mtebp_emu_read_mem(address, mtebp_instruction_bytes(decoded), &raw)) goto emulate_failed;
         reg_write(regs, decoded->rt, (uint64_t)raw, decoded->operand_width == 64);
         if (decoded->instruction == ARM64_INST_LDAR || decoded->instruction == ARM64_INST_LDLAR || decoded->instruction == ARM64_INST_LDAPR || decoded->instruction == ARM64_INST_LDAPUR) smp_mb();
         break;
@@ -581,8 +581,8 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
     case ARM64_INST_LDR_SIGNED_GPR_UNSIGNED_OFFSET:
     {
         __uint128_t raw;
-        if (ptebp_emu_read_mem(address, ptebp_instruction_bytes(decoded), &raw)) goto emulate_failed;
-        reg_write(regs, decoded->rt, sign_extend64((uint64_t)raw, ptebp_instruction_bytes(decoded) * 8 - 1), decoded->operand_width == 64);
+        if (mtebp_emu_read_mem(address, mtebp_instruction_bytes(decoded), &raw)) goto emulate_failed;
+        reg_write(regs, decoded->rt, sign_extend64((uint64_t)raw, mtebp_instruction_bytes(decoded) * 8 - 1), decoded->operand_width == 64);
         if (decoded->instruction == ARM64_INST_LDAPUR_SIGNED) smp_mb();
         break;
     }
@@ -599,7 +599,7 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
     case ARM64_INST_STR_GPR_PRE_INDEX:
     case ARM64_INST_STR_GPR_REGISTER_OFFSET:
     case ARM64_INST_STR_GPR_UNSIGNED_OFFSET:
-        if (ptebp_emu_write_mem(address, ptebp_instruction_bytes(decoded), reg_read(regs, decoded->rt))) goto emulate_failed;
+        if (mtebp_emu_write_mem(address, mtebp_instruction_bytes(decoded), reg_read(regs, decoded->rt))) goto emulate_failed;
         break;
 
     /* ----- 通用寄存器 (GPR) 成对加载 ----- */
@@ -614,7 +614,7 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
         __uint128_t raw0, raw1;
         bool is_signed = (decoded->instruction == ARM64_INST_LDPSW_OFFSET || decoded->instruction == ARM64_INST_LDPSW_POST_INDEX || decoded->instruction == ARM64_INST_LDPSW_PRE_INDEX);
 
-        if (ptebp_emu_read_mem(address, ptebp_instruction_bytes(decoded), &raw0) || ptebp_emu_read_mem(address + ptebp_instruction_bytes(decoded), ptebp_instruction_bytes(decoded), &raw1)) goto emulate_failed;
+        if (mtebp_emu_read_mem(address, mtebp_instruction_bytes(decoded), &raw0) || mtebp_emu_read_mem(address + mtebp_instruction_bytes(decoded), mtebp_instruction_bytes(decoded), &raw1)) goto emulate_failed;
 
         if (is_signed)
         {
@@ -635,15 +635,15 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
     case ARM64_INST_STP_GPR_POST_INDEX:
     case ARM64_INST_STP_GPR_PRE_INDEX:
     {
-        size_t total_bytes = ptebp_instruction_bytes(decoded) * 2;
-        uint64_t mask = (ptebp_instruction_bytes(decoded) == sizeof(mask)) ? U64_MAX : (1ULL << (ptebp_instruction_bytes(decoded) * 8)) - 1;
+        size_t total_bytes = mtebp_instruction_bytes(decoded) * 2;
+        uint64_t mask = (mtebp_instruction_bytes(decoded) == sizeof(mask)) ? U64_MAX : (1ULL << (mtebp_instruction_bytes(decoded) * 8)) - 1;
         __uint128_t pair;
 
         if (total_bytes > sizeof(pair)) goto emulate_failed;
 
-        pair = (__uint128_t)(reg_read(regs, decoded->rt) & mask) | ((__uint128_t)(reg_read(regs, decoded->rt2) & mask) << (ptebp_instruction_bytes(decoded) * 8));
+        pair = (__uint128_t)(reg_read(regs, decoded->rt) & mask) | ((__uint128_t)(reg_read(regs, decoded->rt2) & mask) << (mtebp_instruction_bytes(decoded) * 8));
 
-        if (ptebp_emu_write_mem(address, total_bytes, pair)) goto emulate_failed;
+        if (mtebp_emu_write_mem(address, total_bytes, pair)) goto emulate_failed;
         break;
     }
 
@@ -680,7 +680,7 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
         struct fp_regs fp_regs __attribute__((__uninitialized__));
         __uint128_t value;
 
-        if (ptebp_emu_read_mem(address, ptebp_instruction_bytes(decoded), &value)) goto emulate_failed;
+        if (mtebp_emu_read_mem(address, mtebp_instruction_bytes(decoded), &value)) goto emulate_failed;
 
         read_all_q_regs(&fp_regs);
         fp_regs.q[decoded->rt] = value;
@@ -718,7 +718,7 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
         struct fp_regs fp_regs __attribute__((__uninitialized__));
 
         read_all_q_regs(&fp_regs);
-        if (ptebp_emu_write_mem(address, ptebp_instruction_bytes(decoded), fp_regs.q[decoded->rt])) goto emulate_failed;
+        if (mtebp_emu_write_mem(address, mtebp_instruction_bytes(decoded), fp_regs.q[decoded->rt])) goto emulate_failed;
         break;
     }
 
@@ -738,9 +738,9 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
     {
         struct fp_regs fp_regs __attribute__((__uninitialized__));
         __uint128_t value0, value1;
-        uint8_t bytes = ptebp_instruction_bytes(decoded);
+        uint8_t bytes = mtebp_instruction_bytes(decoded);
 
-        if (ptebp_emu_read_mem(address, bytes, &value0) || ptebp_emu_read_mem(address + bytes, bytes, &value1)) goto emulate_failed;
+        if (mtebp_emu_read_mem(address, bytes, &value0) || mtebp_emu_read_mem(address + bytes, bytes, &value1)) goto emulate_failed;
 
         read_all_q_regs(&fp_regs);
         fp_regs.q[decoded->rt] = value0;
@@ -764,7 +764,7 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
     case ARM64_INST_STPQ_FP_SIMD_PRE_INDEX:
     {
         struct fp_regs fp_regs __attribute__((__uninitialized__));
-        uint8_t bytes = ptebp_instruction_bytes(decoded);
+        uint8_t bytes = mtebp_instruction_bytes(decoded);
         size_t total_bytes = bytes * 2;
         __uint128_t mask, pair;
 
@@ -774,7 +774,7 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
         mask = (bytes == 16) ? ~(__uint128_t)0 : (((__uint128_t)1 << (bytes * 8)) - 1);
         pair = (fp_regs.q[decoded->rt] & mask) | ((fp_regs.q[decoded->rt2] & mask) << (bytes * 8));
 
-        if (ptebp_emu_write_mem(address, total_bytes, pair)) goto emulate_failed;
+        if (mtebp_emu_write_mem(address, total_bytes, pair)) goto emulate_failed;
         break;
     }
 
@@ -839,7 +839,7 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
     return EMU_INST_HANDLED;
 
 emulate_failed:
-    ls_log_always_tag("ptebp", "emulate skip pc=0x%llx inst=0x%08x\n", (unsigned long long)pc, raw_inst);
+    ls_log_always_tag("mtebp", "emulate skip pc=0x%llx inst=0x%08x\n", (unsigned long long)pc, raw_inst);
     return EMU_INST_SKIP;
 }
 /*
@@ -849,57 +849,57 @@ lock_mm=false 用于异常回退路径，只执行当前上下文允许的恢复
 恢复顺序固定为“先恢复原始指令，再恢复 allocation tag，最后清空全局状态”，
 避免其他 CPU 看到半 UDF、半监控的槽位组合。
 */
-static void ptebp_drop_all_monitors(bool lock_mm)
+static void mtebp_drop_all_monitors(bool lock_mm)
 {
     struct mm_struct *mm;
     unsigned long flags;
 
-    spin_lock_irqsave(&g_ptebp_lock, flags);
+    spin_lock_irqsave(&g_mtebp_lock, flags);
 
     //  无需撤销监控或已在停止流程中时直接退出
-    if ((g_ptebp_stopping && !lock_mm) || !g_ptebp_mm) goto out_unlock;
+    if ((g_mtebp_stopping && !lock_mm) || !g_mtebp_mm) goto out_unlock;
 
-    g_ptebp_stopping = true;
-    mm = g_ptebp_mm;
+    g_mtebp_stopping = true;
+    mm = g_mtebp_mm;
 
     // 正常路径需睡眠，临时放锁以获取 mmap 读锁
     if (lock_mm)
     {
-        spin_unlock_irqrestore(&g_ptebp_lock, flags);
+        spin_unlock_irqrestore(&g_mtebp_lock, flags);
         mmap_read_lock(mm);
-        spin_lock_irqsave(&g_ptebp_lock, flags);
+        spin_lock_irqsave(&g_mtebp_lock, flags);
     }
 
     // 阶段一：先恢复所有断点的原始指令，使代码页回到程序原貌。
-    for (size_t i = 0; i < ARRAY_SIZE(g_ptebp_slots); i++)
+    for (size_t i = 0; i < ARRAY_SIZE(g_mtebp_slots); i++)
     {
-        struct ptebp_slot *s = &g_ptebp_slots[i];
-        if (s->hook_addr && ptebp_slot_mapping_matches(mm, s)) (void)ptebp_access_inst(s, &s->orig_inst, true);
+        struct mtebp_slot *s = &g_mtebp_slots[i];
+        if (s->hook_addr && mtebp_slot_mapping_matches(mm, s)) (void)mtebp_access_inst(s, &s->orig_inst, true);
     }
 
     // 阶段二：同一 16-byte granule 只恢复一次原始 tag；只有仍为 monitor_tag 时才覆盖恢复，避免覆盖用户的新 tag。
-    for (size_t i = 0; i < ARRAY_SIZE(g_ptebp_slots); i++)
+    for (size_t i = 0; i < ARRAY_SIZE(g_mtebp_slots); i++)
     {
-        struct ptebp_slot *s = &g_ptebp_slots[i];
+        struct mtebp_slot *s = &g_mtebp_slots[i];
         bool first_granule_slot = true;
 
-        if (!s->hook_addr || !ptebp_slot_mapping_matches(mm, s)) continue;
+        if (!s->hook_addr || !mtebp_slot_mapping_matches(mm, s)) continue;
         for (size_t previous = 0; previous < i; previous++)
-            if (g_ptebp_slots[previous].hook_addr && g_ptebp_slots[previous].tag_paddr == s->tag_paddr)
+            if (g_mtebp_slots[previous].hook_addr && g_mtebp_slots[previous].tag_paddr == s->tag_paddr)
             {
                 first_granule_slot = false;
                 break;
             }
-        if (first_granule_slot && ptebp_read_allocation_tag(s->tag_paddr) == s->monitor_tag) (void)ptebp_write_allocation_tag(s->tag_paddr, s->orig_tag);
+        if (first_granule_slot && mtebp_read_allocation_tag(s->tag_paddr) == s->monitor_tag) (void)mtebp_write_allocation_tag(s->tag_paddr, s->orig_tag);
     }
 
     // 在临界区内原子化重置全部全局状态；从此刻起异常 hook 不再匹配旧槽位。
-    g_ptebp_info = NULL;
-    g_ptebp_mm = NULL;
-    memset(g_ptebp_slots, 0, sizeof(g_ptebp_slots));
-    g_ptebp_stopping = false; // 直接在此复位，避免在末尾重复加锁
+    g_mtebp_info = NULL;
+    g_mtebp_mm = NULL;
+    memset(g_mtebp_slots, 0, sizeof(g_mtebp_slots));
+    g_mtebp_stopping = false; // 直接在此复位，避免在末尾重复加锁
 
-    spin_unlock_irqrestore(&g_ptebp_lock, flags);
+    spin_unlock_irqrestore(&g_mtebp_lock, flags);
 
     // 在锁外释放 mmap 读锁与 mm 引用
     if (lock_mm) mmap_read_unlock(mm);
@@ -907,7 +907,7 @@ static void ptebp_drop_all_monitors(bool lock_mm)
     return;
 
 out_unlock:
-    spin_unlock_irqrestore(&g_ptebp_lock, flags);
+    spin_unlock_irqrestore(&g_mtebp_lock, flags);
 }
 
 /*
@@ -918,9 +918,9 @@ hook_regs->regs[0] = far，hook_regs->regs[1] = esr，hook_regs->regs[2] = 真�
 处理成功后把 hook_regs->regs[0] 置 0 并返回 1，表示 fault 已由模拟器消费；
 未命中时返回 0，交给内核原生 MTE fault 处理。
 */
-static int ptebp_handle_data_abort(struct pt_regs *hook_regs)
+static int mtebp_handle_data_abort(struct pt_regs *hook_regs)
 {
-    const struct ptebp_slot *slot = NULL;
+    const struct mtebp_slot *slot = NULL;
     struct pt_regs *regs;
     uint64_t far, esr, fault_granule;
     uint32_t raw_inst;
@@ -937,43 +937,43 @@ static int ptebp_handle_data_abort(struct pt_regs *hook_regs)
     fault_granule = untagged_addr(far) & MTE_GRANULE_MASK;
 
     // 状态检查：确认当前进程属于目标 mm，且槽位的物理映射和 monitor_tag 仍然有效。
-    spin_lock_irqsave(&g_ptebp_lock, flags);
-    if (!ptebp_monitor_active_locked(current->mm)) goto out_not_ours;
+    spin_lock_irqsave(&g_mtebp_lock, flags);
+    if (!mtebp_monitor_active_locked(current->mm)) goto out_not_ours;
 
     // 匹配命中当前故障 granule 的首个有效槽位。
-    for (size_t i = 0; i < ARRAY_SIZE(g_ptebp_slots); i++)
+    for (size_t i = 0; i < ARRAY_SIZE(g_mtebp_slots); i++)
     {
-        if (g_ptebp_slots[i].hook_addr && (g_ptebp_slots[i].hook_addr & MTE_GRANULE_MASK) == fault_granule)
+        if (g_mtebp_slots[i].hook_addr && (g_mtebp_slots[i].hook_addr & MTE_GRANULE_MASK) == fault_granule)
         {
-            slot = &g_ptebp_slots[i];
+            slot = &g_mtebp_slots[i];
             break;
         }
     }
 
     // 槽位不存在、映射已替换或 allocation tag 已变化时，不接管该异常。
-    if (!slot || !ptebp_slot_tag_matches(current->mm, slot)) goto out_not_ours;
+    if (!slot || !mtebp_slot_tag_matches(current->mm, slot)) goto out_not_ours;
 
     // 正在停止时不再模拟；停止路径会恢复 tag，返回已处理让原始访问稍后重新执行。
-    if (g_ptebp_stopping)
+    if (g_mtebp_stopping)
     {
-        spin_unlock_irqrestore(&g_ptebp_lock, flags);
+        spin_unlock_irqrestore(&g_mtebp_lock, flags);
         goto abort_handled;
     }
 
     // 若任一槽位失效，放锁后统一回滚整组监控，避免只模拟当前访问而留下不一致状态。
-    if (!ptebp_all_slots_valid_locked(current->mm))
+    if (!mtebp_all_slots_valid_locked(current->mm))
     {
-        spin_unlock_irqrestore(&g_ptebp_lock, flags);
-        ptebp_drop_all_monitors(false);
+        spin_unlock_irqrestore(&g_mtebp_lock, flags);
+        mtebp_drop_all_monitors(false);
         goto abort_handled;
     }
 
-    spin_unlock_irqrestore(&g_ptebp_lock, flags);
+    spin_unlock_irqrestore(&g_mtebp_lock, flags);
 
     // 读取触发 fault 的原始指令；用户态取指通过物理别名读取，并把本模块 UDF marker 还原为 orig_inst。
     if (user_mode(regs))
     {
-        if (ptebp_read_user_inst(regs->pc, &raw_inst)) goto fallback_drop;
+        if (mtebp_read_user_inst(regs->pc, &raw_inst)) goto fallback_drop;
     }
     else
     {
@@ -981,20 +981,20 @@ static int ptebp_handle_data_abort(struct pt_regs *hook_regs)
     }
 
     // 模拟原始 load/store；成功时已经更新 regs 和 PC，失败时撤销整组监控并让原始路径重试。
-    if (ptebp_emulate_load_store(regs, raw_inst) == EMU_INST_HANDLED)
+    if (mtebp_emulate_load_store(regs, raw_inst) == EMU_INST_HANDLED)
     {
         goto abort_handled;
     }
 
 fallback_drop:
-    ptebp_drop_all_monitors(false);
+    mtebp_drop_all_monitors(false);
 
 abort_handled:
     hook_regs->regs[0] = 0;
     return 1;
 
 out_not_ours:
-    spin_unlock_irqrestore(&g_ptebp_lock, flags);
+    spin_unlock_irqrestore(&g_mtebp_lock, flags);
     return 0;
 }
 /* ======================== UDF 执行断点命中处理 ======================== */
@@ -1005,7 +1005,7 @@ EL0 64 位同步异常入口的统一 hook 工作函数，只接管本模块写�
 这里只按 ESR 的 Unknown/Uncategorized 类别和异常 PC 匹配槽位，其他同步异常返回 0。
 命中后执行用户回调，再模拟 orig_inst；回调或模拟器改变 PC 时不额外推进 PC。
 */
-static int ptebp_handle_undef_sync(struct pt_regs *hook_regs)
+static int mtebp_handle_undef_sync(struct pt_regs *hook_regs)
 {
     struct fp_regs fp_regs __attribute__((__uninitialized__));
     struct bp_point *hit_point = NULL;
@@ -1025,22 +1025,22 @@ static int ptebp_handle_undef_sync(struct pt_regs *hook_regs)
     pc = untagged_addr(regs->pc);
 
     // 锁内确认目标 mm 仍有活动监控，并按异常 PC 查找对应断点槽位。
-    spin_lock_irqsave(&g_ptebp_lock, flags);
-    if (!ptebp_monitor_active_locked(current->mm))
+    spin_lock_irqsave(&g_mtebp_lock, flags);
+    if (!mtebp_monitor_active_locked(current->mm))
     {
-        spin_unlock_irqrestore(&g_ptebp_lock, flags);
+        spin_unlock_irqrestore(&g_mtebp_lock, flags);
         return 0;
     }
 
-    for (size_t point_slot = 0; point_slot < ARRAY_SIZE(g_ptebp_slots); point_slot++)
+    for (size_t point_slot = 0; point_slot < ARRAY_SIZE(g_mtebp_slots); point_slot++)
     {
-        if (g_ptebp_slots[point_slot].hook_addr != pc) continue;
-        hit_point = &g_ptebp_info->points[point_slot];
-        emulate_inst_word = g_ptebp_slots[point_slot].orig_inst;
+        if (g_mtebp_slots[point_slot].hook_addr != pc) continue;
+        hit_point = &g_mtebp_info->points[point_slot];
+        emulate_inst_word = g_mtebp_slots[point_slot].orig_inst;
         break;
     }
-    stopping = g_ptebp_stopping;
-    spin_unlock_irqrestore(&g_ptebp_lock, flags);
+    stopping = g_mtebp_stopping;
+    spin_unlock_irqrestore(&g_mtebp_lock, flags);
 
     if (!hit_point) return 0;
     if (stopping) return 1;
@@ -1049,7 +1049,7 @@ static int ptebp_handle_undef_sync(struct pt_regs *hook_regs)
     if (hit_point->on_hit) hit_point->on_hit(regs, &fp_regs, hit_point);
 
     // 若回调未改写 PC 则模拟执行原指令；模拟失败则撤销监控使原生重试。
-    if (regs->pc == pc && !emulate_inst(regs, &fp_regs, emulate_inst_word)) ptebp_drop_all_monitors(false);
+    if (regs->pc == pc && !emulate_inst(regs, &fp_regs, emulate_inst_word)) mtebp_drop_all_monitors(false);
 
     write_all_q_regs(&fp_regs);
     return 1;
@@ -1060,84 +1060,84 @@ hook 表的安装语义：do_mem_abort 是 MTE 数据断点的必需入口，必
 两个 el0 同步入口只兼容不同 Android 内核版本，成功安装其中一个即可。
 每行保持单 entry 数组形状，以匹配 inline_hook_install/inline_hook_remove 的既有接口。
 */
-static struct hook_entry g_ptebp_hooks[][1] = {
-    {HOOK_ENTRY("do_mem_abort", ptebp_handle_data_abort)},
-    {HOOK_ENTRY("el0t_64_sync_handler", ptebp_handle_undef_sync)},
-    {HOOK_ENTRY("el0_sync_handler", ptebp_handle_undef_sync)},
+static struct hook_entry g_mtebp_hooks[][1] = {
+    {HOOK_ENTRY("do_mem_abort", mtebp_handle_data_abort)},
+    {HOOK_ENTRY("el0t_64_sync_handler", mtebp_handle_undef_sync)},
+    {HOOK_ENTRY("el0_sync_handler", mtebp_handle_undef_sync)},
 };
 
-static inline int ptebp_install_hooks(void)
+static inline int mtebp_install_hooks(void)
 {
     int status = -ENOENT;
 
     // 先安装必需的 do_mem_abort，再尝试两个同步入口候选；候选成功后跳过另一个。
-    for (int hook_index = 0; hook_index < ARRAY_SIZE(g_ptebp_hooks); hook_index++)
+    for (int hook_index = 0; hook_index < ARRAY_SIZE(g_mtebp_hooks); hook_index++)
     {
         // 同步入口是跨内核版本候选；任意一个成功后跳过另一个候选。
-        if (hook_index >= 1 && (g_ptebp_hooks[1][0].installed || g_ptebp_hooks[2][0].installed)) continue;
+        if (hook_index >= 1 && (g_mtebp_hooks[1][0].installed || g_mtebp_hooks[2][0].installed)) continue;
 
-        status = inline_hook_install(g_ptebp_hooks[hook_index]);
+        status = inline_hook_install(g_mtebp_hooks[hook_index]);
         if (status && hook_index < 1)
         {
-            for (int remove_index = 0; remove_index <= hook_index; remove_index++) inline_hook_remove(g_ptebp_hooks[remove_index]);
+            for (int remove_index = 0; remove_index <= hook_index; remove_index++) inline_hook_remove(g_mtebp_hooks[remove_index]);
             return status;
         }
     }
 
-    if (!g_ptebp_hooks[1][0].installed && !g_ptebp_hooks[2][0].installed)
+    if (!g_mtebp_hooks[1][0].installed && !g_mtebp_hooks[2][0].installed)
     {
-        for (int remove_index = 0; remove_index < ARRAY_SIZE(g_ptebp_hooks); remove_index++) inline_hook_remove(g_ptebp_hooks[remove_index]);
+        for (int remove_index = 0; remove_index < ARRAY_SIZE(g_mtebp_hooks); remove_index++) inline_hook_remove(g_mtebp_hooks[remove_index]);
         return status;
     }
 
     return 0;
 }
 
-static inline void stop_ptebp_monitor(void)
+static inline void mtebp_stop_monitor(void)
 {
     // 先恢复 UDF 和 allocation tag，再按 installed 状态卸载实际成功的 hook。
-    ptebp_drop_all_monitors(true);
+    mtebp_drop_all_monitors(true);
     // 遍历这一张表逐行传入；hook 框架按 installed 状态卸载实际成功的条目。
-    for (int hook_index = ARRAY_SIZE(g_ptebp_hooks) - 1; hook_index >= 0; hook_index--) inline_hook_remove(g_ptebp_hooks[hook_index]);
+    for (int hook_index = ARRAY_SIZE(g_mtebp_hooks) - 1; hook_index >= 0; hook_index--) inline_hook_remove(g_mtebp_hooks[hook_index]);
 }
 
 /*
 安装流程为：规范化地址、确认物理映射、保存原始指令、设置 MTE tag、写入 UDF marker。
 页面是否允许用户态取指不影响安装，UXN/PXN 页面也照常安装；这类页面仍可使用 MTE 监控读写。
 任一步失败都清除当前槽位；如果已经改过 tag 或指令，则先恢复它们。
-调用方持有 g_ptebp_lock 和目标 mm 的 mmap 读锁。
+调用方持有 g_mtebp_lock 和目标 mm 的 mmap 读锁。
 */
-static int ptebp_install_slot(struct break_point *info, size_t point_slot)
+static int mtebp_install_slot(struct break_point *info, size_t point_slot)
 {
-    struct ptebp_slot *slot = &g_ptebp_slots[point_slot];
-    struct ptebp_slot *granule_owner = NULL;
+    struct mtebp_slot *slot = &g_mtebp_slots[point_slot];
+    struct mtebp_slot *granule_owner = NULL;
     uint64_t hook_addr;
     uint32_t marker_inst;
     int status;
-    marker_inst = PTEBP_UDF_INST;
+    marker_inst = MTEBP_UDF_INST;
 
     // 去除 MTE/TBI 顶字节标签，并按 A64 指令的 4-byte 对齐要求规范化地址。
     hook_addr = untagged_addr(info->points[point_slot].hit_addr) & ~0x3ULL;
-    if (!hook_addr || hook_addr >= g_ptebp_mm->task_size) return -EFAULT;
+    if (!hook_addr || hook_addr >= g_mtebp_mm->task_size) return -EFAULT;
 
     // 扫描已安装槽位；同一 16-byte granule 的多个断点共享 orig_tag/monitor_tag 状态。
-    for (size_t scan_slot = 0; scan_slot < ARRAY_SIZE(g_ptebp_slots); scan_slot++)
+    for (size_t scan_slot = 0; scan_slot < ARRAY_SIZE(g_mtebp_slots); scan_slot++)
     {
-        if (!g_ptebp_slots[scan_slot].hook_addr) continue;
-        if (g_ptebp_slots[scan_slot].hook_addr == hook_addr) return -EEXIST;
-        if ((g_ptebp_slots[scan_slot].hook_addr & MTE_GRANULE_MASK) == (hook_addr & MTE_GRANULE_MASK)) granule_owner = &g_ptebp_slots[scan_slot];
+        if (!g_mtebp_slots[scan_slot].hook_addr) continue;
+        if (g_mtebp_slots[scan_slot].hook_addr == hook_addr) return -EEXIST;
+        if ((g_mtebp_slots[scan_slot].hook_addr & MTE_GRANULE_MASK) == (hook_addr & MTE_GRANULE_MASK)) granule_owner = &g_mtebp_slots[scan_slot];
     }
 
-    *slot = (struct ptebp_slot){
+    *slot = (struct mtebp_slot){
         .hook_addr = hook_addr,
     };
 
     // 通过页表翻译确认地址存在并保存物理指令地址；不检查也不修改 UXN/PXN 等权限位。
-    status = ptebp_access_inst(slot, &slot->orig_inst, false);
+    status = mtebp_access_inst(slot, &slot->orig_inst, false);
     if (status) goto clear_slot;
 
     // 原始指令已经是 UDF #0 时无法区分本模块 marker 与目标程序自身非法指令，因此拒绝安装。
-    if (slot->orig_inst == PTEBP_UDF_INST)
+    if (slot->orig_inst == MTEBP_UDF_INST)
     {
         status = -ESTALE;
         goto clear_slot;
@@ -1149,7 +1149,7 @@ static int ptebp_install_slot(struct break_point *info, size_t point_slot)
     {
         // 同一 granule 内可能有多个 4-byte 执行断点，它们必须共享同一个 allocation tag 状态。
         // 如果物理 granule 或已有槽位的 monitor_tag 已变化，说明映射/监控状态失效，拒绝继续安装。
-        if (granule_owner->tag_paddr != slot->tag_paddr || !ptebp_slot_tag_matches(g_ptebp_mm, granule_owner))
+        if (granule_owner->tag_paddr != slot->tag_paddr || !mtebp_slot_tag_matches(g_mtebp_mm, granule_owner))
         {
             status = -ESTALE;
             goto clear_slot;
@@ -1161,29 +1161,29 @@ static int ptebp_install_slot(struct break_point *info, size_t point_slot)
     else
     {
         // 当前是该 granule 的首个槽位：保存用户原始 tag，并选择一个不同的 tag 作为监控值。
-        slot->orig_tag = ptebp_read_allocation_tag(slot->tag_paddr);
+        slot->orig_tag = mtebp_read_allocation_tag(slot->tag_paddr);
         slot->monitor_tag = slot->orig_tag ^ 1U;
         // 改写 allocation tag 后，访问该 granule 的指针若仍带原 tag，就会进入同步 MTE fault。
-        status = ptebp_write_allocation_tag(slot->tag_paddr, slot->monitor_tag);
+        status = mtebp_write_allocation_tag(slot->tag_paddr, slot->monitor_tag);
         if (status) goto err_restore_tag;
     }
 
     // 每个槽位都写入 UDF 以保留执行断点；同一 granule 的 allocation tag 只由首个槽位设置。
-    status = ptebp_access_inst(slot, &marker_inst, true);
+    status = mtebp_access_inst(slot, &marker_inst, true);
     if (status) goto err_restore_tag;
 
     return 0;
 
 err_restore_tag:
-    if (!granule_owner) (void)ptebp_write_allocation_tag(slot->tag_paddr, slot->orig_tag);
-    (void)ptebp_access_inst(slot, &slot->orig_inst, true);
+    if (!granule_owner) (void)mtebp_write_allocation_tag(slot->tag_paddr, slot->orig_tag);
+    (void)mtebp_access_inst(slot, &slot->orig_inst, true);
 clear_slot:
     memset(slot, 0, sizeof(*slot));
     return status;
 }
 
-//启动一组 PTEBP 监控。
-static int start_ptebp_monitor(struct break_point *info)
+//启动一组 MTEBP 监控。
+static int mtebp_start_monitor(struct break_point *info)
 {
     struct mm_struct *mm;
     unsigned long flags;
@@ -1195,45 +1195,45 @@ static int start_ptebp_monitor(struct break_point *info)
     if (!bp_info_find_configured_type(info, BP_BREAKPOINT_X, NULL)) return -EINVAL;
 
     // 校验通过后，再撤销旧实例。
-    stop_ptebp_monitor();
+    mtebp_stop_monitor();
 
     // 安装 MTE fault 和 UDF 同步入口 hook。
-    status = ptebp_install_hooks();
+    status = mtebp_install_hooks();
     if (status) return status;
 
     // 获取并持有目标进程 mm 引用，直到所有槽位清理完成。
     mm = get_mm_by_pid(info->tgid);
     if (!mm)
     {
-        for (int hook_index = ARRAY_SIZE(g_ptebp_hooks) - 1; hook_index >= 0; hook_index--) inline_hook_remove(g_ptebp_hooks[hook_index]);
+        for (int hook_index = ARRAY_SIZE(g_mtebp_hooks) - 1; hook_index >= 0; hook_index--) inline_hook_remove(g_mtebp_hooks[hook_index]);
         return -EINVAL;
     }
 
-    // mmap 读锁保护页表映射，g_ptebp_lock 保护槽位和发布状态。
+    // mmap 读锁保护页表映射，g_mtebp_lock 保护槽位和发布状态。
     mmap_read_lock(mm);
-    spin_lock_irqsave(&g_ptebp_lock, flags);
+    spin_lock_irqsave(&g_mtebp_lock, flags);
 
-    g_ptebp_mm = mm; // 在临界区内正式绑定 mm
+    g_mtebp_mm = mm; // 在临界区内正式绑定 mm
 
     // 逐个安装全部执行断点，全部成功后再一次性发布为有效监控。
     for (size_t i = 0; i < ARRAY_SIZE(info->points); i++)
     {
         if (!bp_point_is_configured_type(&info->points[i], BP_BREAKPOINT_X)) continue;
 
-        status = ptebp_install_slot(info, i);
+        status = mtebp_install_slot(info, i);
         if (status) break;
     }
 
-    // 只有全部成功，fault/UDF hook 才能通过 g_ptebp_info 看到这组监控。
-    if (!status) g_ptebp_info = info;
+    // 只有全部成功，fault/UDF hook 才能通过 g_mtebp_info 看到这组监控。
+    if (!status) g_mtebp_info = info;
 
-    spin_unlock_irqrestore(&g_ptebp_lock, flags);
+    spin_unlock_irqrestore(&g_mtebp_lock, flags);
     mmap_read_unlock(mm);
 
     // 中途失败时统一回滚已安装的 UDF、allocation tag、mm 引用和 hook 状态。
-    if (status) stop_ptebp_monitor();
+    if (status) mtebp_stop_monitor();
 
     return status;
 }
 
-#endif // ARM64_PTEDBG_H
+#endif // ARM64_MTEDBG_H

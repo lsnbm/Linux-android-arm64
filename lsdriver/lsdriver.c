@@ -2,7 +2,9 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
+#include <linux/sched/signal.h>
 #include <linux/sched/task_stack.h>
+#include <linux/atomic.h>
 #include <uapi/linux/sched/types.h>
 #include <linux/kthread.h>
 #include <linux/delay.h>
@@ -262,10 +264,28 @@ static int ConnectThreadFunction(void *data)
     return 0;
 }
 
+//去掉 ARM64 内核返回地址中的指针认证码（PAC）
+static inline unsigned long exit_strip_kernel_pac(unsigned long address)
+{
+#ifdef CONFIG_ARM64_PTR_AUTH_KERNEL
+    register unsigned long stripped_address asm("x30") = address;
+
+    /*
+    xpaci x0    // 移除任意寄存器中“指令指针”类型的 PAC
+    xpacd x0    // 移除任意寄存器中“数据指针”类型的 PAC
+    xpaclri     // 专门移除 x30/LR 中的指令 PAC
+    */
+    asm("hint #7" : "+r"(stripped_address)); //XPACLRI指令
+    return stripped_address;
+#else
+    return address;
+#endif
+}
+
 static const char *exit_watch_process_name(const char *comm)
 {
     static const char *const process_names[] = {
-        "LS", "com.tencent.tmgp.dfm", "com.tencent.tmgp.sgame", "com.pi.czrxdfirst", "com.bwxrk.yqmy.gz", "me.hd.ggtutorial",
+        "LS", "system_server", "surfaceflinger", "com.tencent.tmgp.dfm", "com.tencent.tmgp.sgame", "com.pi.czrxdfirst", "com.bwxrk.yqmy.gz", "me.hd.ggtutorial",
     };
 
     for (int i = 0; i < ARRAY_SIZE(process_names); i++)
@@ -341,30 +361,14 @@ static const char *exit_fault_code_name(unsigned int signal, int code)
     return "UNKNOWN";
 }
 
-struct exit_kernel_frame_record
-{
-    unsigned long previous_fp;
-    unsigned long return_address;
-};
-//去掉 ARM64 内核返回地址中的指针认证码（PAC）
-static inline unsigned long exit_strip_kernel_pac(unsigned long address)
-{
-#ifdef CONFIG_ARM64_PTR_AUTH_KERNEL
-    register unsigned long stripped_address asm("x30") = address;
+static atomic64_t process_event_sequence = ATOMIC64_INIT(0);
 
-    /*
-    xpaci x0    // 移除任意寄存器中“指令指针”类型的 PAC
-    xpacd x0    // 移除任意寄存器中“数据指针”类型的 PAC
-    xpaclri     // 专门移除 x30/LR 中的指令 PAC
-    */
-    asm("hint #7" : "+r"(stripped_address)); //XPACLRI指令
-    return stripped_address;
-#else
-    return address;
-#endif
+static inline unsigned long long next_process_event_id(void)
+{
+    return (unsigned long long)atomic64_inc_return(&process_event_sequence);
 }
-
-static void log_exit_kernel_chain(const char *tag, const struct pt_regs *regs)
+//当前 hook 被调用时，内核是通过哪些函数一路调用到这里的。 它记录的是内核调用栈
+static void log_exit_kernel_chain(const char *tag, unsigned long long event_id, const struct pt_regs *regs)
 {
     unsigned long stack_low = (unsigned long)task_stack_page(current);
     unsigned long stack_high = stack_low + THREAD_SIZE;
@@ -372,29 +376,33 @@ static void log_exit_kernel_chain(const char *tag, const struct pt_regs *regs)
     unsigned long address = exit_strip_kernel_pac(regs->regs[30]);
     unsigned int depth = 0;
 
-    if (address) ls_log_always_tag(tag, "frame=%02u address=%pS\n", depth++, (void *)address);
+    if (address) ls_log_always_tag(tag, "event=%llu frame=%02u address=%pS\n", event_id, depth++, (void *)address);
 
     while (depth < sizeof(uint64_t))
     {
-        const struct exit_kernel_frame_record *frame;
+        const unsigned long *frame = (const unsigned long *)frame_pointer;
         unsigned long previous_fp;
 
-        if ((frame_pointer & 0xf) || frame_pointer < stack_low || frame_pointer > stack_high - sizeof(*frame)) break;
+        if ((frame_pointer & 0xf) || frame_pointer < stack_low || frame_pointer > stack_high - 2 * sizeof(*frame)) break;
 
-        frame = (const struct exit_kernel_frame_record *)frame_pointer;
-        previous_fp = READ_ONCE(frame->previous_fp);
-        address = exit_strip_kernel_pac(READ_ONCE(frame->return_address));
-        if (address) ls_log_always_tag(tag, "frame=%02u address=%pS\n", depth++, (void *)address);
+        previous_fp = READ_ONCE(frame[0]);
+        address = exit_strip_kernel_pac(READ_ONCE(frame[1]));
+        if (address) ls_log_always_tag(tag, "event=%llu frame=%02u address=%pS\n", event_id, depth++, (void *)address);
 
         if (previous_fp <= frame_pointer) break;
         frame_pointer = previous_fp;
     }
 }
 
+/*
+arm64_force_sig_fault
+    -> 原始异常：ESR、fault 地址、信号、用户 PC/LR/SP
+*/
 static int arm64_force_sig_fault_hook_work(struct pt_regs *regs)
 {
     struct task_struct *task = current;
     char process_comm[TASK_COMM_LEN];
+    char thread_comm[TASK_COMM_LEN];
 
     get_task_comm(process_comm, task->group_leader);
     const char *process_name = exit_watch_process_name(process_comm);
@@ -404,49 +412,115 @@ static int arm64_force_sig_fault_hook_work(struct pt_regs *regs)
     const char *source = (const char *)(uintptr_t)regs->regs[3];
     unsigned int signal = (unsigned int)regs->regs[0];
     int code = (int)regs->regs[1];
-    ls_log_always_tag("fault", "process=%s thread=%s tgid=%d tid=%d signal=%s(%u) si_code=%s(%d) addr=0x%lx esr=0x%lx source=%s pc=0x%llx lr=0x%llx sp=0x%llx\n", process_name, task->comm, task->tgid, task->pid, exit_signal_name(signal), signal, exit_fault_code_name(signal, code), code, (unsigned long)regs->regs[2], task->thread.fault_code, source ? source : "<none>", (unsigned long long)user_regs->pc, (unsigned long long)user_regs->regs[30], (unsigned long long)user_regs->sp);
-    log_exit_kernel_chain("fault", regs);
+    unsigned int signal_flags = READ_ONCE(task->signal->flags);
+    unsigned long long event_id = next_process_event_id();
+
+    get_task_comm(thread_comm, task);
+    ls_log_always_tag("fault", "event=%llu stage=fault_delivery process=%s process_start=%llu thread=%s thread_start=%llu tgid=%d tid=%d signal=%s(%u) si_code=%s(%d) addr=0x%lx esr=0x%lx source=%s pc=0x%llx lr=0x%llx sp=0x%llx group_exit=%u group_exit_code=0x%x pf_signaled=%u\n", event_id, process_name, (unsigned long long)READ_ONCE(task->group_leader->start_time), thread_comm, (unsigned long long)READ_ONCE(task->start_time), task->tgid, task->pid, exit_signal_name(signal), signal, exit_fault_code_name(signal, code), code, (unsigned long)regs->regs[2], task->thread.fault_code, source ? source : "<none>", (unsigned long long)user_regs->pc, (unsigned long long)user_regs->regs[30], (unsigned long long)user_regs->sp, !!(signal_flags & SIGNAL_GROUP_EXIT), READ_ONCE(task->signal->group_exit_code), !!(READ_ONCE(task->flags) & PF_SIGNALED));
+    log_exit_kernel_chain("fault", event_id, regs);
     return 0;
 }
 
-static void log_watched_process_exit(struct task_struct *task, const char *process_name, const struct pt_regs *regs)
+/*
+do_group_exit
+    -> 异常是否最终触发整个线程组退出、退出信号/状态
+*/
+static int do_group_exit_hook_work(struct pt_regs *regs)
 {
-    unsigned long code = regs->regs[0];
-    unsigned int signal = code & 0x7f;
+    struct task_struct *task = current;
+    struct pt_regs *user_regs = task_pt_regs(task);
+    char process_comm[TASK_COMM_LEN];
+    char thread_comm[TASK_COMM_LEN];
+    unsigned int requested_code = (unsigned int)regs->regs[0];
+    unsigned int signal_flags = READ_ONCE(task->signal->flags);
+    unsigned int group_exit_code = READ_ONCE(task->signal->group_exit_code);
+    unsigned int effective_code = requested_code;
+    unsigned int signal;
+    unsigned long long event_id;
+
+    get_task_comm(process_comm, task->group_leader);
+    const char *process_name = exit_watch_process_name(process_comm);
+    if (!process_name) return 0;
+
+    if (signal_flags & SIGNAL_GROUP_EXIT) effective_code = group_exit_code;
+
+    signal = effective_code & 0x7f;
+    event_id = next_process_event_id();
+    get_task_comm(thread_comm, task);
 
     if (signal)
     {
-        ls_log_always_tag("exit", "process=%s pid=%d signal=%s(%u) core_dump=%u\n", process_name, task->pid, exit_signal_name(signal), signal, !!(code & 0x80));
-        log_exit_kernel_chain("exit", regs);
+        ls_log_always_tag("group_exit", "event=%llu stage=group_exit process=%s process_start=%llu thread=%s thread_start=%llu tgid=%d tid=%d leader=%u requested_code=0x%x effective_code=0x%x signal=%s(%u) core_dump=%u already_exiting=%u pf_signaled=%u live_threads=%d pc=0x%llx lr=0x%llx sp=0x%llx\n", event_id, process_name, (unsigned long long)READ_ONCE(task->group_leader->start_time), thread_comm, (unsigned long long)READ_ONCE(task->start_time), task->tgid, task->pid, thread_group_leader(task), requested_code, effective_code, exit_signal_name(signal), signal, !!(effective_code & 0x80), !!(signal_flags & SIGNAL_GROUP_EXIT), !!(READ_ONCE(task->flags) & PF_SIGNALED), atomic_read(&task->signal->live), (unsigned long long)user_regs->pc, (unsigned long long)user_regs->regs[30], (unsigned long long)user_regs->sp);
     }
     else
     {
-        ls_log_always_tag("exit", "process=%s pid=%d status=%u\n", process_name, task->pid, (unsigned int)((code >> 8) & 0xff));
+        ls_log_always_tag("group_exit", "event=%llu stage=group_exit process=%s process_start=%llu thread=%s thread_start=%llu tgid=%d tid=%d leader=%u requested_code=0x%x effective_code=0x%x status=%u already_exiting=%u pf_signaled=%u live_threads=%d pc=0x%llx lr=0x%llx sp=0x%llx\n", event_id, process_name, (unsigned long long)READ_ONCE(task->group_leader->start_time), thread_comm, (unsigned long long)READ_ONCE(task->start_time), task->tgid, task->pid, thread_group_leader(task), requested_code, effective_code, (effective_code >> 8) & 0xff, !!(signal_flags & SIGNAL_GROUP_EXIT), !!(READ_ONCE(task->flags) & PF_SIGNALED), atomic_read(&task->signal->live), (unsigned long long)user_regs->pc, (unsigned long long)user_regs->regs[30], (unsigned long long)user_regs->sp);
     }
+
+    log_exit_kernel_chain("group_exit", event_id, regs);
+    return 0;
 }
 
-// do_exit 执行前的 inline hook 工作函数，返回 0 表示继续执行 do_exit
+/*
+do_exit
+    -> 每个线程实际进入不可返回的退出路径
+*/
 static int do_exit_hook_work(struct pt_regs *regs)
 {
-    // 调用 do_exit 的进程就是当前正在运行并准备死去的进程 (current)
     struct task_struct *task = current;
+    struct pt_regs *user_regs = task_pt_regs(task);
+    char process_comm[TASK_COMM_LEN];
+    char thread_comm[TASK_COMM_LEN];
+    unsigned long code = regs->regs[0];
+    unsigned int signal = code & 0x7f;
+    unsigned int signal_flags = READ_ONCE(task->signal->flags);
+    bool is_leader = thread_group_leader(task);
+
+    get_task_comm(process_comm, task->group_leader);
+    const char *process_name = exit_watch_process_name(process_comm);
+    if (process_name)
+    {
+        unsigned long long event_id = next_process_event_id();
+
+        get_task_comm(thread_comm, task);
+        if (signal)
+        {
+            ls_log_always_tag("exit", "event=%llu stage=thread_exit process=%s process_start=%llu thread=%s thread_start=%llu tgid=%d tid=%d leader=%u code=0x%lx signal=%s(%u) core_dump=%u group_exit=%u group_exit_code=0x%x pf_signaled=%u live_threads=%d pc=0x%llx lr=0x%llx sp=0x%llx\n", event_id, process_name, (unsigned long long)READ_ONCE(task->group_leader->start_time), thread_comm, (unsigned long long)READ_ONCE(task->start_time), task->tgid, task->pid, is_leader, code, exit_signal_name(signal), signal, !!(code & 0x80), !!(signal_flags & SIGNAL_GROUP_EXIT), READ_ONCE(task->signal->group_exit_code), !!(READ_ONCE(task->flags) & PF_SIGNALED), atomic_read(&task->signal->live), (unsigned long long)user_regs->pc, (unsigned long long)user_regs->regs[30], (unsigned long long)user_regs->sp);
+        }
+        else
+        {
+            ls_log_always_tag("exit", "event=%llu stage=thread_exit process=%s process_start=%llu thread=%s thread_start=%llu tgid=%d tid=%d leader=%u code=0x%lx status=%u group_exit=%u group_exit_code=0x%x pf_signaled=%u live_threads=%d pc=0x%llx lr=0x%llx sp=0x%llx\n", event_id, process_name, (unsigned long long)READ_ONCE(task->group_leader->start_time), thread_comm, (unsigned long long)READ_ONCE(task->start_time), task->tgid, task->pid, is_leader, code, (unsigned int)((code >> 8) & 0xff), !!(signal_flags & SIGNAL_GROUP_EXIT), READ_ONCE(task->signal->group_exit_code), !!(READ_ONCE(task->flags) & PF_SIGNALED), atomic_read(&task->signal->live), (unsigned long long)user_regs->pc, (unsigned long long)user_regs->regs[30], (unsigned long long)user_regs->sp);
+        }
+
+        if (signal || (signal_flags & SIGNAL_GROUP_EXIT) || is_leader) log_exit_kernel_chain("exit", event_id, regs);
+    }
+
+    return 0;
+}
+
+/*
+taskstats_exit(group_dead=true)
+    -> 确认最后线程退出，整个进程生命周期结束
+*/
+static int taskstats_exit_hook_work(struct pt_regs *regs)
+{
+    struct task_struct *task = (struct task_struct *)(uintptr_t)regs->regs[0];
+    //taskstats_exit 的 group_dead 由内核在 signal->live 递减后计算，非零表示当前是线程组最后一个退出线程。也是进程级退出了
+    bool group_dead = regs->regs[1] != 0;
     char process_comm[TASK_COMM_LEN];
 
-    // 只监听主线程的退出
-    if (!thread_group_leader(task)) return 0;
+    if (!group_dead) return 0;
 
-    get_task_comm(process_comm, task);
-    const char *process_name = exit_watch_process_name(process_comm);
-    if (process_name) log_watched_process_exit(task, process_name, regs);
+    get_task_comm(process_comm, task->group_leader);
 
     // 任意被监控目标退出时移除其 TGID，防止 PID 槽位和 do_el0_svc hook 残留。
     syscall_monitor_remove(task->tgid);
     cntvct_monitor_remove(task->tgid);
 
     // 仅匹配用户态通过 PR_SET_NAME 设置的精确进程名。
-    if (__builtin_strcmp(task->comm, "LS") == 0)
+    if (__builtin_strcmp(process_comm, "LS") == 0)
     {
-        ls_log_tag("core", "【进程监听】检测到 LS 进程即将退出！PID: %d, 进程名(comm): %s\n", task->pid, task->comm);
+        ls_log_tag("core", "【进程监听】检测到 LS 线程组即将完全退出！TGID: %d, 进程名(comm): %s\n", task->tgid, process_comm);
 
         // 相应处理
 
@@ -460,7 +534,7 @@ static int do_exit_hook_work(struct pt_regs *regs)
         remove_process_dptdbg();      // 清理 DPTDBG
         remove_process_stepbp();      // 清理单步断点
         syscall_monitor_remove_all(); // 清理全部系统调用监控目标
-        cntvct_monitor_remove(0);     // 清理 CNTVCT_EL0 读取监控
+        cntvct_monitor_remove_all();  // 清理全部 CNTVCT_EL0 读取监控
         ls_process_task = NULL;       // 标记用户进程已断开
         if (!connect_thread_task && !dispatch_thread_task)
         {
@@ -469,17 +543,30 @@ static int do_exit_hook_work(struct pt_regs *regs)
     }
     return 0;
 }
+
 static int do_exit_init(void)
 {
+    /*
+    arm64_force_sig_fault -> 记录原始异常
+    do_group_exit         -> 记录谁发起整个进程退出及原因
+    do_exit               -> 记录实际线程退出
+    taskstats_exit        -> 在线程组最后一个线程退出时执行资源清理
+    主线程很可能只做资源初始化和线程初始化就退出了，所以不能只看主线程退出就清理驱动相关资源，
+    之前在do_exit_hook_work中看主线程退出清理很错误，现在改为taskstats_exit_hook_work在线程组最后一个线程退出时执行资源清理
+    使用 "nohup dmesg -w > /storage/emulated/0/dmesg.txt 2>/dev/null &"查看日志
+    /sdcard是软链接（快捷方式）/storage/emulated/0 是真实挂载点，两者最终指向同一块内置闪存/data/media/0，内容完全一致。
+    */
     static struct hook_entry exit_hooks[] = {
         HOOK_ENTRY("arm64_force_sig_fault", arm64_force_sig_fault_hook_work),
+        HOOK_ENTRY("do_group_exit", do_group_exit_hook_work),
         HOOK_ENTRY("do_exit", do_exit_hook_work),
+        HOOK_ENTRY("taskstats_exit", taskstats_exit_hook_work),
     };
 
     int ret = inline_hook_install(exit_hooks);
     if (ret < 0)
     {
-        ls_log_tag("core", "安装进程异常/退出 inline hook 失败，错误码: %d\n", ret);
+        ls_log_always_tag("core", "安装进程异常/退出 inline hook 失败，四个 hook 已全部回滚，错误码: %d\n", ret);
         return ret;
     }
 
@@ -561,7 +648,7 @@ static int __init lsdriver_init(void)
         return PTR_ERR(dispatch_thread_task);
     }
 
-    // 注册用户进程退出回调
+    // 注册用户进程退出回调，这里不判断返回值，就算失败了，只是无法查看日志和退出清理，不影响后续运行
     do_exit_init();
 
     // 隐藏内核线程
@@ -640,5 +727,31 @@ MODULE_AUTHOR("Liao");
 	内核死机日志是有的，常规的标准路径/sys/fs/pstore没有，不同的厂商有不同的转储路径
 	adb shell su -c 'getprop | grep -iE "boot.reason|bootreason|panic|ramdump|pstore|reboot"'
 	这个命令即可看到厂商的ramdump是启用的
+KMI:
+    Kernel Module Interface，内核模块接口，独有的Android GKI 概念
+    GKI 核心内核镜像由 Google 统一发布；芯片厂商的硬件驱动编译成独立.ko模块，只能调用 KMI 符号列表内导出的函数 / 全局变量。
+    只要 KMI 分支版本不变，GKI 内核升级，vendor 模块不用重新编译、可以直接加载运行。
+    什么是KMI分支和KMI符号规则表呢？
+    KMI分支:
+    比如
+    6.12.23-android16-5-g16e473de48a3-abogki462654244-4k
+    │  │  │  │         │ │            │                 │
+    │  │  │  │         │ │            │                 └─ 4 KB 页配置
+    │  │  │  │         │ │            └─ 构建系统/CI 构建标识
+    │  │  │  │         │ └─ Git 提交哈希
+    │  │  │  │         └─ KMI generation = 5, KMI世代号为5。在完整版本名中应该是: KMI 版本: 6.12-android16-5, 不是仅仅 android16，也不是仅仅是KMI 代系: 5。 这个分支的目标就是冻结 KMI 接口，同一个 KMI 世代的内核与对应ko兼容
+    │  │  │  └─ Android 16 内核发布分支
+    │  │  └─ Linux stable sublevel = 23
+    │  └─ Linux patch level = 12
+    └─ Linux major version = 6
 
-*/
+    KMI符号规则表：源码树里的文本规则文件，加载模块时会检测是否只依赖白名单符号，依赖了白名单以外的函数和全局变量直接加载失败
+
+    比如这个符号问题，导致的加载失败:
+    copy_from_user_nofault() 虽在 common kernel 源码中写了 EXPORT_SYMBOL_GPL
+    但 Android GKI 会按 KMI 符号列表裁剪导出。源码里声明导出，不代表具体设备的 __ksymtab 一定包含它
+
+    所以说不能只看函数和变量在源码中是否用 EXPORT_SYMBOL 导出了就使用，还要看KMI符号规则表
+
+
+    */

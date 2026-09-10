@@ -199,12 +199,14 @@ out_unlock:
     return status;
 }
 
-// 正 TGID 匹配当前目标时停止监控，非正值表示无条件停止
+// 正 TGID 匹配当前目标时停止监控
 static void cntvct_monitor_remove(pid_t tgid)
 {
+    if (tgid <= 0) return;
+
     mutex_lock(&g_cntvct_monitor_mutex);
     pid_t active_tgid = READ_ONCE(g_cntvct_monitor_tgid);
-    if (tgid <= 0 || active_tgid <= 0 || tgid == active_tgid)
+    if (tgid == active_tgid)
     {
         if (g_cntvct_monitor_hooks[0].installed || g_cntvct_monitor_hooks[1].installed || active_tgid > 0)
         {
@@ -212,6 +214,15 @@ static void cntvct_monitor_remove(pid_t tgid)
             inline_hook_remove(g_cntvct_monitor_hooks);
         }
     }
+    mutex_unlock(&g_cntvct_monitor_mutex);
+}
+
+// 无条件停止当前 CNTVCT_EL0 监控
+static void cntvct_monitor_remove_all(void)
+{
+    mutex_lock(&g_cntvct_monitor_mutex);
+    WRITE_ONCE(g_cntvct_monitor_tgid, 0);
+    inline_hook_remove(g_cntvct_monitor_hooks);
     mutex_unlock(&g_cntvct_monitor_mutex);
 }
 

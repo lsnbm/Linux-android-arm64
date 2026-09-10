@@ -224,7 +224,13 @@ static inline int pte_write_physical(phys_addr_t paddr, const void *buffer, size
     return 0;
 }
 
-// 硬件mmu翻译，手动切换 TTBR0_EL1，然后让硬件遍历目标进程页表；这时目标进程不能崩溃和退出，不然页表遍历访问到了无效或已释放的物理页表，触发不可恢复的同步外部中止
+/*
+硬件mmu翻译，调用前必须外部确保mm页表安全
+手动切换 TTBR0_EL1，然后让硬件遍历目标进程页表；这时目标进程不能崩溃和退出，不然页表遍历访问到了无效或已释放的物理页表，触发不可恢复的同步外部中止
+
+使用失效、正在释放或已损坏的目标页表。正常的地址翻译失败只会写入 PAR_EL1.F；
+但是部分时候会: 硬件 page-table walker 访问了不可响应的物理地址，升级为 EL1 SEA 并 panic。不知道啥原因!!!
+*/
 static inline int mmu_translate_va_to_pa(struct mm_struct *mm, uint64_t va, phys_addr_t *pa)
 {
     int ret;
@@ -341,13 +347,42 @@ static inline int mmu_translate_va_to_pa(struct mm_struct *mm, uint64_t va, phys
 static inline int linear_read_physical(phys_addr_t paddr, void *buffer, size_t size)
 {
     void *kernel_vaddr = phys_to_virt(paddr);
+    // 参数检查
+    if (!size || !buffer) return -EINVAL;
+    // 跨页检查：读写可能跨越页边界，访问到未映射的下一页
+    if (size > PAGE_SIZE - (paddr & ~PAGE_MASK)) return -EINVAL;
 
-    // 下面这个先暂时不使用，靠翻译阶段得出绝对有效物理地址，死机请加上
-    //  // 最后的安全底线：防算错物理地址/内存空洞导致死机
-    //  if (!virt_addr_valid(kernel_vaddr))
-    //  {
-    //      return -EFAULT;
-    //  }
+    /*
+    页表条目 (PTE/PMD/PUD/PGD 条目) 本身没有独立的内存对象；
+    条目存放在[页表页]里。释放时：释放整个页表页，页表条目跟着一起消失。
+
+这里还是必须加上检查，之前注释了不行，查看实际设备崩溃原因就是:
+mm页表页释放(进程崩溃退出也会释放)，释放时会出现
+1.残留(已释放页表页中尚未覆盖的旧描述符，也就是“页表残留”) 
+2.页表页已被其他对象复用，新数据碰巧能被解释成有效描述符。
+
+mmu硬件翻译查表不会崩溃，硬件页表遍历只检查描述符格式和权限，他会正常查询出PA地址，
+但是这个 PA 不属于当前内核可通过 direct map 访问的普通内存；
+phys_to_virt()它算出的 VA 不在线性映射区。解引用这个未映射内核虚拟地址，触发 Level 1 translation fault。
+
+实际案例: mmu通过释放的页表页(物理页内容可能暂时仍保留旧描述符,页面可能已被其他对象复用内容碰巧仍符合页表描述符格式)翻译出PA:0x000000562e07bb50
+         phys_to_virt()数学计算出0xffffffd5ae07bb500
+         当前 39-bit ARM64 内核的线性映射区是0xffffff8000000000 ~ 0xffffffc000000000
+算出的 0xffffffd5ae07bb50 已经超出线性映射区。没有映射 ldr直接触发 Level 1 translation fault。
+
+
+
+     ARM64 的 virt_addr_valid() 先通过 __is_lm_address() 检查 linear map 范围，
+     越界时仅需少量算术和一次分支即可短路；
+     范围有效时再调用pfn_is_map_memory() 排除物理内存空洞和 MEMBLOCK_NOMAP 区域。
+     完整检查比单纯范围比较稍慢，此检查证明 PA 可经 direct map 访问
+
+     mmu翻译出的PA转换后的VA ,90%在内核线性区中,大部分全部命中virt_addr_valid的范围有效时的高开销检查
+     只要在线性区中访问就不会访问异常崩溃，就算这次要读写的不是指定的目标进程空间也可以正常读写成功
+  
+     所以使用__is_lm_address只检查是否在线性区中就行了，  */
+    //if (!virt_addr_valid(kernel_vaddr)) return -EFAULT;
+    if (!__is_lm_address(kernel_vaddr)) return -EFAULT;
 
     // 极限性能且安全的内存拷贝 (防未对齐崩溃)
     switch (size)
@@ -380,12 +415,10 @@ static inline int linear_write_physical(phys_addr_t paddr, const void *buffer, s
 {
     void *kernel_vaddr = phys_to_virt(paddr);
 
-    // if (!virt_addr_valid(kernel_vaddr))
-    // {
-    //     return -EFAULT;
-    // }
+    if (!buffer || !size) return -EINVAL;
+    if ((paddr & ~PAGE_MASK) + size > PAGE_SIZE) return -EINVAL;
+    if (!__is_lm_address(kernel_vaddr)) return -EFAULT;
 
-    // 极限性能且安全的内存拷贝 (防未对齐崩溃)
     switch (size)
     {
     case 1:
@@ -553,8 +586,8 @@ static inline int virtual_memory_rw(enum request_op op, pid_t pid, uint64_t vadd
             }
 
             // 翻译地址
-            status = mmu_translate_va_to_pa(s_last_mm, current_vpn, &paddr_of_page);
-            // status = walk_translate_va_to_pa(s_last_mm, current_vpn, &paddr_of_page);
+            //status = mmu_translate_va_to_pa(s_last_mm, current_vpn, &paddr_of_page);
+            status = walk_translate_va_to_pa(s_last_mm, current_vpn, &paddr_of_page);
 
             if (status != 0)
             {
