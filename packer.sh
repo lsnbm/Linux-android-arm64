@@ -1,16 +1,63 @@
 #!/bin/bash
-# Android 驱动打包器 
+# Android 驱动打包器
+set -euo pipefail
+
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 KO_DIR="$SCRIPT_DIR/lsdriver"
-OUTPUT_FILE="$SCRIPT_DIR/install_driver.sh"
+FINAL_OUTPUT_FILE="$SCRIPT_DIR/install_driver.sh"
+VERSION_FILE="$SCRIPT_DIR/install_driver.version"
+OUTPUT_FILE="${FINAL_OUTPUT_FILE}.tmp.$$"
+VERSION_TEMP_FILE="${VERSION_FILE}.tmp.$$"
 
-echo "正在生成脚本: $OUTPUT_FILE ..."
+cleanup() {
+    rm -f "$OUTPUT_FILE" "$VERSION_TEMP_FILE"
+}
+trap cleanup EXIT
+
+CURRENT_VERSION="0.10.12"
+if [[ -f "$VERSION_FILE" ]]; then
+    CURRENT_VERSION="$(tr -d '\r\n' < "$VERSION_FILE")"
+fi
+if [[ ! "$CURRENT_VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+    echo "错误: $VERSION_FILE 必须使用 x.y.z 格式" >&2
+    exit 1
+fi
+
+VERSION_MAJOR=$((10#${BASH_REMATCH[1]}))
+VERSION_MINOR=$((10#${BASH_REMATCH[2]}))
+VERSION_PATCH=$((10#${BASH_REMATCH[3]}))
+if ((VERSION_MAJOR > 12 || VERSION_MINOR > 12 || VERSION_PATCH > 12)); then
+    echo "错误: 版本号每一段都必须在 0 到 12 之间" >&2
+    exit 1
+fi
+
+PACKAGE_VERSION="$VERSION_MAJOR.$VERSION_MINOR.$VERSION_PATCH"
+if ((VERSION_PATCH < 12)); then
+    ((VERSION_PATCH += 1))
+elif ((VERSION_MINOR < 12)); then
+    VERSION_PATCH=0
+    ((VERSION_MINOR += 1))
+elif ((VERSION_MAJOR < 12)); then
+    VERSION_PATCH=0
+    VERSION_MINOR=0
+    ((VERSION_MAJOR += 1))
+else
+    echo "错误: 版本号已经达到上限 12.12.12" >&2
+    exit 1
+fi
+NEXT_VERSION="$VERSION_MAJOR.$VERSION_MINOR.$VERSION_PATCH"
+
+echo "正在生成脚本: $FINAL_OUTPUT_FILE (版本 $PACKAGE_VERSION) ..."
 
 # -------------------------------------------------------
 # 1. 写入头部 (Shebang & 变量)
 # -------------------------------------------------------
-cat > "$OUTPUT_FILE" << 'HEADER_END'
+{
+cat << 'HEADER_END'
 #!/system/bin/sh
+HEADER_END
+printf '\nINSTALL_DRIVER_VERSION=%s\n' "$PACKAGE_VERSION"
+cat << 'HEADER_END'
 
 # Android 临时目录
 TEMP_KO="/data/local/tmp/driver_auto_$$.ko"
@@ -21,6 +68,7 @@ cleanup() {
 }
 trap cleanup EXIT
 HEADER_END
+} > "$OUTPUT_FILE"
 
 # -------------------------------------------------------
 # 2. 嵌入数据函数 (必须放在逻辑执行之前！)
@@ -63,6 +111,7 @@ load_driver_logic() {
     local desc=$2
 
     echo "=========================================="
+    printf '[-] 安装脚本版本: \033[1;93m%s\033[0m\n' "$INSTALL_DRIVER_VERSION"
     echo "[-] 内核版本: $KERNEL_VER"
     echo "[-] 系统指纹: $BUILD_FINGERPRINT"
     echo "[-] 匹配分支: $desc"
@@ -96,6 +145,11 @@ load_driver_logic() {
 }
 
 # --- 主入口 ---
+if [ "${1:-}" = "--version" ]; then
+    echo "$INSTALL_DRIVER_VERSION"
+    exit 0
+fi
+
 KERNEL_VER=$(uname -r)
 BUILD_FINGERPRINT=$(getprop ro.build.fingerprint 2>/dev/null)
 
@@ -151,4 +205,10 @@ if command -v sed >/dev/null 2>&1; then
 fi
 
 chmod +x "$OUTPUT_FILE"
-echo "生成完毕！请推送到手机: /data/local/tmp/install_driver.sh"
+mv -f "$OUTPUT_FILE" "$FINAL_OUTPUT_FILE"
+printf '%s\n' "$NEXT_VERSION" > "$VERSION_TEMP_FILE"
+mv -f "$VERSION_TEMP_FILE" "$VERSION_FILE"
+trap - EXIT
+
+echo "生成完毕！版本: $PACKAGE_VERSION"
+echo "请推送到手机: /data/local/tmp/install_driver.sh"

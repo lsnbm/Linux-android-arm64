@@ -274,6 +274,10 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
     struct fp_regs fp_regs __attribute__((__uninitialized__));
     read_all_q_regs(&fp_regs);
     struct perf_event **perf_slots = this_cpu_ptr(wp_on_reg);
+    struct bp_point *closest_point = NULL;
+    struct perf_event *closest_event = NULL;
+    uint64_t min_dist = ~0ULL;
+    bool exact_hit = false;
     bool own_hit = false;
     bool perf_hit = false;
     bool perf_requires_step = false;
@@ -284,8 +288,18 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
     {
         struct arch_hw_breakpoint info;
 
-        if (hw_breakpoint_parse(point, 0, &info) || info.ctrl.type == ARM_BREAKPOINT_EXECUTE || !watchpoint_access_matches(&info, esr) || get_distance_from_watchpoint(fault_addr, info.address, &info.ctrl) != 0) continue;
+        if (hw_breakpoint_parse(point, 0, &info) || info.ctrl.type == ARM_BREAKPOINT_EXECUTE || !watchpoint_access_matches(&info, esr)) continue;
 
+        uint64_t dist = get_distance_from_watchpoint(fault_addr, info.address, &info.ctrl);
+        if (dist < min_dist)
+        {
+            min_dist = dist;
+            closest_point = point;
+            closest_event = NULL;
+        }
+        if (dist != 0) continue;
+
+        exact_hit = true;
         own_hit = true;
         point->on_hit(regs, &fp_regs, point);
     }
@@ -296,8 +310,18 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
         if (!event) continue;
 
         struct arch_hw_breakpoint *perf_info = &event->hw.info;
-        if (!watchpoint_access_matches(perf_info, esr) || get_distance_from_watchpoint(fault_addr, perf_info->address, &perf_info->ctrl) != 0) continue;
+        if (!watchpoint_access_matches(perf_info, esr)) continue;
 
+        uint64_t dist = get_distance_from_watchpoint(fault_addr, perf_info->address, &perf_info->ctrl);
+        if (dist < min_dist)
+        {
+            min_dist = dist;
+            closest_point = NULL;
+            closest_event = event;
+        }
+        if (dist != 0) continue;
+
+        exact_hit = true;
         perf_hit = true;
         perf_info->trigger = fault_addr;
         if (!user_mode(regs) && perf_info->ctrl.privilege == AARCH64_BREAKPOINT_EL0)
@@ -308,6 +332,32 @@ static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
 
         fn_perf_bp_event(event, regs);
         if (perf_breakpoint_requires_step(event)) perf_requires_step = true;
+    }
+
+    // FAR 没有精确落入 watched bytes 时，按原生 ARM64 handler 归因到最近的观察点。
+    if (!exact_hit && min_dist != ~0ULL)
+    {
+        if (closest_point)
+        {
+            own_hit = true;
+            closest_point->on_hit(regs, &fp_regs, closest_point);
+        }
+        else if (closest_event)
+        {
+            struct arch_hw_breakpoint *perf_info = &closest_event->hw.info;
+
+            perf_hit = true;
+            perf_info->trigger = fault_addr;
+            if (!user_mode(regs) && perf_info->ctrl.privilege == AARCH64_BREAKPOINT_EL0)
+            {
+                perf_requires_step = true;
+            }
+            else
+            {
+                fn_perf_bp_event(closest_event, regs);
+                if (perf_breakpoint_requires_step(closest_event)) perf_requires_step = true;
+            }
+        }
     }
 
     if (!own_hit && !perf_hit) return 0;
