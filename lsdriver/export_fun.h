@@ -26,23 +26,37 @@
 还有注意所有地方使用函数指针调用内核api，参数类型和返回值类型一定要与内核对齐，比如这里的 unsigned long就不能写为uint64_t, uint64_t定义为unsigned long long,虽然宽度一样，但是不能混合使用
 */
 
-// 屏蔽 CFI 检查，统一利用 kprobe 获取 kallsyms_lookup_name 地址
+/*
+ * 屏蔽 CFI 检查，统一利用 kprobe 获取 kallsyms_lookup_name 地址。
+ *
+ * [死机修复] 原实现把缓存变量声明为栈上局部变量，每次进入函数都被重置为 NULL，
+ * 导致「每查询一个符号」都要做一遍 register_kprobe + unregister_kprobe。
+ * 而 unregister_kprobe() 内部会调用 synchronize_rcu()（阻塞，等待宽限期）：
+ *   - 若在 rcu_read_lock() 临界区内调用 -> 等待自己退出 -> 必然自锁死；
+ *   - 若在 debug exception 等原子上下文调用 -> 非法睡眠。
+ * 两者都会触发 rcu stall，最终整机卡死（实测 pid 卡在 D 状态、watchdog 杀 system_server）。
+ * 修复：改为静态缓存，kprobe 解析全局只做一次。
+ */
+static unsigned long (*cached_kallsyms_lookup_name)(const char *name) __read_mostly = NULL;
+
 __attribute__((no_sanitize("cfi"))) static unsigned long generic_kallsyms_lookup_name(const char *name)
 {
-    unsigned long (*fn_kallsyms_lookup_name)(const char *name) = NULL;
-    struct kprobe kp = {0};
+    unsigned long (*fn)(const char *name);
 
-    if (!fn_kallsyms_lookup_name)
+    fn = READ_ONCE(cached_kallsyms_lookup_name);
+    if (unlikely(!fn))
     {
+        struct kprobe kp = {0};
+
         kp.symbol_name = "kallsyms_lookup_name";
         if (register_kprobe(&kp) < 0) return 0;
-        fn_kallsyms_lookup_name = (void *)kp.addr;
+        fn = (void *)kp.addr;
         unregister_kprobe(&kp);
+        if (!fn) return 0;
+        WRITE_ONCE(cached_kallsyms_lookup_name, fn);
     }
 
-    if (!fn_kallsyms_lookup_name) return 0;
-
-    return fn_kallsyms_lookup_name(name);
+    return fn(name);
 }
 int (*fn_aarch64_insn_patch_text)(void *addrs[], uint32_t insts[], int cnt);
 
