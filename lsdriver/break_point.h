@@ -679,7 +679,6 @@ static inline void remove_process_dptdbg(void)
     // struct break_point *info = g_dptdbg_info;
     // dptdbg_stop_monitor();
     // if (info) __builtin_memset(info, 0, sizeof(*info));
-
 }
 
 #include "arm64_stepdbg.h"

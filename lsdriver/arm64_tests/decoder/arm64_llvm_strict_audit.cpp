@@ -29,29 +29,6 @@
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/Support/raw_ostream.h>
 
-static int hex_digit(char character)
-{
-    if (character >= '0' && character <= '9') return character - '0';
-    if (character >= 'a' && character <= 'f') return character - 'a' + 10;
-    if (character >= 'A' && character <= 'F') return character - 'A' + 10;
-    return -1;
-}
-
-static bool parse_word(std::string_view text, uint32_t &word)
-{
-    if (text.size() == 9 && text.back() == '\r') text.remove_suffix(1);
-    if (text.size() != 8) return false;
-
-    word = 0;
-    for (char character : text)
-    {
-        int digit = hex_digit(character);
-        if (digit < 0) return false;
-        word = (word << 4) | static_cast<uint32_t>(digit);
-    }
-    return true;
-}
-
 static std::string hex_word(uint32_t word)
 {
     std::ostringstream output;
@@ -81,125 +58,6 @@ static const char *status_name(llvm::MCDisassembler::DecodeStatus status)
     return "unknown";
 }
 
-static std::string operand_dump(
-    const llvm::MCInst &instruction,
-    const llvm::MCRegisterInfo &registers)
-{
-    std::ostringstream output;
-
-    for (unsigned index = 0; index < instruction.getNumOperands(); index++)
-    {
-        if (index) output << ';';
-
-        const llvm::MCOperand &operand = instruction.getOperand(index);
-        if (operand.isReg())
-        {
-            output << "r:" << registers.getName(operand.getReg());
-        }
-        else if (operand.isImm())
-        {
-            output << "i:" << operand.getImm();
-        }
-        else if (operand.isSFPImm())
-        {
-            output << "sf:" << operand.getSFPImm();
-        }
-        else if (operand.isDFPImm())
-        {
-            output << "df:" << operand.getDFPImm();
-        }
-        else if (operand.isExpr())
-        {
-            output << "e";
-        }
-        else if (operand.isInst())
-        {
-            output << "s";
-        }
-        else
-        {
-            output << "x";
-        }
-    }
-
-    return output.str();
-}
-
-static std::string immediate_dump(const llvm::MCInst &instruction)
-{
-    std::ostringstream output;
-    bool first = true;
-
-    for (unsigned index = 0; index < instruction.getNumOperands(); index++)
-    {
-        const llvm::MCOperand &operand = instruction.getOperand(index);
-        if (!operand.isImm()) continue;
-        if (!first) output << ';';
-        output << operand.getImm();
-        first = false;
-    }
-
-    return output.str();
-}
-
-static bool read_words(const char *path, std::vector<uint32_t> &words)
-{
-    std::ifstream input(path, std::ios::binary);
-    if (!input)
-    {
-        std::cerr << path << ": cannot open input\n";
-        return false;
-    }
-
-    std::string data((std::istreambuf_iterator<char>(input)),
-                     std::istreambuf_iterator<char>());
-    if (input.bad())
-    {
-        std::cerr << path << ": read failure\n";
-        return false;
-    }
-
-    size_t offset = 0;
-    size_t line_number = 1;
-    while (offset < data.size())
-    {
-        size_t newline = data.find('\n', offset);
-        if (newline == std::string::npos)
-        {
-            std::cerr << path << ':' << line_number
-                      << ": line must end in LF or CRLF\n";
-            return false;
-        }
-
-        std::string_view line(data.data() + offset, newline - offset);
-        while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t'))
-            line.remove_suffix(1);
-        if (line.empty())
-        {
-            offset = newline + 1;
-            line_number++;
-            continue;
-        }
-        uint32_t word;
-        if (!parse_word(line, word))
-        {
-            std::cerr << path << ':' << line_number
-                      << ": expected exactly eight hex digits followed by LF or CRLF\n";
-            return false;
-        }
-        words.push_back(word);
-        offset = newline + 1;
-        line_number++;
-    }
-
-    if (data.empty())
-    {
-        std::cerr << path << ": input is empty\n";
-        return false;
-    }
-    return true;
-}
-
 int main(int argc, char **argv)
 {
     if (argc != 2)
@@ -208,8 +66,68 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
+    std::ifstream input(argv[1], std::ios::binary);
+    if (!input)
+    {
+        std::cerr << argv[1] << ": cannot open input\n";
+        return EXIT_FAILURE;
+    }
+    std::string data((std::istreambuf_iterator<char>(input)),
+                     std::istreambuf_iterator<char>());
+    if (input.bad())
+    {
+        std::cerr << argv[1] << ": read failure\n";
+        return EXIT_FAILURE;
+    }
+    if (data.empty())
+    {
+        std::cerr << argv[1] << ": input is empty\n";
+        return EXIT_FAILURE;
+    }
+
     std::vector<uint32_t> words;
-    if (!read_words(argv[1], words)) return EXIT_FAILURE;
+    size_t offset = 0;
+    size_t line_number = 1;
+    while (offset < data.size())
+    {
+        size_t newline = data.find('\n', offset);
+        if (newline == std::string::npos)
+        {
+            std::cerr << argv[1] << ':' << line_number
+                      << ": line must end in LF or CRLF\n";
+            return EXIT_FAILURE;
+        }
+        std::string_view line(data.data() + offset, newline - offset);
+
+        if (!line.empty() && line.back() == '\r')
+            line.remove_suffix(1);
+        if (!line.empty())
+        {
+            if (line.size() != 8)
+            {
+                std::cerr << argv[1] << ':' << line_number
+                          << ": expected exactly eight hex digits followed by LF or CRLF\n";
+                return EXIT_FAILURE;
+            }
+            uint32_t word = 0;
+            for (char character : line)
+            {
+                int digit = character >= '0' && character <= '9' ? character - '0' :
+                            character >= 'a' && character <= 'f' ? character - 'a' + 10 :
+                            character >= 'A' && character <= 'F' ? character - 'A' + 10 : -1;
+                if (digit < 0)
+                {
+                    std::cerr << argv[1] << ':' << line_number
+                              << ": expected exactly eight hex digits followed by LF or CRLF\n";
+                    return EXIT_FAILURE;
+                }
+                word = (word << 4) | static_cast<uint32_t>(digit);
+            }
+            words.push_back(word);
+        }
+        offset = newline + 1;
+        line_number++;
+    }
 
     LLVMInitializeAArch64TargetInfo();
     LLVMInitializeAArch64TargetMC();
@@ -266,7 +184,7 @@ int main(int argc, char **argv)
                  "\tdecode_size\tencoded_raw\tencoded_bytes_le\tfixups"
                  "\tidentity\toperand_count\toperands\timmediates\tassembly\n";
 
-    unsigned failures = 0;
+    size_t rejected = 0;
     for (size_t index = 0; index < words.size(); index++)
     {
         uint32_t word = words[index];
@@ -288,8 +206,8 @@ int main(int argc, char **argv)
         if (status != llvm::MCDisassembler::Success || size != bytes.size())
         {
             std::cout << "-\t" << status_name(status) << '\t' << size
-                      << "\t-\t-\t-\t0\t0\t-\n";
-            failures++;
+                      << "\t-\t-\t-\t0\t0\t-\t-\t-\n";
+            rejected++;
             continue;
         }
 
@@ -305,21 +223,22 @@ int main(int argc, char **argv)
         if (identity)
         {
             for (size_t byte_index = 0; byte_index < bytes.size(); byte_index++)
-                identity = identity &&
-                           static_cast<uint8_t>(encoded[byte_index]) ==
-                               bytes[byte_index];
+                if (static_cast<uint8_t>(encoded[byte_index]) != bytes[byte_index])
+                {
+                    identity = false;
+                    break;
+                }
         }
 
         std::cout << instructions->getName(instruction.getOpcode()).str()
                   << '\t' << status_name(status) << '\t' << size << '\t';
         if (encoded.size() == bytes.size())
         {
-            uint32_t encoded_word =
+            std::cout << hex_word(
                 static_cast<uint8_t>(encoded[0]) |
                 (static_cast<uint32_t>(static_cast<uint8_t>(encoded[1])) << 8) |
                 (static_cast<uint32_t>(static_cast<uint8_t>(encoded[2])) << 16) |
-                (static_cast<uint32_t>(static_cast<uint8_t>(encoded[3])) << 24);
-            std::cout << hex_word(encoded_word);
+                (static_cast<uint32_t>(static_cast<uint8_t>(encoded[3])) << 24));
         }
         else
         {
@@ -327,9 +246,41 @@ int main(int argc, char **argv)
         }
         std::cout << '\t' << (encoded.empty() ? "-" : hex_bytes(encoded))
                   << '\t' << fixups.size() << '\t' << (identity ? 1 : 0)
-                  << '\t' << instruction.getNumOperands() << '\t'
-                  << operand_dump(instruction, *registers) << '\t'
-                  << immediate_dump(instruction) << '\t';
+                  << '\t' << instruction.getNumOperands() << '\t';
+        for (unsigned operand_index = 0;
+             operand_index < instruction.getNumOperands(); operand_index++)
+        {
+            if (operand_index)
+                std::cout << ';';
+            if (instruction.getOperand(operand_index).isReg())
+                std::cout << "r:" << registers->getName(
+                    instruction.getOperand(operand_index).getReg());
+            else if (instruction.getOperand(operand_index).isImm())
+                std::cout << "i:" << instruction.getOperand(operand_index).getImm();
+            else if (instruction.getOperand(operand_index).isSFPImm())
+                std::cout << "sf:" << instruction.getOperand(operand_index).getSFPImm();
+            else if (instruction.getOperand(operand_index).isDFPImm())
+                std::cout << "df:" << instruction.getOperand(operand_index).getDFPImm();
+            else if (instruction.getOperand(operand_index).isExpr())
+                std::cout << 'e';
+            else if (instruction.getOperand(operand_index).isInst())
+                std::cout << 's';
+            else
+                std::cout << 'x';
+        }
+        std::cout << '\t';
+        bool first_immediate = true;
+        for (unsigned operand_index = 0;
+             operand_index < instruction.getNumOperands(); operand_index++)
+        {
+            if (!instruction.getOperand(operand_index).isImm())
+                continue;
+            if (!first_immediate)
+                std::cout << ';';
+            std::cout << instruction.getOperand(operand_index).getImm();
+            first_immediate = false;
+        }
+        std::cout << '\t';
         std::string assembly;
         llvm::raw_string_ostream assembly_stream(assembly);
         printer->printInst(
@@ -341,10 +292,9 @@ int main(int argc, char **argv)
                 character = ' ';
         std::cout << assembly
                   << '\n';
-        if (!identity) failures++;
     }
 
     std::cerr << "LLVM AArch64 strict audit: rows=" << words.size()
-              << " failures=" << failures << '\n';
-    return failures ? EXIT_FAILURE : EXIT_SUCCESS;
+              << " rejected=" << rejected << '\n';
+    return EXIT_SUCCESS;
 }

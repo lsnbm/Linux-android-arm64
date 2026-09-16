@@ -164,14 +164,6 @@ clean_driver_build() {
     rm -f "$DRIVER_SRC/${MODULE_NAME}.lds"
 }
 
-cleanup_driver_build_on_exit() {
-    local status=$?
-
-    trap - EXIT
-    clean_driver_build || true
-    exit "$status"
-}
-
 # 处理编译产物: 剥离符号 / 复制 / 重命名
 # 参数: $1=版本名  $2=clang工具链路径(可选, 为空则从PATH找)
 handle_output() {
@@ -521,108 +513,95 @@ build_legacy_kernel() {
     clean_driver_build
     return "$output_status"
 }
+requested_versions=("$@")
+build_failed=0
 
+trap '
+    status=$?
+    trap - EXIT
+    clean_driver_build || true
+    exit "$status"
+' EXIT
+generate_instruction_table
 
+STRIP_CHOICE="${STRIP_CHOICE:-}"
+if [[ -z "$STRIP_CHOICE" ]]; then
+    log_warn "是否需要剥离(strip)符号？"
+    echo -e "  输入 ${GREEN}'y'${NC} 进行剥离 (减小体积)"
+    echo -e "  输入 ${GREEN}'n'${NC} 不剥离 (保留调试符号)"
+    read -rp "请输入 (y/n): " STRIP_CHOICE
+fi
 
+if [[ "$STRIP_CHOICE" != "y" && "$STRIP_CHOICE" != "Y" && \
+      "$STRIP_CHOICE" != "n" && "$STRIP_CHOICE" != "N" ]]; then
+    log_warn "无效输入，默认不剥离"
+    STRIP_CHOICE="n"
+fi
+readonly STRIP_CHOICE
 
+if [[ ${#requested_versions[@]} -gt 0 ]]; then
+    log_warn "仅编译指定版本: ${requested_versions[*]}"
+fi
 
-main() {
-    local requested_versions=("$@")
-    local build_failed=0
-
-    trap cleanup_driver_build_on_exit EXIT
-    generate_instruction_table
-
-    STRIP_CHOICE="${STRIP_CHOICE:-}"
-    if [[ -z "$STRIP_CHOICE" ]]; then
-        log_warn "是否需要剥离(strip)符号？"
-        echo -e "  输入 ${GREEN}'y'${NC} 进行剥离 (减小体积)"
-        echo -e "  输入 ${GREEN}'n'${NC} 不剥离 (保留调试符号)"
-        read -rp "请输入 (y/n): " STRIP_CHOICE
-    fi
-
-
-    if [[ "$STRIP_CHOICE" != "y" && "$STRIP_CHOICE" != "Y" && \
-          "$STRIP_CHOICE" != "n" && "$STRIP_CHOICE" != "N" ]]; then
-        log_warn "无效输入，默认不剥离"
-        STRIP_CHOICE="n"
-    fi
-
-    # 导出给子函数使用 (非 export, 同进程内可见)
-    readonly STRIP_CHOICE
-
-    if [[ ${#requested_versions[@]} -gt 0 ]]; then
-        log_warn "仅编译指定版本: ${requested_versions[*]}"
-    fi
-
-    should_build() {
-        [[ ${#requested_versions[@]} -eq 0 ]] || contains_version "$1" "${requested_versions[@]}"
-    }
-
-    # 内核 6.12-Android16
-    if should_build "6.12-Android16" && ! build_kernel "6.12-Android16" \
-        "$KERNELS_ROOT/6.12-Android16/prebuilts/clang/host/linux-x86/clang-r536225" \
-        "aarch64-linux-gnu-" \
-        "CLANG_TRIPLE=aarch64-linux-gnu-"; then
-        build_failed=1
-    fi
-
-    # 2. 内核 6.6-Android15
-    if should_build "6.6-Android15" && ! build_kernel "6.6-Android15" \
-        "$KERNELS_ROOT/6.6-Android15/prebuilts/clang/host/linux-x86/clang-r510928" \
-        "aarch64-linux-gnu-" \
-        "CLANG_TRIPLE=aarch64-linux-gnu-"; then
-        build_failed=1
-    fi
-
-    # 3. 内核 6.1-Android14
-    if should_build "6.1-Android14" && ! build_kernel "6.1-Android14" \
-        "$KERNELS_ROOT/6.1-Android14/prebuilts/clang/host/linux-x86/clang-r487747c" \
-        "aarch64-linux-gnu-" \
-        "LLVM_TOOLCHAIN_PATH=$KERNELS_ROOT/6.1-Android14/prebuilts/clang/host/linux-x86/clang-r487747c"; then
-        build_failed=1
-    fi
-
-    # 4. 内核 5.15-Android13
-    if should_build "5.15-Android13" && ! build_kernel "5.15-Android13" \
-        "$KERNELS_ROOT/5.15-Android13/prebuilts/clang/host/linux-x86/clang-r450784e" \
-        "aarch64-linux-gnu-" \
-        "LLVM_TOOLCHAIN_PATH=$KERNELS_ROOT/5.15-Android13/prebuilts/clang/host/linux-x86/clang-r450784e"; then
-        build_failed=1
-    fi
-
-    # 5. 5.10-Android13
-    if should_build "5.10-Android13" && ! build_kernel "5.10-Android13" \
-        "$KERNELS_ROOT/5.10-Android13/prebuilts/clang/host/linux-x86/clang-r450784e" \
-        "aarch64-linux-gnu-" \
-        "LLVM_TOOLCHAIN_PATH=$KERNELS_ROOT/5.10-Android13/prebuilts/clang/host/linux-x86/clang-r450784e KBUILD_MODPOST_WARN=1"; then
-        build_failed=1
-    fi
-
-    # 6. 5.10-Android12 (Legacy)
-    if should_build "5.10-Android12" && ! build_legacy_kernel; then
-        build_failed=1
-    fi
-
-    log_title
-    echo ""
-    echo -e "${BLUE}编译结果汇总:${NC}"
-    echo -e "${BLUE}----------------------------------------------------${NC}"
-    for result in "${BUILD_RESULTS[@]}"; do
-        echo -e "  $result"
-    done
-    echo -e "${BLUE}----------------------------------------------------${NC}"
-    echo ""
-
-    clean_driver_build
-
-    echo -e "${BLUE}产物列表:${NC}"
-    # shellcheck disable=SC2086
-    ls -lh "$DRIVER_SRC"/[0-9]*-Android*.ko 2>/dev/null || \
-        log_error "未找到任何 .ko 文件"
-
-    log_title
-    return "$build_failed"
+should_build() {
+    [[ ${#requested_versions[@]} -eq 0 ]] || contains_version "$1" "${requested_versions[@]}"
 }
 
-main "$@"
+if should_build "6.12-Android16" && ! build_kernel "6.12-Android16" \
+    "$KERNELS_ROOT/6.12-Android16/prebuilts/clang/host/linux-x86/clang-r536225" \
+    "aarch64-linux-gnu-" \
+    "CLANG_TRIPLE=aarch64-linux-gnu-"; then
+    build_failed=1
+fi
+
+if should_build "6.6-Android15" && ! build_kernel "6.6-Android15" \
+    "$KERNELS_ROOT/6.6-Android15/prebuilts/clang/host/linux-x86/clang-r510928" \
+    "aarch64-linux-gnu-" \
+    "CLANG_TRIPLE=aarch64-linux-gnu-"; then
+    build_failed=1
+fi
+
+if should_build "6.1-Android14" && ! build_kernel "6.1-Android14" \
+    "$KERNELS_ROOT/6.1-Android14/prebuilts/clang/host/linux-x86/clang-r487747c" \
+    "aarch64-linux-gnu-" \
+    "LLVM_TOOLCHAIN_PATH=$KERNELS_ROOT/6.1-Android14/prebuilts/clang/host/linux-x86/clang-r487747c"; then
+    build_failed=1
+fi
+
+if should_build "5.15-Android13" && ! build_kernel "5.15-Android13" \
+    "$KERNELS_ROOT/5.15-Android13/prebuilts/clang/host/linux-x86/clang-r450784e" \
+    "aarch64-linux-gnu-" \
+    "LLVM_TOOLCHAIN_PATH=$KERNELS_ROOT/5.15-Android13/prebuilts/clang/host/linux-x86/clang-r450784e"; then
+    build_failed=1
+fi
+
+if should_build "5.10-Android13" && ! build_kernel "5.10-Android13" \
+    "$KERNELS_ROOT/5.10-Android13/prebuilts/clang/host/linux-x86/clang-r450784e" \
+    "aarch64-linux-gnu-" \
+    "LLVM_TOOLCHAIN_PATH=$KERNELS_ROOT/5.10-Android13/prebuilts/clang/host/linux-x86/clang-r450784e KBUILD_MODPOST_WARN=1"; then
+    build_failed=1
+fi
+
+if should_build "5.10-Android12" && ! build_legacy_kernel; then
+    build_failed=1
+fi
+
+log_title
+echo ""
+echo -e "${BLUE}编译结果汇总:${NC}"
+echo -e "${BLUE}----------------------------------------------------${NC}"
+for result in "${BUILD_RESULTS[@]}"; do
+    echo -e "  $result"
+done
+echo -e "${BLUE}----------------------------------------------------${NC}"
+echo ""
+
+clean_driver_build
+
+echo -e "${BLUE}产物列表:${NC}"
+# shellcheck disable=SC2086
+ls -lh "$DRIVER_SRC"/[0-9]*-Android*.ko 2>/dev/null || \
+    log_error "未找到任何 .ko 文件"
+
+log_title
+exit "$build_failed"

@@ -174,6 +174,16 @@ __nocfi enum emu_inst_result emu_execute_executor_entry(struct pt_regs *regs, st
 
     result = entry->execute(regs, fp_regs, entry);
 
+    if (result != EMU_INST_HANDLED)
+    {
+        fp_regs->fpcr = initial_fpcr;
+        fp_regs->fpsr = initial_fpsr;
+        write_fpcr(initial_fpcr);
+        write_fpsr(initial_fpsr);
+        regs->pstate |= initial_btype;
+        return result;
+    }
+
     /*
     执行期间可能产生 FPSR 异常/QC 标志，MSR FPCR/FPSR 也可能改变
     硬件寄存器。只有值发生变化时才需要写回；之后始终读回硬件，
@@ -185,9 +195,6 @@ __nocfi enum emu_inst_result emu_execute_executor_entry(struct pt_regs *regs, st
     if (fp_regs->fpsr != initial_fpsr) write_fpsr(fp_regs->fpsr);
     fp_regs->fpsr = read_fpsr();
 
-    /* 未提交指令时回滚入口阶段消费的 BTYPE。 */
-    if (result != EMU_INST_HANDLED)
-        regs->pstate |= initial_btype;
     return result;
 }
 

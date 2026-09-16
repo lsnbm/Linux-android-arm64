@@ -100,40 +100,51 @@ static void ptebp_drop_all_monitors(bool lock_mm)
     struct ptebp_page pages[ARRAY_SIZE(g_ptebp_pages)];
     struct mm_struct *mm;
     unsigned long flags;
+    // 单行日志统一报告：mode 区分卸载来源(stop=主动停止/fault=异常回滚)，cause 记录首个失败原因。
+    uint64_t fail_page = 0;
+    const char *cause = "ok";
 
     spin_lock_irqsave(&g_ptebp_lock, flags);
     mm = g_ptebp_mm;
     if (!mm || (g_ptebp_stopping && !lock_mm))
     {
+        cause = mm ? "already-stopping" : "no-mm";
         spin_unlock_irqrestore(&g_ptebp_lock, flags);
-        return;
     }
-
-    // 在复制待恢复页面前阻止新的批量模拟进入。
-    g_ptebp_stopping = true;
-    __builtin_memcpy(pages, g_ptebp_pages, sizeof(pages));
-    if (lock_mm)
+    else
     {
+        // 在复制待恢复页面前阻止新的批量模拟进入。
+        g_ptebp_stopping = true;
+        __builtin_memcpy(pages, g_ptebp_pages, sizeof(pages));
+        if (lock_mm)
+        {
+            spin_unlock_irqrestore(&g_ptebp_lock, flags);
+            mmap_read_lock(mm);
+            spin_lock_irqsave(&g_ptebp_lock, flags);
+        }
+
+        for (size_t point_slot = 0; point_slot < ARRAY_SIZE(pages); point_slot++)
+        {
+            struct ptebp_page *page = &pages[point_slot];
+            struct ptebp_page *live = &g_ptebp_pages[point_slot];
+
+            if (!page->page_vaddr || !page->armed) continue;
+
+            // 页面 PTE 若已被其他路径修改，则不能用旧快照覆盖；只记录首个失败页。
+            bool match = ptebp_page_matches(page, mm, PTE_UXN);
+            if (match && write_user_pte_value(mm, page->page_vaddr, pte_val(page->orig_pte))) continue;
+            live->armed = false;
+            if (fail_page) continue;
+            fail_page = page->page_vaddr;
+            cause = match ? "pte-writeback" : "pte-mismatch";
+        }
+
         spin_unlock_irqrestore(&g_ptebp_lock, flags);
-        mmap_read_lock(mm);
-        spin_lock_irqsave(&g_ptebp_lock, flags);
+
+        if (lock_mm) mmap_read_unlock(mm);
     }
 
-    for (size_t point_slot = 0; point_slot < ARRAY_SIZE(pages); point_slot++)
-    {
-        struct ptebp_page *page = &pages[point_slot];
-        struct ptebp_page *live = &g_ptebp_pages[point_slot];
-
-        if (!page->page_vaddr || !page->armed) continue;
-
-        // 页面 PTE 若已被其他路径修改，则不能用旧快照覆盖。
-        if (!ptebp_page_matches(page, mm, PTE_UXN)) live->armed = false;
-        else if (!write_user_pte_value(mm, page->page_vaddr, pte_val(page->orig_pte))) live->armed = false;
-    }
-
-    spin_unlock_irqrestore(&g_ptebp_lock, flags);
-
-    if (lock_mm) mmap_read_unlock(mm);
+    ls_log_always_tag("ptebp", "drop mode=%s cause=%s page=0x%llx\n", lock_mm ? "stop" : "fault", cause, (unsigned long long)fail_page);
 }
 
 // 清空 PTE 执行断点的全部软件状态，并释放启动监控时持有的 mm_struct 引用
@@ -172,83 +183,77 @@ L3 条目：4KiB   页          PTE
 // 处理受管 UXN 页的用户态取指异常，并在一次异常中批量模拟当前页指令。
 static int ptebp_handle_exec_fault(struct pt_regs *hook_regs)
 {
-    //IABT_LOW 已经确认异常来自 EL0； 最先读取并过滤异常类型，非 EL0 三级指令权限异常不访问任何 PTEBP 状态。
-    uint64_t esr = read_sysreg(esr_el1);
-    if (ESR_ELx_EC(esr) != ESR_ELx_EC_IABT_LOW || (esr & ESR_ELx_FSC) != (ESR_ELx_FSC_PERM | ESR_ELx_FSC_LEVEL)) return 0;
+    // 用户态软件寄存器现场是 el0t_64_sync_handler(regs) 的唯一参数，保存在 hook 入口 x0 中。
+    struct pt_regs *regs = (struct pt_regs *)hook_regs->regs[0];
+    struct mm_struct *mm = current->mm;
 
-    // info 和 stopping 是本次异常处理使用的无锁状态快照。
+    // info 是本次异常批量模拟使用的无锁配置快照。
     struct break_point *info;
     struct ptebp_page *page;
-    bool stopping;
+    struct bp_point *primary_point;
+    struct fp_regs fp_regs;
+    uint64_t page_start;
+    uint64_t page_end;
+    uint64_t esr = read_sysreg(esr_el1);
+    bool batch_ok = true;
 
-    // 用户态软件寄存器现场 el0t_64_sync_handler(regs) 的唯一参数位于 x0。
-    struct pt_regs *regs = (struct pt_regs *)hook_regs->regs[0];
+    // IABT_LOW 已确认异常来自 EL0；非 L3 指令权限异常不访问 PTEBP 状态。
+    if (ESR_ELx_EC(esr) != ESR_ELx_EC_IABT_LOW || (esr & ESR_ELx_FSC) != (ESR_ELx_FSC_PERM | ESR_ELx_FSC_LEVEL)) return 0;
 
     // 即使虚拟地址相同，不同 mm 中也可能对应完全不同的映射，必须精确匹配目标地址空间。
-    if (READ_ONCE(g_ptebp_mm) != current->mm) return 0;
-
-    stopping = READ_ONCE(g_ptebp_stopping);
+    if (READ_ONCE(g_ptebp_mm) != mm) return 0;
     info = READ_ONCE(g_ptebp_info);
 
-    // PTE_UXN 是按页安装的，因此确认故障 PC 所在页确实属于受管页面表。
+    // PTE_UXN 按页安装，因此故障 PC 所在页必须属于受管页面表。
     page = ptebp_find_page(g_ptebp_pages, regs->pc);
     if (!page) return 0;
 
     // 停止阶段的受管迟到异常已经完成归属确认，直接跳过原异常处理函数。
-    if (stopping) return 1;
-    if (!READ_ONCE(page->armed)) return 0;
-    // 页面安装尚未完整发布配置时，不使用空快照。
-    if (!info) return 0;
+    if (READ_ONCE(g_ptebp_stopping)) return 1;
 
-    // 模拟器使用独立的软件 FP/SIMD 现场。整批只在开始时读取一次，避免每条指令重复搬运 Q0-Q31、FPCR 和 FPSR。
-    struct fp_regs fp_regs;
+    // 页面必须仍处于启用状态，且整组断点配置已经完整发布。
+    if (!READ_ONCE(page->armed) || !info) return 0;
+
+    // 页面记录位于首个断点对应槽位；同页其他断点仍可通过配置表查找。C中 两个指向同一数组元素的同类型会自动除以元素大小，结果是它们之间相隔的元素数量
+    primary_point = &info->points[page - g_ptebp_pages];
+
+    // 以已确认的受管页记录固定本批模拟区间；FP/SIMD 现场整批只读取一次。
+    page_start = READ_ONCE(page->page_vaddr);
+    page_end = page_start + PAGE_SIZE;
     read_all_q_regs(&fp_regs);
 
-    //取出本次异常发生时，PC 所在页面的起始虚拟地址，并将它作为本批指令模拟的页面边界。
-    uint64_t batch_page = regs->pc & PAGE_MASK;
-
-    //记录本次取指异常中已经成功模拟了多少条指令。
-    uint32_t executed = 0;
-
-    //本批指令模拟是否以安全状态结束，能否继续保留 PTE UXN 监控。
-    bool batch_ok = true;
-
-    //只要当前待执行的 PC 仍位于本次触发异常的页面中，就继续在内核里模拟下一条指令。
-    while ((regs->pc & PAGE_MASK) == batch_page)
+    // 每条指令前主动确认 PC 仍在受管页 [page_start, page_end)；达到上限后返回 EL0，由 UXN 触发下一批。
+    for (uint32_t executed = 0; executed < PTEBP_BATCH_INST_LIMIT && regs->pc >= page_start && regs->pc < page_end; executed++)
     {
-        // 达到上限不是模拟失败：保留 UXN 并返回，当前页下一次取指异常会继续下一批。
-        if (executed >= PTEBP_BATCH_INST_LIMIT) break;
-
         // 批量模拟期间监控可能被另一 CPU 停止或替换；每条指令前都验证原配置仍然有效。
-        if (READ_ONCE(g_ptebp_stopping) || READ_ONCE(g_ptebp_mm) != current->mm || READ_ONCE(g_ptebp_info) != info) break;
+        if (READ_ONCE(g_ptebp_stopping) || READ_ONCE(g_ptebp_mm) != mm || READ_ONCE(g_ptebp_info) != info) break;
 
-        // UXN 只能报告“进入了受管页”，页内的精确断点需要按当前 PC 在软件中逐条匹配。
-        struct bp_point *hit_point = bp_info_find_point_by_pc(info, regs->pc);
+        // 常见的单断点页直接命中页面所属槽位；同页其他断点才扫描配置表。
+        struct bp_point *hit_point = READ_ONCE(primary_point->hit_addr) == regs->pc ? primary_point : bp_info_find_point_by_pc(info, regs->pc);
         if (hit_point && hit_point->on_hit)
         {
-            // 通用寄存器和完整 FP/SIMD 状态都直接使用当前软件现场，回调修改会由后续模拟继续继承。
+            // 回调直接修改本批使用的 GPR 和 FP/SIMD 软件现场，后续模拟继承修改结果。
             hit_point->on_hit(regs, &fp_regs, hit_point);
         }
 
-        // 断点回调执行后，PC 是否仍在本批模拟的原始页面中。
-        if ((regs->pc & PAGE_MASK) != batch_page) break;
+        // 回调若把 PC 改出当前受管页区间，本批立即结束并从新 PC 返回用户态。
+        if (regs->pc < page_start || regs->pc >= page_end) break;
 
-        // emulate_inst 同时更新 regs 和软件 FP/SIMD 现场；不支持的指令使本批不再安全。
+        // 模拟器负责更新现场和 PC；无法模拟时撤销监控，让当前指令原生重试。
         if (!emulate_inst(regs, &fp_regs, 0))
         {
             batch_ok = false;
             break;
         }
-        executed++;
     }
 
-    // 将最后一批软件模拟结果提交到真实 Q0-Q31、FPCR 和 FPSR，使返回 EL0 后看到与原生执行一致的寄存器状态。
+    // 将本批最终 FP/SIMD 软件现场提交回 CPU。
     write_all_q_regs(&fp_regs);
 
-    // 模拟失败时不能让同一条 UXN 指令持续重入异常；撤销整组监控后让用户代码从当前 PC 原生重试。
+    // 模拟失败时恢复受管页执行权限，避免同一条 UXN 指令持续重入异常。
     if (!batch_ok) ptebp_drop_all_monitors(false);
 
-    // work_fn 返回 1 会让 hook 跳板跳过原 EL0 同步异常处理函数，直接进入 ret_to_user。
+    // 返回 1 让 hook 跳板跳过原 EL0 同步异常处理函数，直接进入 ret_to_user。
     return 1;
 }
 

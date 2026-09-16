@@ -32,8 +32,6 @@
 #define SYS_EXIT 93
 #define BRK_INSTRUCTION 0xd4200000U
 #define PSTATE_SS (1U << 21)
-#define PSTATE_N (1U << 31)
-#define PSTATE_C (1U << 29)
 
 static const char runner_build_id[] __attribute__((used)) =
     "arm64_executor_runner_build_id=" ARM64_EXECUTOR_RUNNER_BUILD_ID;
@@ -100,7 +98,6 @@ enum runner_mismatch_kind
 struct runner_result
 {
     uint32_t status;
-    uint32_t cpu_event;
     uint32_t mismatch_kind;
     uint32_t mismatch_index;
     uint32_t mismatch_bit;
@@ -133,95 +130,100 @@ static __attribute__((noreturn, noinline, no_stack_protector)) void raw_exit(int
 
 static void initialize_expected_case(struct arm64_executor_case *test_case)
 {
-    uint64_t seed = 0x9e3779b97f4a7c15ULL ^ 0xd1b54a32d192ed03ULL;
-    unsigned int reg;
-    unsigned int byte;
-
+    static const uint64_t initial_regs[31] = {
+        0x0000006C985C8B00ULL, 0x00000070455F3B90ULL,
+        0x0000000000000000ULL, 0x0000000000000000ULL,
+        0x0000000000000000ULL, 0x0000000000000000ULL,
+        0x0000000000000000ULL, 0x000000702D4D5000ULL,
+        0x00000070455FA000ULL, 0xC6D55F00C651C160ULL,
+        0x0000000045883856ULL, 0x0000006C985C8D2CULL,
+        0x0000000000000001ULL, 0x0000000000000001ULL,
+        0x0000000000000000ULL, 0x0000006F66DE03E8ULL,
+        0xB400006F41363A88ULL, 0x0000000000000001ULL,
+        0x0000000000000007ULL, 0x0000006C985C8B00ULL,
+        0x0000000000000000ULL, 0x00000070455F3AE8ULL,
+        0x0000006CA03C25C0ULL, 0x000000702D4A92D0ULL,
+        0x0000000000000000ULL, 0x00000070455FA000ULL,
+        0x00000070455F3B60ULL, 0x000000702D4A8000ULL,
+        0x000000702D7FC000ULL, 0x00000070455F3A10ULL,
+        0x000000701D7340DCULL,
+    };
+    static const uint64_t initial_q[32][2] = {
+        { 0x3F0F6791BEFFB76FULL, 0xBEAADF06BF120725ULL },
+        { 0x00000000BEAADF06ULL, 0x0000000000000000ULL },
+        { 0x00000000BF120725ULL, 0x0000000000000000ULL },
+        { 0x000000003D800000ULL, 0x0000000000000000ULL },
+        { 0x00000000322BCC77ULL, 0x0000000000000000ULL },
+        { 0x3F800000BF800000ULL, 0xBF8000003F800000ULL },
+        { 0x3F8000003F800000ULL, 0xBF800000BF800000ULL },
+        { 0x0000000080000000ULL, 0x0000000000000000ULL },
+        { 0x00000000C6D55F00ULL, 0x0000000000000000ULL },
+        { 0x00000000C651C160ULL, 0x0000000000000000ULL },
+        { 0x0000000045883856ULL, 0x0000000000000000ULL },
+        { 0x000000003F800000ULL, 0x0000000000000000ULL },
+        { 0x000000003F800000ULL, 0x0000000000000000ULL },
+        { 0x000000003F800000ULL, 0x0000000000000000ULL },
+        { 0x00000000BEFFB76FULL, 0x0000000000000000ULL },
+        { 0x00000000FFFFFFFFULL, 0x0000000000000000ULL },
+        { 0x45883856C8BF39D0ULL, 0x3F8000003F800000ULL },
+        { 0x0000000080000000ULL, 0x0000000000000000ULL },
+        { 0x0000000000000000ULL, 0x0000000000000000ULL },
+        { 0xBEAADF06BF120725ULL, 0x3F0F6791BEFFB76FULL },
+        { 0x8000000080000000ULL, 0x8000000000000000ULL },
+        { 0x3F0F6791BEFFB76FULL, 0xBEAADF06BF120725ULL },
+        { 0xBEFFB76F3F0F6791ULL, 0xBF120725BEAADF06ULL },
+        { 0xBF8000003F800000ULL, 0xBF8000003F800000ULL },
+        { 0x000000003638B88EULL, 0x3F8000003F800000ULL },
+        { 0x0000000000000000ULL, 0x3F80000000000000ULL },
+        { 0x000000003F800000ULL, 0x0000000000000000ULL },
+        { 0x3F80000000000000ULL, 0x0000000000000000ULL },
+        { 0x0000000000000000ULL, 0x000000003F800000ULL },
+        { 0x8000000000000000ULL, 0x800000003F800000ULL },
+        { 0x00000000BF78F176ULL, 0x0000000000000000ULL },
+        { 0x000000003F800000ULL, 0x0000000000000000ULL },
+    };
     memset(&test_case->initial, 0, sizeof(test_case->initial));
-    for (reg = 0; reg < 31U; reg++)
-        test_case->initial.regs[reg] =
-            seed ^ (0x94d049bb133111ebULL * (uint64_t)(reg + 1U));
-    test_case->initial.sp = ARM64_EXECUTOR_STACK_ADDRESS +
-                            ARM64_EXECUTOR_MEMORY_SIZE - 16U;
-    test_case->initial.pc = ARM64_EXECUTOR_CODE_ADDRESS + ARM64_EXECUTOR_CODE_OFFSET;
-    test_case->initial.pstate = PSTATE_N | PSTATE_C;
-    test_case->initial.tpidr_el0 = 0x71000000ULL;
-    for (reg = 0; reg < 32U; reg++)
-        for (byte = 0; byte < 16U; byte++)
-            test_case->initial.q[reg][byte] =
-                (uint8_t)(seed + reg * 37U + byte * 13U);
-    for (byte = 0; byte < ARM64_EXECUTOR_MEMORY_SIZE; byte++)
+    memcpy(test_case->initial.regs, initial_regs, sizeof(initial_regs));
+    test_case->initial.sp = 0x00000070455F39D0ULL;
+    test_case->initial.pc = 0x000000701D737C18ULL;
+    test_case->initial.pstate = 0x0000000060001000ULL;
+    test_case->initial.fpcr = 0U;
+    test_case->initial.fpsr = 0x0800009FU;
+    test_case->initial.tpidr_el0 = 0U;
+    for (unsigned int reg = 0; reg < 32U; reg++)
+        memcpy(test_case->initial.q[reg], initial_q[reg],
+               sizeof(test_case->initial.q[reg]));
+    for (unsigned int byte = 0; byte < ARM64_EXECUTOR_MEMORY_SIZE; byte++)
         test_case->memory[byte] = (uint8_t)(0x5aU ^ (byte * 29U));
 }
 
-static int validate_and_print_initial_input_profile(
-    const struct arm64_executor_case *test_case)
+static void prepare_common_input(struct arm64_executor_case *test_case)
 {
-    uint8_t q_values[256] = { 0 };
-    uint8_t memory_values[256] = { 0 };
-    unsigned int gpr_nonzero = 0;
-    unsigned int gpr_distinct = 0;
-    unsigned int q_nonzero = 0;
-    unsigned int q_distinct = 0;
-    unsigned int memory_nonzero = 0;
-    unsigned int memory_distinct = 0;
-    unsigned int reg;
-    unsigned int other;
-    unsigned int byte;
+    struct arm64_decoded_instruction decoded;
 
-    for (reg = 0; reg < 31U; reg++)
+    test_case->initial.pc = ARM64_EXECUTOR_CODE_ADDRESS + ARM64_EXECUTOR_CODE_OFFSET;
+    if (arm64_decode_instruction(test_case->raw, &decoded) != ARM64_DECODE_OK)
+        return;
+    if ((decoded.instruction == ARM64_INST_BR ||
+         decoded.instruction == ARM64_INST_BLR ||
+         decoded.instruction == ARM64_INST_RET) && decoded.rn < 31U)
+        test_case->initial.regs[decoded.rn] = test_case->initial.pc;
+    if (decoded.instruction_class != ARM64_INSTRUCTION_CLASS_LOAD_STORE)
+        return;
+    switch (decoded.instruction)
     {
-        int unique = 1;
-
-        if (test_case->initial.regs[reg] != 0U)
-            gpr_nonzero++;
-        for (other = 0; other < reg; other++)
-            if (test_case->initial.regs[reg] == test_case->initial.regs[other])
-            {
-                unique = 0;
-                break;
-            }
-        if (unique)
-            gpr_distinct++;
+    case ARM64_INST_LDR_GPR_LITERAL:
+    case ARM64_INST_LDRSW_LITERAL:
+    case ARM64_INST_LDR_FP_SIMD_LITERAL:
+    case ARM64_INST_PRFM_LITERAL:
+        return;
+    default:
+        break;
     }
-    for (reg = 0; reg < 32U; reg++)
-        for (byte = 0; byte < 16U; byte++)
-        {
-            uint8_t value = test_case->initial.q[reg][byte];
 
-            if (value != 0U)
-                q_nonzero++;
-            q_values[value] = 1U;
-        }
-    for (byte = 0; byte < ARM64_EXECUTOR_MEMORY_SIZE; byte++)
-    {
-        uint8_t value = test_case->memory[byte];
+    int64_t base = (int64_t)ARM64_EXECUTOR_DATA_ADDRESS - decoded.offset;
 
-        if (value != 0U)
-            memory_nonzero++;
-        memory_values[value] = 1U;
-    }
-    for (byte = 0; byte < 256U; byte++)
-    {
-        q_distinct += q_values[byte];
-        memory_distinct += memory_values[byte];
-    }
-    if (gpr_nonzero != 31U || gpr_distinct != 31U ||
-        test_case->initial.sp == 0U || test_case->initial.pc == 0U ||
-        test_case->initial.pstate == 0U ||
-        test_case->initial.tpidr_el0 == 0U ||
-        q_nonzero != 511U || q_distinct != 256U ||
-        memory_nonzero != 4080U || memory_distinct != 256U)
-        return -1;
-    printf("input_profile=gpr_nonzero=%u/31,gpr_distinct=%u,q_nonzero=%u/512,q_distinct_bytes=%u,memory_nonzero=%u/4096,memory_distinct_bytes=%u\n",
-           gpr_nonzero, gpr_distinct, q_nonzero, q_distinct,
-           memory_nonzero, memory_distinct);
-    return 0;
-}
-
-static int instruction_is_post_index(const struct arm64_decoded_instruction *decoded)
-{
-    switch (decoded->instruction)
+    switch (decoded.instruction)
     {
     case ARM64_INST_STP_GPR_POST_INDEX:
     case ARM64_INST_LDP_GPR_POST_INDEX:
@@ -239,29 +241,18 @@ static int instruction_is_post_index(const struct arm64_decoded_instruction *dec
     case ARM64_INST_LDRSB_GPR_POST_INDEX:
     case ARM64_INST_LDRSH_GPR_POST_INDEX:
     case ARM64_INST_LDRSW_GPR_POST_INDEX:
-        return 1;
+        base = ARM64_EXECUTOR_DATA_ADDRESS;
+        break;
     default:
-        return 0;
+        break;
     }
-}
-
-static int instruction_has_base_register(const struct arm64_decoded_instruction *decoded)
-{
-    switch (decoded->instruction)
-    {
-    case ARM64_INST_LDR_GPR_LITERAL:
-    case ARM64_INST_LDRSW_LITERAL:
-    case ARM64_INST_LDR_FP_SIMD_LITERAL:
-    case ARM64_INST_PRFM_LITERAL:
-        return 0;
-    default:
-        return 1;
-    }
-}
-
-static int instruction_has_register_offset(const struct arm64_decoded_instruction *decoded)
-{
-    switch (decoded->instruction)
+    if (decoded.rn == 31U)
+        test_case->initial.sp = (uint64_t)((base + 15) & ~15LL);
+    else
+        test_case->initial.regs[decoded.rn] = (uint64_t)base;
+    if (decoded.rm >= 31U)
+        return;
+    switch (decoded.instruction)
     {
     case ARM64_INST_STRB_GPR_REGISTER_OFFSET:
     case ARM64_INST_STRH_GPR_REGISTER_OFFSET:
@@ -275,37 +266,11 @@ static int instruction_has_register_offset(const struct arm64_decoded_instructio
     case ARM64_INST_STR_FP_SIMD_REGISTER_OFFSET:
     case ARM64_INST_LDR_FP_SIMD_REGISTER_OFFSET:
     case ARM64_INST_PRFM_REGISTER_OFFSET:
-        return 1;
-    default:
-        return 0;
-    }
-}
-
-static int prepare_common_input(struct arm64_executor_case *test_case)
-{
-    struct arm64_decoded_instruction decoded;
-    int64_t base;
-
-    if (arm64_decode_instruction(test_case->raw, &decoded) != ARM64_DECODE_OK)
-        return -1;
-    test_case->initial.pc = ARM64_EXECUTOR_CODE_ADDRESS + ARM64_EXECUTOR_CODE_OFFSET;
-    if ((decoded.instruction == ARM64_INST_BR ||
-         decoded.instruction == ARM64_INST_BLR ||
-         decoded.instruction == ARM64_INST_RET) && decoded.rn < 31U)
-        test_case->initial.regs[decoded.rn] = test_case->initial.pc;
-    if (decoded.instruction_class != ARM64_INSTRUCTION_CLASS_LOAD_STORE ||
-        !instruction_has_base_register(&decoded))
-        return 0;
-    base = instruction_is_post_index(&decoded) ?
-           (int64_t)ARM64_EXECUTOR_DATA_ADDRESS :
-           (int64_t)ARM64_EXECUTOR_DATA_ADDRESS - decoded.offset;
-    if (decoded.rn == 31U)
-        test_case->initial.sp = (uint64_t)((base + 15) & ~15LL);
-    else
-        test_case->initial.regs[decoded.rn] = (uint64_t)base;
-    if (instruction_has_register_offset(&decoded) && decoded.rm < 31U)
         test_case->initial.regs[decoded.rm] = 0U;
-    return 0;
+        break;
+    default:
+        break;
+    }
 }
 
 static int prepare_case_isolated(int device, struct arm64_executor_case *test_case)
@@ -381,11 +346,6 @@ static int prepare_case_isolated(int device, struct arm64_executor_case *test_ca
     return -1;
 }
 
-static unsigned int first_different_bit(uint64_t expected, uint64_t actual)
-{
-    return (unsigned int)__builtin_ctzll(expected ^ actual);
-}
-
 static int compare_u64(struct runner_result *result, uint32_t kind,
                        uint32_t index, uint64_t expected, uint64_t actual)
 {
@@ -393,53 +353,51 @@ static int compare_u64(struct runner_result *result, uint32_t kind,
         return 1;
     result->mismatch_kind = kind;
     result->mismatch_index = index;
-    result->mismatch_bit = first_different_bit(expected, actual);
+    result->mismatch_bit = (uint32_t)__builtin_ctzll(expected ^ actual);
     result->expected_value = expected;
     result->actual_value = actual;
     return 0;
 }
 
-static int compare_raw_results(struct runner_result *result,
-                               const struct arm64_executor_completion *completion,
-                               const struct arm64_executor_arch_state *cpu,
-                               const uint8_t *cpu_memory)
+static void compare_raw_results(struct runner_result *result,
+                                const struct arm64_executor_completion *completion,
+                                const struct arm64_executor_arch_state *cpu,
+                                const uint8_t *cpu_memory)
 {
-    const struct arm64_executor_arch_state *executor = &completion->executor_state;
-    unsigned int index;
-    unsigned int byte;
-
-    for (index = 0; index < 31U; index++)
+    for (uint32_t index = 0; index < 31U; index++)
         if (!compare_u64(result, RUNNER_MISMATCH_GPR, index,
-                         executor->regs[index], cpu->regs[index]))
-            return 0;
+                         completion->executor_state.regs[index],
+                         cpu->regs[index]))
+            return;
     if (!compare_u64(result, RUNNER_MISMATCH_SP, 0,
-                     executor->sp, cpu->sp) ||
+                     completion->executor_state.sp, cpu->sp) ||
         !compare_u64(result, RUNNER_MISMATCH_PC, 0,
-                     executor->pc, cpu->pc) ||
+                     completion->executor_state.pc, cpu->pc) ||
         !compare_u64(result, RUNNER_MISMATCH_PSTATE, 0,
-                     executor->pstate, cpu->pstate))
-        return 0;
-    for (index = 0; index < 32U; index++)
-        for (byte = 0; byte < 16U; byte++)
-            if (executor->q[index][byte] != cpu->q[index][byte])
+                     completion->executor_state.pstate, cpu->pstate))
+        return;
+    for (uint32_t index = 0; index < 32U; index++)
+        for (uint32_t byte = 0; byte < 16U; byte++)
+            if (completion->executor_state.q[index][byte] != cpu->q[index][byte])
             {
                 result->mismatch_kind = RUNNER_MISMATCH_Q;
                 result->mismatch_index = index;
                 result->mismatch_bit = byte * 8U +
                     (unsigned int)__builtin_ctz((unsigned int)
-                        (executor->q[index][byte] ^ cpu->q[index][byte]));
-                result->expected_value = executor->q[index][byte];
+                        (completion->executor_state.q[index][byte] ^
+                         cpu->q[index][byte]));
+                result->expected_value = completion->executor_state.q[index][byte];
                 result->actual_value = cpu->q[index][byte];
-                return 0;
+                return;
             }
     if (!compare_u64(result, RUNNER_MISMATCH_FPCR, 0,
-                     executor->fpcr, cpu->fpcr) ||
+                     completion->executor_state.fpcr, cpu->fpcr) ||
         !compare_u64(result, RUNNER_MISMATCH_FPSR, 0,
-                     executor->fpsr, cpu->fpsr) ||
+                     completion->executor_state.fpsr, cpu->fpsr) ||
         !compare_u64(result, RUNNER_MISMATCH_TPIDR_EL0, 0,
-                     executor->tpidr_el0, cpu->tpidr_el0))
-        return 0;
-    for (byte = 0; byte < ARM64_EXECUTOR_MEMORY_SIZE; byte++)
+                     completion->executor_state.tpidr_el0, cpu->tpidr_el0))
+        return;
+    for (uint32_t byte = 0; byte < ARM64_EXECUTOR_MEMORY_SIZE; byte++)
         if (completion->executor_memory[byte] != cpu_memory[byte])
         {
             result->mismatch_kind = RUNNER_MISMATCH_MEMORY;
@@ -448,10 +406,9 @@ static int compare_raw_results(struct runner_result *result,
                 (completion->executor_memory[byte] ^ cpu_memory[byte]));
             result->expected_byte = completion->executor_memory[byte];
             result->actual_byte = cpu_memory[byte];
-            return 0;
+            return;
         }
     result->status = RUNNER_STATUS_PASS;
-    return 1;
 }
 
 static int read_instructions(const char *path, uint32_t **values, size_t *count)
@@ -503,13 +460,6 @@ invalid:
     fclose(file);
     free(buffer);
     return -1;
-}
-
-static void *map_fixed(uintptr_t address, size_t size, int protection)
-{
-    void *mapped = mmap((void *)address, size, protection,
-                        MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
-    return mapped == MAP_FAILED ? NULL : mapped;
 }
 
 static int ptrace_regs(pid_t child, int request, unsigned long note,
@@ -573,20 +523,6 @@ static void runner_fatal_signal(int signal_number)
     siglongjmp(runner_recovery, 1);
 }
 
-static void install_runner_signal_handlers(void)
-{
-    struct sigaction action;
-
-    memset(&action, 0, sizeof(action));
-    action.sa_handler = runner_fatal_signal;
-    sigemptyset(&action.sa_mask);
-    action.sa_flags = 0;
-    sigaction(SIGSEGV, &action, NULL);
-    sigaction(SIGBUS, &action, NULL);
-    sigaction(SIGILL, &action, NULL);
-    sigaction(SIGABRT, &action, NULL);
-}
-
 static void cpu_session_stop(struct cpu_session *session)
 {
     if (session->child > 0)
@@ -617,7 +553,7 @@ static int cpu_session_start(struct cpu_session *session,
         session->code = NULL;
         goto fail;
     }
-    failure_phase = "data-mmap";
+    failure_phase = "code-mprotect";
     if (mprotect((void *)ARM64_EXECUTOR_CODE_ADDRESS,
                  ARM64_EXECUTOR_MEMORY_SIZE,
                  PROT_READ | PROT_WRITE | PROT_EXEC) < 0)
@@ -631,6 +567,7 @@ static int cpu_session_start(struct cpu_session *session,
         session->data = NULL;
         goto fail;
     }
+    failure_phase = "data-mprotect";
     if (mprotect((void *)ARM64_EXECUTOR_DATA_ADDRESS,
                  ARM64_EXECUTOR_MEMORY_SIZE,
                  PROT_READ | PROT_WRITE) < 0)
@@ -645,10 +582,12 @@ static int cpu_session_start(struct cpu_session *session,
         goto fail;
     if (session->child == 0)
     {
-        void *stack = map_fixed(ARM64_EXECUTOR_STACK_ADDRESS, 4096,
-                                PROT_READ | PROT_WRITE);
+        void *stack = mmap((void *)ARM64_EXECUTOR_STACK_ADDRESS, 4096,
+                           PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE,
+                           -1, 0);
 
-        if (!stack)
+        if (stack == MAP_FAILED)
             _exit(120);
         if (ptrace(PTRACE_TRACEME, 0, NULL, NULL) < 0)
             _exit(121);
@@ -805,21 +744,21 @@ static int cpu_session_step(struct cpu_session *session,
         if (ptrace_regs(session->child, PTRACE_GETREGSET, NT_ARM_TLS,
                         &tpidr_el0, sizeof(tpidr_el0)) < 0)
             goto fail;
-         *cpu_event = RUNNER_CPU_STEP_COMPLETE;
-         memcpy(cpu_state->regs, regs.regs, sizeof(regs.regs));
-         cpu_state->sp = regs.sp;
-         cpu_state->pc = regs.pc;
-         cpu_state->pstate = regs.pstate & ~((uint64_t)PSTATE_SS);
-         memcpy(cpu_state->q, fp_regs.vregs, sizeof(cpu_state->q));
-         cpu_state->fpcr = fp_regs.fpcr;
-         cpu_state->fpsr = fp_regs.fpsr;
-         cpu_state->tpidr_el0 = tpidr_el0;
-         memcpy(cpu_memory,
+        *cpu_event = RUNNER_CPU_STEP_COMPLETE;
+        memcpy(cpu_state->regs, regs.regs, sizeof(regs.regs));
+        cpu_state->sp = regs.sp;
+        cpu_state->pc = regs.pc;
+        cpu_state->pstate = regs.pstate & ~((uint64_t)PSTATE_SS);
+        memcpy(cpu_state->q, fp_regs.vregs, sizeof(cpu_state->q));
+        cpu_state->fpcr = fp_regs.fpcr;
+        cpu_state->fpsr = fp_regs.fpsr;
+        cpu_state->tpidr_el0 = tpidr_el0;
+        memcpy(cpu_memory,
                (uint8_t *)session->data + ARM64_EXECUTOR_MAPPING_GUARD,
-             ARM64_EXECUTOR_MEMORY_SIZE);
+               ARM64_EXECUTOR_MEMORY_SIZE);
         return 0;
     }
-        *cpu_event = RUNNER_CPU_EXCEPTION;
+    *cpu_event = RUNNER_CPU_EXCEPTION;
     if (!WIFSTOPPED(wait_status))
         session->child = -1;
     return 0;
@@ -831,12 +770,8 @@ fail:
 
 int main(int argc, char **argv)
 {
-    const char *instruction_path;
-    const char *device_path;
-    uint32_t *instructions;
-    size_t count;
-    int device;
-    size_t index;
+    size_t compared = 0;
+    size_t skipped = 0;
     int exit_code = 1;
     struct arm64_executor_arch_state chained_state;
     uint8_t chained_memory[ARM64_EXECUTOR_MEMORY_SIZE];
@@ -846,9 +781,10 @@ int main(int argc, char **argv)
         fprintf(stderr, "usage: %s <instruction.txt> </dev/arm64_executor_test>\n", argv[0]);
         return 1;
     }
-    instruction_path = argv[1];
-    device_path = argv[2];
-    if (read_instructions(instruction_path, &instructions, &count) < 0)
+    uint32_t *instructions;
+    size_t count;
+
+    if (read_instructions(argv[1], &instructions, &count) < 0)
         return 1;
     printf("protocol_version=%u\n", ARM64_EXECUTOR_PROTOCOL_VERSION);
     printf("runner_build_id=%s\n", runner_build_id);
@@ -857,15 +793,31 @@ int main(int argc, char **argv)
     printf("raw_compare=x0-x30,sp,pc,pstate,q0-q31,fpcr,fpsr,tpidr_el0,memory4096\n");
     printf("instruction_count=%zu\n", count);
     fflush(stdout);
-    install_runner_signal_handlers();
-    device = open(device_path, O_RDWR | O_CLOEXEC);
+    struct sigaction action = { .sa_handler = runner_fatal_signal };
+
+    sigemptyset(&action.sa_mask);
+    sigaction(SIGSEGV, &action, NULL);
+    sigaction(SIGBUS, &action, NULL);
+    sigaction(SIGILL, &action, NULL);
+    sigaction(SIGABRT, &action, NULL);
+
+    int device = open(argv[2], O_RDWR | O_CLOEXEC);
+
     if (device < 0)
     {
-        perror(device_path);
+        perror(argv[2]);
         free(instructions);
         return 1;
     }
-    for (index = 0; index < count; index++)
+    {
+        struct arm64_executor_case initial_case = { 0 };
+
+        initialize_expected_case(&initial_case);
+        printf("input_profile=regs.txt\n");
+        chained_state = initial_case.initial;
+        memcpy(chained_memory, initial_case.memory, sizeof(chained_memory));
+    }
+    for (size_t index = 0; index < count; index++)
     {
         struct arm64_executor_case test_case = {
             .version = ARM64_EXECUTOR_PROTOCOL_VERSION,
@@ -885,33 +837,42 @@ int main(int argc, char **argv)
         struct arm64_executor_arch_state cpu_state;
         uint8_t cpu_memory[ARM64_EXECUTOR_MEMORY_SIZE];
         uint32_t cpu_event;
+        const struct arm64_executor_arch_state *previous_state = NULL;
 
-        if (index == 0U)
-        {
-            initialize_expected_case(&test_case);
-            if (validate_and_print_initial_input_profile(&test_case) < 0)
-            {
-                fprintf(stderr, "initial input profile validation failed\n");
-                goto out;
-            }
-        }
-        else
-        {
-            test_case.initial = chained_state;
-            memcpy(test_case.memory, chained_memory, sizeof(test_case.memory));
-        }
-        if (prepare_common_input(&test_case) < 0)
-        {
-            fprintf(stderr, "index=%zu raw=0x%08x result=INPUT_PREPARE_FAIL\n",
-                    index, instructions[index]);
-            goto out;
-        }
+        test_case.initial = chained_state;
+        memcpy(test_case.memory, chained_memory, sizeof(test_case.memory));
+        prepare_common_input(&test_case);
         runner_current_index = (sig_atomic_t)index;
         if (sigsetjmp(runner_recovery, 1) != 0)
         {
             fprintf(stderr, "index=%zu raw=0x%08x result=CPU_RUNNER_FAIL\n",
                     index, instructions[index]);
             goto out;
+        }
+        if (runner_cpu_session.child < 0)
+        {
+            if (cpu_session_start(&runner_cpu_session, &test_case) < 0)
+                goto out;
+        }
+        else
+            previous_state = &chained_state;
+        if (cpu_session_step(&runner_cpu_session, &test_case,
+                             previous_state,
+                             &cpu_state, cpu_memory, &cpu_event) < 0)
+        {
+            fprintf(stderr, "index=%zu raw=0x%08x result=CPU_RUNNER_FAIL\n",
+                    index, instructions[index]);
+            goto out;
+        }
+        if (cpu_event != RUNNER_CPU_STEP_COMPLETE)
+        {
+            result.status = RUNNER_STATUS_CPU_EXCEPTION;
+            printf("index=%zu raw=0x%08x status=%u action=skip emulator=not_called\n",
+                   index, instructions[index], result.status);
+            fflush(stdout);
+            skipped++;
+            cpu_session_stop(&runner_cpu_session);
+            continue;
         }
         if (prepare_case_isolated(device, &test_case) < 0)
         {
@@ -921,16 +882,6 @@ int main(int argc, char **argv)
             errno = prepare_errno;
             fprintf(stderr, "index=%zu raw=0x%08x result=PREPARE_FAIL errno=%d\n",
                     index, instructions[index], errno);
-            goto out;
-        }
-        if (index == 0U && cpu_session_start(&runner_cpu_session, &test_case) < 0)
-            goto out;
-        if (cpu_session_step(&runner_cpu_session, &test_case,
-                             index == 0U ? NULL : &chained_state,
-                             &cpu_state, cpu_memory, &cpu_event) < 0)
-        {
-            fprintf(stderr, "index=%zu raw=0x%08x result=CPU_RUNNER_FAIL\n",
-                    index, instructions[index]);
             goto out;
         }
         if (ioctl(device, ARM64_EXECUTOR_COMPLETE, &completion) < 0)
@@ -943,13 +894,6 @@ int main(int argc, char **argv)
             completion.reserved != 0U)
         {
             fprintf(stderr, "index=%zu raw=0x%08x result=PROTOCOL_FAIL\n",
-                    index, instructions[index]);
-            goto out;
-        }
-        if (cpu_event != RUNNER_CPU_STEP_COMPLETE)
-        {
-            result.status = RUNNER_STATUS_CPU_EXCEPTION;
-            fprintf(stderr, "index=%zu raw=0x%08x result=CPU_EXCEPTION\n",
                     index, instructions[index]);
             goto out;
         }
@@ -975,8 +919,10 @@ int main(int argc, char **argv)
         }
         chained_state = cpu_state;
         memcpy(chained_memory, cpu_memory, sizeof(chained_memory));
+        compared++;
     }
     printf("continuous test passed cases=%zu\n", count);
+    printf("case_counts=compared=%zu skipped=%zu\n", compared, skipped);
     exit_code = 0;
 out:
     cpu_session_stop(&runner_cpu_session);

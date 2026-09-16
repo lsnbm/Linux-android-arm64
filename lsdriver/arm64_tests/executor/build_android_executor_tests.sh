@@ -12,8 +12,7 @@ RUNNER_OUTPUT="$TEST_DIR/executor_test_runner"
 RUNNER_TEMP="$RUNNER_OUTPUT.tmp.$$"
 BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/arm64-executor-runner.XXXXXX")"
 
-cleanup()
-{
+trap '
     status=$?
     rm -f "$RUNNER_TEMP"
     rm -rf "$BUILD_DIR"
@@ -21,9 +20,7 @@ cleanup()
         rm -f "$RUNNER_OUTPUT"
     fi
     exit "$status"
-}
-
-trap cleanup EXIT
+' EXIT
 
 if [[ ! -x "$NDK_CLANG" || ! -d "$NDK_SYSROOT" ]]; then
     echo "missing Android ARM64 runner toolchain under: $KERNEL_ROOT" >&2

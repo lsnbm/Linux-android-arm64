@@ -1,99 +1,52 @@
-# ARM64 Decoder 主机验证说明
+# ARM64 Decoder 验证
 
-## 验证边界
+## 输入
 
-`arm64_decode_instruction()` 只对 32 位机器码执行普通 C 计算，不执行目标
-指令，也不依赖 ARM64 寄存器、异常或内存副作用。生产 decoder 是跨平台代码，
-因此直接在 Windows 主机的 WSL 工具链中编译和运行即可验证，不需要连接 Android
-设备。
+`../instruction.txt` 是 decoder 与 executor 共用的固定语料。当前输入包含 2047 行、
+922 个不同的 word，SHA-256 为：
 
-固定语料中的每条机器码同时经过生产 decoder、固定版本 LLVM 和独立字段算法。
-这种验证同时检查解码结果、LLVM 重编码一致性及项目字段契约。
-
-## 运行
-
-从仓库根目录在 Windows PowerShell 中执行：
-
-```powershell
-& .\windows\run-arm64-decoder-test.ps1
+```text
+98D6AA19F20B20BCB700F7087B682B28120A76122C1BCD9DAB1F4C296BF4926D
 ```
 
-也可以直接在 WSL 中执行：
+每个非空行必须是八位十六进制数。语料变化时同步更新 `Makefile` 中的行数、
+unique word 数和 SHA-256。
+
+## 构建与运行
+
+在仓库根目录执行：
 
 ```bash
 make -C lsdriver/arm64_tests/decoder strict-test
 ```
 
-两种入口运行同一套主机测试。编译警告、输入变化、行错位、未覆盖 instruction
-或任一字段差异都会返回非零。
+测试依次构建并运行：
 
-## 固定输入
+1. `arm64_instruction_decoder.c` 调用生产 `arm64_decode/*.c`，输出逐项解码状态和字段；
+2. `arm64_llvm_strict_audit.cpp` 使用 Android clang-r487747c / LLVM 17.0.2 解码、
+	重编码并输出 opcode、operand 和 immediate；
+3. `arm64_strict_decoder_audit.py` 对齐两份 TSV，检查 identity 映射，并根据原始编码
+	独立计算生产 decoder 字段。
 
-```text
-文件: ../instruction.txt
-有效指令行数: 9362
-unique word: 2938
-SHA-256: 2EB84464AA498B65014CE0C115C9A7948450A4E1C5039ADEC818037A9015BBEC
-```
+## 判定
 
-## 验证层次
+生产 decoder 与 LLVM 均成功的项必须满足：
 
-### 生产 decoder
+- LLVM 恰好消费四字节、无 fixup，重编码逐字节等于输入；
+- instruction 与 LLVM opcode 的组合存在于 `arm64_llvm_identity.tsv`；
+- instruction class 和所有适用字段与独立计算结果一致；
+- 未由该 instruction 使用的字段为零。
 
-在主机编译并运行真实的 `arm64_decode/*.c`。逐条读取原始机器码，要求全部返回
-`ARM64_DECODE_OK`，并导出完整字段结果。
-
-### LLVM 严格对照
-
-固定使用 Android `clang-r487747c` / LLVM 17.0.2：
+生产 decoder 返回 `ARM64_DECODE_UNALLOCATED` 且 LLVM 返回 `fail` 时，该项记为
+一致拒绝，不执行字段审计。其他成功/失败组合均为错误。当前结果为：
 
 ```text
-triple: aarch64-linux-gnu
-CPU: generic
-features: +lse,+rcpc
-source revision: d9f89f4d16663d5012e5c09495f3b30ece3d2362
-```
-
-每条指令必须满足：
-
-- LLVM 解码成功并且恰好消费 4 字节；
-- 不产生 fixup；
-- MCCodeEmitter 重编码后逐字节等于输入；
-- 项目 instruction 与 LLVM opcode 的 identity 映射无缺失、无未知项。
-
-### 独立字段审计
-
-`arm64_strict_decoder_audit.py` 根据 raw 编码独立计算字段并逐项检查生产 decoder，
-包括 offset、immediate、位域掩码、移位/扩展、条件码、系统寄存器、SIMD/FP
-布局、lane、寄存器字段、operand width，以及规范要求为零的未使用字段。
-
-LLVM 公共 MC API 没有直接导出所有项目字段，所以无法由 LLVM 单独给出
-`bitfield_wmask`、`bitfield_tmask` 等字段；这些字段由独立算法审计，不把生产
-decoder 自身当作 oracle。
-
-## 通过标准
-
-必须同时满足：
-
-- 生产 decoder 9362 条全部成功；
-- LLVM 解码和逐字节 round-trip 9362 条全部成功；
-- identity 映射无缺失、无未知项；
-- 完整字段审计 `failures=0`；
-- 没有未覆盖的 instruction 或字段。
-
-2026-09-09 的主机验证结果：
-
-```text
-ARM64 instruction decoder: rows=9362 failures=0
-LLVM AArch64 strict audit: rows=9362 failures=0
-decoder_contract_checks=18724
-decoder_contract_failures=0
-llvm_field_checks=18982
-llvm_field_failures=0
-field_checks=215326 failures=0
+rows=2047
+consistent_rejections=1
+field_checks=47058 failures=0
+llvm_failures=0
 total_failures=0
-ARM64 decoder host validation passed
+ARM64 instruction.txt decoder/LLVM strict audit: PASS
 ```
 
-通过固定语料不等于形式化证明整个 AArch64 编码空间正确；它证明当前固定输入、
-固定 LLVM 版本和声明字段范围内全部一致。
+测试全程只在主机解码机器码，不执行目标 ARM64 指令。

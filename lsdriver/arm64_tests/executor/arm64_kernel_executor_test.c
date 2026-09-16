@@ -31,68 +31,11 @@ struct arm64_executor_pending_case
 static DEFINE_MUTEX(arm64_executor_case_lock);
 static struct arm64_executor_pending_case *arm64_executor_pending;
 
-static int arm64_executor_prepare_user_pages(const struct arm64_executor_case *request)
-{
-    __u32 breakpoint = ARM64_EXECUTOR_BREAK_INSTRUCTION;
-
-    if (copy_to_user((void __user *)(unsigned long)ARM64_EXECUTOR_CODE_ADDRESS,
-                     request->memory, ARM64_EXECUTOR_MEMORY_SIZE))
-        return -EFAULT;
-    if (copy_to_user((void __user *)(unsigned long)ARM64_EXECUTOR_DATA_ADDRESS,
-                     request->memory, ARM64_EXECUTOR_MEMORY_SIZE))
-        return -EFAULT;
-    if (copy_to_user((void __user *)(unsigned long)(ARM64_EXECUTOR_CODE_ADDRESS +
-                                                    ARM64_EXECUTOR_CODE_OFFSET),
-                     &request->raw, sizeof(request->raw)))
-        return -EFAULT;
-    if (copy_to_user((void __user *)(unsigned long)(ARM64_EXECUTOR_CODE_ADDRESS +
-                                                    ARM64_EXECUTOR_CODE_OFFSET +
-                                                    sizeof(request->raw)),
-                     &breakpoint, sizeof(breakpoint)))
-        return -EFAULT;
-    return 0;
-}
-
-static void arm64_executor_state_from_pt_regs(struct arm64_executor_arch_state *state,
-                                              const struct pt_regs *regs,
-                                              const struct fp_regs *fp_regs)
-{
-    unsigned int index;
-
-    for (index = 0; index < ARRAY_SIZE(state->regs); index++)
-        state->regs[index] = regs->regs[index];
-    state->sp = regs->sp;
-    state->pc = regs->pc;
-    state->pstate = regs->pstate;
-    memcpy(state->q, fp_regs->q, sizeof(state->q));
-    state->fpcr = fp_regs->fpcr;
-    state->fpsr = fp_regs->fpsr;
-}
-
-static void arm64_executor_pt_regs_from_state(struct pt_regs *regs,
-                                              struct fp_regs *fp_regs,
-                                              const struct arm64_executor_arch_state *state)
-{
-    unsigned int index;
-
-    memset(regs, 0, sizeof(*regs));
-    for (index = 0; index < ARRAY_SIZE(state->regs); index++)
-        regs->regs[index] = state->regs[index];
-    regs->sp = state->sp;
-    regs->pc = state->pc;
-    regs->pstate = state->pstate;
-    memcpy(fp_regs->q, state->q, sizeof(fp_regs->q));
-    fp_regs->fpcr = state->fpcr;
-    fp_regs->fpsr = state->fpsr;
-}
-
 static long arm64_executor_ioctl(struct file *file, unsigned int command,
                                  unsigned long argument)
 {
     struct arm64_executor_case request;
     struct arm64_executor_completion completion;
-    struct pt_regs regs;
-    struct fp_regs fp_regs;
     int status;
 
     (void)file;
@@ -126,23 +69,40 @@ static long arm64_executor_ioctl(struct file *file, unsigned int command,
             goto out;
         }
         {
-            struct arm64_executor_arch_state software_initial;
             struct pt_regs software_regs;
             struct fp_regs software_fp_regs;
-            __u64 original_tpidr_el0;
+            __u32 breakpoint = ARM64_EXECUTOR_BREAK_INSTRUCTION;
 
-            software_initial = request.initial;
-            status = arm64_executor_prepare_user_pages(&request);
-            if (status)
+            if (copy_to_user((void __user *)(unsigned long)ARM64_EXECUTOR_CODE_ADDRESS,
+                             request.memory, ARM64_EXECUTOR_MEMORY_SIZE) ||
+                copy_to_user((void __user *)(unsigned long)ARM64_EXECUTOR_DATA_ADDRESS,
+                             request.memory, ARM64_EXECUTOR_MEMORY_SIZE) ||
+                copy_to_user((void __user *)(unsigned long)(ARM64_EXECUTOR_CODE_ADDRESS +
+                                                            ARM64_EXECUTOR_CODE_OFFSET),
+                             &request.raw, sizeof(request.raw)) ||
+                copy_to_user((void __user *)(unsigned long)(ARM64_EXECUTOR_CODE_ADDRESS +
+                                                            ARM64_EXECUTOR_CODE_OFFSET +
+                                                            sizeof(request.raw)),
+                             &breakpoint, sizeof(breakpoint)))
             {
                 kfree(arm64_executor_pending);
                 arm64_executor_pending = NULL;
+                status = -EFAULT;
                 goto out;
             }
-            arm64_executor_pt_regs_from_state(&software_regs, &software_fp_regs,
-                                              &software_initial);
-            original_tpidr_el0 = arm64_read_tpidr_el0();
-            arm64_write_tpidr_el0(software_initial.tpidr_el0);
+            memset(&software_regs, 0, sizeof(software_regs));
+            for (uint32_t index = 0; index < ARRAY_SIZE(request.initial.regs); index++)
+                software_regs.regs[index] = request.initial.regs[index];
+            software_regs.sp = request.initial.sp;
+            software_regs.pc = request.initial.pc;
+            software_regs.pstate = request.initial.pstate;
+            memcpy(software_fp_regs.q, request.initial.q, sizeof(software_fp_regs.q));
+            software_fp_regs.fpcr = request.initial.fpcr;
+            software_fp_regs.fpsr = request.initial.fpsr;
+
+            __u64 original_tpidr_el0 = arm64_read_tpidr_el0();
+
+            arm64_write_tpidr_el0(request.initial.tpidr_el0);
             kernel_neon_begin();
             if (!emulate_inst(&software_regs, &software_fp_regs, request.raw))
             {
@@ -154,7 +114,7 @@ static long arm64_executor_ioctl(struct file *file, unsigned int command,
                 goto out;
             }
             kernel_neon_end();
-            software_initial.tpidr_el0 = arm64_read_tpidr_el0();
+            arm64_executor_pending->executor_state.tpidr_el0 = arm64_read_tpidr_el0();
             arm64_write_tpidr_el0(original_tpidr_el0);
             if (copy_from_user(arm64_executor_pending->executor_memory,
                                (void __user *)ARM64_EXECUTOR_DATA_ADDRESS,
@@ -165,9 +125,18 @@ static long arm64_executor_ioctl(struct file *file, unsigned int command,
                 status = -EFAULT;
                 goto out;
             }
-            arm64_executor_state_from_pt_regs(&arm64_executor_pending->executor_state,
-                                              &software_regs, &software_fp_regs);
-            arm64_executor_pending->executor_state.tpidr_el0 = software_initial.tpidr_el0;
+            for (uint32_t index = 0;
+                 index < ARRAY_SIZE(arm64_executor_pending->executor_state.regs);
+                 index++)
+                arm64_executor_pending->executor_state.regs[index] =
+                    software_regs.regs[index];
+            arm64_executor_pending->executor_state.sp = software_regs.sp;
+            arm64_executor_pending->executor_state.pc = software_regs.pc;
+            arm64_executor_pending->executor_state.pstate = software_regs.pstate;
+            memcpy(arm64_executor_pending->executor_state.q, software_fp_regs.q,
+                   sizeof(arm64_executor_pending->executor_state.q));
+            arm64_executor_pending->executor_state.fpcr = software_fp_regs.fpcr;
+            arm64_executor_pending->executor_state.fpsr = software_fp_regs.fpsr;
         }
         arm64_executor_pending->index = request.index;
         arm64_executor_pending->raw = request.raw;

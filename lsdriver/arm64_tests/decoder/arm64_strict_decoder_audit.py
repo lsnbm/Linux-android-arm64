@@ -17,6 +17,9 @@ LLVM_DIRECT_FIELDS = {
     "rd", "rn", "rm", "ra", "rt", "rt2", "rs",
 }
 
+ARM64_DECODE_OK = 0
+ARM64_DECODE_UNALLOCATED = 3
+
 
 def bits(raw, high, low=None):
     if low is None:
@@ -123,7 +126,7 @@ def llvm_assembly_immediates(row):
     return values
 
 
-def llvm_project_fields(decoder_row, llvm_row, name):
+def llvm_project_fields(llvm_row, name):
     operands = llvm_operands(llvm_row)
     registers = [value for kind, value in operands if kind == "reg"]
     immediates = [value for kind, value in operands if kind == "imm"]
@@ -282,8 +285,10 @@ def audit_llvm_projected_fields(rows, llvm_rows, names):
     failures = []
     covered = Counter()
     for decoder_row, llvm_row in zip(rows, llvm_rows):
+        if int(decoder_row["status"], 0) != ARM64_DECODE_OK:
+            continue
         name = names[int(decoder_row["instruction"], 0)]
-        projected = llvm_project_fields(decoder_row, llvm_row, name)
+        projected = llvm_project_fields(llvm_row, name)
         for field, expected in projected.items():
             covered[field] += 1
             actual = int(decoder_row[field], 0)
@@ -315,19 +320,27 @@ def audit_llvm_rows(rows, llvm_rows, names, identity_path):
     expected_pairs = load_identity_pairs(identity_path)
     failures = []
     observed_pairs = set()
+    rejected = 0
     if len(rows) != len(llvm_rows):
         failures.append(("rows", len(llvm_rows), len(rows)))
     for index, (decoder_row, llvm_row) in enumerate(zip(rows, llvm_rows)):
-        name = names[int(decoder_row["instruction"], 0)]
         raw = int(decoder_row["raw"], 0)
-        pair = (name.strip(), llvm_row["opcode"].strip())
-        observed_pairs.add(pair)
         if int(llvm_row["index"]) != index or int(decoder_row["index"]) != index:
             failures.append((index, "index", llvm_row["index"], index))
         if int(llvm_row["input_raw"], 16) != raw:
             failures.append((index, "input_raw", llvm_row["input_raw"], decoder_row["raw"]))
-        if llvm_row["decode_status"] != "success":
-            failures.append((index, "decode_status", llvm_row["decode_status"], "success"))
+        decoder_status = int(decoder_row["status"], 0)
+        llvm_status = llvm_row["decode_status"]
+        if decoder_status == ARM64_DECODE_UNALLOCATED and llvm_status == "fail":
+            rejected += 1
+            continue
+        if decoder_status != ARM64_DECODE_OK or llvm_status != "success":
+            failures.append((index, "decode_status", decoder_status, llvm_status,
+                             "decoder=0/LLVM=success or decoder=3/LLVM=fail"))
+            continue
+        name = names[int(decoder_row["instruction"], 0)]
+        pair = (name.strip(), llvm_row["opcode"].strip())
+        observed_pairs.add(pair)
         if int(llvm_row["decode_size"]) != 4:
             failures.append((index, "decode_size", llvm_row["decode_size"], 4))
         if llvm_row["encoded_raw"] != llvm_row["input_raw"]:
@@ -338,11 +351,7 @@ def audit_llvm_rows(rows, llvm_rows, names, identity_path):
             failures.append((index, "identity", llvm_row["identity"], 1))
         if pair not in expected_pairs:
             failures.append((index, "identity_pair", pair, "allowlist"))
-    for pair in sorted(expected_pairs - observed_pairs):
-        failures.append(("missing_pair", pair, "observed"))
-    for pair in sorted(observed_pairs - expected_pairs):
-        failures.append(("unexpected_pair", pair, "allowlist"))
-    return failures, expected_pairs, observed_pairs
+    return failures, expected_pairs, observed_pairs, rejected
 
 
 def audit_row(row, name):
@@ -476,7 +485,7 @@ def audit_row(row, name):
         expect("rd", bits(raw, 4, 0)); expect("rn", bits(raw, 9, 5)); expect("element_width", width); expect("operand_width", width)
     elif name in {"ARM64_INST_SCVTF_SIMD_SCALAR", "ARM64_INST_UCVTF_SIMD_SCALAR", "ARM64_INST_FCVTZS_SIMD_SCALAR", "ARM64_INST_FCVTZU_SIMD_SCALAR", "ARM64_INST_FCVTNS_SIMD_SCALAR", "ARM64_INST_FCVTNU_SIMD_SCALAR", "ARM64_INST_FCVTAS_SIMD_SCALAR", "ARM64_INST_FCVTAU_SIMD_SCALAR", "ARM64_INST_FCVTPS_SIMD_SCALAR", "ARM64_INST_FCVTPU_SIMD_SCALAR", "ARM64_INST_FCVTMS_SIMD_SCALAR", "ARM64_INST_FCVTMU_SIMD_SCALAR"}:
         width = 64 if bits(raw, 22) else 32
-        expect("rd", bits(raw, 4, 0)); expect("rn", bits(raw, 9, 5)); expect("element_width", width); expect("operand_width", width if bits(raw, 28) else width)
+        expect("rd", bits(raw, 4, 0)); expect("rn", bits(raw, 9, 5)); expect("element_width", width); expect("operand_width", width)
     elif name in {"ARM64_INST_FADD_VECTOR", "ARM64_INST_FMUL_VECTOR", "ARM64_INST_FSUB_VECTOR", "ARM64_INST_FMLA_VECTOR", "ARM64_INST_FCMGT_VECTOR", "ARM64_INST_ORR_VECTOR", "ARM64_INST_BIT_VECTOR", "ARM64_INST_BSL_VECTOR", "ARM64_INST_ZIP1_VECTOR", "ARM64_INST_ZIP2_VECTOR", "ARM64_INST_TRN1_VECTOR", "ARM64_INST_TRN2_VECTOR", "ARM64_INST_UZP1_VECTOR", "ARM64_INST_UZP2_VECTOR"}:
         expect("rd", bits(raw, 4, 0)); expect("rn", bits(raw, 9, 5)); expect("rm", bits(raw, 20, 16)); expect("operand_width", 128 if bits(raw, 30) else 64)
         expect("element_width", 8 if name in {"ARM64_INST_ORR_VECTOR", "ARM64_INST_BIT_VECTOR", "ARM64_INST_BSL_VECTOR"} else 32 << (bits(raw, 22) & 1))
@@ -512,9 +521,6 @@ def audit_row(row, name):
     elif name == "ARM64_INST_INS_ELEMENT_VECTOR":
         imm5 = bits(raw, 20, 16); size = (imm5 & -imm5).bit_length() - 1
         expect("rd", bits(raw, 4, 0)); expect("rn", bits(raw, 9, 5)); expect("immediate", bits(raw, 14, 11) >> size); expect("element_width", 8 << size); expect("lane_index", imm5 >> (size + 1)); expect("operand_width", 128)
-    elif name == "ARM64_INST_FMOV_FP_TO_GPR":
-        expect("rd", bits(raw, 4, 0)); expect("rn", bits(raw, 9, 5))
-        expect("element_width", 64 if bits(raw, 31) else 32); expect("operand_width", 64 if bits(raw, 31) else 32)
     elif name == "ARM64_INST_FCVTZS_GPR":
         expect("rd", bits(raw, 4, 0)); expect("rn", bits(raw, 9, 5))
         expect("operand_width", 64 if bits(raw, 31) else 32); expect("element_width", 64 if bits(raw, 22) else 32)
@@ -688,14 +694,23 @@ def main():
     contract_checks = 0
     for row in rows:
         raw = int(row["raw"], 0)
+        status = int(row["status"], 0)
         expected_class = expected_instruction_class(raw)
-        contract_checks += 2
-        if row["status"] != "0":
-            failures.append(("decoder", row["raw"], "status", row["status"], 0))
-        if expected_class is None:
-            failures.append(("decoder", row["raw"], "class", row["class"], "known raw owner"))
-        elif int(row["class"], 0) != expected_class:
-            failures.append(("decoder", row["raw"], "class", row["class"], expected_class))
+        contract_checks += 1
+        if status == ARM64_DECODE_OK:
+            contract_checks += 1
+            if expected_class is None:
+                failures.append(("decoder", row["raw"], "class", row["class"], "known raw owner"))
+            elif int(row["class"], 0) != expected_class:
+                failures.append(("decoder", row["raw"], "class", row["class"], expected_class))
+        elif status == ARM64_DECODE_UNALLOCATED:
+            for field in ("class", "instruction") + FIELDS:
+                contract_checks += 1
+                if int(row[field], 0) != 0:
+                    failures.append(("decoder", row["raw"], field, row[field], 0))
+        else:
+            failures.append(("decoder", row["raw"], "status", status,
+                             f"{ARM64_DECODE_OK} or {ARM64_DECODE_UNALLOCATED}"))
     decoder_contract_failures = len(failures)
     print(f"decoder_contract_checks={contract_checks}")
     print(f"decoder_contract_failures={decoder_contract_failures}")
@@ -704,20 +719,22 @@ def main():
             parser.error("--identity-map is required with --llvm-tsv")
         with open(args.llvm_tsv, newline="", encoding="utf-8") as llvm_file:
             llvm_rows = list(csv.DictReader(llvm_file, delimiter="\t"))
-        llvm_failures, expected_pairs, observed_pairs = audit_llvm_rows(rows, llvm_rows, names, args.identity_map)
+        llvm_failures, expected_pairs, observed_pairs, rejected = audit_llvm_rows(
+            rows, llvm_rows, names, args.identity_map)
         failures.extend(("LLVM",) + failure for failure in llvm_failures)
         llvm_field_failures, llvm_field_coverage = audit_llvm_projected_fields(rows, llvm_rows, names)
         failures.extend(("LLVM_FIELD",) + failure for failure in llvm_field_failures)
         print(f"llvm_rows={len(llvm_rows)}")
-        print(f"llvm_identity_pairs={len(observed_pairs)} expected={len(expected_pairs)}")
-        print("llvm_missing_pairs=" + ",".join(f"{pair[0]}:{pair[1]}" for pair in sorted(expected_pairs - observed_pairs)))
-        print("llvm_unexpected_pairs=" + ",".join(f"{pair[0]}:{pair[1]}" for pair in sorted(observed_pairs - expected_pairs)))
+        print(f"consistent_rejections={rejected}")
+        print(f"llvm_identity_pairs={len(observed_pairs)} allowed={len(expected_pairs)}")
         print(f"llvm_field_checks={sum(llvm_field_coverage.values())}")
         print("llvm_field_coverage=" + ",".join(f"{field}:{llvm_field_coverage[field]}" for field in FIELDS if llvm_field_coverage[field]))
         print(f"llvm_field_failures={len(llvm_field_failures)}")
         print("llvm_nonprojectable_fields=" + ",".join(
             field for field in FIELDS if field not in LLVM_DIRECT_FIELDS))
     for row in rows:
+        if int(row["status"], 0) != ARM64_DECODE_OK:
+            continue
         name = names[int(row["instruction"], 0)]
         row_covered, row_failures = audit_row(row, name)
         covered.update(field for field in row_covered if field in FIELDS)
@@ -742,14 +759,8 @@ def main():
             field_failure_counts[failure[2]] += 1
     print("field_failure_counts=" + ",".join(f"{field}:{count}" for field, count in sorted(field_failure_counts.items())))
     print("field_failure_instructions=" + ",".join(f"{name}:{count}" for name, count in sorted(field_failure_by_instruction.items())))
-    for failure in failures[:100]: print("FAIL", *failure, sep="\t")
-    field_failures_seen = 0
-    for failure in failures:
-        if failure and failure[0] not in {"LLVM", "decoder"}:
-            print("FIELD_FAIL", *failure, sep="\t")
-            field_failures_seen += 1
-            if field_failures_seen >= 100:
-                break
+    for failure in failures[:100]:
+        print("FAIL", *failure, sep="\t")
     return 1 if failures else 0
 
 

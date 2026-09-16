@@ -2050,7 +2050,7 @@ static inline enum emu_inst_result emu_fmaxnm_vector_w64_ew16(struct pt_regs *re
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_fmaxnm_4h((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rm], 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -2158,7 +2158,7 @@ static inline enum emu_inst_result emu_fadd_vector_w64_ew16(struct pt_regs *regs
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_fadd_4h((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rm], 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -2212,7 +2212,7 @@ static inline enum emu_inst_result emu_fmulx_vector_w64_ew16(struct pt_regs *reg
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_fmulx_4h((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rm], 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -2266,7 +2266,7 @@ static inline enum emu_inst_result emu_fcmeq_vector_w64_ew16(struct pt_regs *reg
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_fcmeq_4h((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rm], 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -2362,7 +2362,7 @@ static inline enum emu_inst_result emu_fmax_vector_w64_ew16(struct pt_regs *regs
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_fmax_4h((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rm], 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -2416,7 +2416,7 @@ static inline enum emu_inst_result emu_frecps_vector_w64_ew16(struct pt_regs *re
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_frecps_4h((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rm], 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -2537,7 +2537,7 @@ static inline enum emu_inst_result emu_fcvtns_simd_vector_w64_ew64(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtns_d_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -2585,7 +2585,7 @@ static inline enum emu_inst_result emu_fcvtms_simd_vector_w64_ew64(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtms_d_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -2633,7 +2633,7 @@ static inline enum emu_inst_result emu_fcvtas_simd_vector_w64_ew64(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtas_d_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -2681,7 +2681,7 @@ static inline enum emu_inst_result emu_scvtf_simd_vector_w64_ew64(struct pt_regs
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_scvtf_d_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -3228,7 +3228,7 @@ static inline enum emu_inst_result emu_fminnm_vector_w64_ew16(struct pt_regs *re
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_fminnm_4h((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rm], 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -3282,7 +3282,7 @@ static inline enum emu_inst_result emu_fcmgt_zero_vector_w64_ew16(struct pt_regs
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_fcmgt_4h_zero((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -3390,7 +3390,7 @@ static inline enum emu_inst_result emu_fsub_vector_w64_ew16(struct pt_regs *regs
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_fsub_4h((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rm], 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -3444,7 +3444,7 @@ static inline enum emu_inst_result emu_fcmeq_zero_vector_w64_ew16(struct pt_regs
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_fcmeq_4h_zero((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -3555,7 +3555,7 @@ static inline enum emu_inst_result emu_fcmlt_zero_vector_w64_ew16(struct pt_regs
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_fcmlt_4h_zero((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -3651,7 +3651,7 @@ static inline enum emu_inst_result emu_fmin_vector_w64_ew16(struct pt_regs *regs
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_fmin_4h((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rm], 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -3765,7 +3765,7 @@ static inline enum emu_inst_result emu_frsqrts_vector_w64_ew16(struct pt_regs *r
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_frsqrts_4h((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rm], 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -3830,7 +3830,7 @@ static inline enum emu_inst_result emu_fcvtps_simd_vector_w64_ew64(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtps_d_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -3878,7 +3878,7 @@ static inline enum emu_inst_result emu_fcvtzs_simd_vector_w64_ew64(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtzs_d_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -10324,7 +10324,7 @@ static inline enum emu_inst_result emu_fmaxnmp_vector_w64_ew16(struct pt_regs *r
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_fmaxnmp_4h((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rm], 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -10420,7 +10420,7 @@ static inline enum emu_inst_result emu_faddp_vector_w64_ew16(struct pt_regs *reg
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_faddp_4h((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rm], 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -10474,7 +10474,7 @@ static inline enum emu_inst_result emu_fmul_vector_w64_ew16(struct pt_regs *regs
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_fmul_4h((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rm], 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -10528,7 +10528,7 @@ static inline enum emu_inst_result emu_fcmge_vector_w64_ew16(struct pt_regs *reg
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_fcmge_4h((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rm], 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -10582,7 +10582,7 @@ static inline enum emu_inst_result emu_facge_vector_w64_ew16(struct pt_regs *reg
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_facge_4h((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rm], 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -10636,7 +10636,7 @@ static inline enum emu_inst_result emu_fmaxp_vector_w64_ew16(struct pt_regs *reg
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_fmaxp_4h((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rm], 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -10690,7 +10690,7 @@ static inline enum emu_inst_result emu_fdiv_vector_w64_ew16(struct pt_regs *regs
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_fdiv_4h((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rm], 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -10811,7 +10811,7 @@ static inline enum emu_inst_result emu_fcvtnu_simd_vector_w64_ew64(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtnu_d_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -10859,7 +10859,7 @@ static inline enum emu_inst_result emu_fcvtmu_simd_vector_w64_ew64(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtmu_d_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -10907,7 +10907,7 @@ static inline enum emu_inst_result emu_fcvtau_simd_vector_w64_ew64(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtau_d_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -10955,7 +10955,7 @@ static inline enum emu_inst_result emu_ucvtf_simd_vector_w64_ew64(struct pt_regs
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_ucvtf_d_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -11686,7 +11686,7 @@ static inline enum emu_inst_result emu_fminnmp_vector_w64_ew16(struct pt_regs *r
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_fminnmp_4h((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rm], 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -11740,7 +11740,7 @@ static inline enum emu_inst_result emu_fcmge_zero_vector_w64_ew16(struct pt_regs
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_fcmge_4h_zero((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -11836,7 +11836,7 @@ static inline enum emu_inst_result emu_fabd_vector_w64_ew16(struct pt_regs *regs
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_fabd_4h((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rm], 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -11890,7 +11890,7 @@ static inline enum emu_inst_result emu_fcmle_zero_vector_w64_ew16(struct pt_regs
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_fcmle_4h_zero((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -12001,7 +12001,7 @@ static inline enum emu_inst_result emu_fcmgt_vector_w64_ew16(struct pt_regs *reg
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_fcmgt_4h((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rm], 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -12055,7 +12055,7 @@ static inline enum emu_inst_result emu_facgt_vector_w64_ew16(struct pt_regs *reg
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_facgt_4h((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rm], 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -12109,7 +12109,7 @@ static inline enum emu_inst_result emu_fminp_vector_w64_ew16(struct pt_regs *reg
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_fminp_4h((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rm], 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -12283,7 +12283,7 @@ static inline enum emu_inst_result emu_fcvtpu_simd_vector_w64_ew64(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtpu_d_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -12331,7 +12331,7 @@ static inline enum emu_inst_result emu_fcvtzu_simd_vector_w64_ew64(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtzu_d_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -13904,7 +13904,7 @@ static inline enum emu_inst_result emu_fcvtns_simd_scalar_w32_ew32(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtns_s_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 4);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -13924,7 +13924,7 @@ static inline enum emu_inst_result emu_fcvtns_simd_scalar_w64_ew32(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtns_s_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 4);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -13932,7 +13932,7 @@ static inline enum emu_inst_result emu_fcvtns_simd_scalar_w64_ew64(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtns_d_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -13980,7 +13980,7 @@ static inline enum emu_inst_result emu_fcvtms_simd_scalar_w32_ew32(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtms_s_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 4);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -14000,7 +14000,7 @@ static inline enum emu_inst_result emu_fcvtms_simd_scalar_w64_ew32(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtms_s_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 4);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -14008,7 +14008,7 @@ static inline enum emu_inst_result emu_fcvtms_simd_scalar_w64_ew64(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtms_d_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -14056,7 +14056,7 @@ static inline enum emu_inst_result emu_fcvtas_simd_scalar_w32_ew32(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtas_s_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 4);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -14076,7 +14076,7 @@ static inline enum emu_inst_result emu_fcvtas_simd_scalar_w64_ew32(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtas_s_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 4);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -14084,7 +14084,7 @@ static inline enum emu_inst_result emu_fcvtas_simd_scalar_w64_ew64(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtas_d_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -14152,7 +14152,7 @@ static inline enum emu_inst_result emu_scvtf_simd_scalar_w64_ew32(struct pt_regs
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_scvtf_s_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 4);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -14160,7 +14160,7 @@ static inline enum emu_inst_result emu_scvtf_simd_scalar_w64_ew64(struct pt_regs
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_scvtf_d_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -14286,7 +14286,7 @@ static inline enum emu_inst_result emu_fcmgt_zero_scalar_w16_ew16(struct pt_regs
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_fcmgt_h_scalar_zero((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 2);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -14310,7 +14310,7 @@ static inline enum emu_inst_result emu_fcmgt_zero_scalar_w32_ew32(struct pt_regs
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcmgt_s_scalar_zero((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 4);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -14334,7 +14334,7 @@ static inline enum emu_inst_result emu_fcmgt_zero_scalar_w64_ew64(struct pt_regs
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcmgt_d_scalar_zero((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -14363,7 +14363,7 @@ static inline enum emu_inst_result emu_fcmeq_zero_scalar_w16_ew16(struct pt_regs
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_fcmeq_h_scalar_zero((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 2);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -14387,7 +14387,7 @@ static inline enum emu_inst_result emu_fcmeq_zero_scalar_w32_ew32(struct pt_regs
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcmeq_s_scalar_zero((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 4);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -14411,7 +14411,7 @@ static inline enum emu_inst_result emu_fcmeq_zero_scalar_w64_ew64(struct pt_regs
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcmeq_d_scalar_zero((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -14440,7 +14440,7 @@ static inline enum emu_inst_result emu_fcmlt_zero_scalar_w16_ew16(struct pt_regs
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_fcmlt_h_scalar_zero((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 2);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -14464,7 +14464,7 @@ static inline enum emu_inst_result emu_fcmlt_zero_scalar_w32_ew32(struct pt_regs
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcmlt_s_scalar_zero((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 4);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -14488,7 +14488,7 @@ static inline enum emu_inst_result emu_fcmlt_zero_scalar_w64_ew64(struct pt_regs
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcmlt_d_scalar_zero((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -14565,7 +14565,7 @@ static inline enum emu_inst_result emu_fcvtps_simd_scalar_w32_ew32(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtps_s_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 4);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -14585,7 +14585,7 @@ static inline enum emu_inst_result emu_fcvtps_simd_scalar_w64_ew32(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtps_s_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 4);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -14593,7 +14593,7 @@ static inline enum emu_inst_result emu_fcvtps_simd_scalar_w64_ew64(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtps_d_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -14661,7 +14661,7 @@ static inline enum emu_inst_result emu_fcvtzs_simd_scalar_w64_ew32(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtzs_s_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 4);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -14669,7 +14669,7 @@ static inline enum emu_inst_result emu_fcvtzs_simd_scalar_w64_ew64(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtzs_d_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -15605,7 +15605,7 @@ static inline enum emu_inst_result emu_fcvtnu_simd_scalar_w32_ew32(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtnu_s_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 4);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -15625,7 +15625,7 @@ static inline enum emu_inst_result emu_fcvtnu_simd_scalar_w64_ew32(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtnu_2s((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -15633,7 +15633,7 @@ static inline enum emu_inst_result emu_fcvtnu_simd_scalar_w64_ew64(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtnu_d_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -15681,7 +15681,7 @@ static inline enum emu_inst_result emu_fcvtmu_simd_scalar_w32_ew32(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtmu_s_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 4);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -15701,7 +15701,7 @@ static inline enum emu_inst_result emu_fcvtmu_simd_scalar_w64_ew32(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtmu_2s((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -15709,7 +15709,7 @@ static inline enum emu_inst_result emu_fcvtmu_simd_scalar_w64_ew64(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtmu_d_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -15757,7 +15757,7 @@ static inline enum emu_inst_result emu_fcvtau_simd_scalar_w32_ew32(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtau_s_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 4);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -15777,7 +15777,7 @@ static inline enum emu_inst_result emu_fcvtau_simd_scalar_w64_ew32(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtau_2s((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -15785,7 +15785,7 @@ static inline enum emu_inst_result emu_fcvtau_simd_scalar_w64_ew64(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtau_d_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -15833,7 +15833,7 @@ static inline enum emu_inst_result emu_ucvtf_simd_scalar_w32_ew32(struct pt_regs
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_ucvtf_s_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 4);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -15853,7 +15853,7 @@ static inline enum emu_inst_result emu_ucvtf_simd_scalar_w64_ew32(struct pt_regs
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_ucvtf_2s((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -15861,7 +15861,7 @@ static inline enum emu_inst_result emu_ucvtf_simd_scalar_w64_ew64(struct pt_regs
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_ucvtf_d_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -16135,7 +16135,7 @@ static inline enum emu_inst_result emu_fcmge_zero_scalar_w16_ew16(struct pt_regs
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_fcmge_h_scalar_zero((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 2);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -16159,7 +16159,7 @@ static inline enum emu_inst_result emu_fcmge_zero_scalar_w32_ew32(struct pt_regs
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcmge_s_scalar_zero((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 4);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -16183,7 +16183,7 @@ static inline enum emu_inst_result emu_fcmge_zero_scalar_w64_ew64(struct pt_regs
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcmge_d_scalar_zero((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -16241,7 +16241,7 @@ static inline enum emu_inst_result emu_fcmle_zero_scalar_w16_ew16(struct pt_regs
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     if (!arm64_current_cpu_has_fp16()) return EMU_INST_SKIP;
     simd_fcmle_h_scalar_zero((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 2);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -16265,7 +16265,7 @@ static inline enum emu_inst_result emu_fcmle_zero_scalar_w32_ew32(struct pt_regs
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcmle_s_scalar_zero((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 4);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -16289,7 +16289,7 @@ static inline enum emu_inst_result emu_fcmle_zero_scalar_w64_ew64(struct pt_regs
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcmle_d_scalar_zero((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -16395,7 +16395,7 @@ static inline enum emu_inst_result emu_fcvtpu_simd_scalar_w32_ew32(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtpu_s_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 4);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -16415,7 +16415,7 @@ static inline enum emu_inst_result emu_fcvtpu_simd_scalar_w64_ew32(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtpu_2s((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -16423,7 +16423,7 @@ static inline enum emu_inst_result emu_fcvtpu_simd_scalar_w64_ew64(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtpu_d_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -16471,7 +16471,7 @@ static inline enum emu_inst_result emu_fcvtzu_simd_scalar_w32_ew32(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtzu_s_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 4);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -16491,7 +16491,7 @@ static inline enum emu_inst_result emu_fcvtzu_simd_scalar_w64_ew32(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtzu_2s((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
@@ -16499,7 +16499,7 @@ static inline enum emu_inst_result emu_fcvtzu_simd_scalar_w64_ew64(struct pt_reg
 {
     struct arm64_hw_template_output output __attribute__((__uninitialized__));
     simd_fcvtzu_d_merge((uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rd], (uint64_t)(uintptr_t)&fp_regs->q[entry->decoded.rn], 0, 0, 0, &output);
-    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 8);
+    __builtin_memcpy(&fp_regs->q[entry->decoded.rd], &output.value0, 16);
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }

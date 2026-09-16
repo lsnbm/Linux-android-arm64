@@ -6,17 +6,14 @@ RUNNER=/data/local/tmp/executor_test_runner
 INSTRUCTIONS=/data/local/tmp/instruction.txt
 DEVICE=/dev/arm64_executor_test
 
-cleanup()
-{
+trap '
     cleanup_status=0
     rm -f "$DEVICE" || cleanup_status=$?
     if grep -q "^$MODULE_NAME " /proc/modules; then
         rmmod "$MODULE_NAME" 2>/dev/null || cleanup_status=$?
     fi
     echo "cleanup_status=$cleanup_status"
-}
-
-trap cleanup EXIT
+' EXIT
 
 if grep -q "^$MODULE_NAME " /proc/modules; then
     rmmod "$MODULE_NAME" || exit $?
