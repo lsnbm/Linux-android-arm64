@@ -233,9 +233,9 @@ _Static_assert(__alignof__(struct fp_regs) == 16, "fp_regs must remain 16-byte a
         asm volatile("str " __stringify(QREG(N)) ", [%0]\n" ::"r"(DST) : "memory"); \
         break
 
-#define WRITE_Q_REG_CASE(N, SRC)                                                                          \
-    case N:                                                                                               \
-        asm volatile("ldr " __stringify(QREG(N)) ", [%0]\n" ::"r"(SRC) : "memory", __stringify(VREG(N))); \
+#define WRITE_Q_REG_CASE(N, SRC)                                                    \
+    case N:                                                                         \
+        asm volatile("ldr " __stringify(QREG(N)) ", [%0]\n" ::"r"(SRC) : "memory"); \
         break
 
 #define GEN_READ_Q_REG_CASES(DST) \
@@ -307,7 +307,7 @@ _Static_assert(__alignof__(struct fp_regs) == 16, "fp_regs must remain 16-byte a
     WRITE_Q_REG_CASE(31, SRC)
 
 // n: Q寄存器编号 0~31, dst: 指向 16 字节缓冲区的指针
-static inline void read_q_reg(int n, void *dst)
+static __always_inline void read_q_reg(int n, void *dst)
 {
     switch (n)
     {
@@ -318,7 +318,7 @@ static inline void read_q_reg(int n, void *dst)
 }
 
 // n: Q寄存器编号 0~31, src: 指向 16 字节数据的只读指针
-static inline void write_q_reg(int n, const void *src)
+static __always_inline void write_q_reg(int n, const void *src)
 {
     switch (n)
     {
@@ -333,7 +333,7 @@ static inline void write_q_reg(int n, const void *src)
 */
 
 // 读取当前 FPCR 控制配置，用于保存浮点运算环境。
-static inline uint32_t read_fpcr(void)
+static __always_inline uint32_t read_fpcr(void)
 {
     uint64_t v;
     asm volatile("mrs %0, fpcr" : "=r"(v));
@@ -341,14 +341,14 @@ static inline uint32_t read_fpcr(void)
 }
 
 // 写入 FPCR 控制配置，用于恢复浮点运算环境；不会修改 FPSR 状态。
-static inline void write_fpcr(uint32_t val)
+static __always_inline void write_fpcr(uint32_t val)
 {
     uint64_t v = val;
     asm volatile("msr fpcr, %0" : : "r"(v));
 }
 
 // 读取当前 FPSR 状态标志，用于保存浮点运算结果状态。
-static inline uint32_t read_fpsr(void)
+static __always_inline uint32_t read_fpsr(void)
 {
     uint64_t v;
     asm volatile("mrs %0, fpsr" : "=r"(v));
@@ -356,14 +356,14 @@ static inline uint32_t read_fpsr(void)
 }
 
 // 写入 FPSR 状态标志，用于恢复累计异常等状态；不会修改 FPCR 配置。
-static inline void write_fpsr(uint32_t val)
+static __always_inline void write_fpsr(uint32_t val)
 {
     uint64_t v = val;
     asm volatile("msr fpsr, %0" : : "r"(v));
 }
 
 // 批量读取 Q0-Q31、FPCR 和 FPSR，输出到 regs 指向的软件现场。
-static inline void read_all_q_regs(struct fp_regs *regs)
+static __always_inline void read_all_q_regs(struct fp_regs *regs)
 {
     asm volatile("stp q0, q1, [%0, #0]\n"
                  "stp q2, q3, [%0, #32]\n"
@@ -389,7 +389,100 @@ static inline void read_all_q_regs(struct fp_regs *regs)
 }
 
 // 从 regs 指向的软件现场批量写入 Q0-Q31、FPCR 和 FPSR。
-static inline void write_all_q_regs(const struct fp_regs *regs)
+/*
+非常严重的记录，让我非常头疼，耗费巨量时间和金钱修复
+2026-09-17：PTE 断点导致人物姿态异常，但程序继续运行的问题记录。
+
+一、最早是怎么定位的(定位问题很难受，真正找到了才发现问题是如此简单)
+
+最初怀疑受管页指令的解码、执行器派发、C 逻辑或硬件模板参数错误。
+instruction.txt 第 2097-3120 行的 1024 条指令在既定输入下与实体 CPU
+单步对拍全部一致，但该测试只比较软件现场，未覆盖 PTE handler 返回时的硬件现场。
+
+因此继续沿“保存现场 -> 模拟 -> 回写 CPU -> 函数返回”检查。
+发现本函数 write_all_q_regs 原来的 clobber 列表包含 v0-v31，
+其中 v8-v15 的低 64 位按 AArch64 C 调用约定属于 callee-saved，
+编译器需要让它们在 C 函数返回时不变。
+
+反汇编现有 6.1-Android14 模块的 ptebp_handle_exec_fault，确认实际顺序为：
+
+    入口：stp d15, d14, ...；随后保存其余 d8-d13。
+    回写：ldp q8, q9, ...；随后装入其余完整 Q 寄存器。
+    出口：ldp d9, d8, ...；随后恢复其余 d10-d15。
+
+本函数内联后，ABI 保存恢复发生在外层 handler，不一定能在 helper 本身看到。
+修复后重新构建完整模块，确认 Q 回写保留而 d8-d15 保存恢复消失；
+随后在实际场景复测确认姿态恢复。
+
+二、会造成什么严重的情况
+
+结论：即使解码、执行条目选择、执行函数的 C 逻辑及 C 与汇编模板的交换
+全部正确，每条指令的结果也都正确写入了软件现场，这个错误仍然可以独立发生。
+故障不要求执行器算错任何一条指令；它发生在正确结果提交之后的函数返回阶段。
+
+完整过程必须区分为四步：
+
+    1. 执行器正确计算，将最终结果保存在 fp_regs.q[0..31] 中。
+    2. write_all_q_regs 的 ldp qN 正确装入完整 128 位结果；此时硬件 Q 值也正确。
+    3. 外层 ptebp_handle_exec_fault 返回前，编译器插入的 ldp d8-d15 又执行一次
+       ABI 恢复：把 Q8-Q15 低 64 位覆盖成 handler 入口旧值，并清零高 64 位。
+    4. 返回用户态时使用的是第 3 步破坏后的硬件现场，不是第 1 步的正确软件现场。
+
+例如用 [高64位, 低64位] 表示 Q8：入口为 [OLD_H, OLD_L]，模拟正确结果为
+[NEW_H, NEW_L]。ldp q8 回写后确实得到 [NEW_H, NEW_L]，但出口恢复 d8 后
+变成 [0, OLD_L]。内存中的 fp_regs.q[8] 仍是 [NEW_H, NEW_L]，并没有被改坏。
+因此，只打印软件现场或只对拍执行器输出，会看到正确结果而漏掉这个错误。
+
+不是所有计算都被撤销：这组 ABI 恢复直接破坏的是 Q8-Q15，Q0-Q7、Q16-Q31、
+GPR 软件现场及此前已完成的内存写入不会被这组 ldp dN 撤销。若某次新旧低位
+恰好相等且新高位本来就是零，错误可能暂时不可见；否则这些寄存器的新结果丢失。
+后续矩阵、四元数和位置等运算继续使用损坏的 Q8-Q15，错误随数据依赖传播，
+最终可以表现为整个人物姿态异常，而不只是某一个局部数值错误。
+
+这些寄存器加载本身合法，不必触发异常；执行器已返回 HANDLED，失败回滚也
+不会启动。原模块的未命中提前返回路径同样经过 d8-d15 恢复，会清零这些 Q
+寄存器的高半部，影响不局限于实际进入批量模拟的路径。
+
+三、修复原理
+
+这里提交的是异常软件现场，目的是让新 Q 值一直保留到异常返回，不是普通 C
+函数对调用者浮点临时值的修改。去掉向量 clobber，避免触发外层 C 函数的
+callee-saved 保存恢复；使用 __always_inline 避免形成普通的函数调用边界。
+仅强制内联而保留原 clobber 不能修复，保存恢复会转移到外层函数。
+
+省略向量 clobber 是本项目异常边界的特殊约定，依赖调用对象使用
+-mno-implicit-float、-fno-vectorize、-fno-slp-vectorize，且周边 C 代码
+没有编译器管理的活跃 FP/SIMD 值。memory clobber 描述内存副作用，绝不等于
+告诉编译器所有向量寄存器都改变了。普通允许浮点计算的 C 函数不可照搬此法；
+若需要支持那种环境，应在独立汇编异常出口完成最终提交，并明确调用边界。
+回写后到异常返回之间也不能再有破坏 FP/SIMD 的调用或显式汇编。
+
+四、其他类似的编译器与汇编边界陷阱
+
+- asm volatile 不能代替输入、输出和 clobber 约束，也不是完整的顺序屏障；
+    隐含读取内存需用内存操作数或 memory clobber 描述，硬件屏障仍按架构需要使用。
+
+- 普通内联汇编修改 NZCV 应声明 cc，读写同一操作数通常需要 + 约束；输出在
+    其他输入读完前就被写入时可能需要 & early-clobber，否则寄存器分配可重叠。
+
+- 只禁用循环和 SLP 向量化不代表没有 SIMD 指令：复制、清零、寄存器分配和
+    ABI 保存恢复仍需检查；
+
+- 本次 -mno-implicit-float 也没有阻止显式 clobber 引发的 d8-d15 保存恢复，
+    不能把某一个编译选项当作完整保证。
+
+- 硬件模板的 naked/basic asm 不会自动补齐 C ABI 保存恢复。若借用 x19-x29
+    或 v8-v15，需要自己满足对应保留约定；优先按模板约定使用 caller-saved
+    寄存器。asm 内隐藏的 bl 也不会自动向编译器描述整套函数调用副作用。
+
+- write_q_reg 同样移除了向量 clobber 并强制内联，依赖上述禁止隐式 FP/SIMD
+    的特殊约定；异常现场提交仍应检查最终汇编，不能只看 helper 或低 64 位结果。
+
+- LTO、优化级别、内联决策和工具链变化可能改变序言、尾声与尾调用。升级或
+    修改编译配置后要检查最终模块的所有返回路径，尤其是 Q 回写之后的 SIMD
+    加载；验证应比较完整 128 位，而不是只比较 D/S 或软件现场。
+*/
+static __always_inline void write_all_q_regs(const struct fp_regs *regs)
 {
     asm volatile("ldp q0, q1, [%0, #0]\n"
                  "ldp q2, q3, [%0, #32]\n"
@@ -409,7 +502,7 @@ static inline void write_all_q_regs(const struct fp_regs *regs)
                  "ldp q30, q31, [%0, #480]\n"
                  :
                  : "r"(regs->q)
-                 : "memory", "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10", "v11", "v12", "v13", "v14", "v15", "v16", "v17", "v18", "v19", "v20", "v21", "v22", "v23", "v24", "v25", "v26", "v27", "v28", "v29", "v30", "v31");
+                 : "memory");
     write_fpcr(regs->fpcr);
     write_fpsr(regs->fpsr);
 }

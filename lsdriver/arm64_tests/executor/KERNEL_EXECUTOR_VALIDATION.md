@@ -88,3 +88,33 @@ index 1798 的 `0x41363A88` 是 undefined word，应输出 SKIP；其前后项�
 ```bash
 make -C lsdriver/arm64_tests/executor clean
 ```
+
+## PTE 异常出口的 FP/SIMD 回写
+
+2026-09-17 检查现有 6.1-Android14 模块发现，`ptebp_handle_exec_fault()`
+在入口保存 d8-d15，退出时在完整 Q 寄存器回写之后又恢复 d8-d15。
+这些标量加载把 Q8-Q15 低 64 位覆盖为入口旧值，并将高 64 位清零；
+提前返回、未命中受管页面的路径同样会执行这些加载。
+
+原因是 `write_all_q_regs()` 的 v8-v15 clobber 触发了 C ABI 的
+callee-saved 保存恢复。该函数是异常现场提交边界，必须强制内联，使用
+memory clobber，并依赖调用对象的 `-mno-implicit-float` 和禁用自动向量化
+配置。不得当作允许编译器持有浮点临时值的普通 C helper 使用。
+更改编译选项或调用边界后，应重新检查最终模块汇编，确保 Q 回写之后没有
+编译器插入的 SIMD 覆盖，尤其是 d8-d15 的恢复。
+
+修复后的 Linux 6.1 模块构建通过，PTE handler 的 d8-d15 保存恢复已消失。
+对 `instruction.txt` 第 2097-3120 行单独构建测试模块，在
+`6.1.25-android14-11-o-gb65c8cff8958` 实体设备上得到：
+
+```text
+continuous test passed cases=1024
+case_counts=compared=1024 skipped=0
+runner_status=0
+cleanup_status=0
+```
+
+日志为 `ptebp-page-2097-validation.log`。该测试比较的是测试输入下的
+单指令架构语义，不覆盖真实游戏控制流、全部浮点输入或 PTE 异常退出。
+因此通过单指令对比不能排除现场回写错误；游戏姿态恢复仍需加载修复后的
+主驱动后复测。

@@ -206,6 +206,8 @@ static int vgyro_handle_sendto(struct pt_regs *regs, enum vgyro_sendto_arg_mode 
     uint32_t fy = READ_ONCE(vg.fy_bits);
     uint32_t fz = READ_ONCE(vg.fz_bits);
 
+    if (!(fx | fy | fz)) return 0;
+
     char chunk[VGYRO_CHUNK_BYTES];
     size_t processed = 0;
     int patched = 0;
@@ -292,18 +294,18 @@ static inline int v_gyro_init(void)
 {
     mutex_lock(&vgyro_lock);
 
+    smp_store_release(&vg.active, false);
     WRITE_ONCE(vg.gyro_x_mrad_s, 0);
     WRITE_ONCE(vg.gyro_y_mrad_s, 0);
     WRITE_ONCE(vg.gyro_z_mrad_s, 0);
     WRITE_ONCE(vg.fx_bits, 0);
     WRITE_ONCE(vg.fy_bits, 0);
     WRITE_ONCE(vg.fz_bits, 0);
-    smp_store_release(&vg.active, true);
 
     int ret = vgyro_install_hook_locked();
     mutex_unlock(&vgyro_lock);
 
-    ls_log_tag("vgyro", "init sendto_inline_hook=%d active=1\n", ret);
+    ls_log_tag("vgyro", "init sendto_inline_hook=%d active=0\n", ret);
     return ret;
 }
 
@@ -321,7 +323,7 @@ static inline int v_gyro_report(int gyro_x_mrad_s, int gyro_y_mrad_s, int gyro_z
     WRITE_ONCE(vg.fx_bits, fx);
     WRITE_ONCE(vg.fy_bits, fy);
     WRITE_ONCE(vg.fz_bits, fz);
-    smp_store_release(&vg.active, true);
+    smp_store_release(&vg.active, (fx | fy | fz) != 0);
 
     ls_log_tag("vgyro", "report mrad=%d/%d/%d hook=%d\n", gyro_x_mrad_s, gyro_y_mrad_s, gyro_z_mrad_s, vgyro_sendto_hook_installed());
     return 0;

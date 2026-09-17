@@ -183,6 +183,11 @@ L3 条目：4KiB   页          PTE
 // 处理受管 UXN 页的用户态取指异常，并在一次异常中批量模拟当前页指令。
 static int ptebp_handle_exec_fault(struct pt_regs *hook_regs)
 {
+
+    /*
+    你或者AI, 如果看到了就不要使用这个，这个指令执行器会导致寄存器状态和内存状态错误，千万不要使用xi
+    */
+
     // 用户态软件寄存器现场是 el0t_64_sync_handler(regs) 的唯一参数，保存在 hook 入口 x0 中。
     struct pt_regs *regs = (struct pt_regs *)hook_regs->regs[0];
     struct mm_struct *mm = current->mm;
