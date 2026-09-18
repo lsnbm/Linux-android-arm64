@@ -188,20 +188,30 @@ static bool watchpoint_access_matches(struct arch_hw_breakpoint *info, uint64_t 
 
 // 原生 ARM64 perf 断点通过 overflow_handler 是否为默认 perf 回调决定是否单步。
 // 默认回调表示异常处理后仍需执行被断住的原指令；trigger 只记录命中地址，不能作为单步标志。
+//
+// [死机修复] 这两个符号必须在「安装阶段」(可睡眠上下文，见 hwdbg_resolve_perf_output_symbols)
+// 解析一次并缓存，绝不能在本函数内惰性解析。本函数的调用方 work_trampoline_breakpoint /
+// work_trampoline_watchpoint 运行在 debug exception 原子上下文中（早期版本还在断点循环里
+// 持有 rcu_read_lock()）：符号解析会走 register_kprobe -> unregister_kprobe ->
+// synchronize_rcu()，在原子上下文属非法睡眠，在 RCU 读侧临界区内则是等待自己退出，
+// 两者都会引发 rcu stall，最终整机卡死（实测现象：pid 卡 D 状态、watchdog 杀 system_server）。
+static void (*perf_default_output_forward)(struct perf_event *, struct perf_sample_data *, struct pt_regs *) __read_mostly;
+static void (*perf_default_output_backward)(struct perf_event *, struct perf_sample_data *, struct pt_regs *) __read_mostly;
+
+// 在可睡眠上下文调用（安装断点时），全局只解析一次。
+static inline void hwdbg_resolve_perf_output_symbols(void)
+{
+    perf_default_output_forward = (void *)generic_kallsyms_lookup_name("perf_event_output_forward");
+    perf_default_output_backward = (void *)generic_kallsyms_lookup_name("perf_event_output_backward");
+}
+
 static bool perf_breakpoint_requires_step(struct perf_event *event)
 {
-    static void (*default_forward)(struct perf_event *, struct perf_sample_data *, struct pt_regs *) __attribute__((__section__(".data..read_mostly")));
-    static void (*default_backward)(struct perf_event *, struct perf_sample_data *, struct pt_regs *) __attribute__((__section__(".data..read_mostly")));
-
     if (!event) return false;
 
-    if (!default_forward || !default_backward)
-    {
-        default_forward = (void *)generic_kallsyms_lookup_name("perf_event_output_forward");
-        default_backward = (void *)generic_kallsyms_lookup_name("perf_event_output_backward");
-    }
-
-    return (default_forward && event->overflow_handler == default_forward) || (default_backward && event->overflow_handler == default_backward);
+    // 只做指针比较；绝不在此触发符号解析 / kprobe / synchronize_rcu。
+    return (perf_default_output_forward && event->overflow_handler == perf_default_output_forward) ||
+           (perf_default_output_backward && event->overflow_handler == perf_default_output_backward);
 }
 
 // 执行断异常处理跳板工作函数
@@ -658,6 +668,13 @@ static int start_task_run_monitor(struct break_point *bp_info)
         ls_log_tag("hwbp", "lookup bp_on_reg/wp_on_reg/perf_bp_event failed\n");
         return -ENOENT;
     }
+
+    // 预解析 perf 默认输出回调（此处为可睡眠上下文，安全）。
+    // 绝不能推迟到异常处理路径里解析：那里处于 debug exception 原子上下文，
+    // 一旦解析就会 unregister_kprobe -> synchronize_rcu -> 非法睡眠 / 自锁死(rcu stall)。
+    hwdbg_resolve_perf_output_symbols();
+    if (!perf_default_output_forward && !perf_default_output_backward)
+        ls_log_tag("hwbp", "warn: perf_event_output_forward/backward unresolved, step detection disabled\n");
 
     // 传递上下文给全局指针，让异常处理和断点写入都能互相传递配置信息
     g_bp_info = bp_info;
