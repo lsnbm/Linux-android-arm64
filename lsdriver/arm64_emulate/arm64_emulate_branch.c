@@ -546,6 +546,13 @@ static inline enum emu_inst_result emu_dmb_15(struct pt_regs *regs, struct fp_re
     regs->pc += 4;
     return EMU_INST_HANDLED;
 }
+static inline enum emu_inst_result emu_dc_zva(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+{
+    (void)fp_regs;
+    dc_zva_hw(read_gpr_or_zr(regs, entry->decoded.rt), 0, 0, 0, 0, 0);
+    regs->pc += 4;
+    return EMU_INST_HANDLED;
+}
 static inline enum emu_inst_result emu_isb(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     (void)fp_regs;
@@ -748,6 +755,8 @@ enum emu_inst_result (*emu_build_branch_executor(const struct arm64_decoded_inst
         return NULL;
     case ARM64_INST_ISB:
         return emu_isb;
+    case ARM64_INST_DC_ZVA:
+        return emu_dc_zva;
     case ARM64_INST_MSR_REGISTER:
         if (decoded->sysreg == ARM64_SYSREG_KEY(3, 3, 4, 2, 0)) return emu_msr_register_s3_3_c4_c2_0;
         if (decoded->sysreg == ARM64_SYSREG_KEY(3, 3, 4, 4, 0)) return emu_msr_register_s3_3_c4_c4_0;

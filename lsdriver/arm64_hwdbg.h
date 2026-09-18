@@ -383,33 +383,31 @@ bp_on_reg/wp_on_reg 不是全局断点配置表，而是 perf 对各 CPU 硬件�
 */
 static void dump_perf_breakpoint_slots(void)
 {
-    int cpu;
+    int cpu = get_cpu();
 
     rcu_read_lock();
-    for_each_online_cpu(cpu)
+    struct perf_event **breakpoint_slots = this_cpu_ptr(bp_on_reg); //per_cpu_ptr(bp_on_reg, cpu)读指定，this_cpu_ptr读当前
+    struct perf_event **watchpoint_slots = this_cpu_ptr(wp_on_reg);
+
+    for (int slot = 0; slot < num_brps; slot++)
     {
-        struct perf_event **breakpoint_slots = per_cpu_ptr(bp_on_reg, cpu);
-        struct perf_event **watchpoint_slots = per_cpu_ptr(wp_on_reg, cpu);
+        struct perf_event *event = READ_ONCE(breakpoint_slots[slot]);
+        if (!event) continue;
 
-        for (int slot = 0; slot < num_brps; slot++)
-        {
-            struct perf_event *event = READ_ONCE(breakpoint_slots[slot]);
-            if (!event) continue;
+        struct arch_hw_breakpoint *info = &event->hw.info;
+        ls_log_always_tag("hwbp-perf", "cpu=%d kind=bp slot=%d addr=0x%llx len=%llu type=0x%x disabled=%u arch_addr=0x%llx enabled=%u privilege=%u type=0x%x len=0x%x ctrl=0x%x\n", cpu, slot, (unsigned long long)event->attr.bp_addr, (unsigned long long)event->attr.bp_len, event->attr.bp_type, event->attr.disabled, (unsigned long long)info->address, info->ctrl.enabled, info->ctrl.privilege, info->ctrl.type, info->ctrl.len, encode_ctrl_reg(info->ctrl));
+    }
 
-            struct arch_hw_breakpoint *info = &event->hw.info;
-            ls_log_always_tag("hwbp-perf", "cpu=%d kind=bp slot=%d addr=0x%llx len=%llu type=0x%x disabled=%u arch_addr=0x%llx enabled=%u privilege=%u type=0x%x len=0x%x ctrl=0x%x\n", cpu, slot, (unsigned long long)event->attr.bp_addr, (unsigned long long)event->attr.bp_len, event->attr.bp_type, event->attr.disabled, (unsigned long long)info->address, info->ctrl.enabled, info->ctrl.privilege, info->ctrl.type, info->ctrl.len, encode_ctrl_reg(info->ctrl));
-        }
+    for (int slot = 0; slot < num_wrps; slot++)
+    {
+        struct perf_event *event = READ_ONCE(watchpoint_slots[slot]);
+        if (!event) continue;
 
-        for (int slot = 0; slot < num_wrps; slot++)
-        {
-            struct perf_event *event = READ_ONCE(watchpoint_slots[slot]);
-            if (!event) continue;
-
-            struct arch_hw_breakpoint *info = &event->hw.info;
-            ls_log_always_tag("hwbp-perf", "cpu=%d kind=wp slot=%d addr=0x%llx len=%llu type=0x%x disabled=%u arch_addr=0x%llx enabled=%u privilege=%u type=0x%x len=0x%x ctrl=0x%x\n", cpu, slot, (unsigned long long)event->attr.bp_addr, (unsigned long long)event->attr.bp_len, event->attr.bp_type, event->attr.disabled, (unsigned long long)info->address, info->ctrl.enabled, info->ctrl.privilege, info->ctrl.type, info->ctrl.len, encode_ctrl_reg(info->ctrl));
-        }
+        struct arch_hw_breakpoint *info = &event->hw.info;
+        ls_log_always_tag("hwbp-perf", "cpu=%d kind=wp slot=%d addr=0x%llx len=%llu type=0x%x disabled=%u arch_addr=0x%llx enabled=%u privilege=%u type=0x%x len=0x%x ctrl=0x%x\n", cpu, slot, (unsigned long long)event->attr.bp_addr, (unsigned long long)event->attr.bp_len, event->attr.bp_type, event->attr.disabled, (unsigned long long)info->address, info->ctrl.enabled, info->ctrl.privilege, info->ctrl.type, info->ctrl.len, encode_ctrl_reg(info->ctrl));
     }
     rcu_read_unlock();
+    put_cpu();
 }
 
 // 在当前 CPU 上安装硬件断点/观察点寄存器。

@@ -66,7 +66,6 @@ public: // 共有结构体和锁
         }
     };
     SpinLock m_mutex;
-
 #define TLS_THREAD_NAME_LEN 16
     struct env_params
     {
@@ -82,7 +81,7 @@ public: // 共有结构体和锁
 #define BP_OP_NONE    0x0 // 00: 不操作
 #define BP_OP_READ    0x1 // 01: 读
 #define BP_OP_WRITE   0x2 // 10: 写
-#define BP_CONFIG_MAX 16
+#define BP_CONFIG_MAX 0x10
 #define BP_RECORD_MAX 0x10
 
 // 设置掩码位的宏，参数1:结构体指针，参数2:寄存器索引，参数3:操作类型
@@ -119,7 +118,6 @@ public: // 共有结构体和锁
         BP_BREAKPOINT_LEN_6 = 6,
         BP_BREAKPOINT_LEN_7 = 7,
         BP_BREAKPOINT_LEN_8 = 8,
-
     };
     // 断点作用线程范围
     enum bp_scope
@@ -360,7 +358,6 @@ public: // 共有结构体和锁
         request_op_env_get_params, // 获取指定task环境参数
 
         request_op_kernel_exit, // 内核线程退出
-
     };
 
     // 将在队列中使用的请求实例结构体

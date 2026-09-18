@@ -163,6 +163,9 @@ ARM64_HW_TEMPLATE void dmb_15(uint64_t input0, uint64_t input1, uint64_t input2,
 ARM64_HW_TEMPLATE void isb_hw(uint64_t input0, uint64_t input1, uint64_t input2, uint64_t input3, uint64_t input4, void *output)
 { asm volatile("isb\nret\n"); }
 
+ARM64_HW_TEMPLATE void dc_zva_hw(uint64_t input0, uint64_t input1, uint64_t input2, uint64_t input3, uint64_t input4, void *output)
+{ asm volatile("dc zva, x0\nret\n"); }
+
 /* ---------- YIELD ---------- */
 
 ARM64_HW_TEMPLATE void yield_hw(uint64_t input0, uint64_t input1, uint64_t input2, uint64_t input3, uint64_t input4, void *output)

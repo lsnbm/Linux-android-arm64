@@ -204,6 +204,12 @@ static void prepare_common_input(struct arm64_executor_case *test_case)
     test_case->initial.pc = ARM64_EXECUTOR_CODE_ADDRESS + ARM64_EXECUTOR_CODE_OFFSET;
     if (arm64_decode_instruction(test_case->raw, &decoded) != ARM64_DECODE_OK)
         return;
+    if (decoded.instruction == ARM64_INST_DC_ZVA)
+    {
+        if (decoded.rt < 31U)
+            test_case->initial.regs[decoded.rt] = ARM64_EXECUTOR_DATA_ADDRESS + 31U;
+        return;
+    }
     if ((decoded.instruction == ARM64_INST_BR ||
          decoded.instruction == ARM64_INST_BLR ||
          decoded.instruction == ARM64_INST_RET) && decoded.rn < 31U)

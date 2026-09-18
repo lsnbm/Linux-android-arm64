@@ -175,6 +175,13 @@ enum arm64_decode_status arm64_decode_branch_exception_system(uint32_t raw, stru
 
     case 0xD5:
     {
+        if ((raw & 0xFFFFFFE0U) == 0xD50B7420U)
+        {
+            decoded->instruction = ARM64_INST_DC_ZVA;
+            decoded->rt = ARM64_DECODE_FIELD(raw, 4, 0);
+            decoded->operand_width = 64;
+            return ARM64_DECODE_OK;
+        }
         switch (raw & 0xFFFFF01FU)
         {
         case 0xD503201FU:
