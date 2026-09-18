@@ -14,6 +14,21 @@
 
 #include "lsdriver_log.h"
 
+// Linux 6.18 使用 MDSCR_EL1_* 替代旧 DBG_MDSCR_* 名称，寄存器位定义不变。
+// 仅在旧宏缺失时映射到新名称，旧内核继续使用自身定义。
+// MDE(bit15): 调试监控使能；KDE(bit13): 内核态调试使能；SS(bit0): 软件单步使能。
+#ifndef DBG_MDSCR_MDE
+#define DBG_MDSCR_MDE MDSCR_EL1_MDE
+#endif
+#ifndef DBG_MDSCR_KDE
+#define DBG_MDSCR_KDE MDSCR_EL1_KDE
+#endif
+#ifndef DBG_MDSCR_SS
+#define DBG_MDSCR_SS MDSCR_EL1_SS
+#endif
+
+// 若内核头文件已定义 phys_to_ttbr 宏，先取消它，避免下方同名函数定义被宏展开。
+// 此后使用本文件的 PA52 编码函数
 #ifdef phys_to_ttbr
 #undef phys_to_ttbr
 #endif
@@ -83,8 +98,10 @@ static inline void enable_hardware_debug_on_cpu(void *unused)
 
     /*
     读取 MDSCR_EL1，置位后写回：
-    bit 15 (MDE): Monitor Debug Enable，用户态调试使能(EL0)
-    bit 13 (KDE): Kernel Debug Enable，内核态调试使能(EL1)
+    DBG_MDSCR_MDE = 1 << 15：Monitor Debug Enable，使能监控式硬件断点和观察点调试。
+    DBG_MDSCR_KDE = 1 << 13：Kernel Debug Enable，配合 MDE 允许 EL1 的此类调试。
+    MDE 并非仅作用于 EL0；实际触发还取决于断点/观察点寄存器配置及异常屏蔽等条件。
+    下方 clear 参数为 0，仅置位 MDE/KDE，保留寄存器其他位。
     */
     sysreg_clear_set(mdscr_el1, 0, (uint64_t)(DBG_MDSCR_MDE | DBG_MDSCR_KDE));
     isb();

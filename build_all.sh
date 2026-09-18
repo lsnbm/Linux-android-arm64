@@ -5,7 +5,7 @@
 # ==============================================================
 #
 #  支持的内核版本:
-#    Bazel 构建:  6.12-Android16 / 6.6-Android15 / 6.1-Android14 / 5.15-Android13 / 5.10-Android13
+#    Bazel 构建:  6.18-Android17 / 6.12-Android16 / 6.6-Android15 / 6.1-Android14 / 5.15-Android13 / 5.10-Android13
 #    Legacy 构建: 5.10-Android12
 #
 #  用法:
@@ -24,11 +24,12 @@ KERNELS_ROOT="/root"
 DRIVER_SRC="/mnt/e/1.CodeRepository/Android/Kernel/lsdriver"
 
 # 强制不剥离符号的版本列表 (剥离后无法加载)
-NO_STRIP_VERSIONS=("6.12-Android16" "6.6-Android15")
+NO_STRIP_VERSIONS=("6.18-Android17" "6.12-Android16" "6.6-Android15")
 
 # 编译外部模块时不导入内核导出的 Module.symvers，生成空 __versions 的版本列表。
 # 这样 ko 的 vermagic 仍然带 modversions，但不会携带具体符号 CRC
 NO_CRC_VERSIONS=(
+    "6.18-Android17"
     "6.12-Android16"
     "6.6-Android15"
     "6.1-Android14"
@@ -173,7 +174,7 @@ handle_output() {
 }
 
 # ======================== Bazel 构建 =========================
-# 适用于: Android 13+ 内核 (6.12-Android16 / 6.6-Android15 / 6.1-Android14 / 5.15-Android13 / 5.10-Android13)
+# 适用于: Android 13+ 内核 (6.18-Android17 / 6.12-Android16 / 6.6-Android15 / 6.1-Android14 / 5.15-Android13 / 5.10-Android13)
 
 build_kernel() {
     local version="$1"
@@ -475,6 +476,11 @@ main() {
     should_build() {
         [[ ${#requested_versions[@]} -eq 0 ]] || contains_version "$1" "${requested_versions[@]}"
     }
+
+    should_build "6.18-Android17" && build_kernel "6.18-Android17" \
+        "$KERNELS_ROOT/6.18-Android17/prebuilts/clang/host/linux-x86/clang-r584948c" \
+        "aarch64-linux-gnu-" \
+        "CLANG_TRIPLE=aarch64-linux-gnu-"
 
     # 内核 6.12-Android16
     should_build "6.12-Android16" && build_kernel "6.12-Android16" \

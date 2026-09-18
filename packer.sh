@@ -97,6 +97,7 @@ embed_file() {
 embed_file "$KO_DIR/6.1-Android14.ko"  "payload_6_1"
 embed_file "$KO_DIR/6.6-Android15.ko"  "payload_6_6"
 embed_file "$KO_DIR/6.12-Android16.ko" "payload_6_12"
+embed_file "$KO_DIR/6.18-Android17.ko" "payload_6_18"
 embed_file "$KO_DIR/5.15-Android13.ko" "payload_5_15"
 embed_file "$KO_DIR/5.10-Android12.ko" "payload_android12"
 embed_file "$KO_DIR/5.10-Android13.ko" "payload_android13"
@@ -159,6 +160,9 @@ fi
 
 case "$KERNEL_VER" in
     # 6.x 系列
+    6.18.*)
+        load_driver_logic "payload_6_18" "6.18-Android17"
+        ;;
     6.12.*)
         load_driver_logic "payload_6_12" "6.12-Android16"
         ;;
@@ -192,7 +196,7 @@ case "$KERNEL_VER" in
     # 其他
     *)
         echo "[!] 错误: 不支持的内核版本 ($KERNEL_VER)"
-        echo "[!] 支持: 5.10 / 5.15 / 6.1 / 6.6 / 6.12"
+        echo "[!] 支持: 5.10 / 5.15 / 6.1 / 6.6 / 6.12 / 6.18"
         exit 1
         ;;
 esac

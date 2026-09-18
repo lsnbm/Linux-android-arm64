@@ -164,6 +164,9 @@ static uint64_t get_distance_from_watchpoint(uint64_t fault_addr, uint64_t watch
 {
     if (!ctrl || !ctrl->len) return ~0ULL;
 
+    fault_addr = untagged_addr(fault_addr);
+    watch_addr = untagged_addr(watch_addr);
+
     uint32_t lens = __ffs(ctrl->len);
     uint32_t lene = __fls(ctrl->len);
 

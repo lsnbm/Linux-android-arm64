@@ -33,7 +33,7 @@ struct env_params
 #define BP_OP_NONE    0x0 // 00: 不操作
 #define BP_OP_READ    0x1 // 01: 读
 #define BP_OP_WRITE   0x2 // 10: 写
-#define BP_CONFIG_MAX 16
+#define BP_CONFIG_MAX 0x10
 #define BP_RECORD_MAX 0x10
 
 // 设置掩码位的宏，参数1:结构体指针，参数2:寄存器索引，参数3:操作类型

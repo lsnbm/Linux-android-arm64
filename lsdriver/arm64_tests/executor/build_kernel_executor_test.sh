@@ -95,7 +95,7 @@ generate_instruction_table() {
         echo "#define ARM64_TEST_INSTRUCTION_COUNT ${instruction_count}U"
         echo '#include <linux/types.h>'
         echo 'static const u32 arm64_test_instructions[ARM64_TEST_INSTRUCTION_COUNT] = {'
-        while IFS= read -r raw_instruction; do
+        while IFS= read -r raw_instruction || [[ -n "$raw_instruction" ]]; do
             raw_instruction="${raw_instruction%$'\r'}"
             [[ "$raw_instruction" =~ [^[:space:]] ]] || continue
             printf '    0x%sU,\n' "$raw_instruction"
