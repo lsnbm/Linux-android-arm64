@@ -682,8 +682,8 @@ namespace
                 moduleItem["segs"].push_back({
                     {"index", seg.index},
                     {"prot", static_cast<int>(seg.prot)},
-                    {"start", seg.start},
-                    {"end", seg.end},
+                    {"start", std::format("0x{:X}", seg.start)},
+                    {"end", std::format("0x{:X}", seg.end)},
                 });
             }
 
@@ -694,8 +694,8 @@ namespace
         {
             const auto &region = info.regions[i];
             root["regions"].push_back({
-                {"start", region.start},
-                {"end", region.end},
+                {"start", std::format("0x{:X}", region.start)},
+                {"end", std::format("0x{:X}", region.end)},
             });
         }
 
@@ -708,8 +708,7 @@ namespace
         json root;
         root["read_success"] = viewer.readSuccess();
         root["read_status"] = viewer.readStatus();
-        root["base"] = static_cast<std::uint64_t>(viewer.base());
-        root["base_hex"] = std::format("0x{:X}", static_cast<std::uint64_t>(viewer.base()));
+        root["base"] = std::format("0x{:X}", static_cast<std::uint64_t>(viewer.base()));
         const auto format = viewer.format();
         root["format"] = viewFormatToToken(format);
 
@@ -726,8 +725,7 @@ namespace
                 if (emittedLines >= buffer.size() / 4) break;
                 json item;
                 item["valid"] = line.valid;
-                item["address"] = line.address;
-                item["address_hex"] = std::format("0x{:X}", line.address);
+                item["address"] = std::format("0x{:X}", line.address);
                 item["size"] = line.size;
                 item["bytes_hex"] = bytesToHex(line.bytes, line.size);
                 item["mnemonic"] = sanitizeLine(line.mnemonic);
@@ -747,19 +745,19 @@ namespace
         for (const auto &point : info.points)
         {
             const int pointRecordCount = clampHwbpRecordCount(point.record_count);
-            json pointItem = {{"bt", static_cast<int>(point.bt)}, {"bl", static_cast<int>(point.bl)}, {"bs", static_cast<int>(point.bs)}, {"hit_addr", point.hit_addr}, {"record_count", pointRecordCount}, {"records", json::array()}};
+            json pointItem = {{"bt", static_cast<int>(point.bt)}, {"bl", static_cast<int>(point.bl)}, {"bs", static_cast<int>(point.bs)}, {"hit_addr", std::format("0x{:X}", point.hit_addr)}, {"record_count", pointRecordCount}, {"records", json::array()}};
 
             for (int i = 0; i < pointRecordCount; ++i)
             {
                 auto &rec = const_cast<Driver::bp_record &>(point.records[i]);
                 MemUtils::HwbpRequestAll(rec);
-                json item = {{"mask", json::array()}, {"hit_count", readHwbp64(rec, Driver::IDX_HIT_COUNT)}, {"pc", readHwbp64(rec, Driver::IDX_PC)}, {"lr", readHwbp64(rec, Driver::IDX_LR)}, {"sp", readHwbp64(rec, Driver::IDX_SP)}, {"orig_x0", readHwbp64(rec, Driver::IDX_ORIG_X0)}, {"syscallno", readHwbp32(rec, Driver::IDX_SYSCALLNO)}, {"pstate", readHwbp64(rec, Driver::IDX_PSTATE)}, {"fpsr", readHwbp32(rec, Driver::IDX_FPSR)}, {"fpcr", readHwbp32(rec, Driver::IDX_FPCR)}};
-                for (int m = 0; m < 18; ++m) item["mask"].push_back(rec.mask[m]);
-                for (int reg = 0; reg < 30; ++reg) item[std::format("x{}", reg)] = readHwbp64(rec, Driver::IDX_X0 + reg);
+                json item = {{"mask", json::array()}, {"hit_count", readHwbp64(rec, Driver::IDX_HIT_COUNT)}, {"pc", std::format("0x{:X}", readHwbp64(rec, Driver::IDX_PC))}, {"lr", std::format("0x{:X}", readHwbp64(rec, Driver::IDX_LR))}, {"sp", std::format("0x{:X}", readHwbp64(rec, Driver::IDX_SP))}, {"orig_x0", std::format("0x{:X}", readHwbp64(rec, Driver::IDX_ORIG_X0))}, {"syscallno", std::format("0x{:X}", readHwbp32(rec, Driver::IDX_SYSCALLNO))}, {"pstate", std::format("0x{:X}", readHwbp64(rec, Driver::IDX_PSTATE))}, {"fpsr", std::format("0x{:X}", readHwbp32(rec, Driver::IDX_FPSR))}, {"fpcr", std::format("0x{:X}", readHwbp32(rec, Driver::IDX_FPCR))}};
+                for (int m = 0; m < 18; ++m) item["mask"].push_back(std::format("0x{:X}", rec.mask[m]));
+                for (int reg = 0; reg < 30; ++reg) item[std::format("x{}", reg)] = std::format("0x{:X}", readHwbp64(rec, Driver::IDX_X0 + reg));
                 for (int reg = 0; reg < 32; ++reg)
                 {
                     const auto qreg = MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_Q0 + reg);
-                    item[std::format("q{}", reg)] = {{"lo", static_cast<std::uint64_t>(qreg)}, {"hi", static_cast<std::uint64_t>(qreg >> 64)}};
+                    item[std::format("q{}", reg)] = {{"lo", std::format("0x{:X}", static_cast<std::uint64_t>(qreg))}, {"hi", std::format("0x{:X}", static_cast<std::uint64_t>(qreg >> 64))}};
                 }
                 pointItem["records"].push_back(std::move(item));
             }
@@ -792,8 +790,7 @@ namespace
         {
             const auto addr = static_cast<std::uint64_t>(matches[i]);
             root["matches"].push_back({
-                {"addr", addr},
-                {"addr_hex", std::format("0x{:X}", addr)},
+                {"addr", std::format("0x{:X}", addr)},
             });
         }
 
@@ -1086,7 +1083,7 @@ namespace
             json outPoints = json::array();
             for (std::size_t index = 0; index < points.size(); ++index)
             {
-                outPoints.push_back({{"index", index}, {"address", points[index].hit_addr}, {"address_hex", std::format("0x{:X}", points[index].hit_addr)}, {"type", std::string(bpTypeToToken(points[index].bt))}, {"scope", std::string(bpScopeToToken(points[index].bs))}, {"length", static_cast<int>(points[index].bl)}});
+                outPoints.push_back({{"index", index}, {"address", std::format("0x{:X}", points[index].hit_addr)}, {"type", std::string(bpTypeToToken(points[index].bt))}, {"scope", std::string(bpScopeToToken(points[index].bs))}, {"length", static_cast<int>(points[index].bl)}});
             }
             return okData({{"status", status}, {"mode", mode}, {"point_count", points.size()}, {"points", std::move(outPoints)}});
         };
@@ -1141,8 +1138,7 @@ namespace
             for (const auto &state : MemoryTool::Saved().snapshotStates())
             {
                 items.push_back({
-                    {"address", state.item.address},
-                    {"address_hex", std::format("0x{:X}", state.item.address)},
+                    {"address", std::format("0x{:X}", state.item.address)},
                     {"value_type", std::string(dataTypeToken(state.item.type))},
                     {"value_type_label", Types::Labels::TYPE[static_cast<size_t>(state.item.type)]},
                     {"value_kind", std::string(savedValueKindToken(state.item.kind))},
@@ -1233,12 +1229,9 @@ namespace
             return okData({
                 {"pid", pid},
                 {"thread_name", threadName},
-                {"tpidr_el0", info.tpidr_el0},
-                {"tpidr_el0_hex", std::format("0x{:X}", info.tpidr_el0)},
-                {"pacga_lo", info.pacga_lo},
-                {"pacga_hi", info.pacga_hi},
-                {"pacga_lo_hex", std::format("0x{:X}", info.pacga_lo)},
-                {"pacga_hi_hex", std::format("0x{:X}", info.pacga_hi)},
+                {"tpidr_el0", std::format("0x{:X}", info.tpidr_el0)},
+                {"pacga_lo", std::format("0x{:X}", info.pacga_lo)},
+                {"pacga_hi", std::format("0x{:X}", info.pacga_hi)},
                 {"tls_status", info.tls_status},
                 {"pacga_status", info.pacga_status},
             });
@@ -1266,7 +1259,7 @@ namespace
 
             std::uint64_t address = 0;
             if (!dr->GetModuleAddress(std::get<std::string>(moduleName), static_cast<short>(std::get<int>(segmentIndex)), &address, isStart)) return fail("未找到目标模块或段");
-            return okData({{"address", address}, {"address_hex", std::format("0x{:X}", address)}});
+            return okData({{"address", std::format("0x{:X}", address)}});
         }
 
         if (op == "memory.dump")
@@ -1393,8 +1386,7 @@ namespace
             for (const auto addr : pageState.results)
             {
                 payload["items"].push_back({
-                    {"addr", static_cast<std::uint64_t>(addr)},
-                    {"addr_hex", std::format("0x{:X}", static_cast<std::uint64_t>(addr))},
+                    {"addr", std::format("0x{:X}", static_cast<std::uint64_t>(addr))},
                     {"value", stringType    ? MemUtils::ReadAsText(addr)
                               : pointerType ? MemUtils::ReadAsPointerString(addr)
                                             : MemUtils::ReadAsString(addr, *dataType)},
@@ -1714,8 +1706,7 @@ namespace
             const int readBytes = dr->Read(std::get<std::uint64_t>(address), bytes.data(), bytes.size());
             if (readBytes != byteCount) return fail(std::format("读取失败 status={}", readBytes));
             return okData({
-                {"address", std::get<std::uint64_t>(address)},
-                {"address_hex", std::format("0x{:X}", std::get<std::uint64_t>(address))},
+                {"address", std::format("0x{:X}", std::get<std::uint64_t>(address))},
                 {"size", byteCount},
                 {"data_hex", bytesToHex(bytes.data(), bytes.size())},
             });
@@ -1737,8 +1728,7 @@ namespace
             const int readBytes = dr->Read(std::get<std::uint64_t>(address), readback.data(), readback.size());
             const bool readbackComplete = readBytes == static_cast<int>(readback.size());
             return okData({
-                {"address", std::get<std::uint64_t>(address)},
-                {"address_hex", std::format("0x{:X}", std::get<std::uint64_t>(address))},
+                {"address", std::format("0x{:X}", std::get<std::uint64_t>(address))},
                 {"size", bytes->size()},
                 {"verified", readbackComplete && readback == *bytes},
                 {"readback_status", readBytes},

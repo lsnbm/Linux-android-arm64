@@ -190,6 +190,7 @@ namespace android
             void *(*SurfaceComposerClient__Transaction__Reparent)(void *thiz, StrongPointer<void> &surfaceControl, StrongPointer<void> &newParentHandle) = nullptr;
             void *(*SurfaceComposerClient__Transaction__SetMatrix)(void *thiz, StrongPointer<void> &surfaceControl, float dsdx, float dtdx, float dtdy, float dsdy) = nullptr;
             void *(*SurfaceComposerClient__Transaction__SetPosition)(void *thiz, StrongPointer<void> &surfaceControl, float x, float y) = nullptr;
+            int32_t (*SurfaceComposerClient__Transaction__ApplyLegacy)(void *thiz, bool synchronous) = nullptr;
             int32_t (*SurfaceComposerClient__Transaction__Apply)(void *thiz, bool synchronous, bool oneWay) = nullptr;
 
             int32_t (*SurfaceControl__Validate)(void *thiz) = nullptr;
@@ -227,12 +228,6 @@ namespace android
                             {reinterpret_cast<void **>(&LayerMetadata__Constructor), "_ZN7android3gui13LayerMetadataC2Ev"},
                             {reinterpret_cast<void **>(&SurfaceComposerClient__CreateSurface), "_ZN7android21SurfaceComposerClient13createSurfaceERKNS_7String8EjjiiRKNS_2spINS_7IBinderEEENS_3gui13LayerMetadataEPj"},
                             {reinterpret_cast<void **>(&SurfaceControl__GetSurface), "_ZNK7android14SurfaceControl10getSurfaceEv"},
-                        },
-                    },
-                    {
-                        12,
-                        {
-                            {reinterpret_cast<void **>(&SurfaceComposerClient__Transaction__Apply), "_ZN7android21SurfaceComposerClient11Transaction5applyEb"},
                         },
                     },
                     {
@@ -300,7 +295,14 @@ namespace android
                     ResolveMethod(SurfaceComposerClient__Transaction, SetMatrix, libgui, "_ZN7android21SurfaceComposerClient11Transaction9setMatrixERKNS_2spINS_14SurfaceControlEEEffff");
                     ResolveMethod(SurfaceComposerClient__Transaction, SetPosition, libgui, "_ZN7android21SurfaceComposerClient11Transaction11setPositionERKNS_2spINS_14SurfaceControlEEEff");
                 }
-                ResolveMethod(SurfaceComposerClient__Transaction, Apply, libgui, "_ZN7android21SurfaceComposerClient11Transaction5applyEbb");
+                if (12 >= systemVersion)
+                {
+                    ResolveMethod(SurfaceComposerClient__Transaction, ApplyLegacy, libgui, "_ZN7android21SurfaceComposerClient11Transaction5applyEb");
+                }
+                else
+                {
+                    ResolveMethod(SurfaceComposerClient__Transaction, Apply, libgui, "_ZN7android21SurfaceComposerClient11Transaction5applyEbb");
+                }
 
                 ResolveMethod(SurfaceControl, Validate, libgui, "_ZNK7android14SurfaceControl8validateEv");
                 ResolveMethod(SurfaceControl, GetSurface, libgui, "_ZN7android14SurfaceControl10getSurfaceEv");
@@ -522,8 +524,11 @@ namespace android
             {
                 if (!valid) return 0;
                 auto &f = Functionals::GetInstance();
-                if (12 >= f.systemVersion && f.SurfaceComposerClient__Transaction__Apply) return reinterpret_cast<int32_t (*)(void *, bool)>(f.SurfaceComposerClient__Transaction__Apply)(data, synchronous);
-                else SAFE_CALL_RET(f.SurfaceComposerClient__Transaction__Apply, 0, data, synchronous, oneWay);
+                if (12 >= f.systemVersion)
+                {
+                    SAFE_CALL_RET(f.SurfaceComposerClient__Transaction__ApplyLegacy, 0, data, synchronous);
+                }
+                SAFE_CALL_RET(f.SurfaceComposerClient__Transaction__Apply, 0, data, synchronous, oneWay);
             }
         };
 
@@ -829,7 +834,7 @@ namespace android
 
             if (!surfaceComposerClient.GetDisplayInfo(&displayInfo)) return {0, 0, 0};
 
-            DisplayInfo local_displayInfo{0};
+            DisplayInfo local_displayInfo{};
             int32_t local_orientation = static_cast<int32_t>(displayInfo.orientation);
             int32_t local_abs_x = (displayInfo.layerStackSpaceRect.width > displayInfo.layerStackSpaceRect.height ? displayInfo.layerStackSpaceRect.width : displayInfo.layerStackSpaceRect.height);
             int32_t local_abs_y = (displayInfo.layerStackSpaceRect.width < displayInfo.layerStackSpaceRect.height ? displayInfo.layerStackSpaceRect.width : displayInfo.layerStackSpaceRect.height);

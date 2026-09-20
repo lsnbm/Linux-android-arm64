@@ -252,7 +252,7 @@ def normalize_breakpoint_points(points: list[dict[str, Any]]) -> list[dict[str, 
 @dataclass(frozen=True)
 class SavedAddressState:
     address: int
-    address_hex: str
+    address_text: str
     value_type: str
     value_type_label: str
     value_kind: str
@@ -266,11 +266,10 @@ class SavedAddressState:
     def from_dict(cls, payload: dict[str, Any]) -> "SavedAddressState":
         value_type = normalize_value_type(str(payload.get("value_type", "")))
         value_kind = normalize_saved_kind(str(payload.get("value_kind", "numeric")))
-        address = int(payload.get("address", 0))
-        address_hex = str(payload.get("address_hex") or format_address(address))
+        address = int(str(payload.get("address", "0x0")), 0)
         return cls(
             address=address,
-            address_hex=address_hex,
+            address_text=format_address(address),
             value_type=value_type,
             value_type_label=str(payload.get("value_type_label") or VALUE_TYPE_LABELS[value_type]),
             value_kind=value_kind,

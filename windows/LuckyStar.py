@@ -2286,7 +2286,7 @@ class HttpBridgeWindow(QWidget):
         else:
             for idx, item in enumerate(matches, start=1):
                 if isinstance(item, dict):
-                    lines.append(f"{idx:04d}. {item.get('addr_hex', '0x0')}")
+                    lines.append(f"{idx:04d}. {item.get('addr', '0x0')}")
                 else:
                     lines.append(f"{idx:04d}. {item}")
         return "\n".join(lines)
@@ -2304,7 +2304,7 @@ class HttpBridgeWindow(QWidget):
                 if not isinstance(item, dict):
                     lines.append(f"{start + idx:08d} | 非法数据")
                     continue
-                addr_hex = str(item.get("addr_hex", ""))
+                addr_hex = str(item.get("addr", ""))
                 value = str(item.get("value", ""))
                 lines.append(f"{start + idx:08d} | {addr_hex:<18} | {value}")
 
@@ -2329,7 +2329,7 @@ class HttpBridgeWindow(QWidget):
         try:
             self.saved_items = [
                 {
-                    "addr": state.address_hex,
+                    "addr": state.address_text,
                     "value": state.value,
                     "type": state.value_type_label,
                     "locked": "1" if state.locked else "0",
@@ -3010,7 +3010,7 @@ class HttpBridgeWindow(QWidget):
             return "\n".join(lines + ["(no data)"])
 
         for item in window_items:
-            address_hex = str(item.get("address_hex", "0x0"))
+            address_hex = str(item.get("address", "0x0"))
             bytes_hex = str(item.get("bytes_hex", ""))
             mnemonic = str(item.get("mnemonic", "")).strip()
             op_str = str(item.get("op_str", "")).strip()
@@ -3489,9 +3489,9 @@ class HttpBridgeWindow(QWidget):
         lines = [
             f"PID: {self._safe_int(data.get('pid'), 0)}",
             f"线程名: {str(data.get('thread_name') or '(未指定)')}",
-            f"TPIDR_EL0: {str(data.get('tpidr_el0_hex') or '0x0')}",
-            f"PACGA_LO: {str(data.get('pacga_lo_hex') or '0x0')}",
-            f"PACGA_HI: {str(data.get('pacga_hi_hex') or '0x0')}",
+            f"TPIDR_EL0: {str(data.get('tpidr_el0') or '0x0')}",
+            f"PACGA_LO: {str(data.get('pacga_lo') or '0x0')}",
+            f"PACGA_HI: {str(data.get('pacga_hi') or '0x0')}",
             f"TLS 状态: {self._safe_int(data.get('tls_status'), 0)}",
             f"PACGA 状态: {self._safe_int(data.get('pacga_status'), 0)}",
         ]

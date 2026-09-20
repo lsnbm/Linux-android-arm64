@@ -49,23 +49,11 @@ def _run_pyinstaller(args: list[str]) -> None:
     PyInstaller.__main__.run(args)
 
 
-def _read_script_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8", errors="ignore")
-
-
-def _is_gui_script(script_text: str) -> bool:
-    return any(marker in script_text for marker in GUI_MARKERS)
-
-
-def _needs_mcp_bundle(script_text: str) -> bool:
-    return any(marker in script_text for marker in MCP_MARKERS)
-
-
 def _write_version_file(target_name: str, spec_dir: Path) -> Path:
-        version_text = ".".join(str(part) for part in EXECUTABLE_VERSION)
-        version_file = spec_dir / f"{target_name}.version.txt"
-        version_file.write_text(
-                f"""VSVersionInfo(
+    version_text = ".".join(str(part) for part in EXECUTABLE_VERSION)
+    version_file = spec_dir / f"{target_name}.version.txt"
+    version_file.write_text(
+        f"""VSVersionInfo(
     ffi=FixedFileInfo(
         filevers={EXECUTABLE_VERSION},
         prodvers={EXECUTABLE_VERSION},
@@ -91,9 +79,9 @@ def _write_version_file(target_name: str, spec_dir: Path) -> Path:
     ]
 )
 """,
-                encoding="utf-8",
-        )
-        return version_file
+        encoding="utf-8",
+    )
+    return version_file
 
 
 def _discover_local_python_files() -> list[Path]:
@@ -169,7 +157,7 @@ def _build_script(
     work_root: Path,
     spec_dir: Path,
 ) -> None:
-    script_text = _read_script_text(target)
+    script_text = target.read_text(encoding="utf-8", errors="ignore")
     target_name = target.stem
     target_work_dir = work_root / target_name
     version_file = _write_version_file(target_name, spec_dir)
@@ -195,11 +183,11 @@ def _build_script(
         str(SCRIPT_DIR),
     ]
 
-    if _is_gui_script(script_text):
+    if any(marker in script_text for marker in GUI_MARKERS):
         cmd.extend(["--add-data", f"{DEFAULT_ICON_PATH}{os.pathsep}."])
         cmd.append("--windowed")
 
-    if _needs_mcp_bundle(script_text):
+    if any(marker in script_text for marker in MCP_MARKERS):
         cmd.extend(
             [
                 "--collect-all",
