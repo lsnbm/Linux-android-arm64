@@ -31,6 +31,45 @@ static inline enum arm64_decode_status arm64_decode_register_conditional_compare
     return ARM64_DECODE_OK;
 }
 
+static inline enum arm64_decode_status arm64_decode_register_conditional_select(uint32_t raw, struct arm64_decoded_instruction *decoded)
+{
+    uint32_t opc;
+
+    switch (raw & 0x3FE00000U)
+    {
+    case 0x1A800000U:
+        break;
+    default:
+        return ARM64_DECODE_UNSUPPORTED;
+    }
+    decoded->rd = ARM64_DECODE_FIELD(raw, 4, 0);
+    decoded->rn = ARM64_DECODE_FIELD(raw, 9, 5);
+    decoded->operand_width = ARM64_DECODE_BIT(raw, 31) ? 64 : 32;
+    decoded->rm = ARM64_DECODE_FIELD(raw, 20, 16);
+    if (raw & 0x00000800U)
+    {
+        return ARM64_DECODE_UNALLOCATED;
+    }
+    decoded->condition = ARM64_DECODE_FIELD(raw, 15, 12);
+    opc = (ARM64_DECODE_BIT(raw, 30) << 1) | ARM64_DECODE_BIT(raw, 10);
+    switch (opc)
+    {
+    case 0:
+        decoded->instruction = ARM64_INST_CSEL;
+        break;
+    case 1:
+        decoded->instruction = ARM64_INST_CSINC;
+        break;
+    case 2:
+        decoded->instruction = ARM64_INST_CSINV;
+        break;
+    default:
+        decoded->instruction = ARM64_INST_CSNEG;
+        break;
+    }
+    return ARM64_DECODE_OK;
+}
+
 /* 解码寄存器移位、扩展、条件选择及算术逻辑编码。 */
 enum arm64_decode_status arm64_decode_data_processing_register(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
@@ -197,43 +236,7 @@ enum arm64_decode_status arm64_decode_data_processing_register(uint32_t raw, str
             }
 
             case 0x00800000U:
-            {
-                uint32_t opc;
-
-                switch (raw & 0x3FE00000U)
-                {
-                case 0x1A800000U:
-                    break;
-                default:
-                    return ARM64_DECODE_UNSUPPORTED;
-                }
-                decoded->rd = ARM64_DECODE_FIELD(raw, 4, 0);
-                decoded->rn = ARM64_DECODE_FIELD(raw, 9, 5);
-                decoded->operand_width = ARM64_DECODE_BIT(raw, 31) ? 64 : 32;
-                decoded->rm = ARM64_DECODE_FIELD(raw, 20, 16);
-                if (raw & 0x00000800U)
-                {
-                    return ARM64_DECODE_UNALLOCATED;
-                }
-                decoded->condition = ARM64_DECODE_FIELD(raw, 15, 12);
-                opc = (ARM64_DECODE_BIT(raw, 30) << 1) | ARM64_DECODE_BIT(raw, 10);
-                switch (opc)
-                {
-                case 0:
-                    decoded->instruction = ARM64_INST_CSEL;
-                    break;
-                case 1:
-                    decoded->instruction = ARM64_INST_CSINC;
-                    break;
-                case 2:
-                    decoded->instruction = ARM64_INST_CSINV;
-                    break;
-                default:
-                    decoded->instruction = ARM64_INST_CSNEG;
-                    break;
-                }
-                return ARM64_DECODE_OK;
-            }
+                return arm64_decode_register_conditional_select(raw, decoded);
 
             case 0x00C00000U:
             {
@@ -336,6 +339,11 @@ enum arm64_decode_status arm64_decode_data_processing_register(uint32_t raw, str
         case 0x40000000U:
         {
             uint32_t opc;
+
+            if ((raw & 0x00E00000U) == 0x00800000U)
+            {
+                return arm64_decode_register_conditional_select(raw, decoded);
+            }
 
             switch (raw & 0x7FFF0000U)
             {
