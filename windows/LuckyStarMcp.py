@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Annotated, Any, Literal, TypedDict
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 from pydantic import Field
 
 PROJECT_WINDOWS_DIR = Path(__file__).resolve().parents[1] / "windows"
@@ -87,7 +87,7 @@ def _call_bridge_operation(operation: str, params: dict[str, Any] | None = None)
     return _mcp_response(bridge.call_operation(operation, params))
 
 
-mcp = FastMCP(
+mcp = MCPServer(
     "NativeHttpBridge Android MCP",
     instructions=(
         "Pass addresses and register values as 0x-prefixed strings, never JSON numbers. "
@@ -95,9 +95,6 @@ mcp = FastMCP(
         "Counts, lengths and indexes remain numbers. "
         "Scan and saved values remain strings in their requested data format."
     ),
-    host=DEFAULT_MCP_BIND_HOST,
-    port=DEFAULT_MCP_BIND_PORT,
-    streamable_http_path=DEFAULT_MCP_PATH,
 )
 
 
@@ -577,23 +574,28 @@ def main() -> int:
     args = parser.parse_args()
 
     bridge.configure(host=args.android_host, timeout_seconds=args.android_timeout)
-    mcp.settings.host = args.mcp_host.strip() or DEFAULT_MCP_BIND_HOST
-    mcp.settings.port = int(args.mcp_port)
+    mcp_host = args.mcp_host.strip() or DEFAULT_MCP_BIND_HOST
+    mcp_port = int(args.mcp_port)
     mcp_path = str(args.mcp_path).strip() or "/mcp"
     if not mcp_path.startswith("/"):
         mcp_path = "/" + mcp_path
     if len(mcp_path) > 1:
         mcp_path = mcp_path.rstrip("/")
-    mcp.settings.streamable_http_path = mcp_path or "/mcp"
+    mcp_path = mcp_path or "/mcp"
 
-    display_host = "127.0.0.1" if mcp.settings.host == "0.0.0.0" else mcp.settings.host
+    display_host = "127.0.0.1" if mcp_host == "0.0.0.0" else mcp_host
     print("[MCP] Server started:", file=sys.stderr, flush=True)
     print(
-        f"  Streamable HTTP: http://{display_host}:{mcp.settings.port}{mcp.settings.streamable_http_path}",
+        f"  Streamable HTTP: http://{display_host}:{mcp_port}{mcp_path}",
         file=sys.stderr,
         flush=True,
     )
-    mcp.run(transport="streamable-http")
+    mcp.run(
+        transport="streamable-http",
+        host=mcp_host,
+        port=mcp_port,
+        streamable_http_path=mcp_path,
+    )
     return 0
 
 

@@ -28,7 +28,7 @@ GUI_MARKERS = (
 )
 
 MCP_MARKERS = (
-    "from mcp.server.fastmcp import FastMCP",
+    "from mcp.server import MCPServer",
     "import mcp",
     "from mcp.",
 )
