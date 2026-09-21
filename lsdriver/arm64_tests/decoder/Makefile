@@ -7,9 +7,9 @@ DRIVER_DIR := $(abspath $(TEST_DIR)/../..)
 CC ?= gcc
 PYTHON ?= python3
 LLVM_TOOLCHAIN ?= /root/6.1-Android14/prebuilts/clang/host/linux-x86/clang-r487747c
-override EXPECTED_ROWS := 2047
-override EXPECTED_UNIQUE_WORDS := 922
-override EXPECTED_INPUT_SHA256 := 98D6AA19F20B20BCB700F7087B682B28120A76122C1BCD9DAB1F4C296BF4926D
+override EXPECTED_ROWS := 5119
+override EXPECTED_UNIQUE_WORDS := 1844
+override EXPECTED_INPUT_SHA256 := DC34125CC5138E4BE854997714824A24EAB349701B10D555BDD7A29D04C8D763
 LLVM_SOURCE_REVISION := d9f89f4d16663d5012e5c09495f3b30ece3d2362
 
 DECODER_CFLAGS := -std=gnu11 -O2 -Wall -Wextra -Werror
@@ -23,7 +23,15 @@ DECODER_SOURCES := \
 	$(DRIVER_DIR)/arm64_decode/arm64_decode_sve.c \
 	$(DRIVER_DIR)/arm64_decode/arm64_decode_sme.c
 
-.PHONY: strict-test test
+.PHONY: strict-test test contract-test
+
+contract-test:
+	set -euo pipefail
+	build_dir="$$(mktemp -d "$${TMPDIR:-/tmp}/lsdriver-arm64-contract.XXXXXX")"
+	trap 'rm -rf "$$build_dir"' EXIT
+	$(CC) $(DECODER_CFLAGS) '$(TEST_DIR)/arm64_decoder_contract_test.c' \
+		$(DECODER_SOURCES) -o "$$build_dir/arm64_decoder_contract_test"
+	"$$build_dir/arm64_decoder_contract_test"
 
 # Decoder validation is host-only; it never executes target instructions.
 strict-test test:

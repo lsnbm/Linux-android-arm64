@@ -340,157 +340,166 @@ static inline uint8_t arm64_decode_simd_scalar_fp_width(uint32_t type)
 
 static inline enum arm64_decode_status arm64_decode_simd_modified_imm(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
-    uint8_t encoded_immediate = (ARM64_DECODE_FIELD(raw, 18, 16) << 5) | ARM64_DECODE_FIELD(raw, 9, 5);
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
+
+    if (!(ARM64_DECODE_MATCH(raw, 0x9FF80C00U, 0x0F000400U))) return ARM64_DECODE_UNSUPPORTED;
+    uint8_t encoded_immediate = ARM64_DECODE_CONCAT(ARM64_DECODE_FIELD(raw, 18, 16), ARM64_DECODE_FIELD(raw, 9, 5), 5U);
     uint8_t cmode = ARM64_DECODE_FIELD(raw, 15, 12);
     uint8_t op = ARM64_DECODE_BIT(raw, 29);
-    decoded->simd_cmode = cmode;
+    candidate->simd_cmode = cmode;
 
-    decoded->immediate = encoded_immediate;
-    decoded->operand_width = ARM64_DECODE_BIT(raw, 30) ? 128 : 64;
+    candidate->immediate = encoded_immediate;
+    candidate->operand_width = ARM64_DECODE_BIT(raw, 30) ? 128 : 64;
 
-    switch ((op << 4) | cmode)
+    switch (ARM64_DECODE_CONCAT(op, cmode, 4U))
     {
     case 0x00:
-        decoded->instruction = ARM64_INST_MOVI_VECTOR_IMMEDIATE;
-        decoded->element_width = 32;
+        candidate->instruction = ARM64_INST_MOVI_VECTOR_IMMEDIATE;
+        candidate->element_width = 32;
         break;
     case 0x01:
-        decoded->instruction = ARM64_INST_ORR_VECTOR_IMMEDIATE;
-        decoded->element_width = 32;
+        candidate->instruction = ARM64_INST_ORR_VECTOR_IMMEDIATE;
+        candidate->element_width = 32;
         break;
     case 0x02:
-        decoded->instruction = ARM64_INST_MOVI_VECTOR_IMMEDIATE;
-        decoded->element_width = 32;
+        candidate->instruction = ARM64_INST_MOVI_VECTOR_IMMEDIATE;
+        candidate->element_width = 32;
         break;
     case 0x03:
-        decoded->instruction = ARM64_INST_ORR_VECTOR_IMMEDIATE;
-        decoded->element_width = 32;
+        candidate->instruction = ARM64_INST_ORR_VECTOR_IMMEDIATE;
+        candidate->element_width = 32;
         break;
     case 0x04:
-        decoded->instruction = ARM64_INST_MOVI_VECTOR_IMMEDIATE;
-        decoded->element_width = 32;
+        candidate->instruction = ARM64_INST_MOVI_VECTOR_IMMEDIATE;
+        candidate->element_width = 32;
         break;
     case 0x05:
-        decoded->instruction = ARM64_INST_ORR_VECTOR_IMMEDIATE;
-        decoded->element_width = 32;
+        candidate->instruction = ARM64_INST_ORR_VECTOR_IMMEDIATE;
+        candidate->element_width = 32;
         break;
     case 0x06:
-        decoded->instruction = ARM64_INST_MOVI_VECTOR_IMMEDIATE;
-        decoded->element_width = 32;
+        candidate->instruction = ARM64_INST_MOVI_VECTOR_IMMEDIATE;
+        candidate->element_width = 32;
         break;
     case 0x07:
-        decoded->instruction = ARM64_INST_ORR_VECTOR_IMMEDIATE;
-        decoded->element_width = 32;
+        candidate->instruction = ARM64_INST_ORR_VECTOR_IMMEDIATE;
+        candidate->element_width = 32;
         break;
     case 0x08:
-        decoded->instruction = ARM64_INST_MOVI_VECTOR_IMMEDIATE;
-        decoded->element_width = 16;
+        candidate->instruction = ARM64_INST_MOVI_VECTOR_IMMEDIATE;
+        candidate->element_width = 16;
         break;
     case 0x09:
-        decoded->instruction = ARM64_INST_ORR_VECTOR_IMMEDIATE;
-        decoded->element_width = 16;
+        candidate->instruction = ARM64_INST_ORR_VECTOR_IMMEDIATE;
+        candidate->element_width = 16;
         break;
     case 0x0A:
-        decoded->instruction = ARM64_INST_MOVI_VECTOR_IMMEDIATE;
-        decoded->element_width = 16;
+        candidate->instruction = ARM64_INST_MOVI_VECTOR_IMMEDIATE;
+        candidate->element_width = 16;
         break;
     case 0x0B:
-        decoded->instruction = ARM64_INST_ORR_VECTOR_IMMEDIATE;
-        decoded->element_width = 16;
+        candidate->instruction = ARM64_INST_ORR_VECTOR_IMMEDIATE;
+        candidate->element_width = 16;
         break;
     case 0x0C:
-        decoded->instruction = ARM64_INST_MOVI_VECTOR_IMMEDIATE;
-        decoded->element_width = 32;
+        candidate->instruction = ARM64_INST_MOVI_VECTOR_IMMEDIATE;
+        candidate->element_width = 32;
         break;
     case 0x0D:
-        decoded->instruction = ARM64_INST_MOVI_VECTOR_IMMEDIATE;
-        decoded->element_width = 32;
+        candidate->instruction = ARM64_INST_MOVI_VECTOR_IMMEDIATE;
+        candidate->element_width = 32;
         break;
     case 0x0E:
-        decoded->instruction = ARM64_INST_MOVI_VECTOR_IMMEDIATE;
-        decoded->element_width = 8;
+        candidate->instruction = ARM64_INST_MOVI_VECTOR_IMMEDIATE;
+        candidate->element_width = 8;
         break;
     case 0x0F:
-        decoded->instruction = ARM64_INST_FMOV_VECTOR_IMMEDIATE;
-        decoded->element_width = 32;
+        candidate->instruction = ARM64_INST_FMOV_VECTOR_IMMEDIATE;
+        candidate->element_width = 32;
         break;
     case 0x10:
-        decoded->instruction = ARM64_INST_MVNI_VECTOR_IMMEDIATE;
-        decoded->element_width = 32;
+        candidate->instruction = ARM64_INST_MVNI_VECTOR_IMMEDIATE;
+        candidate->element_width = 32;
         break;
     case 0x11:
-        decoded->instruction = ARM64_INST_BIC_VECTOR_IMMEDIATE;
-        decoded->element_width = 32;
+        candidate->instruction = ARM64_INST_BIC_VECTOR_IMMEDIATE;
+        candidate->element_width = 32;
         break;
     case 0x12:
-        decoded->instruction = ARM64_INST_MVNI_VECTOR_IMMEDIATE;
-        decoded->element_width = 32;
+        candidate->instruction = ARM64_INST_MVNI_VECTOR_IMMEDIATE;
+        candidate->element_width = 32;
         break;
     case 0x13:
-        decoded->instruction = ARM64_INST_BIC_VECTOR_IMMEDIATE;
-        decoded->element_width = 32;
+        candidate->instruction = ARM64_INST_BIC_VECTOR_IMMEDIATE;
+        candidate->element_width = 32;
         break;
     case 0x14:
-        decoded->instruction = ARM64_INST_MVNI_VECTOR_IMMEDIATE;
-        decoded->element_width = 32;
+        candidate->instruction = ARM64_INST_MVNI_VECTOR_IMMEDIATE;
+        candidate->element_width = 32;
         break;
     case 0x15:
-        decoded->instruction = ARM64_INST_BIC_VECTOR_IMMEDIATE;
-        decoded->element_width = 32;
+        candidate->instruction = ARM64_INST_BIC_VECTOR_IMMEDIATE;
+        candidate->element_width = 32;
         break;
     case 0x16:
-        decoded->instruction = ARM64_INST_MVNI_VECTOR_IMMEDIATE;
-        decoded->element_width = 32;
+        candidate->instruction = ARM64_INST_MVNI_VECTOR_IMMEDIATE;
+        candidate->element_width = 32;
         break;
     case 0x17:
-        decoded->instruction = ARM64_INST_BIC_VECTOR_IMMEDIATE;
-        decoded->element_width = 32;
+        candidate->instruction = ARM64_INST_BIC_VECTOR_IMMEDIATE;
+        candidate->element_width = 32;
         break;
     case 0x18:
-        decoded->instruction = ARM64_INST_MVNI_VECTOR_IMMEDIATE;
-        decoded->element_width = 16;
+        candidate->instruction = ARM64_INST_MVNI_VECTOR_IMMEDIATE;
+        candidate->element_width = 16;
         break;
     case 0x19:
-        decoded->instruction = ARM64_INST_BIC_VECTOR_IMMEDIATE;
-        decoded->element_width = 16;
+        candidate->instruction = ARM64_INST_BIC_VECTOR_IMMEDIATE;
+        candidate->element_width = 16;
         break;
     case 0x1A:
-        decoded->instruction = ARM64_INST_MVNI_VECTOR_IMMEDIATE;
-        decoded->element_width = 16;
+        candidate->instruction = ARM64_INST_MVNI_VECTOR_IMMEDIATE;
+        candidate->element_width = 16;
         break;
     case 0x1B:
-        decoded->instruction = ARM64_INST_BIC_VECTOR_IMMEDIATE;
-        decoded->element_width = 16;
+        candidate->instruction = ARM64_INST_BIC_VECTOR_IMMEDIATE;
+        candidate->element_width = 16;
         break;
     case 0x1C:
-        decoded->instruction = ARM64_INST_MVNI_VECTOR_IMMEDIATE;
-        decoded->element_width = 32;
+        candidate->instruction = ARM64_INST_MVNI_VECTOR_IMMEDIATE;
+        candidate->element_width = 32;
         break;
     case 0x1D:
-        decoded->instruction = ARM64_INST_MVNI_VECTOR_IMMEDIATE;
-        decoded->element_width = 32;
+        candidate->instruction = ARM64_INST_MVNI_VECTOR_IMMEDIATE;
+        candidate->element_width = 32;
         break;
     case 0x1E:
-        decoded->instruction = ARM64_INST_MOVI_VECTOR_IMMEDIATE;
-        decoded->element_width = 64;
+        candidate->instruction = ARM64_INST_MOVI_VECTOR_IMMEDIATE;
+        candidate->element_width = 64;
         break;
     case 0x1F:
-        if (decoded->operand_width != 128) return ARM64_DECODE_UNALLOCATED;
-        decoded->instruction = ARM64_INST_FMOV_VECTOR_IMMEDIATE;
-        decoded->element_width = 64;
+        if (candidate->operand_width != 128) return ARM64_DECODE_UNALLOCATED;
+        candidate->instruction = ARM64_INST_FMOV_VECTOR_IMMEDIATE;
+        candidate->element_width = 64;
         break;
     default:
         return ARM64_DECODE_UNALLOCATED;
     }
 
+    *decoded = result;
     return ARM64_DECODE_OK;
 }
 
 static inline enum arm64_decode_status arm64_decode_simd_vector_fp16_3reg(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
+
+    if (!(ARM64_DECODE_MATCH(raw, 0x9F60C400U, 0x0E400400U))) return ARM64_DECODE_UNSUPPORTED;
     enum arm64_instruction instruction;
 
-    switch ((ARM64_DECODE_BIT(raw, 29) << 6) | (ARM64_DECODE_BIT(raw, 23) << 5) | (ARM64_DECODE_FIELD(raw, 13, 11) + 24))
+    switch (ARM64_DECODE_CONCAT(ARM64_DECODE_BIT_PAIR(raw, 29, 23), ARM64_DECODE_FIELD(raw, 13, 11) + 24U, 5U))
     {
     case 0x18:
         instruction = ARM64_INST_FMAXNM_VECTOR;
@@ -577,14 +586,19 @@ static inline enum arm64_decode_status arm64_decode_simd_vector_fp16_3reg(uint32
         return ARM64_DECODE_UNALLOCATED;
     }
 
-    decoded->instruction = instruction;
-    decoded->element_width = 16;
-    decoded->operand_width = ARM64_DECODE_BIT(raw, 30) ? 128 : 64;
+    candidate->instruction = instruction;
+    candidate->element_width = 16;
+    candidate->operand_width = ARM64_DECODE_BIT(raw, 30) ? 128 : 64;
+    *decoded = result;
     return ARM64_DECODE_OK;
 }
 
 static inline enum arm64_decode_status arm64_decode_simd_vector_3same(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
+
+    if (!(ARM64_DECODE_MATCH(raw, 0x9F200400U, 0x0E200400U))) return ARM64_DECODE_UNSUPPORTED;
     uint8_t q = ARM64_DECODE_BIT(raw, 30);
     uint8_t u = ARM64_DECODE_BIT(raw, 29);
     uint8_t size = ARM64_DECODE_FIELD(raw, 23, 22);
@@ -602,50 +616,65 @@ static inline enum arm64_decode_status arm64_decode_simd_vector_3same(uint32_t r
                 switch (size)
                 {
                 case 0:
-                    decoded->instruction = ARM64_INST_AND_VECTOR;
-                    decoded->element_width = 8;
-                    decoded->operand_width = q ? 128 : 64;
+                    candidate->instruction = ARM64_INST_AND_VECTOR;
+                    candidate->element_width = 8;
+                    candidate->operand_width = q ? 128 : 64;
+                    *decoded = result;
                     return ARM64_DECODE_OK;
                 case 1:
-                    decoded->instruction = ARM64_INST_BIC_VECTOR;
-                    decoded->element_width = 8;
-                    decoded->operand_width = q ? 128 : 64;
+                    candidate->instruction = ARM64_INST_BIC_VECTOR;
+                    candidate->element_width = 8;
+                    candidate->operand_width = q ? 128 : 64;
+                    *decoded = result;
                     return ARM64_DECODE_OK;
                 case 2:
-                    decoded->instruction = ARM64_INST_ORR_VECTOR;
-                    decoded->element_width = 8;
-                    decoded->operand_width = q ? 128 : 64;
+                    candidate->instruction = ARM64_INST_ORR_VECTOR;
+                    candidate->element_width = 8;
+                    candidate->operand_width = q ? 128 : 64;
+                    *decoded = result;
+                    return ARM64_DECODE_OK;
+                case 3:
+                    candidate->instruction = ARM64_INST_ORN_VECTOR;
+                    candidate->element_width = 8;
+                    candidate->operand_width = q ? 128 : 64;
+                    *decoded = result;
                     return ARM64_DECODE_OK;
                 default:
-                    decoded->instruction = ARM64_INST_ORN_VECTOR;
-                    decoded->element_width = 8;
-                    decoded->operand_width = q ? 128 : 64;
-                    return ARM64_DECODE_OK;
+                    return ARM64_DECODE_UNSUPPORTED;
                 }
-            default:
+            case 1:
                 switch (size)
                 {
                 case 0:
-                    decoded->instruction = ARM64_INST_EOR_VECTOR;
-                    decoded->element_width = 8;
-                    decoded->operand_width = q ? 128 : 64;
+                    candidate->instruction = ARM64_INST_EOR_VECTOR;
+                    candidate->element_width = 8;
+                    candidate->operand_width = q ? 128 : 64;
+                    *decoded = result;
                     return ARM64_DECODE_OK;
                 case 1:
-                    decoded->instruction = ARM64_INST_BSL_VECTOR;
-                    decoded->element_width = 8;
-                    decoded->operand_width = q ? 128 : 64;
+                    candidate->instruction = ARM64_INST_BSL_VECTOR;
+                    candidate->element_width = 8;
+                    candidate->operand_width = q ? 128 : 64;
+                    *decoded = result;
                     return ARM64_DECODE_OK;
                 case 2:
-                    decoded->instruction = ARM64_INST_BIT_VECTOR;
-                    decoded->element_width = 8;
-                    decoded->operand_width = q ? 128 : 64;
+                    candidate->instruction = ARM64_INST_BIT_VECTOR;
+                    candidate->element_width = 8;
+                    candidate->operand_width = q ? 128 : 64;
+                    *decoded = result;
+                    return ARM64_DECODE_OK;
+                case 3:
+                    candidate->instruction = ARM64_INST_BIF_VECTOR;
+                    candidate->element_width = 8;
+                    candidate->operand_width = q ? 128 : 64;
+                    *decoded = result;
                     return ARM64_DECODE_OK;
                 default:
-                    decoded->instruction = ARM64_INST_BIF_VECTOR;
-                    decoded->element_width = 8;
-                    decoded->operand_width = q ? 128 : 64;
-                    return ARM64_DECODE_OK;
+                    return ARM64_DECODE_UNSUPPORTED;
                 }
+
+            default:
+                return ARM64_DECODE_UNSUPPORTED;
             }
         }
 
@@ -750,7 +779,7 @@ static inline enum arm64_decode_status arm64_decode_simd_vector_3same(uint32_t r
                 return ARM64_DECODE_UNALLOCATED;
             }
             break;
-        default:
+        case 1:
             switch (opcode)
             {
             case 0:
@@ -845,11 +874,15 @@ static inline enum arm64_decode_status arm64_decode_simd_vector_3same(uint32_t r
                 return ARM64_DECODE_UNALLOCATED;
             }
             break;
+
+        default:
+            return ARM64_DECODE_UNSUPPORTED;
         }
         if (!(valid_sizes & (1U << size)) || (!q && size == 3)) return ARM64_DECODE_UNALLOCATED;
-        decoded->instruction = instruction;
-        decoded->element_width = 8U << size;
-        decoded->operand_width = q ? 128 : 64;
+        candidate->instruction = instruction;
+        candidate->element_width = 8U << size;
+        candidate->operand_width = q ? 128 : 64;
+        *decoded = result;
         return ARM64_DECODE_OK;
     }
 
@@ -887,7 +920,7 @@ static inline enum arm64_decode_status arm64_decode_simd_vector_3same(uint32_t r
                 break;
             }
             break;
-        default:
+        case 1:
             switch (opcode)
             {
             case 24:
@@ -913,9 +946,12 @@ static inline enum arm64_decode_status arm64_decode_simd_vector_3same(uint32_t r
                 break;
             }
             break;
+
+        default:
+            return ARM64_DECODE_UNSUPPORTED;
         }
         break;
-    default:
+    case 1:
         switch (size >> 1)
         {
         case 0:
@@ -947,7 +983,7 @@ static inline enum arm64_decode_status arm64_decode_simd_vector_3same(uint32_t r
                 break;
             }
             break;
-        default:
+        case 1:
             switch (opcode)
             {
             case 24:
@@ -976,30 +1012,42 @@ static inline enum arm64_decode_status arm64_decode_simd_vector_3same(uint32_t r
                 break;
             }
             break;
+
+        default:
+            return ARM64_DECODE_UNSUPPORTED;
         }
         break;
+
+    default:
+        return ARM64_DECODE_UNSUPPORTED;
     }
     if (instruction == ARM64_INST_UNKNOWN) return ARM64_DECODE_UNALLOCATED;
     if ((!u && opcode == 29) || (u && opcode == 25))
     {
         if (size & 1) return ARM64_DECODE_UNALLOCATED;
-        decoded->instruction = instruction;
-        decoded->element_width = 16;
-        decoded->operand_width = q ? 128 : 64;
+        candidate->instruction = instruction;
+        candidate->element_width = 16;
+        candidate->operand_width = q ? 128 : 64;
+        *decoded = result;
         return ARM64_DECODE_OK;
     }
-    decoded->element_width = 32U << (size & 1);
-    if (!q && decoded->element_width == 64) return ARM64_DECODE_UNALLOCATED;
-    decoded->instruction = instruction;
-    decoded->operand_width = q ? 128 : 64;
+    candidate->element_width = 32U << (size & 1);
+    if (!q && candidate->element_width == 64) return ARM64_DECODE_UNALLOCATED;
+    candidate->instruction = instruction;
+    candidate->operand_width = q ? 128 : 64;
+    *decoded = result;
     return ARM64_DECODE_OK;
 }
 
 static inline enum arm64_decode_status arm64_decode_simd_scalar_fp16_3reg(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
+
+    if (!(ARM64_DECODE_MATCH(raw, 0xDF60C400U, 0x5E400400U))) return ARM64_DECODE_UNSUPPORTED;
     enum arm64_instruction instruction;
 
-    switch ((ARM64_DECODE_BIT(raw, 29) << 6) | (ARM64_DECODE_BIT(raw, 23) << 5) | (ARM64_DECODE_FIELD(raw, 13, 11) + 24))
+    switch (ARM64_DECODE_CONCAT(ARM64_DECODE_BIT_PAIR(raw, 29, 23), ARM64_DECODE_FIELD(raw, 13, 11) + 24U, 5U))
     {
     case 0x1B:
         instruction = ARM64_INST_FMULX_SCALAR;
@@ -1032,14 +1080,19 @@ static inline enum arm64_decode_status arm64_decode_simd_scalar_fp16_3reg(uint32
         return ARM64_DECODE_UNALLOCATED;
     }
 
-    decoded->instruction = instruction;
-    decoded->element_width = 16;
-    decoded->operand_width = 16;
+    candidate->instruction = instruction;
+    candidate->element_width = 16;
+    candidate->operand_width = 16;
+    *decoded = result;
     return ARM64_DECODE_OK;
 }
 
 static inline enum arm64_decode_status arm64_decode_simd_scalar_3same(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
+
+    if (!(ARM64_DECODE_MATCH(raw, 0xDF200400U, 0x5E200400U))) return ARM64_DECODE_UNSUPPORTED;
     uint8_t u = ARM64_DECODE_BIT(raw, 29);
     uint8_t size = ARM64_DECODE_FIELD(raw, 23, 22);
     uint8_t opcode = ARM64_DECODE_FIELD(raw, 15, 11);
@@ -1134,7 +1187,7 @@ static inline enum arm64_decode_status arm64_decode_simd_scalar_3same(uint32_t r
                 break;
             }
             break;
-        default:
+        case 1:
             switch (size_high)
             {
             case 0:
@@ -1217,11 +1270,15 @@ static inline enum arm64_decode_status arm64_decode_simd_scalar_3same(uint32_t r
                 break;
             }
             break;
+
+        default:
+            return ARM64_DECODE_UNSUPPORTED;
         }
         if (!(valid_sizes & (1U << size))) return ARM64_DECODE_UNALLOCATED;
-        decoded->instruction = instruction;
-        decoded->element_width = 8U << size;
-        decoded->operand_width = 8U << size;
+        candidate->instruction = instruction;
+        candidate->element_width = 8U << size;
+        candidate->operand_width = 8U << size;
+        *decoded = result;
         return ARM64_DECODE_OK;
     }
 
@@ -1249,7 +1306,7 @@ static inline enum arm64_decode_status arm64_decode_simd_scalar_3same(uint32_t r
             break;
         }
         break;
-    default:
+    case 1:
         switch (size_high)
         {
         case 0:
@@ -1279,47 +1336,58 @@ static inline enum arm64_decode_status arm64_decode_simd_scalar_3same(uint32_t r
             break;
         }
         break;
+
+    default:
+        return ARM64_DECODE_UNSUPPORTED;
     }
     if (instruction == ARM64_INST_UNKNOWN) return ARM64_DECODE_UNALLOCATED;
-    decoded->instruction = instruction;
-    decoded->element_width = 32U << (size & 1);
-    decoded->operand_width = 32U << (size & 1);
+    candidate->instruction = instruction;
+    candidate->element_width = 32U << (size & 1);
+    candidate->operand_width = 32U << (size & 1);
+    *decoded = result;
     return ARM64_DECODE_OK;
 }
 
 static inline enum arm64_decode_status arm64_decode_simd_rdm_by_element(uint32_t raw, struct arm64_decoded_instruction *decoded, enum arm64_instruction instruction, uint8_t operand_width, uint8_t size)
 {
-    uint8_t h = ARM64_DECODE_BIT(raw, 11);
-    uint8_t l = ARM64_DECODE_BIT(raw, 21);
-    uint8_t m = ARM64_DECODE_BIT(raw, 20);
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
 
     if (size != 1 && size != 2) return ARM64_DECODE_UNALLOCATED;
 
-    decoded->instruction = instruction;
-    decoded->element_width = 8U << size;
-    decoded->operand_width = operand_width;
+    candidate->instruction = instruction;
+    candidate->element_width = 8U << size;
+    candidate->operand_width = operand_width;
     if (size == 1)
     {
-        decoded->rm = ARM64_DECODE_FIELD(raw, 19, 16);
-        decoded->lane_index = (h << 2) | (l << 1) | m;
+        candidate->rm = ARM64_DECODE_FIELD(raw, 19, 16);
+        candidate->lane_index = ARM64_DECODE_BIT_TRIPLE(raw, 11, 21, 20);
     }
-    else decoded->lane_index = (h << 1) | l;
+    else candidate->lane_index = ARM64_DECODE_BIT_PAIR(raw, 11, 21);
+    *decoded = result;
     return ARM64_DECODE_OK;
 }
 
 static inline enum arm64_decode_status arm64_decode_simd_dot_by_element(uint32_t raw, struct arm64_decoded_instruction *decoded, enum arm64_instruction instruction, uint8_t q, uint8_t size, uint8_t element_width)
 {
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
+
     if (size != 2) return ARM64_DECODE_UNALLOCATED;
 
-    decoded->instruction = instruction;
-    decoded->element_width = element_width;
-    decoded->lane_index = (ARM64_DECODE_BIT(raw, 11) << 1) | ARM64_DECODE_BIT(raw, 21);
-    decoded->operand_width = q ? 128 : 64;
+    candidate->instruction = instruction;
+    candidate->element_width = element_width;
+    candidate->lane_index = ARM64_DECODE_BIT_PAIR(raw, 11, 21);
+    candidate->operand_width = q ? 128 : 64;
+    *decoded = result;
     return ARM64_DECODE_OK;
 }
 
 static inline enum arm64_decode_status arm64_decode_simd_fcmla_by_element(uint32_t raw, struct arm64_decoded_instruction *decoded, uint8_t q, uint8_t size)
 {
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
+
     uint8_t h = ARM64_DECODE_BIT(raw, 11);
     uint8_t l = ARM64_DECODE_BIT(raw, 21);
 
@@ -1327,48 +1395,60 @@ static inline enum arm64_decode_status arm64_decode_simd_fcmla_by_element(uint32
     if (size == 2 && (l || !q)) return ARM64_DECODE_UNALLOCATED;
     if (size == 1 && h && !q) return ARM64_DECODE_UNALLOCATED;
 
-    decoded->instruction = ARM64_INST_FCMLA_VECTOR_BY_ELEMENT;
-    decoded->immediate = ARM64_DECODE_FIELD(raw, 14, 13);
-    decoded->element_width = 8U << size;
-    decoded->lane_index = size == 1 ? (h << 1) | l : h;
-    decoded->operand_width = q ? 128 : 64;
+    candidate->instruction = ARM64_INST_FCMLA_VECTOR_BY_ELEMENT;
+    candidate->immediate = ARM64_DECODE_FIELD(raw, 14, 13);
+    candidate->element_width = 8U << size;
+    candidate->lane_index = size == 1 ? ARM64_DECODE_BIT_PAIR(raw, 11, 21) : h;
+    candidate->operand_width = q ? 128 : 64;
+    *decoded = result;
     return ARM64_DECODE_OK;
 }
 
 static inline enum arm64_decode_status arm64_decode_simd_fhm_by_element(uint32_t raw, struct arm64_decoded_instruction *decoded, enum arm64_instruction instruction, uint8_t q, uint8_t size)
 {
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
+
     if (size != 2) return ARM64_DECODE_UNALLOCATED;
 
-    decoded->instruction = instruction;
-    decoded->element_width = 16;
-    decoded->lane_index = (ARM64_DECODE_BIT(raw, 11) << 2) | (ARM64_DECODE_BIT(raw, 21) << 1) | ARM64_DECODE_BIT(raw, 20);
-    decoded->operand_width = q ? 128 : 64;
-    decoded->rm = ARM64_DECODE_FIELD(raw, 19, 16);
+    candidate->instruction = instruction;
+    candidate->element_width = 16;
+    candidate->lane_index = ARM64_DECODE_BIT_TRIPLE(raw, 11, 21, 20);
+    candidate->operand_width = q ? 128 : 64;
+    candidate->rm = ARM64_DECODE_FIELD(raw, 19, 16);
+    *decoded = result;
     return ARM64_DECODE_OK;
 }
 
 static inline enum arm64_decode_status arm64_decode_simd_fp_by_element(uint32_t raw, struct arm64_decoded_instruction *decoded, enum arm64_instruction instruction, uint8_t operand_width, uint8_t size)
 {
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
+
     uint8_t h = ARM64_DECODE_BIT(raw, 11);
     uint8_t l = ARM64_DECODE_BIT(raw, 21);
 
     if (size == 1) return ARM64_DECODE_UNALLOCATED;
     if (size == 3 && l) return ARM64_DECODE_UNALLOCATED;
 
-    decoded->instruction = instruction;
-    decoded->element_width = size == 0 ? 16 : 8U << size;
-    decoded->operand_width = operand_width;
+    candidate->instruction = instruction;
+    candidate->element_width = size == 0 ? 16 : 8U << size;
+    candidate->operand_width = operand_width;
     if (size == 0)
     {
-        decoded->rm = ARM64_DECODE_FIELD(raw, 19, 16);
-        decoded->lane_index = (h << 2) | (l << 1) | ARM64_DECODE_BIT(raw, 20);
+        candidate->rm = ARM64_DECODE_FIELD(raw, 19, 16);
+        candidate->lane_index = ARM64_DECODE_BIT_TRIPLE(raw, 11, 21, 20);
     }
-    else decoded->lane_index = size == 2 ? (h << 1) | l : h;
+    else candidate->lane_index = size == 2 ? ARM64_DECODE_BIT_PAIR(raw, 11, 21) : h;
+    *decoded = result;
     return ARM64_DECODE_OK;
 }
 
-static enum arm64_decode_status arm64_decode_simd_scalar_fp_basic(uint32_t raw, struct arm64_decoded_instruction *decoded)
+static inline enum arm64_decode_status arm64_decode_simd_scalar_fp_basic(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
+
     uint32_t type = ARM64_DECODE_FIELD(raw, 23, 22);
     uint8_t width;
 
@@ -1377,23 +1457,26 @@ static enum arm64_decode_status arm64_decode_simd_scalar_fp_basic(uint32_t raw, 
     case 0x1F000000U:
         width = arm64_decode_simd_scalar_fp_width(type);
         if (!width) return ARM64_DECODE_UNALLOCATED;
-        switch ((ARM64_DECODE_BIT(raw, 21) << 1) | ARM64_DECODE_BIT(raw, 15))
+        switch (ARM64_DECODE_BIT_PAIR(raw, 21, 15))
         {
         case 0:
-            decoded->instruction = ARM64_INST_FMADD_SCALAR;
+            candidate->instruction = ARM64_INST_FMADD_SCALAR;
             break;
         case 1:
-            decoded->instruction = ARM64_INST_FMSUB_SCALAR;
+            candidate->instruction = ARM64_INST_FMSUB_SCALAR;
             break;
         case 2:
-            decoded->instruction = ARM64_INST_FNMADD_SCALAR;
+            candidate->instruction = ARM64_INST_FNMADD_SCALAR;
+            break;
+        case 3:
+            candidate->instruction = ARM64_INST_FNMSUB_SCALAR;
             break;
         default:
-            decoded->instruction = ARM64_INST_FNMSUB_SCALAR;
-            break;
+            return ARM64_DECODE_UNSUPPORTED;
         }
-        decoded->operand_width = width;
-        decoded->element_width = width;
+        candidate->operand_width = width;
+        candidate->element_width = width;
+        *decoded = result;
         return ARM64_DECODE_OK;
     default:
         break;
@@ -1442,37 +1525,38 @@ static enum arm64_decode_status arm64_decode_simd_scalar_fp_basic(uint32_t raw, 
         switch (ARM64_DECODE_FIELD(raw, 15, 12))
         {
         case 0:
-            decoded->instruction = ARM64_INST_FMUL_SCALAR;
+            candidate->instruction = ARM64_INST_FMUL_SCALAR;
             break;
         case 1:
-            decoded->instruction = ARM64_INST_FDIV_SCALAR;
+            candidate->instruction = ARM64_INST_FDIV_SCALAR;
             break;
         case 2:
-            decoded->instruction = ARM64_INST_FADD_SCALAR;
+            candidate->instruction = ARM64_INST_FADD_SCALAR;
             break;
         case 3:
-            decoded->instruction = ARM64_INST_FSUB_SCALAR;
+            candidate->instruction = ARM64_INST_FSUB_SCALAR;
             break;
         case 4:
-            decoded->instruction = ARM64_INST_FMAX_SCALAR;
+            candidate->instruction = ARM64_INST_FMAX_SCALAR;
             break;
         case 5:
-            decoded->instruction = ARM64_INST_FMIN_SCALAR;
+            candidate->instruction = ARM64_INST_FMIN_SCALAR;
             break;
         case 6:
-            decoded->instruction = ARM64_INST_FMAXNM_SCALAR;
+            candidate->instruction = ARM64_INST_FMAXNM_SCALAR;
             break;
         case 7:
-            decoded->instruction = ARM64_INST_FMINNM_SCALAR;
+            candidate->instruction = ARM64_INST_FMINNM_SCALAR;
             break;
         case 8:
-            decoded->instruction = ARM64_INST_FNMUL_SCALAR;
+            candidate->instruction = ARM64_INST_FNMUL_SCALAR;
             break;
         default:
             return ARM64_DECODE_UNSUPPORTED;
         }
-        decoded->operand_width = width;
-        decoded->element_width = width;
+        candidate->operand_width = width;
+        candidate->element_width = width;
+        *decoded = result;
         return ARM64_DECODE_OK;
     }
     default:
@@ -1484,18 +1568,23 @@ static enum arm64_decode_status arm64_decode_simd_scalar_fp_basic(uint32_t raw, 
     case 0x1E201000U:
         width = arm64_decode_simd_scalar_fp_width(type);
         if (!width) return ARM64_DECODE_UNALLOCATED;
-        decoded->instruction = ARM64_INST_FMOV_SCALAR_IMMEDIATE;
-        decoded->operand_width = width;
-        decoded->element_width = width;
-        decoded->immediate = ARM64_DECODE_FIELD(raw, 20, 13);
+        candidate->instruction = ARM64_INST_FMOV_SCALAR_IMMEDIATE;
+        candidate->operand_width = width;
+        candidate->element_width = width;
+        candidate->immediate = ARM64_DECODE_FIELD(raw, 20, 13);
+        *decoded = result;
         return ARM64_DECODE_OK;
     default:
-        return ARM64_DECODE_OK;
+        return ARM64_DECODE_UNSUPPORTED;
     }
 }
 
-static enum arm64_decode_status arm64_decode_simd_vector_permute(uint32_t raw, struct arm64_decoded_instruction *decoded)
+static inline enum arm64_decode_status arm64_decode_simd_vector_permute(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
+
+    if (!(ARM64_DECODE_MATCH(raw, 0xBF208C00U, 0x0E000800U))) return ARM64_DECODE_UNSUPPORTED;
     uint8_t opcode = ARM64_DECODE_FIELD(raw, 14, 12);
     uint8_t size = ARM64_DECODE_FIELD(raw, 23, 22);
     uint8_t q = ARM64_DECODE_BIT(raw, 30);
@@ -1503,35 +1592,39 @@ static enum arm64_decode_status arm64_decode_simd_vector_permute(uint32_t raw, s
     switch (opcode)
     {
     case 1:
-        decoded->instruction = ARM64_INST_UZP1_VECTOR;
+        candidate->instruction = ARM64_INST_UZP1_VECTOR;
         break;
     case 2:
-        decoded->instruction = ARM64_INST_TRN1_VECTOR;
+        candidate->instruction = ARM64_INST_TRN1_VECTOR;
         break;
     case 3:
-        decoded->instruction = ARM64_INST_ZIP1_VECTOR;
+        candidate->instruction = ARM64_INST_ZIP1_VECTOR;
         break;
     case 5:
-        decoded->instruction = ARM64_INST_UZP2_VECTOR;
+        candidate->instruction = ARM64_INST_UZP2_VECTOR;
         break;
     case 6:
-        decoded->instruction = ARM64_INST_TRN2_VECTOR;
+        candidate->instruction = ARM64_INST_TRN2_VECTOR;
         break;
     case 7:
-        decoded->instruction = ARM64_INST_ZIP2_VECTOR;
+        candidate->instruction = ARM64_INST_ZIP2_VECTOR;
         break;
     default:
         return ARM64_DECODE_UNALLOCATED;
     }
 
     if (!q && size == 3) return ARM64_DECODE_UNALLOCATED;
-    decoded->operand_width = q ? 128 : 64;
-    decoded->element_width = 8U << size;
+    candidate->operand_width = q ? 128 : 64;
+    candidate->element_width = 8U << size;
+    *decoded = result;
     return ARM64_DECODE_OK;
 }
 
-static enum arm64_decode_status arm64_decode_simd_vector_reduce(uint32_t raw, struct arm64_decoded_instruction *decoded)
+static inline enum arm64_decode_status arm64_decode_simd_vector_reduce(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
+
     uint8_t q = ARM64_DECODE_BIT(raw, 30);
     uint8_t size = ARM64_DECODE_FIELD(raw, 23, 22);
     uint8_t valid_sizes = 0;
@@ -1580,18 +1673,22 @@ static enum arm64_decode_status arm64_decode_simd_vector_reduce(uint32_t raw, st
         valid_sizes = q ? 0x7 : 0x3;
         break;
     default:
-        return ARM64_DECODE_OK;
+        return ARM64_DECODE_UNSUPPORTED;
     }
 
     if (!(valid_sizes & (1U << size))) return ARM64_DECODE_UNALLOCATED;
-    decoded->instruction = instruction;
-    decoded->operand_width = q ? 128 : 64;
-    decoded->element_width = 8U << size;
+    candidate->instruction = instruction;
+    candidate->operand_width = q ? 128 : 64;
+    candidate->element_width = 8U << size;
+    *decoded = result;
     return ARM64_DECODE_OK;
 }
 
-static enum arm64_decode_status arm64_decode_simd_vector_unary(uint32_t raw, struct arm64_decoded_instruction *decoded)
+static inline enum arm64_decode_status arm64_decode_simd_vector_unary(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
+
     uint32_t shape = raw & 0x00FE0000U;
     uint32_t signature = raw & 0xBF01FC00U;
     uint8_t q = ARM64_DECODE_BIT(raw, 30);
@@ -1620,42 +1717,46 @@ static enum arm64_decode_status arm64_decode_simd_vector_unary(uint32_t raw, str
     {
     case 0x0E019800U:
         if (element_width != 32 || q) return ARM64_DECODE_UNALLOCATED;
-        decoded->instruction = ARM64_INST_FRINTM_VECTOR;
+        candidate->instruction = ARM64_INST_FRINTM_VECTOR;
         break;
     case 0x0E00F800U:
-        decoded->instruction = ARM64_INST_FABS_VECTOR;
+        candidate->instruction = ARM64_INST_FABS_VECTOR;
         break;
     case 0x2E00F800U:
-        decoded->instruction = ARM64_INST_FNEG_VECTOR;
+        candidate->instruction = ARM64_INST_FNEG_VECTOR;
         break;
     case 0x2E01F800U:
-        decoded->instruction = ARM64_INST_FSQRT_VECTOR;
+        candidate->instruction = ARM64_INST_FSQRT_VECTOR;
         break;
     default:
         return ARM64_DECODE_UNALLOCATED;
     }
 
-    decoded->element_width = element_width;
-    decoded->operand_width = q ? 128 : 64;
+    candidate->element_width = element_width;
+    candidate->operand_width = q ? 128 : 64;
+    *decoded = result;
     return ARM64_DECODE_OK;
 }
 
-static enum arm64_decode_status arm64_decode_simd_vector_dot_family(uint32_t raw, struct arm64_decoded_instruction *decoded)
+static inline enum arm64_decode_status arm64_decode_simd_vector_dot_family(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
+
     switch (raw & 0x9F208400U)
     {
     case 0x0E008400U:
         switch (raw & 0xBF20E400U)
         {
         case 0x2E00C400U:
-            return ARM64_DECODE_OK;
+            return ARM64_DECODE_UNSUPPORTED;
         default:
             break;
         }
         switch (raw & 0xBF20EC00U)
         {
         case 0x2E00E400U:
-            return ARM64_DECODE_OK;
+            return ARM64_DECODE_UNSUPPORTED;
         default:
             break;
         }
@@ -1666,7 +1767,7 @@ static enum arm64_decode_status arm64_decode_simd_vector_dot_family(uint32_t raw
             uint8_t opcode = ARM64_DECODE_FIELD(raw, 15, 11);
             enum arm64_instruction instruction = ARM64_INST_UNKNOWN;
 
-            decoded->operand_width = q ? 128 : 64;
+            candidate->operand_width = q ? 128 : 64;
             switch (u)
             {
             case 0:
@@ -1691,21 +1792,21 @@ static enum arm64_decode_status arm64_decode_simd_vector_dot_family(uint32_t raw
                     {
                     case 2:
                         instruction = ARM64_INST_SDOT_VECTOR;
-                        decoded->element_width = 8;
+                        candidate->element_width = 8;
                         break;
                     case 3:
                         instruction = ARM64_INST_USDOT_VECTOR;
-                        decoded->element_width = 8;
+                        candidate->element_width = 8;
                         break;
                     case 4:
                         if (!q) return ARM64_DECODE_UNALLOCATED;
                         instruction = ARM64_INST_SMMLA_VECTOR;
-                        decoded->element_width = 8;
+                        candidate->element_width = 8;
                         break;
                     case 5:
                         if (!q) return ARM64_DECODE_UNALLOCATED;
                         instruction = ARM64_INST_USMMLA_VECTOR;
-                        decoded->element_width = 8;
+                        candidate->element_width = 8;
                         break;
                     default:
                         break;
@@ -1715,7 +1816,7 @@ static enum arm64_decode_status arm64_decode_simd_vector_dot_family(uint32_t raw
                     break;
                 }
                 break;
-            default:
+            case 1:
                 switch (size)
                 {
                 case 0:
@@ -1737,11 +1838,11 @@ static enum arm64_decode_status arm64_decode_simd_vector_dot_family(uint32_t raw
                     {
                     case 0:
                         instruction = ARM64_INST_SQRDMLAH_VECTOR;
-                        decoded->element_width = 8U << size;
+                        candidate->element_width = 8U << size;
                         break;
                     case 1:
                         instruction = ARM64_INST_SQRDMLSH_VECTOR;
-                        decoded->element_width = 8U << size;
+                        candidate->element_width = 8U << size;
                         break;
                     case 2:
                     case 4:
@@ -1749,11 +1850,11 @@ static enum arm64_decode_status arm64_decode_simd_vector_dot_family(uint32_t raw
                     case 13:
                         if (!q) return ARM64_DECODE_UNALLOCATED;
                         instruction = ARM64_INST_BFMMLA_VECTOR;
-                        decoded->element_width = 16;
+                        candidate->element_width = 16;
                         break;
                     case 15:
                         instruction = ARM64_INST_BFDOT_VECTOR;
-                        decoded->element_width = 16;
+                        candidate->element_width = 16;
                         break;
                     default:
                         break;
@@ -1764,20 +1865,20 @@ static enum arm64_decode_status arm64_decode_simd_vector_dot_family(uint32_t raw
                     {
                     case 0:
                         instruction = ARM64_INST_SQRDMLAH_VECTOR;
-                        decoded->element_width = 8U << size;
+                        candidate->element_width = 8U << size;
                         break;
                     case 1:
                         instruction = ARM64_INST_SQRDMLSH_VECTOR;
-                        decoded->element_width = 8U << size;
+                        candidate->element_width = 8U << size;
                         break;
                     case 2:
                         instruction = ARM64_INST_UDOT_VECTOR;
-                        decoded->element_width = 8;
+                        candidate->element_width = 8;
                         break;
                     case 4:
                         if (!q) return ARM64_DECODE_UNALLOCATED;
                         instruction = ARM64_INST_UMMLA_VECTOR;
-                        decoded->element_width = 8;
+                        candidate->element_width = 8;
                         break;
                     case 13:
                     case 15:
@@ -1801,12 +1902,15 @@ static enum arm64_decode_status arm64_decode_simd_vector_dot_family(uint32_t raw
                         case 0:
                             instruction = ARM64_INST_BFMLALB_VECTOR;
                             break;
-                        default:
+                        case 1:
                             instruction = ARM64_INST_BFMLALT_VECTOR;
                             break;
+
+                        default:
+                            return ARM64_DECODE_UNSUPPORTED;
                         }
-                        decoded->operand_width = 128;
-                        decoded->element_width = 16;
+                        candidate->operand_width = 128;
+                        candidate->element_width = 16;
                         break;
                     default:
                         break;
@@ -1816,11 +1920,15 @@ static enum arm64_decode_status arm64_decode_simd_vector_dot_family(uint32_t raw
                     break;
                 }
                 break;
+
+            default:
+                return ARM64_DECODE_UNSUPPORTED;
             }
 
             if (instruction != ARM64_INST_UNKNOWN)
             {
-                decoded->instruction = instruction;
+                candidate->instruction = instruction;
+                *decoded = result;
                 return ARM64_DECODE_OK;
             }
             break;
@@ -1828,69 +1936,73 @@ static enum arm64_decode_status arm64_decode_simd_vector_dot_family(uint32_t raw
     default:
         break;
     }
-    return ARM64_DECODE_OK;
+    return ARM64_DECODE_UNSUPPORTED;
 }
 
-static enum arm64_decode_status arm64_decode_simd_conversion(uint32_t raw, struct arm64_decoded_instruction *decoded)
+static inline enum arm64_decode_status arm64_decode_simd_conversion(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
+
     switch (raw & 0xFFFFFC00U)
     {
     case 0x1E220000U:
-        decoded->instruction = ARM64_INST_SCVTF_S_W;
-        decoded->operand_width = 32;
-        decoded->element_width = 32;
+        candidate->instruction = ARM64_INST_SCVTF_S_W;
+        candidate->operand_width = 32;
+        candidate->element_width = 32;
         break;
     case 0x1E22C000U:
-        decoded->instruction = ARM64_INST_FCVT_D_S;
-        decoded->operand_width = 64;
-        decoded->element_width = 32;
+        candidate->instruction = ARM64_INST_FCVT_D_S;
+        candidate->operand_width = 64;
+        candidate->element_width = 32;
         break;
     case 0x1E230000U:
-        decoded->instruction = ARM64_INST_UCVTF_S_W;
-        decoded->operand_width = 32;
-        decoded->element_width = 32;
+        candidate->instruction = ARM64_INST_UCVTF_S_W;
+        candidate->operand_width = 32;
+        candidate->element_width = 32;
         break;
     case 0x1E620000U:
-        decoded->instruction = ARM64_INST_SCVTF_D_W;
-        decoded->operand_width = 64;
-        decoded->element_width = 32;
+        candidate->instruction = ARM64_INST_SCVTF_D_W;
+        candidate->operand_width = 64;
+        candidate->element_width = 32;
         break;
     case 0x1E624000U:
-        decoded->instruction = ARM64_INST_FCVT_S_D;
-        decoded->operand_width = 32;
-        decoded->element_width = 64;
+        candidate->instruction = ARM64_INST_FCVT_S_D;
+        candidate->operand_width = 32;
+        candidate->element_width = 64;
         break;
     case 0x1E630000U:
-        decoded->instruction = ARM64_INST_UCVTF_D_W;
-        decoded->operand_width = 64;
-        decoded->element_width = 32;
+        candidate->instruction = ARM64_INST_UCVTF_D_W;
+        candidate->operand_width = 64;
+        candidate->element_width = 32;
         break;
     case 0x9E220000U:
-        decoded->instruction = ARM64_INST_SCVTF_S_X;
-        decoded->operand_width = 32;
-        decoded->element_width = 64;
+        candidate->instruction = ARM64_INST_SCVTF_S_X;
+        candidate->operand_width = 32;
+        candidate->element_width = 64;
         break;
     case 0x9E230000U:
-        decoded->instruction = ARM64_INST_UCVTF_S_X;
-        decoded->operand_width = 32;
-        decoded->element_width = 64;
+        candidate->instruction = ARM64_INST_UCVTF_S_X;
+        candidate->operand_width = 32;
+        candidate->element_width = 64;
         break;
     case 0x9E620000U:
-        decoded->instruction = ARM64_INST_SCVTF_D_X;
-        decoded->operand_width = 64;
-        decoded->element_width = 64;
+        candidate->instruction = ARM64_INST_SCVTF_D_X;
+        candidate->operand_width = 64;
+        candidate->element_width = 64;
         break;
     case 0x9E630000U:
-        decoded->instruction = ARM64_INST_UCVTF_D_X;
-        decoded->operand_width = 64;
-        decoded->element_width = 64;
+        candidate->instruction = ARM64_INST_UCVTF_D_X;
+        candidate->operand_width = 64;
+        candidate->element_width = 64;
         break;
     default:
         break;
     }
 
-    if (decoded->instruction != ARM64_INST_UNKNOWN)
+    if (candidate->instruction != ARM64_INST_UNKNOWN)
     {
+        *decoded = result;
         return ARM64_DECODE_OK;
     }
 
@@ -1903,24 +2015,33 @@ static enum arm64_decode_status arm64_decode_simd_conversion(uint32_t raw, struc
             switch (ARM64_DECODE_BIT(raw, 28))
             {
             case 0:
-                decoded->instruction = ARM64_INST_FCVTNS_SIMD_VECTOR;
+                candidate->instruction = ARM64_INST_FCVTNS_SIMD_VECTOR;
                 break;
+            case 1:
+                candidate->instruction = ARM64_INST_FCVTNS_SIMD_SCALAR;
+                break;
+
             default:
-                decoded->instruction = ARM64_INST_FCVTNS_SIMD_SCALAR;
-                break;
+                return ARM64_DECODE_UNSUPPORTED;
             }
             break;
-        default:
+        case 1:
             switch (ARM64_DECODE_BIT(raw, 28))
             {
             case 0:
-                decoded->instruction = ARM64_INST_FCVTNU_SIMD_VECTOR;
+                candidate->instruction = ARM64_INST_FCVTNU_SIMD_VECTOR;
                 break;
+            case 1:
+                candidate->instruction = ARM64_INST_FCVTNU_SIMD_SCALAR;
+                break;
+
             default:
-                decoded->instruction = ARM64_INST_FCVTNU_SIMD_SCALAR;
-                break;
+                return ARM64_DECODE_UNSUPPORTED;
             }
             break;
+
+        default:
+            return ARM64_DECODE_UNSUPPORTED;
         }
         break;
     case 0x0E21B800U:
@@ -1930,24 +2051,33 @@ static enum arm64_decode_status arm64_decode_simd_conversion(uint32_t raw, struc
             switch (ARM64_DECODE_BIT(raw, 28))
             {
             case 0:
-                decoded->instruction = ARM64_INST_FCVTMS_SIMD_VECTOR;
+                candidate->instruction = ARM64_INST_FCVTMS_SIMD_VECTOR;
                 break;
+            case 1:
+                candidate->instruction = ARM64_INST_FCVTMS_SIMD_SCALAR;
+                break;
+
             default:
-                decoded->instruction = ARM64_INST_FCVTMS_SIMD_SCALAR;
-                break;
+                return ARM64_DECODE_UNSUPPORTED;
             }
             break;
-        default:
+        case 1:
             switch (ARM64_DECODE_BIT(raw, 28))
             {
             case 0:
-                decoded->instruction = ARM64_INST_FCVTMU_SIMD_VECTOR;
+                candidate->instruction = ARM64_INST_FCVTMU_SIMD_VECTOR;
                 break;
+            case 1:
+                candidate->instruction = ARM64_INST_FCVTMU_SIMD_SCALAR;
+                break;
+
             default:
-                decoded->instruction = ARM64_INST_FCVTMU_SIMD_SCALAR;
-                break;
+                return ARM64_DECODE_UNSUPPORTED;
             }
             break;
+
+        default:
+            return ARM64_DECODE_UNSUPPORTED;
         }
         break;
     case 0x0E21C800U:
@@ -1957,24 +2087,33 @@ static enum arm64_decode_status arm64_decode_simd_conversion(uint32_t raw, struc
             switch (ARM64_DECODE_BIT(raw, 28))
             {
             case 0:
-                decoded->instruction = ARM64_INST_FCVTAS_SIMD_VECTOR;
+                candidate->instruction = ARM64_INST_FCVTAS_SIMD_VECTOR;
                 break;
+            case 1:
+                candidate->instruction = ARM64_INST_FCVTAS_SIMD_SCALAR;
+                break;
+
             default:
-                decoded->instruction = ARM64_INST_FCVTAS_SIMD_SCALAR;
-                break;
+                return ARM64_DECODE_UNSUPPORTED;
             }
             break;
-        default:
+        case 1:
             switch (ARM64_DECODE_BIT(raw, 28))
             {
             case 0:
-                decoded->instruction = ARM64_INST_FCVTAU_SIMD_VECTOR;
+                candidate->instruction = ARM64_INST_FCVTAU_SIMD_VECTOR;
                 break;
+            case 1:
+                candidate->instruction = ARM64_INST_FCVTAU_SIMD_SCALAR;
+                break;
+
             default:
-                decoded->instruction = ARM64_INST_FCVTAU_SIMD_SCALAR;
-                break;
+                return ARM64_DECODE_UNSUPPORTED;
             }
             break;
+
+        default:
+            return ARM64_DECODE_UNSUPPORTED;
         }
         break;
     case 0x0E21D800U:
@@ -1984,24 +2123,33 @@ static enum arm64_decode_status arm64_decode_simd_conversion(uint32_t raw, struc
             switch (ARM64_DECODE_BIT(raw, 28))
             {
             case 0:
-                decoded->instruction = ARM64_INST_SCVTF_SIMD_VECTOR;
+                candidate->instruction = ARM64_INST_SCVTF_SIMD_VECTOR;
                 break;
+            case 1:
+                candidate->instruction = ARM64_INST_SCVTF_SIMD_SCALAR;
+                break;
+
             default:
-                decoded->instruction = ARM64_INST_SCVTF_SIMD_SCALAR;
-                break;
+                return ARM64_DECODE_UNSUPPORTED;
             }
             break;
-        default:
+        case 1:
             switch (ARM64_DECODE_BIT(raw, 28))
             {
             case 0:
-                decoded->instruction = ARM64_INST_UCVTF_SIMD_VECTOR;
+                candidate->instruction = ARM64_INST_UCVTF_SIMD_VECTOR;
                 break;
+            case 1:
+                candidate->instruction = ARM64_INST_UCVTF_SIMD_SCALAR;
+                break;
+
             default:
-                decoded->instruction = ARM64_INST_UCVTF_SIMD_SCALAR;
-                break;
+                return ARM64_DECODE_UNSUPPORTED;
             }
             break;
+
+        default:
+            return ARM64_DECODE_UNSUPPORTED;
         }
         break;
     case 0x0EA1A800U:
@@ -2011,24 +2159,33 @@ static enum arm64_decode_status arm64_decode_simd_conversion(uint32_t raw, struc
             switch (ARM64_DECODE_BIT(raw, 28))
             {
             case 0:
-                decoded->instruction = ARM64_INST_FCVTPS_SIMD_VECTOR;
+                candidate->instruction = ARM64_INST_FCVTPS_SIMD_VECTOR;
                 break;
+            case 1:
+                candidate->instruction = ARM64_INST_FCVTPS_SIMD_SCALAR;
+                break;
+
             default:
-                decoded->instruction = ARM64_INST_FCVTPS_SIMD_SCALAR;
-                break;
+                return ARM64_DECODE_UNSUPPORTED;
             }
             break;
-        default:
+        case 1:
             switch (ARM64_DECODE_BIT(raw, 28))
             {
             case 0:
-                decoded->instruction = ARM64_INST_FCVTPU_SIMD_VECTOR;
+                candidate->instruction = ARM64_INST_FCVTPU_SIMD_VECTOR;
                 break;
+            case 1:
+                candidate->instruction = ARM64_INST_FCVTPU_SIMD_SCALAR;
+                break;
+
             default:
-                decoded->instruction = ARM64_INST_FCVTPU_SIMD_SCALAR;
-                break;
+                return ARM64_DECODE_UNSUPPORTED;
             }
             break;
+
+        default:
+            return ARM64_DECODE_UNSUPPORTED;
         }
         break;
     case 0x0EA1B800U:
@@ -2038,95 +2195,106 @@ static enum arm64_decode_status arm64_decode_simd_conversion(uint32_t raw, struc
             switch (ARM64_DECODE_BIT(raw, 28))
             {
             case 0:
-                decoded->instruction = ARM64_INST_FCVTZS_SIMD_VECTOR;
+                candidate->instruction = ARM64_INST_FCVTZS_SIMD_VECTOR;
                 break;
+            case 1:
+                candidate->instruction = ARM64_INST_FCVTZS_SIMD_SCALAR;
+                break;
+
             default:
-                decoded->instruction = ARM64_INST_FCVTZS_SIMD_SCALAR;
-                break;
+                return ARM64_DECODE_UNSUPPORTED;
             }
             break;
-        default:
+        case 1:
             switch (ARM64_DECODE_BIT(raw, 28))
             {
             case 0:
-                decoded->instruction = ARM64_INST_FCVTZU_SIMD_VECTOR;
+                candidate->instruction = ARM64_INST_FCVTZU_SIMD_VECTOR;
                 break;
+            case 1:
+                candidate->instruction = ARM64_INST_FCVTZU_SIMD_SCALAR;
+                break;
+
             default:
-                decoded->instruction = ARM64_INST_FCVTZU_SIMD_SCALAR;
-                break;
+                return ARM64_DECODE_UNSUPPORTED;
             }
             break;
+
+        default:
+            return ARM64_DECODE_UNSUPPORTED;
         }
         break;
     default:
         break;
     }
 
-    if (decoded->instruction != ARM64_INST_UNKNOWN)
+    if (candidate->instruction != ARM64_INST_UNKNOWN)
     {
-        decoded->element_width = ARM64_DECODE_BIT(raw, 22) ? 64 : 32;
+        candidate->element_width = ARM64_DECODE_BIT(raw, 22) ? 64 : 32;
         if (ARM64_DECODE_BIT(raw, 28))
         {
             if (!ARM64_DECODE_BIT(raw, 30)) return ARM64_DECODE_UNALLOCATED;
-            decoded->operand_width = decoded->element_width;
+            candidate->operand_width = candidate->element_width;
         }
         else
         {
-            decoded->operand_width = ARM64_DECODE_BIT(raw, 30) ? 128 : 64;
-            if (decoded->operand_width == 64 && decoded->element_width == 64) return ARM64_DECODE_UNALLOCATED;
+            candidate->operand_width = ARM64_DECODE_BIT(raw, 30) ? 128 : 64;
+            if (candidate->operand_width == 64 && candidate->element_width == 64) return ARM64_DECODE_UNALLOCATED;
         }
+        *decoded = result;
         return ARM64_DECODE_OK;
     }
 
     switch (raw & 0x7F20FC00U)
     {
     case 0x1E200000U:
-        if (ARM64_DECODE_FIELD(raw, 23, 22) > 1) return ARM64_DECODE_OK;
+        if (ARM64_DECODE_FIELD(raw, 23, 22) > 1) return ARM64_DECODE_UNSUPPORTED;
         {
-            uint32_t selector = (ARM64_DECODE_FIELD(raw, 20, 19) << 3) | ARM64_DECODE_FIELD(raw, 18, 16);
+            uint32_t selector = ARM64_DECODE_FIELD(raw, 20, 16);
 
             switch (selector)
             {
             case 0x00:
-                decoded->instruction = ARM64_INST_FCVTNS_GPR;
+                candidate->instruction = ARM64_INST_FCVTNS_GPR;
                 break;
             case 0x01:
-                decoded->instruction = ARM64_INST_FCVTNU_GPR;
+                candidate->instruction = ARM64_INST_FCVTNU_GPR;
                 break;
             case 0x04:
-                decoded->instruction = ARM64_INST_FCVTAS_GPR;
+                candidate->instruction = ARM64_INST_FCVTAS_GPR;
                 break;
             case 0x05:
-                decoded->instruction = ARM64_INST_FCVTAU_GPR;
+                candidate->instruction = ARM64_INST_FCVTAU_GPR;
                 break;
             case 0x08:
-                decoded->instruction = ARM64_INST_FCVTPS_GPR;
+                candidate->instruction = ARM64_INST_FCVTPS_GPR;
                 break;
             case 0x09:
-                decoded->instruction = ARM64_INST_FCVTPU_GPR;
+                candidate->instruction = ARM64_INST_FCVTPU_GPR;
                 break;
             case 0x10:
-                decoded->instruction = ARM64_INST_FCVTMS_GPR;
+                candidate->instruction = ARM64_INST_FCVTMS_GPR;
                 break;
             case 0x11:
-                decoded->instruction = ARM64_INST_FCVTMU_GPR;
+                candidate->instruction = ARM64_INST_FCVTMU_GPR;
                 break;
             case 0x18:
-                decoded->instruction = ARM64_INST_FCVTZS_GPR;
+                candidate->instruction = ARM64_INST_FCVTZS_GPR;
                 break;
             case 0x19:
-                decoded->instruction = ARM64_INST_FCVTZU_GPR;
+                candidate->instruction = ARM64_INST_FCVTZU_GPR;
                 break;
             default:
-                return ARM64_DECODE_OK;
+                return ARM64_DECODE_UNSUPPORTED;
             }
 
-            decoded->operand_width = ARM64_DECODE_BIT(raw, 31) ? 64 : 32;
-            decoded->element_width = ARM64_DECODE_BIT(raw, 22) ? 64 : 32;
+            candidate->operand_width = ARM64_DECODE_GPR_WIDTH(raw);
+            candidate->element_width = ARM64_DECODE_BIT(raw, 22) ? 64 : 32;
+            *decoded = result;
             return ARM64_DECODE_OK;
         }
     default:
-        return ARM64_DECODE_OK;
+        return ARM64_DECODE_UNSUPPORTED;
     }
 }
 
@@ -2134,36 +2302,10 @@ static enum arm64_decode_status arm64_decode_simd_conversion(uint32_t raw, struc
 所有 FP/AdvSIMD 编码签名只在本文件内匹配；成功分支直接选择具体 instruction，
 随后填写该 instruction 对应的真实操作数。
 */
-static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, struct arm64_decoded_instruction *decoded)
+static inline enum arm64_decode_status arm64_decode_simd_copy_vector(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
-    decoded->instruction_class = ARM64_INSTRUCTION_CLASS_DATA_PROCESSING_SIMD_FP;
-    decoded->instruction = ARM64_INST_UNKNOWN;
-    decoded->rd = ARM64_DECODE_FIELD(raw, 4, 0);
-    decoded->rn = ARM64_DECODE_FIELD(raw, 9, 5);
-    decoded->ra = ARM64_DECODE_FIELD(raw, 14, 10);
-    decoded->rm = ARM64_DECODE_FIELD(raw, 20, 16);
-
-    switch (raw & 0x9FF80C00U)
-    {
-    case 0x0F000400U:
-        return arm64_decode_simd_modified_imm(raw, decoded);
-    default:
-        break;
-    }
-
-    {
-        enum arm64_decode_status status = arm64_decode_simd_scalar_fp_basic(raw, decoded);
-
-        if (status != ARM64_DECODE_OK || decoded->instruction != ARM64_INST_UNKNOWN) return status;
-    }
-
-    switch (raw & 0xBF208C00U)
-    {
-    case 0x0E000800U:
-        return arm64_decode_simd_vector_permute(raw, decoded);
-    default:
-        break;
-    }
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
 
     switch (raw & 0x9FE08400U)
     {
@@ -2177,68 +2319,62 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
         uint8_t size = (uint8_t)__builtin_ctz(imm5);
         if (size > 3) return ARM64_DECODE_UNALLOCATED;
 
-        decoded->element_width = 8U << size;
-        if (!q && decoded->element_width == 64) return ARM64_DECODE_UNALLOCATED;
-        decoded->lane_index = imm5 >> (size + 1);
+        candidate->element_width = 8U << size;
+        if (!q && candidate->element_width == 64) return ARM64_DECODE_UNALLOCATED;
+        candidate->lane_index = imm5 >> (size + 1);
 
         if (ARM64_DECODE_BIT(raw, 29))
         {
             if (!q) return ARM64_DECODE_UNALLOCATED;
-            decoded->instruction = ARM64_INST_INS_ELEMENT_VECTOR;
-            decoded->immediate = imm4 >> size;
-            decoded->operand_width = 128;
+            candidate->instruction = ARM64_INST_INS_ELEMENT_VECTOR;
+            candidate->immediate = imm4 >> size;
+            candidate->operand_width = 128;
+            *decoded = result;
             return ARM64_DECODE_OK;
         }
 
         switch (imm4)
         {
         case 0:
-            decoded->instruction = ARM64_INST_DUP_ELEMENT_VECTOR;
-            decoded->operand_width = q ? 128 : 64;
+            candidate->instruction = ARM64_INST_DUP_ELEMENT_VECTOR;
+            candidate->operand_width = q ? 128 : 64;
             break;
         case 1:
-            decoded->instruction = ARM64_INST_DUP_GENERAL_VECTOR;
-            decoded->operand_width = q ? 128 : 64;
+            candidate->instruction = ARM64_INST_DUP_GENERAL_VECTOR;
+            candidate->operand_width = q ? 128 : 64;
             break;
         case 3:
             if (!q) return ARM64_DECODE_UNALLOCATED;
-            decoded->instruction = ARM64_INST_INS_GPR_VECTOR;
-            decoded->operand_width = 128;
+            candidate->instruction = ARM64_INST_INS_GPR_VECTOR;
+            candidate->operand_width = 128;
             break;
         case 5:
-            if ((!q && decoded->element_width > 16) || (q && decoded->element_width > 32)) return ARM64_DECODE_UNALLOCATED;
-            decoded->instruction = ARM64_INST_SMOV_VECTOR_TO_GPR;
-            decoded->operand_width = q ? 64 : 32;
+            if ((!q && candidate->element_width > 16) || (q && candidate->element_width > 32)) return ARM64_DECODE_UNALLOCATED;
+            candidate->instruction = ARM64_INST_SMOV_VECTOR_TO_GPR;
+            candidate->operand_width = q ? 64 : 32;
             break;
         case 7:
-            if ((!q && decoded->element_width > 32) || (q && decoded->element_width != 64)) return ARM64_DECODE_UNALLOCATED;
-            decoded->instruction = ARM64_INST_UMOV_VECTOR_TO_GPR;
-            decoded->operand_width = q ? 64 : 32;
+            if ((!q && candidate->element_width > 32) || (q && candidate->element_width != 64)) return ARM64_DECODE_UNALLOCATED;
+            candidate->instruction = ARM64_INST_UMOV_VECTOR_TO_GPR;
+            candidate->operand_width = q ? 64 : 32;
             break;
         default:
             return ARM64_DECODE_UNALLOCATED;
         }
 
+        *decoded = result;
         return ARM64_DECODE_OK;
     }
     default:
         break;
     }
+    return ARM64_DECODE_UNSUPPORTED;
+}
 
-    switch (raw & 0x9F200400U)
-    {
-    case 0x0E200400U:
-        switch (raw & 0x9F60C400U)
-        {
-        case 0x0E400400U:
-            break;
-        default:
-            return arm64_decode_simd_vector_3same(raw, decoded);
-        }
-        break;
-    default:
-        break;
-    }
+static inline enum arm64_decode_status arm64_decode_simd_compare_zero(uint32_t raw, struct arm64_decoded_instruction *decoded)
+{
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
 
     switch (raw & 0x8F000C00U)
     {
@@ -2274,9 +2410,12 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
             case 0:
                 instruction = ARM64_INST_FCMGT_ZERO_VECTOR;
                 break;
-            default:
+            case 1:
                 instruction = ARM64_INST_FCMGT_ZERO_SCALAR;
                 break;
+
+            default:
+                return ARM64_DECODE_UNSUPPORTED;
             }
             break;
         case 0x0000D000U:
@@ -2285,9 +2424,12 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
             case 0:
                 instruction = ARM64_INST_FCMEQ_ZERO_VECTOR;
                 break;
-            default:
+            case 1:
                 instruction = ARM64_INST_FCMEQ_ZERO_SCALAR;
                 break;
+
+            default:
+                return ARM64_DECODE_UNSUPPORTED;
             }
             break;
         case 0x0000E000U:
@@ -2296,9 +2438,12 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
             case 0:
                 instruction = ARM64_INST_FCMLT_ZERO_VECTOR;
                 break;
-            default:
+            case 1:
                 instruction = ARM64_INST_FCMLT_ZERO_SCALAR;
                 break;
+
+            default:
+                return ARM64_DECODE_UNSUPPORTED;
             }
             break;
         case 0x2000C000U:
@@ -2307,9 +2452,12 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
             case 0:
                 instruction = ARM64_INST_FCMGE_ZERO_VECTOR;
                 break;
-            default:
+            case 1:
                 instruction = ARM64_INST_FCMGE_ZERO_SCALAR;
                 break;
+
+            default:
+                return ARM64_DECODE_UNSUPPORTED;
             }
             break;
         case 0x2000D000U:
@@ -2318,9 +2466,12 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
             case 0:
                 instruction = ARM64_INST_FCMLE_ZERO_VECTOR;
                 break;
-            default:
+            case 1:
                 instruction = ARM64_INST_FCMLE_ZERO_SCALAR;
                 break;
+
+            default:
+                return ARM64_DECODE_UNSUPPORTED;
             }
             break;
         default:
@@ -2331,16 +2482,17 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
         {
             if (scalar)
             {
-                decoded->operand_width = element_width;
+                candidate->operand_width = element_width;
             }
             else
             {
                 if (!q && element_width == 64) return ARM64_DECODE_UNALLOCATED;
-                decoded->operand_width = q ? 128 : 64;
+                candidate->operand_width = q ? 128 : 64;
             }
 
-            decoded->instruction = instruction;
-            decoded->element_width = element_width;
+            candidate->instruction = instruction;
+            candidate->element_width = element_width;
+            *decoded = result;
             return ARM64_DECODE_OK;
         }
         break;
@@ -2348,155 +2500,127 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
     default:
         break;
     }
+    return ARM64_DECODE_UNSUPPORTED;
+}
 
+static inline enum arm64_decode_status arm64_decode_simd_narrow(uint32_t raw, struct arm64_decoded_instruction *decoded)
+{
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
+
+    uint32_t size = ARM64_DECODE_FIELD(raw, 23, 22);
+
+    switch (raw & 0xFF3FFC00U)
     {
-        enum arm64_decode_status status = arm64_decode_simd_vector_reduce(raw, decoded);
-
-        if (status != ARM64_DECODE_OK || decoded->instruction != ARM64_INST_UNKNOWN) return status;
-    }
-
-    {
-        enum arm64_decode_status status = arm64_decode_simd_conversion(raw, decoded);
-
-        if (status != ARM64_DECODE_OK || decoded->instruction != ARM64_INST_UNKNOWN) return status;
-    }
-
-    {
-        uint32_t size = ARM64_DECODE_FIELD(raw, 23, 22);
-
-        switch (raw & 0xFF3FFC00U)
-        {
-        case 0x0E212800U:
-            decoded->instruction = ARM64_INST_XTN_VECTOR;
-            decoded->operand_width = ARM64_DECODE_BIT(raw, 30) ? 128 : 64;
-            break;
-        case 0x0E214800U:
-            decoded->instruction = ARM64_INST_SQXTN_VECTOR;
-            decoded->operand_width = ARM64_DECODE_BIT(raw, 30) ? 128 : 64;
-            break;
-        case 0x2E212800U:
-            decoded->instruction = ARM64_INST_SQXTUN_VECTOR;
-            decoded->operand_width = ARM64_DECODE_BIT(raw, 30) ? 128 : 64;
-            break;
-        case 0x2E214800U:
-            decoded->instruction = ARM64_INST_UQXTN_VECTOR;
-            decoded->operand_width = ARM64_DECODE_BIT(raw, 30) ? 128 : 64;
-            break;
-        case 0x4E212800U:
-            decoded->instruction = ARM64_INST_XTN2_VECTOR;
-            decoded->operand_width = 128;
-            break;
-        case 0x4E214800U:
-            decoded->instruction = ARM64_INST_SQXTN2_VECTOR;
-            decoded->operand_width = 128;
-            break;
-        case 0x5E212800U:
-            return ARM64_DECODE_UNALLOCATED;
-        case 0x5E214800U:
-            decoded->instruction = ARM64_INST_SQXTN_SCALAR;
-            decoded->operand_width = 8U << size;
-            break;
-        case 0x6E212800U:
-            decoded->instruction = ARM64_INST_SQXTUN2_VECTOR;
-            decoded->operand_width = 128;
-            break;
-        case 0x6E214800U:
-            decoded->instruction = ARM64_INST_UQXTN2_VECTOR;
-            decoded->operand_width = 128;
-            break;
-        case 0x7E212800U:
-            decoded->instruction = ARM64_INST_SQXTUN_SCALAR;
-            decoded->operand_width = 8U << size;
-            break;
-        case 0x7E214800U:
-            decoded->instruction = ARM64_INST_UQXTN_SCALAR;
-            decoded->operand_width = 8U << size;
-            break;
-        default:
-            break;
-        }
-
-        if (decoded->instruction != ARM64_INST_UNKNOWN)
-        {
-            if (size == 3) return ARM64_DECODE_UNALLOCATED;
-            decoded->element_width = 16U << size;
-            return ARM64_DECODE_OK;
-        }
-    }
-
-    {
-        enum arm64_instruction instruction = ARM64_INST_UNKNOWN;
-
-        switch (raw & 0x9FFFFC00U)
-        {
-        case 0x0E30C800U:
-            instruction = ARM64_INST_FMAXNMV_SCALAR_REDUCE;
-            break;
-        case 0x0E30F800U:
-            instruction = ARM64_INST_FMAXV_SCALAR_REDUCE;
-            break;
-        case 0x0EB0C800U:
-            instruction = ARM64_INST_FMINNMV_SCALAR_REDUCE;
-            break;
-        case 0x0EB0F800U:
-            instruction = ARM64_INST_FMINV_SCALAR_REDUCE;
-            break;
-        default:
-            break;
-        }
-
-        if (instruction != ARM64_INST_UNKNOWN)
-        {
-            if (ARM64_DECODE_BIT(raw, 29))
-            {
-                if (!ARM64_DECODE_BIT(raw, 30)) return ARM64_DECODE_UNALLOCATED;
-                decoded->element_width = 32;
-                decoded->operand_width = 128;
-            }
-            else
-            {
-                decoded->element_width = 16;
-                decoded->operand_width = ARM64_DECODE_BIT(raw, 30) ? 128 : 64;
-            }
-            decoded->instruction = instruction;
-            return ARM64_DECODE_OK;
-        }
-    }
-
-    switch (raw & 0x9F60C400U)
-    {
-    case 0x0E400400U:
-        return arm64_decode_simd_vector_fp16_3reg(raw, decoded);
-    default:
+    case 0x0E212800U:
+        candidate->instruction = ARM64_INST_XTN_VECTOR;
+        candidate->operand_width = ARM64_DECODE_BIT(raw, 30) ? 128 : 64;
         break;
-    }
-
-    {
-        enum arm64_decode_status status = arm64_decode_simd_vector_dot_family(raw, decoded);
-
-        if (status != ARM64_DECODE_OK || decoded->instruction != ARM64_INST_UNKNOWN) return status;
-    }
-
-    switch (raw & 0x00FE0000U)
-    {
-    case 0x00200000U:
-    case 0x00F80000U:
-    case 0x00A00000U:
-    case 0x00E00000U:
-        switch (raw & 0xBF01FC00U)
-        {
-        case 0x0E019800U:
-        case 0x0E00F800U:
-        case 0x2E00F800U:
-        case 0x2E01F800U:
-            return arm64_decode_simd_vector_unary(raw, decoded);
-        default:
-            break;
-        }
+    case 0x0E214800U:
+        candidate->instruction = ARM64_INST_SQXTN_VECTOR;
+        candidate->operand_width = ARM64_DECODE_BIT(raw, 30) ? 128 : 64;
+        break;
+    case 0x2E212800U:
+        candidate->instruction = ARM64_INST_SQXTUN_VECTOR;
+        candidate->operand_width = ARM64_DECODE_BIT(raw, 30) ? 128 : 64;
+        break;
+    case 0x2E214800U:
+        candidate->instruction = ARM64_INST_UQXTN_VECTOR;
+        candidate->operand_width = ARM64_DECODE_BIT(raw, 30) ? 128 : 64;
+        break;
+    case 0x4E212800U:
+        candidate->instruction = ARM64_INST_XTN2_VECTOR;
+        candidate->operand_width = 128;
+        break;
+    case 0x4E214800U:
+        candidate->instruction = ARM64_INST_SQXTN2_VECTOR;
+        candidate->operand_width = 128;
+        break;
+    case 0x5E212800U:
+        return ARM64_DECODE_UNALLOCATED;
+    case 0x5E214800U:
+        candidate->instruction = ARM64_INST_SQXTN_SCALAR;
+        candidate->operand_width = 8U << size;
+        break;
+    case 0x6E212800U:
+        candidate->instruction = ARM64_INST_SQXTUN2_VECTOR;
+        candidate->operand_width = 128;
+        break;
+    case 0x6E214800U:
+        candidate->instruction = ARM64_INST_UQXTN2_VECTOR;
+        candidate->operand_width = 128;
+        break;
+    case 0x7E212800U:
+        candidate->instruction = ARM64_INST_SQXTUN_SCALAR;
+        candidate->operand_width = 8U << size;
+        break;
+    case 0x7E214800U:
+        candidate->instruction = ARM64_INST_UQXTN_SCALAR;
+        candidate->operand_width = 8U << size;
         break;
     default:
         break;
     }
+
+    if (candidate->instruction != ARM64_INST_UNKNOWN)
+    {
+        if (size == 3) return ARM64_DECODE_UNALLOCATED;
+        candidate->element_width = 16U << size;
+        *decoded = result;
+        return ARM64_DECODE_OK;
+    }
+    return ARM64_DECODE_UNSUPPORTED;
+}
+
+static inline enum arm64_decode_status arm64_decode_simd_fp_reduce(uint32_t raw, struct arm64_decoded_instruction *decoded)
+{
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
+
+    enum arm64_instruction instruction = ARM64_INST_UNKNOWN;
+
+    switch (raw & 0x9FFFFC00U)
+    {
+    case 0x0E30C800U:
+        instruction = ARM64_INST_FMAXNMV_SCALAR_REDUCE;
+        break;
+    case 0x0E30F800U:
+        instruction = ARM64_INST_FMAXV_SCALAR_REDUCE;
+        break;
+    case 0x0EB0C800U:
+        instruction = ARM64_INST_FMINNMV_SCALAR_REDUCE;
+        break;
+    case 0x0EB0F800U:
+        instruction = ARM64_INST_FMINV_SCALAR_REDUCE;
+        break;
+    default:
+        break;
+    }
+
+    if (instruction != ARM64_INST_UNKNOWN)
+    {
+        if (ARM64_DECODE_BIT(raw, 29))
+        {
+            if (!ARM64_DECODE_BIT(raw, 30)) return ARM64_DECODE_UNALLOCATED;
+            candidate->element_width = 32;
+            candidate->operand_width = 128;
+        }
+        else
+        {
+            candidate->element_width = 16;
+            candidate->operand_width = ARM64_DECODE_BIT(raw, 30) ? 128 : 64;
+        }
+        candidate->instruction = instruction;
+        *decoded = result;
+        return ARM64_DECODE_OK;
+    }
+    return ARM64_DECODE_UNSUPPORTED;
+}
+
+static inline enum arm64_decode_status arm64_decode_simd_by_element(uint32_t raw, struct arm64_decoded_instruction *decoded)
+{
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
 
     switch (raw & 0xDF000400U)
     {
@@ -2522,15 +2646,35 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
                     switch (opcode)
                     {
                     case 1:
-                        return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INST_FMLA_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_fp_by_element(raw, candidate, ARM64_INST_FMLA_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 5:
-                        return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INST_FMLS_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_fp_by_element(raw, candidate, ARM64_INST_FMLS_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 9:
-                        return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INST_FMUL_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_fp_by_element(raw, candidate, ARM64_INST_FMUL_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 14:
-                        return arm64_decode_simd_dot_by_element(raw, decoded, ARM64_INST_SDOT_VECTOR_BY_ELEMENT, q, size, 8);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_dot_by_element(raw, candidate, ARM64_INST_SDOT_VECTOR_BY_ELEMENT, q, size, 8);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 15:
-                        return arm64_decode_simd_dot_by_element(raw, decoded, ARM64_INST_SUDOT_VECTOR_BY_ELEMENT, q, 2, 8);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_dot_by_element(raw, candidate, ARM64_INST_SUDOT_VECTOR_BY_ELEMENT, q, 2, 8);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     default:
                         break;
                     }
@@ -2539,15 +2683,35 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
                     switch (opcode)
                     {
                     case 1:
-                        return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INST_FMLA_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_fp_by_element(raw, candidate, ARM64_INST_FMLA_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 5:
-                        return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INST_FMLS_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_fp_by_element(raw, candidate, ARM64_INST_FMLS_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 9:
-                        return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INST_FMUL_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_fp_by_element(raw, candidate, ARM64_INST_FMUL_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 14:
-                        return arm64_decode_simd_dot_by_element(raw, decoded, ARM64_INST_SDOT_VECTOR_BY_ELEMENT, q, size, 8);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_dot_by_element(raw, candidate, ARM64_INST_SDOT_VECTOR_BY_ELEMENT, q, size, 8);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 15:
-                        return arm64_decode_simd_dot_by_element(raw, decoded, ARM64_INST_BFDOT_VECTOR_BY_ELEMENT, q, 2, 16);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_dot_by_element(raw, candidate, ARM64_INST_BFDOT_VECTOR_BY_ELEMENT, q, 2, 16);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     default:
                         break;
                     }
@@ -2557,35 +2721,68 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
                     switch (opcode)
                     {
                     case 0:
-                        return arm64_decode_simd_fhm_by_element(raw, decoded, ARM64_INST_FMLAL_VECTOR_BY_ELEMENT, q, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_fhm_by_element(raw, candidate, ARM64_INST_FMLAL_VECTOR_BY_ELEMENT, q, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 1:
                         if (size == 3 && !q) return ARM64_DECODE_UNALLOCATED;
-                        return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INST_FMLA_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                        {
+                            enum arm64_decode_status status = arm64_decode_simd_fp_by_element(raw, candidate, ARM64_INST_FMLA_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                            if (status == ARM64_DECODE_OK) *decoded = result;
+                            return status;
+                        }
                     case 4:
-                        return arm64_decode_simd_fhm_by_element(raw, decoded, ARM64_INST_FMLSL_VECTOR_BY_ELEMENT, q, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_fhm_by_element(raw, candidate, ARM64_INST_FMLSL_VECTOR_BY_ELEMENT, q, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 5:
                         if (size == 3 && !q) return ARM64_DECODE_UNALLOCATED;
-                        return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INST_FMLS_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                        {
+                            enum arm64_decode_status status = arm64_decode_simd_fp_by_element(raw, candidate, ARM64_INST_FMLS_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                            if (status == ARM64_DECODE_OK) *decoded = result;
+                            return status;
+                        }
                     case 9:
                         if (size == 3 && !q) return ARM64_DECODE_UNALLOCATED;
-                        return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INST_FMUL_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                        {
+                            enum arm64_decode_status status = arm64_decode_simd_fp_by_element(raw, candidate, ARM64_INST_FMUL_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                            if (status == ARM64_DECODE_OK) *decoded = result;
+                            return status;
+                        }
                     case 14:
-                        return arm64_decode_simd_dot_by_element(raw, decoded, ARM64_INST_SDOT_VECTOR_BY_ELEMENT, q, size, 8);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_dot_by_element(raw, candidate, ARM64_INST_SDOT_VECTOR_BY_ELEMENT, q, size, 8);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 15:
-                        if (size == 2) return arm64_decode_simd_dot_by_element(raw, decoded, ARM64_INST_USDOT_VECTOR_BY_ELEMENT, q, 2, 8);
+                        if (size == 2)
+                        {
+                            enum arm64_decode_status status = arm64_decode_simd_dot_by_element(raw, candidate, ARM64_INST_USDOT_VECTOR_BY_ELEMENT, q, 2, 8);
+                            if (status == ARM64_DECODE_OK) *decoded = result;
+                            return status;
+                        }
                         switch (q)
                         {
                         case 0:
-                            decoded->instruction = ARM64_INST_BFMLALB_VECTOR_BY_ELEMENT;
+                            candidate->instruction = ARM64_INST_BFMLALB_VECTOR_BY_ELEMENT;
                             break;
+                        case 1:
+                            candidate->instruction = ARM64_INST_BFMLALT_VECTOR_BY_ELEMENT;
+                            break;
+
                         default:
-                            decoded->instruction = ARM64_INST_BFMLALT_VECTOR_BY_ELEMENT;
-                            break;
+                            return ARM64_DECODE_UNSUPPORTED;
                         }
-                        decoded->element_width = 16;
-                        decoded->lane_index = (ARM64_DECODE_BIT(raw, 11) << 2) | (ARM64_DECODE_BIT(raw, 21) << 1) | ARM64_DECODE_BIT(raw, 20);
-                        decoded->operand_width = 128;
-                        decoded->rm = ARM64_DECODE_FIELD(raw, 19, 16);
+                        candidate->element_width = 16;
+                        candidate->lane_index = ARM64_DECODE_BIT_TRIPLE(raw, 11, 21, 20);
+                        candidate->operand_width = 128;
+                        candidate->rm = ARM64_DECODE_FIELD(raw, 19, 16);
+                        *decoded = result;
                         return ARM64_DECODE_OK;
                     default:
                         break;
@@ -2595,7 +2792,7 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
                     break;
                 }
                 break;
-            default:
+            case 1:
                 switch (size)
                 {
                 case 0:
@@ -2605,15 +2802,35 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
                     case 3:
                     case 5:
                     case 7:
-                        return arm64_decode_simd_fcmla_by_element(raw, decoded, q, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_fcmla_by_element(raw, candidate, q, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 9:
-                        return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INST_FMULX_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_fp_by_element(raw, candidate, ARM64_INST_FMULX_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 13:
-                        return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INST_SQRDMLAH_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_rdm_by_element(raw, candidate, ARM64_INST_SQRDMLAH_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 14:
-                        return arm64_decode_simd_dot_by_element(raw, decoded, ARM64_INST_UDOT_VECTOR_BY_ELEMENT, q, size, 8);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_dot_by_element(raw, candidate, ARM64_INST_UDOT_VECTOR_BY_ELEMENT, q, size, 8);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 15:
-                        return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INST_SQRDMLSH_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_rdm_by_element(raw, candidate, ARM64_INST_SQRDMLSH_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     default:
                         break;
                     }
@@ -2625,15 +2842,35 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
                     case 3:
                     case 5:
                     case 7:
-                        return arm64_decode_simd_fcmla_by_element(raw, decoded, q, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_fcmla_by_element(raw, candidate, q, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 9:
-                        return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INST_FMULX_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_fp_by_element(raw, candidate, ARM64_INST_FMULX_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 13:
-                        return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INST_SQRDMLAH_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_rdm_by_element(raw, candidate, ARM64_INST_SQRDMLAH_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 14:
-                        return arm64_decode_simd_dot_by_element(raw, decoded, ARM64_INST_UDOT_VECTOR_BY_ELEMENT, q, size, 8);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_dot_by_element(raw, candidate, ARM64_INST_UDOT_VECTOR_BY_ELEMENT, q, size, 8);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 15:
-                        return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INST_SQRDMLSH_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_rdm_by_element(raw, candidate, ARM64_INST_SQRDMLSH_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     default:
                         break;
                     }
@@ -2645,19 +2882,47 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
                     case 3:
                     case 5:
                     case 7:
-                        return arm64_decode_simd_fcmla_by_element(raw, decoded, q, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_fcmla_by_element(raw, candidate, q, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 8:
-                        return arm64_decode_simd_fhm_by_element(raw, decoded, ARM64_INST_FMLAL2_VECTOR_BY_ELEMENT, q, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_fhm_by_element(raw, candidate, ARM64_INST_FMLAL2_VECTOR_BY_ELEMENT, q, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 9:
-                        return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INST_FMULX_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_fp_by_element(raw, candidate, ARM64_INST_FMULX_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 12:
-                        return arm64_decode_simd_fhm_by_element(raw, decoded, ARM64_INST_FMLSL2_VECTOR_BY_ELEMENT, q, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_fhm_by_element(raw, candidate, ARM64_INST_FMLSL2_VECTOR_BY_ELEMENT, q, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 13:
-                        return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INST_SQRDMLAH_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_rdm_by_element(raw, candidate, ARM64_INST_SQRDMLAH_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 14:
-                        return arm64_decode_simd_dot_by_element(raw, decoded, ARM64_INST_UDOT_VECTOR_BY_ELEMENT, q, size, 8);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_dot_by_element(raw, candidate, ARM64_INST_UDOT_VECTOR_BY_ELEMENT, q, size, 8);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 15:
-                        return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INST_SQRDMLSH_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_rdm_by_element(raw, candidate, ARM64_INST_SQRDMLSH_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     default:
                         break;
                     }
@@ -2669,20 +2934,48 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
                     case 3:
                     case 5:
                     case 7:
-                        return arm64_decode_simd_fcmla_by_element(raw, decoded, q, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_fcmla_by_element(raw, candidate, q, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 8:
-                        return arm64_decode_simd_fhm_by_element(raw, decoded, ARM64_INST_FMLAL2_VECTOR_BY_ELEMENT, q, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_fhm_by_element(raw, candidate, ARM64_INST_FMLAL2_VECTOR_BY_ELEMENT, q, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 9:
                         if (!q) return ARM64_DECODE_UNALLOCATED;
-                        return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INST_FMULX_VECTOR_BY_ELEMENT, 128, size);
+                        {
+                            enum arm64_decode_status status = arm64_decode_simd_fp_by_element(raw, candidate, ARM64_INST_FMULX_VECTOR_BY_ELEMENT, 128, size);
+                            if (status == ARM64_DECODE_OK) *decoded = result;
+                            return status;
+                        }
                     case 12:
-                        return arm64_decode_simd_fhm_by_element(raw, decoded, ARM64_INST_FMLSL2_VECTOR_BY_ELEMENT, q, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_fhm_by_element(raw, candidate, ARM64_INST_FMLSL2_VECTOR_BY_ELEMENT, q, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 13:
-                        return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INST_SQRDMLAH_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_rdm_by_element(raw, candidate, ARM64_INST_SQRDMLAH_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 14:
-                        return arm64_decode_simd_dot_by_element(raw, decoded, ARM64_INST_UDOT_VECTOR_BY_ELEMENT, q, size, 8);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_dot_by_element(raw, candidate, ARM64_INST_UDOT_VECTOR_BY_ELEMENT, q, size, 8);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 15:
-                        return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INST_SQRDMLSH_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_rdm_by_element(raw, candidate, ARM64_INST_SQRDMLSH_VECTOR_BY_ELEMENT, q ? 128 : 64, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     default:
                         break;
                     }
@@ -2691,6 +2984,9 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
                     break;
                 }
                 break;
+
+            default:
+                return ARM64_DECODE_UNSUPPORTED;
             }
             break;
         case 1:
@@ -2704,11 +3000,23 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
                     switch (opcode)
                     {
                     case 1:
-                        return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INST_FMLA_SCALAR_BY_ELEMENT, 16, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_fp_by_element(raw, candidate, ARM64_INST_FMLA_SCALAR_BY_ELEMENT, 16, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 5:
-                        return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INST_FMLS_SCALAR_BY_ELEMENT, 16, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_fp_by_element(raw, candidate, ARM64_INST_FMLS_SCALAR_BY_ELEMENT, 16, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 9:
-                        return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INST_FMUL_SCALAR_BY_ELEMENT, 16, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_fp_by_element(raw, candidate, ARM64_INST_FMUL_SCALAR_BY_ELEMENT, 16, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     default:
                         break;
                     }
@@ -2718,11 +3026,23 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
                     switch (opcode)
                     {
                     case 1:
-                        return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INST_FMLA_SCALAR_BY_ELEMENT, size == 2 ? 32 : 64, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_fp_by_element(raw, candidate, ARM64_INST_FMLA_SCALAR_BY_ELEMENT, size == 2 ? 32 : 64, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 5:
-                        return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INST_FMLS_SCALAR_BY_ELEMENT, size == 2 ? 32 : 64, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_fp_by_element(raw, candidate, ARM64_INST_FMLS_SCALAR_BY_ELEMENT, size == 2 ? 32 : 64, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 9:
-                        return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INST_FMUL_SCALAR_BY_ELEMENT, size == 2 ? 32 : 64, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_fp_by_element(raw, candidate, ARM64_INST_FMUL_SCALAR_BY_ELEMENT, size == 2 ? 32 : 64, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     default:
                         break;
                     }
@@ -2731,7 +3051,7 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
                     break;
                 }
                 break;
-            default:
+            case 1:
                 switch (size)
                 {
                 case 0:
@@ -2739,11 +3059,23 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
                     switch (opcode)
                     {
                     case 9:
-                        return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INST_FMULX_SCALAR_BY_ELEMENT, 16, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_fp_by_element(raw, candidate, ARM64_INST_FMULX_SCALAR_BY_ELEMENT, 16, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 13:
-                        return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INST_SQRDMLAH_SCALAR_BY_ELEMENT, 8U << size, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_rdm_by_element(raw, candidate, ARM64_INST_SQRDMLAH_SCALAR_BY_ELEMENT, 8U << size, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 15:
-                        return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INST_SQRDMLSH_SCALAR_BY_ELEMENT, 8U << size, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_rdm_by_element(raw, candidate, ARM64_INST_SQRDMLSH_SCALAR_BY_ELEMENT, 8U << size, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     default:
                         break;
                     }
@@ -2756,11 +3088,23 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
                     case 12:
                         return ARM64_DECODE_UNALLOCATED;
                     case 9:
-                        return arm64_decode_simd_fp_by_element(raw, decoded, ARM64_INST_FMULX_SCALAR_BY_ELEMENT, size == 2 ? 32 : 64, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_fp_by_element(raw, candidate, ARM64_INST_FMULX_SCALAR_BY_ELEMENT, size == 2 ? 32 : 64, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 13:
-                        return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INST_SQRDMLAH_SCALAR_BY_ELEMENT, 8U << size, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_rdm_by_element(raw, candidate, ARM64_INST_SQRDMLAH_SCALAR_BY_ELEMENT, 8U << size, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     case 15:
-                        return arm64_decode_simd_rdm_by_element(raw, decoded, ARM64_INST_SQRDMLSH_SCALAR_BY_ELEMENT, 8U << size, size);
+                    {
+                        enum arm64_decode_status status = arm64_decode_simd_rdm_by_element(raw, candidate, ARM64_INST_SQRDMLSH_SCALAR_BY_ELEMENT, 8U << size, size);
+                        if (status == ARM64_DECODE_OK) *decoded = result;
+                        return status;
+                    }
                     default:
                         break;
                     }
@@ -2769,6 +3113,9 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
                     break;
                 }
                 break;
+
+            default:
+                return ARM64_DECODE_UNSUPPORTED;
             }
             break;
         default:
@@ -2779,6 +3126,13 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
     default:
         break;
     }
+    return ARM64_DECODE_UNSUPPORTED;
+}
+
+static inline enum arm64_decode_status arm64_decode_simd_shift_immediate(uint32_t raw, struct arm64_decoded_instruction *decoded)
+{
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
 
     switch (raw & 0x9F800000U)
     {
@@ -2823,7 +3177,7 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
                         break;
                     }
                     break;
-                default:
+                case 1:
                     switch (by_element_opcode)
                     {
                     case 1:
@@ -2844,6 +3198,9 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
                         break;
                     }
                     break;
+
+                default:
+                    return ARM64_DECODE_UNSUPPORTED;
                 }
                 break;
             default:
@@ -2862,9 +3219,12 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
                         case 0:
                             instruction = ARM64_INST_SSHR_VECTOR_IMMEDIATE;
                             break;
-                        default:
+                        case 1:
                             instruction = ARM64_INST_USHR_VECTOR_IMMEDIATE;
                             break;
+
+                        default:
+                            return ARM64_DECODE_UNSUPPORTED;
                         }
                     }
                     break;
@@ -2889,13 +3249,14 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
         if (instruction != ARM64_INST_UNKNOWN)
         {
             uint8_t element_width = 8U << ARM64_DECODE_HIGHEST_SET_BIT(immh);
-            uint8_t encoded_immediate = (immh << 3) | immb;
+            uint8_t encoded_immediate = ARM64_DECODE_CONCAT(immh, immb, 3U);
 
-            decoded->operand_width = ARM64_DECODE_BIT(raw, 30) ? 128 : 64;
-            if (decoded->operand_width == 64 && element_width == 64) return ARM64_DECODE_UNALLOCATED;
-            decoded->instruction = instruction;
-            decoded->element_width = element_width;
-            decoded->immediate = instruction == ARM64_INST_SHL_VECTOR_IMMEDIATE ? encoded_immediate - element_width : 2 * element_width - encoded_immediate;
+            candidate->operand_width = ARM64_DECODE_BIT(raw, 30) ? 128 : 64;
+            if (candidate->operand_width == 64 && element_width == 64) return ARM64_DECODE_UNALLOCATED;
+            candidate->instruction = instruction;
+            candidate->element_width = element_width;
+            candidate->immediate = instruction == ARM64_INST_SHL_VECTOR_IMMEDIATE ? encoded_immediate - element_width : 2 * element_width - encoded_immediate;
+            *decoded = result;
             return ARM64_DECODE_OK;
         }
         break;
@@ -2903,6 +3264,13 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
     default:
         break;
     }
+    return ARM64_DECODE_UNSUPPORTED;
+}
+
+static inline enum arm64_decode_status arm64_decode_simd_conditional_fp(uint32_t raw, struct arm64_decoded_instruction *decoded)
+{
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
 
     uint32_t type = ARM64_DECODE_FIELD(raw, 23, 22);
     switch (raw & 0xFF200C00U)
@@ -2915,16 +3283,20 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
         switch (ARM64_DECODE_BIT(raw, 4))
         {
         case 0:
-            decoded->instruction = ARM64_INST_FCCMP_SCALAR;
+            candidate->instruction = ARM64_INST_FCCMP_SCALAR;
             break;
+        case 1:
+            candidate->instruction = ARM64_INST_FCCMPE_SCALAR;
+            break;
+
         default:
-            decoded->instruction = ARM64_INST_FCCMPE_SCALAR;
-            break;
+            return ARM64_DECODE_UNSUPPORTED;
         }
-        decoded->condition = ARM64_DECODE_FIELD(raw, 15, 12);
-        decoded->immediate = ARM64_DECODE_FIELD(raw, 3, 0);
-        decoded->operand_width = width;
-        decoded->element_width = width;
+        candidate->condition = ARM64_DECODE_FIELD(raw, 15, 12);
+        candidate->immediate = ARM64_DECODE_FIELD(raw, 3, 0);
+        candidate->operand_width = width;
+        candidate->element_width = width;
+        *decoded = result;
         return ARM64_DECODE_OK;
     }
 
@@ -2933,57 +3305,84 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
         uint8_t width = arm64_decode_simd_scalar_fp_width(type);
 
         if (!width) return ARM64_DECODE_UNALLOCATED;
-        decoded->instruction = ARM64_INST_FCSEL_SCALAR;
-        decoded->condition = ARM64_DECODE_FIELD(raw, 15, 12);
-        decoded->operand_width = width;
-        decoded->element_width = width;
+        candidate->instruction = ARM64_INST_FCSEL_SCALAR;
+        candidate->condition = ARM64_DECODE_FIELD(raw, 15, 12);
+        candidate->operand_width = width;
+        candidate->element_width = width;
+        *decoded = result;
         return ARM64_DECODE_OK;
     }
 
     default:
         break;
     }
+    return ARM64_DECODE_UNSUPPORTED;
+}
 
+static inline enum arm64_decode_status arm64_decode_simd_compare_fp(uint32_t raw, struct arm64_decoded_instruction *decoded)
+{
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
+
+    uint32_t type = ARM64_DECODE_FIELD(raw, 23, 22);
     switch (raw & 0xFF20FC00U)
     {
     case 0x1E202000U:
     {
         uint32_t zero = ARM64_DECODE_BIT(raw, 3);
 
-        if (type == 2 || ARM64_DECODE_FIELD(raw, 2, 0) || (zero && decoded->rm != 0)) return ARM64_DECODE_UNALLOCATED;
+        if (type == 2 || ARM64_DECODE_FIELD(raw, 2, 0) || (zero && candidate->rm != 0)) return ARM64_DECODE_UNALLOCATED;
         switch (ARM64_DECODE_BIT(raw, 4))
         {
         case 0:
             switch (zero)
             {
             case 0:
-                decoded->instruction = ARM64_INST_FCMP_REGISTER_SCALAR;
+                candidate->instruction = ARM64_INST_FCMP_REGISTER_SCALAR;
                 break;
+            case 1:
+                candidate->instruction = ARM64_INST_FCMP_ZERO_SCALAR;
+                break;
+
             default:
-                decoded->instruction = ARM64_INST_FCMP_ZERO_SCALAR;
-                break;
+                return ARM64_DECODE_UNSUPPORTED;
             }
             break;
-        default:
+        case 1:
             switch (zero)
             {
             case 0:
-                decoded->instruction = ARM64_INST_FCMPE_REGISTER_SCALAR;
+                candidate->instruction = ARM64_INST_FCMPE_REGISTER_SCALAR;
                 break;
+            case 1:
+                candidate->instruction = ARM64_INST_FCMPE_ZERO_SCALAR;
+                break;
+
             default:
-                decoded->instruction = ARM64_INST_FCMPE_ZERO_SCALAR;
-                break;
+                return ARM64_DECODE_UNSUPPORTED;
             }
             break;
+
+        default:
+            return ARM64_DECODE_UNSUPPORTED;
         }
-        decoded->element_width = type == 3 ? 16 : type ? 64 : 32;
-        decoded->operand_width = type == 3 ? 16 : type ? 64 : 32;
+        candidate->element_width = type == 3 ? 16 : type ? 64 : 32;
+        candidate->operand_width = type == 3 ? 16 : type ? 64 : 32;
+        *decoded = result;
         return ARM64_DECODE_OK;
     }
     default:
         break;
     }
+    return ARM64_DECODE_UNSUPPORTED;
+}
 
+static inline enum arm64_decode_status arm64_decode_simd_unary_fp(uint32_t raw, struct arm64_decoded_instruction *decoded)
+{
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
+
+    uint32_t type = ARM64_DECODE_FIELD(raw, 23, 22);
     switch (raw & 0xFF207C00U)
     {
     case 0x1E204000U:
@@ -3028,48 +3427,56 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
         switch (opcode)
         {
         case 0:
-            decoded->instruction = ARM64_INST_FMOV_SCALAR;
+            candidate->instruction = ARM64_INST_FMOV_SCALAR;
             break;
         case 1:
-            decoded->instruction = ARM64_INST_FABS_SCALAR;
+            candidate->instruction = ARM64_INST_FABS_SCALAR;
             break;
         case 2:
-            decoded->instruction = ARM64_INST_FNEG_SCALAR;
+            candidate->instruction = ARM64_INST_FNEG_SCALAR;
             break;
         case 3:
-            decoded->instruction = ARM64_INST_FSQRT_SCALAR;
+            candidate->instruction = ARM64_INST_FSQRT_SCALAR;
             break;
         case 8:
-            decoded->instruction = ARM64_INST_FRINTN_SCALAR;
+            candidate->instruction = ARM64_INST_FRINTN_SCALAR;
             break;
         case 9:
-            decoded->instruction = ARM64_INST_FRINTP_SCALAR;
+            candidate->instruction = ARM64_INST_FRINTP_SCALAR;
             break;
         case 10:
-            decoded->instruction = ARM64_INST_FRINTM_SCALAR;
+            candidate->instruction = ARM64_INST_FRINTM_SCALAR;
             break;
         case 11:
-            decoded->instruction = ARM64_INST_FRINTZ_SCALAR;
+            candidate->instruction = ARM64_INST_FRINTZ_SCALAR;
             break;
         case 12:
-            decoded->instruction = ARM64_INST_FRINTA_SCALAR;
+            candidate->instruction = ARM64_INST_FRINTA_SCALAR;
             break;
         case 14:
-            decoded->instruction = ARM64_INST_FRINTX_SCALAR;
+            candidate->instruction = ARM64_INST_FRINTX_SCALAR;
             break;
         case 15:
-            decoded->instruction = ARM64_INST_FRINTI_SCALAR;
+            candidate->instruction = ARM64_INST_FRINTI_SCALAR;
             break;
         default:
             return ARM64_DECODE_UNSUPPORTED;
         }
-        decoded->operand_width = width;
-        decoded->element_width = width;
+        candidate->operand_width = width;
+        candidate->element_width = width;
+        *decoded = result;
         return ARM64_DECODE_OK;
     }
     default:
         break;
     }
+    return ARM64_DECODE_UNSUPPORTED;
+}
+
+static inline enum arm64_decode_status arm64_decode_simd_move_gpr_fp(uint32_t raw, struct arm64_decoded_instruction *decoded)
+{
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
 
     switch (raw & 0x7FBEFC00U)
     {
@@ -3114,31 +3521,50 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
         switch (ARM64_DECODE_BIT(raw, 16))
         {
         case 0:
-            decoded->instruction = ARM64_INST_FMOV_FP_TO_GPR;
+            candidate->instruction = ARM64_INST_FMOV_FP_TO_GPR;
             break;
+        case 1:
+            candidate->instruction = ARM64_INST_FMOV_GPR_TO_FP;
+            break;
+
         default:
-            decoded->instruction = ARM64_INST_FMOV_GPR_TO_FP;
-            break;
+            return ARM64_DECODE_UNSUPPORTED;
         }
-        decoded->element_width = sf ? 64 : 32;
-        decoded->operand_width = sf ? 64 : 32;
+        candidate->element_width = sf ? 64 : 32;
+        candidate->operand_width = sf ? 64 : 32;
+        *decoded = result;
         return ARM64_DECODE_OK;
     }
     default:
         break;
     }
+    return ARM64_DECODE_UNSUPPORTED;
+}
+
+static inline enum arm64_decode_status arm64_decode_simd_extract_vector(uint32_t raw, struct arm64_decoded_instruction *decoded)
+{
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
 
     switch (raw & 0xBFE08400U)
     {
     case 0x2E000000U:
-        decoded->instruction = ARM64_INST_EXT_VECTOR;
-        decoded->immediate = ARM64_DECODE_FIELD(raw, 14, 11);
-        decoded->operand_width = ARM64_DECODE_BIT(raw, 30) ? 128 : 64;
-        if (decoded->operand_width == 64 && decoded->immediate >= 8) return ARM64_DECODE_UNALLOCATED;
+        candidate->instruction = ARM64_INST_EXT_VECTOR;
+        candidate->immediate = ARM64_DECODE_FIELD(raw, 14, 11);
+        candidate->operand_width = ARM64_DECODE_BIT(raw, 30) ? 128 : 64;
+        if (candidate->operand_width == 64 && candidate->immediate >= 8) return ARM64_DECODE_UNALLOCATED;
+        *decoded = result;
         return ARM64_DECODE_OK;
     default:
         break;
     }
+    return ARM64_DECODE_UNSUPPORTED;
+}
+
+static inline enum arm64_decode_status arm64_decode_simd_complex_multiply(uint32_t raw, struct arm64_decoded_instruction *decoded)
+{
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
 
     switch (raw & 0xBF20E400U)
     {
@@ -3148,15 +3574,23 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
         uint8_t size = ARM64_DECODE_FIELD(raw, 23, 22);
 
         if (size == 0 || (!q && size == 3)) return ARM64_DECODE_UNALLOCATED;
-        decoded->instruction = ARM64_INST_FCMLA_VECTOR;
-        decoded->immediate = ARM64_DECODE_FIELD(raw, 12, 11);
-        decoded->element_width = 8U << size;
-        decoded->operand_width = q ? 128 : 64;
+        candidate->instruction = ARM64_INST_FCMLA_VECTOR;
+        candidate->immediate = ARM64_DECODE_FIELD(raw, 12, 11);
+        candidate->element_width = 8U << size;
+        candidate->operand_width = q ? 128 : 64;
+        *decoded = result;
         return ARM64_DECODE_OK;
     }
     default:
         break;
     }
+    return ARM64_DECODE_UNSUPPORTED;
+}
+
+static inline enum arm64_decode_status arm64_decode_simd_complex_add(uint32_t raw, struct arm64_decoded_instruction *decoded)
+{
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
 
     switch (raw & 0xBF20EC00U)
     {
@@ -3166,15 +3600,23 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
         uint8_t size = ARM64_DECODE_FIELD(raw, 23, 22);
 
         if (size == 0 || (!q && size == 3)) return ARM64_DECODE_UNALLOCATED;
-        decoded->instruction = ARM64_INST_FCADD_VECTOR;
-        decoded->immediate = ARM64_DECODE_BIT(raw, 12) ? ARM64_SIMD_ROTATION_270 : ARM64_SIMD_ROTATION_90;
-        decoded->element_width = 8U << size;
-        decoded->operand_width = q ? 128 : 64;
+        candidate->instruction = ARM64_INST_FCADD_VECTOR;
+        candidate->immediate = ARM64_DECODE_BIT(raw, 12) ? ARM64_SIMD_ROTATION_270 : ARM64_SIMD_ROTATION_90;
+        candidate->element_width = 8U << size;
+        candidate->operand_width = q ? 128 : 64;
+        *decoded = result;
         return ARM64_DECODE_OK;
     }
     default:
         break;
     }
+    return ARM64_DECODE_UNSUPPORTED;
+}
+
+static inline enum arm64_decode_status arm64_decode_simd_copy_scalar(uint32_t raw, struct arm64_decoded_instruction *decoded)
+{
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
 
     switch (raw & 0xFFE0FC00U)
     {
@@ -3186,30 +3628,23 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
         uint8_t size = (uint8_t)__builtin_ctz(imm5);
         if (size > 3) return ARM64_DECODE_UNALLOCATED;
 
-        decoded->instruction = ARM64_INST_DUP_ELEMENT_SCALAR;
-        decoded->element_width = 8U << size;
-        decoded->lane_index = imm5 >> (size + 1);
-        decoded->operand_width = decoded->element_width;
+        candidate->instruction = ARM64_INST_DUP_ELEMENT_SCALAR;
+        candidate->element_width = 8U << size;
+        candidate->lane_index = imm5 >> (size + 1);
+        candidate->operand_width = candidate->element_width;
+        *decoded = result;
         return ARM64_DECODE_OK;
     }
     default:
         break;
     }
+    return ARM64_DECODE_UNSUPPORTED;
+}
 
-    switch (raw & 0xDF200400U)
-    {
-    case 0x5E200400U:
-        switch (raw & 0xDF60C400U)
-        {
-        case 0x5E400400U:
-            break;
-        default:
-            return arm64_decode_simd_scalar_3same(raw, decoded);
-        }
-        break;
-    default:
-        break;
-    }
+static inline enum arm64_decode_status arm64_decode_simd_pairwise_scalar(uint32_t raw, struct arm64_decoded_instruction *decoded)
+{
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
 
     switch (raw & 0xDFBFFC00U)
     {
@@ -3217,26 +3652,26 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
         if (!ARM64_DECODE_BIT(raw, 29))
         {
             if (ARM64_DECODE_BIT(raw, 22)) return ARM64_DECODE_UNALLOCATED;
-            decoded->element_width = 16;
+            candidate->element_width = 16;
         }
         else
         {
-            decoded->element_width = ARM64_DECODE_BIT(raw, 22) ? 64 : 32;
+            candidate->element_width = ARM64_DECODE_BIT(raw, 22) ? 64 : 32;
         }
-        decoded->instruction = ARM64_INST_FADDP_SCALAR_REDUCE;
-        decoded->operand_width = decoded->element_width * 2;
+        candidate->instruction = ARM64_INST_FADDP_SCALAR_REDUCE;
+        candidate->operand_width = candidate->element_width * 2;
+        *decoded = result;
         return ARM64_DECODE_OK;
     default:
         break;
     }
+    return ARM64_DECODE_UNSUPPORTED;
+}
 
-    switch (raw & 0xDF60C400U)
-    {
-    case 0x5E400400U:
-        return arm64_decode_simd_scalar_fp16_3reg(raw, decoded);
-    default:
-        break;
-    }
+static inline enum arm64_decode_status arm64_decode_simd_rdm_scalar(uint32_t raw, struct arm64_decoded_instruction *decoded)
+{
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
 
     switch (raw & 0xFF208400U)
     {
@@ -3251,18 +3686,331 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
         switch (ARM64_DECODE_BIT(raw, 11))
         {
         case 0:
-            decoded->instruction = ARM64_INST_SQRDMLAH_SCALAR;
+            candidate->instruction = ARM64_INST_SQRDMLAH_SCALAR;
             break;
+        case 1:
+            candidate->instruction = ARM64_INST_SQRDMLSH_SCALAR;
+            break;
+
         default:
-            decoded->instruction = ARM64_INST_SQRDMLSH_SCALAR;
-            break;
+            return ARM64_DECODE_UNSUPPORTED;
         }
-        decoded->element_width = 8U << size;
-        decoded->operand_width = decoded->element_width;
+        candidate->element_width = 8U << size;
+        candidate->operand_width = candidate->element_width;
+        *decoded = result;
         return ARM64_DECODE_OK;
     }
     default:
         break;
+    }
+    return ARM64_DECODE_UNSUPPORTED;
+}
+
+static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, struct arm64_decoded_instruction *decoded)
+{
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
+
+    candidate->instruction_class = ARM64_INSTRUCTION_CLASS_DATA_PROCESSING_SIMD_FP;
+    candidate->instruction = ARM64_INST_UNKNOWN;
+    candidate->rd = ARM64_DECODE_FIELD(raw, 4, 0);
+    candidate->rn = ARM64_DECODE_FIELD(raw, 9, 5);
+    candidate->ra = ARM64_DECODE_FIELD(raw, 14, 10);
+    candidate->rm = ARM64_DECODE_FIELD(raw, 20, 16);
+
+    switch (raw & 0x9FF80C00U)
+    {
+    case 0x0F000400U:
+    {
+        enum arm64_decode_status status = arm64_decode_simd_modified_imm(raw, candidate);
+        if (status == ARM64_DECODE_OK) *decoded = result;
+        return status;
+    }
+    default:
+        break;
+    }
+
+    {
+        enum arm64_decode_status status = arm64_decode_simd_scalar_fp_basic(raw, candidate);
+
+        if (status != ARM64_DECODE_UNSUPPORTED)
+        {
+            if (status == ARM64_DECODE_OK) *decoded = result;
+            return status;
+        }
+    }
+
+    switch (raw & 0xBF208C00U)
+    {
+    case 0x0E000800U:
+    {
+        enum arm64_decode_status status = arm64_decode_simd_vector_permute(raw, candidate);
+        if (status == ARM64_DECODE_OK) *decoded = result;
+        return status;
+    }
+    default:
+        break;
+    }
+
+    {
+        enum arm64_decode_status status = arm64_decode_simd_copy_vector(raw, candidate);
+        if (status != ARM64_DECODE_UNSUPPORTED)
+        {
+            if (status == ARM64_DECODE_OK) *decoded = result;
+            return status;
+        }
+    }
+
+    switch (raw & 0x9F200400U)
+    {
+    case 0x0E200400U:
+        switch (raw & 0x9F60C400U)
+        {
+        case 0x0E400400U:
+            break;
+        default:
+        {
+            enum arm64_decode_status status = arm64_decode_simd_vector_3same(raw, candidate);
+            if (status == ARM64_DECODE_OK) *decoded = result;
+            return status;
+        }
+        }
+        break;
+    default:
+        break;
+    }
+
+    {
+        enum arm64_decode_status status = arm64_decode_simd_compare_zero(raw, candidate);
+        if (status != ARM64_DECODE_UNSUPPORTED)
+        {
+            if (status == ARM64_DECODE_OK) *decoded = result;
+            return status;
+        }
+    }
+
+    {
+        enum arm64_decode_status status = arm64_decode_simd_vector_reduce(raw, candidate);
+
+        if (status != ARM64_DECODE_UNSUPPORTED)
+        {
+            if (status == ARM64_DECODE_OK) *decoded = result;
+            return status;
+        }
+    }
+
+    {
+        enum arm64_decode_status status = arm64_decode_simd_conversion(raw, candidate);
+
+        if (status != ARM64_DECODE_UNSUPPORTED)
+        {
+            if (status == ARM64_DECODE_OK) *decoded = result;
+            return status;
+        }
+    }
+
+    {
+        enum arm64_decode_status status = arm64_decode_simd_narrow(raw, candidate);
+        if (status != ARM64_DECODE_UNSUPPORTED)
+        {
+            if (status == ARM64_DECODE_OK) *decoded = result;
+            return status;
+        }
+    }
+
+    {
+        enum arm64_decode_status status = arm64_decode_simd_fp_reduce(raw, candidate);
+        if (status != ARM64_DECODE_UNSUPPORTED)
+        {
+            if (status == ARM64_DECODE_OK) *decoded = result;
+            return status;
+        }
+    }
+
+    switch (raw & 0x9F60C400U)
+    {
+    case 0x0E400400U:
+    {
+        enum arm64_decode_status status = arm64_decode_simd_vector_fp16_3reg(raw, candidate);
+        if (status == ARM64_DECODE_OK) *decoded = result;
+        return status;
+    }
+    default:
+        break;
+    }
+
+    {
+        enum arm64_decode_status status = arm64_decode_simd_vector_dot_family(raw, candidate);
+
+        if (status != ARM64_DECODE_UNSUPPORTED)
+        {
+            if (status == ARM64_DECODE_OK) *decoded = result;
+            return status;
+        }
+    }
+
+    switch (raw & 0x00FE0000U)
+    {
+    case 0x00200000U:
+    case 0x00F80000U:
+    case 0x00A00000U:
+    case 0x00E00000U:
+        switch (raw & 0xBF01FC00U)
+        {
+        case 0x0E019800U:
+        case 0x0E00F800U:
+        case 0x2E00F800U:
+        case 0x2E01F800U:
+        {
+            enum arm64_decode_status status = arm64_decode_simd_vector_unary(raw, candidate);
+            if (status == ARM64_DECODE_OK) *decoded = result;
+            return status;
+        }
+        default:
+            break;
+        }
+        break;
+    default:
+        break;
+    }
+
+    {
+        enum arm64_decode_status status = arm64_decode_simd_by_element(raw, candidate);
+        if (status != ARM64_DECODE_UNSUPPORTED)
+        {
+            if (status == ARM64_DECODE_OK) *decoded = result;
+            return status;
+        }
+    }
+
+    {
+        enum arm64_decode_status status = arm64_decode_simd_shift_immediate(raw, candidate);
+        if (status != ARM64_DECODE_UNSUPPORTED)
+        {
+            if (status == ARM64_DECODE_OK) *decoded = result;
+            return status;
+        }
+    }
+
+    {
+        enum arm64_decode_status status = arm64_decode_simd_conditional_fp(raw, candidate);
+        if (status != ARM64_DECODE_UNSUPPORTED)
+        {
+            if (status == ARM64_DECODE_OK) *decoded = result;
+            return status;
+        }
+    }
+
+    {
+        enum arm64_decode_status status = arm64_decode_simd_compare_fp(raw, candidate);
+        if (status != ARM64_DECODE_UNSUPPORTED)
+        {
+            if (status == ARM64_DECODE_OK) *decoded = result;
+            return status;
+        }
+    }
+
+    {
+        enum arm64_decode_status status = arm64_decode_simd_unary_fp(raw, candidate);
+        if (status != ARM64_DECODE_UNSUPPORTED)
+        {
+            if (status == ARM64_DECODE_OK) *decoded = result;
+            return status;
+        }
+    }
+
+    {
+        enum arm64_decode_status status = arm64_decode_simd_move_gpr_fp(raw, candidate);
+        if (status != ARM64_DECODE_UNSUPPORTED)
+        {
+            if (status == ARM64_DECODE_OK) *decoded = result;
+            return status;
+        }
+    }
+
+    {
+        enum arm64_decode_status status = arm64_decode_simd_extract_vector(raw, candidate);
+        if (status != ARM64_DECODE_UNSUPPORTED)
+        {
+            if (status == ARM64_DECODE_OK) *decoded = result;
+            return status;
+        }
+    }
+
+    {
+        enum arm64_decode_status status = arm64_decode_simd_complex_multiply(raw, candidate);
+        if (status != ARM64_DECODE_UNSUPPORTED)
+        {
+            if (status == ARM64_DECODE_OK) *decoded = result;
+            return status;
+        }
+    }
+
+    {
+        enum arm64_decode_status status = arm64_decode_simd_complex_add(raw, candidate);
+        if (status != ARM64_DECODE_UNSUPPORTED)
+        {
+            if (status == ARM64_DECODE_OK) *decoded = result;
+            return status;
+        }
+    }
+
+    {
+        enum arm64_decode_status status = arm64_decode_simd_copy_scalar(raw, candidate);
+        if (status != ARM64_DECODE_UNSUPPORTED)
+        {
+            if (status == ARM64_DECODE_OK) *decoded = result;
+            return status;
+        }
+    }
+
+    switch (raw & 0xDF200400U)
+    {
+    case 0x5E200400U:
+        switch (raw & 0xDF60C400U)
+        {
+        case 0x5E400400U:
+            break;
+        default:
+        {
+            enum arm64_decode_status status = arm64_decode_simd_scalar_3same(raw, candidate);
+            if (status == ARM64_DECODE_OK) *decoded = result;
+            return status;
+        }
+        }
+        break;
+    default:
+        break;
+    }
+
+    {
+        enum arm64_decode_status status = arm64_decode_simd_pairwise_scalar(raw, candidate);
+        if (status != ARM64_DECODE_UNSUPPORTED)
+        {
+            if (status == ARM64_DECODE_OK) *decoded = result;
+            return status;
+        }
+    }
+
+    switch (raw & 0xDF60C400U)
+    {
+    case 0x5E400400U:
+    {
+        enum arm64_decode_status status = arm64_decode_simd_scalar_fp16_3reg(raw, candidate);
+        if (status == ARM64_DECODE_OK) *decoded = result;
+        return status;
+    }
+    default:
+        break;
+    }
+
+    {
+        enum arm64_decode_status status = arm64_decode_simd_rdm_scalar(raw, candidate);
+        if (status != ARM64_DECODE_UNSUPPORTED)
+        {
+            if (status == ARM64_DECODE_OK) *decoded = result;
+            return status;
+        }
     }
 
     switch (raw & 0x40FE0000U)
@@ -3278,14 +4026,17 @@ static inline enum arm64_decode_status arm64_decode_simd_impl(uint32_t raw, stru
 
 enum arm64_decode_status arm64_decode_simd_fp(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
-    enum arm64_decode_status status = arm64_decode_simd_impl(raw, decoded);
+    struct arm64_decoded_instruction result = *decoded;
+    struct arm64_decoded_instruction *candidate = &result;
+
+    enum arm64_decode_status status = arm64_decode_simd_impl(raw, candidate);
 
     if (status != ARM64_DECODE_OK)
     {
-        decoded->instruction = ARM64_INST_UNKNOWN;
         return status;
     }
-    if (decoded->instruction == ARM64_INST_UNKNOWN) return ARM64_DECODE_UNSUPPORTED;
-    if (!arm64_decode_simd_normalize_registers(decoded)) return ARM64_DECODE_UNSUPPORTED;
+    if (candidate->instruction == ARM64_INST_UNKNOWN) return ARM64_DECODE_UNSUPPORTED;
+    if (!arm64_decode_simd_normalize_registers(candidate)) return ARM64_DECODE_UNSUPPORTED;
+    *decoded = result;
     return ARM64_DECODE_OK;
 }

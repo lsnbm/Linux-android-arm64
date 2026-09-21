@@ -91,12 +91,9 @@ int main(int argc, char **argv)
     while (offset < data.size())
     {
         size_t newline = data.find('\n', offset);
-        if (newline == std::string::npos)
-        {
-            std::cerr << argv[1] << ':' << line_number
-                      << ": line must end in LF or CRLF\n";
-            return EXIT_FAILURE;
-        }
+        bool terminated = newline != std::string::npos;
+        if (!terminated)
+            newline = data.size();
         std::string_view line(data.data() + offset, newline - offset);
 
         if (!line.empty() && line.back() == '\r')
@@ -125,7 +122,7 @@ int main(int argc, char **argv)
             }
             words.push_back(word);
         }
-        offset = newline + 1;
+        offset = terminated ? newline + 1 : data.size();
         line_number++;
     }
 

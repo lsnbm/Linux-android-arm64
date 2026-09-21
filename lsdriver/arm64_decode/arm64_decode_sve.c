@@ -4,6 +4,6 @@
 enum arm64_decode_status arm64_decode_sve(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
     (void)raw;
-    decoded->instruction_class = ARM64_INSTRUCTION_CLASS_SVE;
+    (void)decoded;
     return ARM64_DECODE_UNSUPPORTED;
 }

@@ -11,10 +11,20 @@
 #include <stdint.h>
 #endif
 
-#define ARM64_DECODE_FIELD(raw, high, low)    (((raw) >> (low)) & (~0U >> (31U - ((high) - (low)))))
-#define ARM64_DECODE_BIT(raw, bit)            (((raw) >> (bit)) & 1U)
-#define ARM64_DECODE_SIGN_EXTEND(value, bits) ((int64_t)((((uint64_t)(value) ^ (1ULL << ((bits) - 1U))) - (1ULL << ((bits) - 1U)))))
-#define ARM64_DECODE_HIGHEST_SET_BIT(value)   (31U - (uint32_t)__builtin_clz((uint32_t)(value)))
+#define ARM64_DECODE_FIELD(raw, high, low)                (((raw) >> (low)) & (~0U >> (31U - ((high) - (low)))))
+#define ARM64_DECODE_BIT(raw, bit)                        (((raw) >> (bit)) & 1U)
+#define ARM64_DECODE_MATCH(raw, mask, value)              (((raw) & (mask)) == (value))
+#define ARM64_DECODE_BIT_PAIR(raw, high, low)             ((ARM64_DECODE_BIT((raw), (high)) << 1U) | ARM64_DECODE_BIT((raw), (low)))
+#define ARM64_DECODE_BIT_TRIPLE(raw, high, middle, low)   ((ARM64_DECODE_BIT((raw), (high)) << 2U) | (ARM64_DECODE_BIT((raw), (middle)) << 1U) | ARM64_DECODE_BIT((raw), (low)))
+#define ARM64_DECODE_BIT_QUAD(raw, b3, b2, b1, b0)        ((ARM64_DECODE_BIT((raw), (b3)) << 3U) | (ARM64_DECODE_BIT((raw), (b2)) << 2U) | (ARM64_DECODE_BIT((raw), (b1)) << 1U) | ARM64_DECODE_BIT((raw), (b0)))
+#define ARM64_DECODE_SHIFTED_FIELD(raw, high, low, shift) ((uint64_t)ARM64_DECODE_FIELD((raw), (high), (low)) << (shift))
+#define ARM64_DECODE_SCALE(value, shift)                  ((uint64_t)(value) << (shift))
+#define ARM64_DECODE_CONCAT(high, low, bits)              (ARM64_DECODE_SCALE((high), (bits)) | (uint64_t)(low))
+#define ARM64_DECODE_JOIN_BIT_FIELD(raw, bit, high, low)  ARM64_DECODE_CONCAT(ARM64_DECODE_BIT((raw), (bit)), ARM64_DECODE_FIELD((raw), (high), (low)), ((high) - (low) + 1U))
+#define ARM64_DECODE_GPR_WIDTH(raw)                       (ARM64_DECODE_BIT((raw), 31U) ? 64U : 32U)
+#define ARM64_DECODE_SIGN_EXTEND(value, bits)             ((int64_t)((((uint64_t)(value) ^ (1ULL << ((bits) - 1U))) - (1ULL << ((bits) - 1U)))))
+#define ARM64_DECODE_HIGHEST_SET_BIT(value)               (31U - (uint32_t)__builtin_clz((uint32_t)(value)))
+#define ARM64_DECODE_SIGNED_FIELD(raw, high, low, shift)  ARM64_DECODE_SIGN_EXTEND(ARM64_DECODE_SHIFTED_FIELD((raw), (high), (low), (shift)), (high) - (low) + 1U + (shift))
 
 #define ARM64_SYSREG_KEY(OP0, OP1, CRN, CRM, OP2) ((((OP0) & 0x3) << 14) | (((OP1) & 0x7) << 11) | (((CRN) & 0xF) << 7) | (((CRM) & 0xF) << 3) | ((OP2) & 0x7))
 
@@ -732,7 +742,6 @@ enum arm64_instruction
     ARM64_INST_UCVTF_S_X,
     ARM64_INST_SCVTF_D_X,
     ARM64_INST_UCVTF_D_X,
-
 };
 //结构体成员通常按最大成员对齐，最终大小是最大成员的倍数
 struct arm64_decoded_instruction
@@ -757,7 +766,6 @@ struct arm64_decoded_instruction
     以下成员是所有已支持编码形式可能使用的语义字段集合，不是固定数量的操作数槽。
     一条指令通常只填写其中少数字段；ARM64_DECODE_OK 时，由 instruction 决定哪些字段有效。
     */
-
 
     int64_t offset; // 已完成符号扩展和尺度换算的相对偏移；如 B label 或 ADR X0,label 的目标相对偏移，单位为字节。
 

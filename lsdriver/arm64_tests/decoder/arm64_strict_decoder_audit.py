@@ -183,7 +183,9 @@ def llvm_project_fields(llvm_row, name):
             if assembly_immediates:
                 projected["immediate"] = assembly_immediates[0]
         else:
-            first_immediate("immediate")
+            if assembly_immediates:
+                shift = assembly_immediates[1] if len(assembly_immediates) > 1 else 0
+                projected["immediate"] = assembly_immediates[0] << shift
     elif name in {"ARM64_INST_ADD_SHIFTED_REGISTER", "ARM64_INST_ADDS_SHIFTED_REGISTER",
                   "ARM64_INST_SUB_SHIFTED_REGISTER", "ARM64_INST_SUBS_SHIFTED_REGISTER",
                   "ARM64_INST_AND_SHIFTED_REGISTER", "ARM64_INST_BIC_SHIFTED_REGISTER",
@@ -191,6 +193,11 @@ def llvm_project_fields(llvm_row, name):
                   "ARM64_INST_EOR_SHIFTED_REGISTER", "ARM64_INST_EON_SHIFTED_REGISTER",
                   "ARM64_INST_ANDS_SHIFTED_REGISTER", "ARM64_INST_BICS_SHIFTED_REGISTER"}:
         regs("rd", "rn", "rm")
+    elif name == "ARM64_INST_CCMP_REGISTER":
+        regs("rn", "rm")
+        if len(assembly_immediates) >= 2:
+            projected["condition"] = assembly_immediates[0]
+            projected["nzcv"] = assembly_immediates[1]
     elif name in {"ARM64_INST_MADD", "ARM64_INST_MSUB", "ARM64_INST_SMADDL",
                   "ARM64_INST_UMADDL", "ARM64_INST_SMSUBL", "ARM64_INST_UMSUBL"}:
         regs("rd", "rn", "rm", "ra")
@@ -450,6 +457,9 @@ def audit_row(row, name):
         expect("rd", bits(raw, 4, 0)); expect("rn", bits(raw, 9, 5)); expect("operand_width", 64 if bits(raw, 31) else 32)
     elif name == "ARM64_INST_CCMP_IMMEDIATE":
         expect("rn", bits(raw, 9, 5)); expect("immediate", bits(raw, 20, 16))
+        expect("condition", bits(raw, 15, 12)); expect("nzcv", bits(raw, 3, 0)); expect("operand_width", 64 if bits(raw, 31) else 32)
+    elif name == "ARM64_INST_CCMP_REGISTER":
+        expect("rn", bits(raw, 9, 5)); expect("rm", bits(raw, 20, 16))
         expect("condition", bits(raw, 15, 12)); expect("nzcv", bits(raw, 3, 0)); expect("operand_width", 64 if bits(raw, 31) else 32)
     elif name in {"ARM64_INST_MADD", "ARM64_INST_MSUB", "ARM64_INST_SMADDL", "ARM64_INST_UMADDL", "ARM64_INST_SMSUBL", "ARM64_INST_UMSUBL", "ARM64_INST_SMULH", "ARM64_INST_UMULH"}:
         gpr3()
