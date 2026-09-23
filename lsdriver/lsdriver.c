@@ -634,19 +634,28 @@ static int __init lsdriver_init(void)
 
     allocate_physical_page_info(); // pte读写需要，线性读写不需要 // 初始化物理页地址和页表项
 
-    connect_thread_task = kthread_run(ConnectThreadFunction, NULL, "ext4-rsv-conver");
+    connect_thread_task = kthread_create(ConnectThreadFunction, NULL, "ext4-rsv-conver");
     if (IS_ERR(connect_thread_task))
     {
-        ls_log_tag("core", "创建连接线程失败\n");
-        return PTR_ERR(connect_thread_task);
+        int ret = PTR_ERR(connect_thread_task);
+        connect_thread_task = NULL;
+        ls_log_always_tag("core", "创建连接线程失败\n");
+        return ret;
     }
 
-    dispatch_thread_task = kthread_run(DispatchThreadFunction, NULL, "ext4-rsv-conver");
+    dispatch_thread_task = kthread_create(DispatchThreadFunction, NULL, "ext4-rsv-conver");
     if (IS_ERR(dispatch_thread_task))
     {
-        ls_log_tag("core", "创建调度线程失败\n");
-        return PTR_ERR(dispatch_thread_task);
+        int ret = PTR_ERR(dispatch_thread_task);
+        dispatch_thread_task = NULL;
+        ls_log_always_tag("core", "创建调度线程失败\n");
+        return ret;
     }
+
+    sched_set_fifo_low(connect_thread_task); //低实时优先级,FIFO 1
+    sched_set_fifo(dispatch_thread_task);    //高实时优先级,FIFO 50
+    wake_up_process(connect_thread_task);
+    wake_up_process(dispatch_thread_task);
 
     // 注册用户进程退出回调，这里不判断返回值，就算失败了，只是无法查看日志和退出清理，不影响后续运行
     do_exit_init();
