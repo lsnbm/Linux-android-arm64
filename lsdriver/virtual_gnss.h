@@ -12,7 +12,6 @@
        没有使用 binder_transaction_data_sg 的真实 ioctl 大小，SG 命令不会命中。
     5. lat_bits/lon_bits 分别读写；重复上报与回调并发时可能形成新纬度配旧经度的混合快照。
     6. 仅检查 Parcel 前 512 字节且 provider 长度限制为 64，复杂 Parcel 或较长 provider 可能漏检。
-    8. 部分解析路径使用直接的 uint64_t* 非对齐读取，依赖 ARM64 对非对齐访问的容忍，可能会崩溃
 
   说明：32 位 compat ioctl 按当前目标范围主动排除，不列为待修复项。
 */
@@ -23,6 +22,7 @@
 #include <linux/mutex.h>
 #include <linux/types.h>
 #include <linux/uaccess.h>
+#include "export_fun.h"
 #include "inline_hook_frame.h"
 #include "lsdriver_log.h"
 
@@ -47,7 +47,7 @@
     2. Android Binder 驱动通过 ioctl(BINDER_WRITE_READ) 收发 transaction，因此在 ioctl hook 中拦截 Binder write buffer
     3. 解析 BC_TRANSACTION/BC_REPLY/BC_TRANSACTION_SG/BC_REPLY_SG，复制 Parcel 数据到内核临时缓冲区
     4. 通过 interface token 和 Location Parcelable 布局识别位置回调，不依赖 current->comm 进程名
-    5. 用整数逻辑把 latitude_e7/longitude_e7 转成 IEEE754 double bit，修改 Parcel 后 copy_to_user 写回
+    5. 用整数逻辑把 latitude_e7/longitude_e7 转成 IEEE754 double bit，修改 Parcel 后 copy_to_user_inatomic_nofault 写回
 
 在 Android 系统中，定位数据的传输路径如下：
     GNSS HAL / network / fused provider 等位置源把定位结果上报给 system_server。
@@ -187,7 +187,7 @@ static bool vgnss_try_patch_location(char *buf, size_t probe_len, size_t start, 
 
     // 直接将计算好的 Double Bits 覆写回用户层，无需覆写整个 Parcel
     uint64_t patch_data[2] = {lat_bits, lon_bits};
-    return copy_to_user(u_base + pos, patch_data, sizeof(patch_data)) == 0;
+    return copy_to_user_inatomic_nofault(u_base + pos, patch_data, sizeof(patch_data)) == 0;
 }
 
 //  栈探针扫描，零堆内存分配 (Zero Alloc)
@@ -198,7 +198,7 @@ static void vgnss_inspect_parcel(char __user *u_buf, size_t size, uint64_t lat_b
     char stack_buf[VGNSS_SCAN_PROBE_SIZE];
     size_t probe_len = min_t(size_t, size, sizeof(stack_buf));
 
-    if (copy_from_user(stack_buf, u_buf, probe_len)) return;
+    if (copy_from_user_inatomic_nofault(stack_buf, u_buf, probe_len)) return;
 
     // 寻找 Token 头部
     for (size_t i = 0; i + VGNSS_TOKEN_BYTE_LEN <= probe_len; i += 4)
@@ -226,7 +226,7 @@ static inline void vgnss_process_write_buffer(const char __user *u_write_buf, si
     while (pos + sizeof(uint32_t) <= write_size)
     {
         uint32_t cmd;
-        if (__get_user(cmd, (uint32_t __user *)(u_write_buf + pos))) break;
+        if (copy_from_user_inatomic_nofault(&cmd, u_write_buf + pos, sizeof(cmd))) break;
 
         size_t payload_size = _IOC_SIZE(cmd);
         pos += sizeof(uint32_t);
@@ -236,7 +236,7 @@ static inline void vgnss_process_write_buffer(const char __user *u_write_buf, si
         if (cmd == VGNSS_BC_TRANSACTION || cmd == VGNSS_BC_REPLY || cmd == VGNSS_BC_TRANSACTION_SG || cmd == VGNSS_BC_REPLY_SG)
         {
             struct vgnss_binder_transaction_data tr;
-            if (payload_size >= sizeof(tr) && !copy_from_user(&tr, u_write_buf + pos, sizeof(tr)))
+            if (payload_size >= sizeof(tr) && !copy_from_user_inatomic_nofault(&tr, u_write_buf + pos, sizeof(tr)))
             {
                 vgnss_inspect_parcel((char __user *)(uintptr_t)tr.data.ptr.buffer, (size_t)tr.data_size, lat_bits, lon_bits);
             }
@@ -253,7 +253,7 @@ static inline void vgnss_handle_ioctl(unsigned int cmd, void __user *argp)
     if (unlikely(!smp_load_acquire(&vgps.has_fix))) return;
 
     struct vgnss_binder_write_read bwr;
-    if (copy_from_user(&bwr, argp, sizeof(bwr))) return;
+    if (copy_from_user_inatomic_nofault(&bwr, argp, sizeof(bwr))) return;
 
     if (!bwr.write_size || !bwr.write_buffer || bwr.write_size > (256 * 1024)) return;
 

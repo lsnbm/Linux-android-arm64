@@ -26,7 +26,7 @@
     1. inline_hook_install() 挂钩 __arm64_sys_sendto 或 __sys_sendto
     2. AOSP BitTube 使用 send() 写入本地 socket；arm64 Linux 上 send() 通常进入 sendto 路径，因此在 sendto hook 中拦截用户缓冲区
     3. 在 104 字节 ASensorEvent 中找到 gyro/gyro_uncalibrated
-    4. 修改 data[0]/data[1]/data[2] 后 copy_to_user 写回
+    4. 修改 data[0]/data[1]/data[2] 后 copy_to_user_inatomic_nofault 写回
 
 在 Android 系统中，传感器数据的传输路径如下：
     Sensor HAL（硬件抽象层） 从硬件获取到陀螺仪等数据。
@@ -216,7 +216,7 @@ static int vgyro_handle_sendto(struct pt_regs *regs, enum vgyro_sendto_arg_mode 
     while (processed < len)
     {
         size_t cur_chunk_len = min_t(size_t, len - processed, VGYRO_CHUNK_BYTES);
-        if (copy_from_user(chunk, ubuf + processed, cur_chunk_len)) break;
+        if (copy_from_user_inatomic_nofault(chunk, ubuf + processed, cur_chunk_len)) break;
 
         for (size_t off = 0; off + VGYRO_ASENSOR_EVENT_SIZE <= cur_chunk_len; off += VGYRO_ASENSOR_EVENT_SIZE)
         {
@@ -234,7 +234,7 @@ static int vgyro_handle_sendto(struct pt_regs *regs, enum vgyro_sendto_arg_mode 
             patch_data[2] = vgyro_float_bits_add(data[2], fz);
 
             // 精准覆写 12 字节到用户空间，避免回写整个 Buffer
-            if (!copy_to_user(ubuf + processed + off + VGYRO_ASENSOR_DATA_OFFSET, patch_data, sizeof(patch_data)))
+            if (!copy_to_user_inatomic_nofault(ubuf + processed + off + VGYRO_ASENSOR_DATA_OFFSET, patch_data, sizeof(patch_data)))
             {
                 patched++;
             }

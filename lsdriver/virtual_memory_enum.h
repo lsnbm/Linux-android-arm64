@@ -401,7 +401,7 @@ static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
     【第二阶段：反调试程序的多层保护】
 
     保护一：VMA 碎裂
-        反调试程序调用 mprotect() Hook 游戏函数，内核被迫将原本一整块 RX 代码段
+        反调试程序调用 mprotect() Hook 主程序自身函数，内核被迫将原本一整块 RX 代码段
         "劈碎"成几十甚至上百个细碎 VMA，部分页被改为 RWX 混合权限，
         彻底打乱原本连贯的天然区段。
 
