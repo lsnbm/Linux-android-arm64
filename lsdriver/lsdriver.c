@@ -40,6 +40,8 @@ volatile 约束，这三个指针的每次读写都按易变访问处理，
 适合在线程循环中持续轮询生命周期状态。
 不约束指针指向内存地址
 
+volatile struct task_struct * ls_process_task = 0;错误：指向 是volatile 数据 的指针， 赋值给普通指针会报错，这里是指向结构体数据
+struct task_struct *volatile ls_process_task = ...; // 正确：指针变量本身是 volatile
 */
 struct task_struct *volatile connect_thread_task = 0;
 struct task_struct *volatile dispatch_thread_task = 0;
@@ -173,6 +175,7 @@ static int DispatchThreadFunction(void *data)
 static int ConnectThreadFunction(void *data)
 {
     struct task_struct *task;
+    struct task_struct *old_task;
     struct mm_struct *mm = NULL;
     struct page **pages = NULL;
     int num_pages;
@@ -190,7 +193,8 @@ static int ConnectThreadFunction(void *data)
             // 这次的task是旧task跳过
             if (task == ls_process_task) continue;
             // 这次的task启动时间小于旧task跳过
-            if (ls_process_task && task->start_time <= ls_process_task->start_time) continue;
+            old_task = ls_process_task;
+            if (old_task && task->start_time <= old_task->start_time) continue;
 
             // 获取进程的内存描述符
             mm = get_task_mm(task);
@@ -235,7 +239,8 @@ static int ConnectThreadFunction(void *data)
                 ls_log_tag("core", "vmap 失败\n");
                 goto out_put_pages;
             }
-            if (ls_process_task) send_sig(SIGKILL, ls_process_task, 0); // 杀死旧的task
+            old_task = ls_process_task;
+            if (old_task && !(READ_ONCE(old_task->flags) & PF_EXITING)) send_sig(SIGKILL, old_task, 0); // 杀死旧的task
 
             // 成功 get_user_pages_remote 持有页面引用，只需释放 mm
             ls_process_task = task;        // 保存用户进程指针

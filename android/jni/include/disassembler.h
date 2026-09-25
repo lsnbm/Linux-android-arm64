@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <vector>
 #include <string>
 #include <cstdint>
@@ -239,37 +240,16 @@ namespace Disasm
                 return results;
             }
 
-            // 输出反汇编结果
             if (logInstructions) LS_LOGI_TAG("Disassembler", "反汇编 %zu 条指令", count);
-            for (size_t i = 0; i < count; i++)
-            {
-                if (!logInstructions) continue;
-                // 原始字节
-                char bytesStr[48] = {0};
-                int pos = 0;
-                for (size_t j = 0; j < insn[i].size; j++) pos += snprintf(bytesStr + pos, sizeof(bytesStr) - pos, "%02X ", insn[i].bytes[j]);
-                if (pos > 0) bytesStr[pos - 1] = '\0';
-
-                // 大写化
-                char mn[32] = {0}, op[160] = {0};
-                strncpy(mn, insn[i].mnemonic, sizeof(mn) - 1);
-                strncpy(op, insn[i].op_str, sizeof(op) - 1);
-                for (char *p = mn; *p; ++p) *p = std::toupper(static_cast<unsigned char>(*p));
-                for (char *p = op; *p; ++p) *p = std::toupper(static_cast<unsigned char>(*p));
-
-                LS_LOGI_TAG("Disassembler", "0x%llX: %-12s %-7s %s", (unsigned long long)insn[i].address, bytesStr, mn, op);
-            }
-
-            // 填充结果
             results.reserve(count);
             for (size_t i = 0; i < count; i++)
             {
-                DisasmLine line;
+                DisasmLine line{};
                 line.valid = true;
                 line.address = insn[i].address;
                 line.size = insn[i].size;
 
-                size_t copyLen = (insn[i].size < sizeof(line.bytes)) ? insn[i].size : sizeof(line.bytes);
+                const size_t copyLen = std::min(static_cast<size_t>(insn[i].size), sizeof(line.bytes));
                 memcpy(line.bytes, insn[i].bytes, copyLen);
 
                 strncpy(line.mnemonic, insn[i].mnemonic, sizeof(line.mnemonic) - 1);
@@ -277,6 +257,21 @@ namespace Disasm
 
                 for (char *p = line.mnemonic; *p; ++p) *p = std::toupper(static_cast<unsigned char>(*p));
                 for (char *p = line.op_str; *p; ++p) *p = std::toupper(static_cast<unsigned char>(*p));
+
+                if (logInstructions)
+                {
+                    char bytesStr[48] = {};
+                    int pos = 0;
+                    const size_t byteCount = std::min(static_cast<size_t>(insn[i].size), (sizeof(bytesStr) - 1) / 3);
+                    for (size_t j = 0; j < byteCount; ++j)
+                    {
+                        const int written = snprintf(bytesStr + pos, sizeof(bytesStr) - static_cast<size_t>(pos), "%02X ", insn[i].bytes[j]);
+                        if (written <= 0) break;
+                        pos += std::min(written, static_cast<int>(sizeof(bytesStr) - 1 - static_cast<size_t>(pos)));
+                    }
+                    if (pos > 0) bytesStr[pos - 1] = '\0';
+                    LS_LOGI_TAG("Disassembler", "0x%llX: %-12s %-7s %s", (unsigned long long)line.address, bytesStr, line.mnemonic, line.op_str);
+                }
 
                 results.push_back(line);
             }

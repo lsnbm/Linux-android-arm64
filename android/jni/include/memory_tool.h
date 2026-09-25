@@ -1332,16 +1332,6 @@ private:
         finishFile(file);
     }
 
-    static void appendSnapshotSpan(std::vector<SnapshotSpan> &spans, uintptr_t address, std::uint64_t fileOffset, size_t size)
-    {
-        if (!spans.empty() && spans.back().address + spans.back().size == address && spans.back().fileOffset + spans.back().size == fileOffset)
-        {
-            spans.back().size += size;
-            return;
-        }
-        spans.push_back({address, fileOffset, size});
-    }
-
     template <typename T> static size_t countValidValues(const uint8_t *buffer, size_t size)
     {
         if constexpr (!std::is_floating_point_v<T>) return size / sizeof(T);
@@ -1356,7 +1346,7 @@ private:
         return count;
     }
 
-    template <typename T> void scanFirstUnknown(Types::DataType dataType)
+    template <typename T> void scanFirstUnknown()
     {
         auto regions = normalizeScanRegions(dr->GetScanRegions(), sizeof(T));
         auto snapshot = createCandidateFile();
@@ -1370,7 +1360,10 @@ private:
                               const size_t usable = size / sizeof(T) * sizeof(T);
                               if (usable == 0) return;
                               if (fwrite(buffer, 1, usable, snapshot.get()) != usable) throw std::runtime_error("写入 Unknown 快照失败");
-                              appendSnapshotSpan(spans, address, fileOffset, usable);
+                              if (!spans.empty() && spans.back().address + spans.back().size == address && spans.back().fileOffset + spans.back().size == fileOffset)
+                                  spans.back().size += usable;
+                              else
+                                  spans.push_back({address, fileOffset, usable});
                               fileOffset += usable;
                               count += countValidValues<T>(buffer, usable);
                               liveCount_ = count;
@@ -1380,7 +1373,7 @@ private:
         publishSnapshot(std::move(snapshot), std::move(spans), count);
     }
 
-    template <typename T> void scanFirst(T target, Types::DataType dataType, Types::FuzzyMode mode, T rangeMax)
+    template <typename T> void scanFirst(T target, Types::FuzzyMode mode, T rangeMax)
     {
         auto regions = normalizeScanRegions(dr->GetScanRegions(), sizeof(T));
         auto output = createCandidateFile();
@@ -1395,10 +1388,6 @@ private:
                               {
                                   T value{};
                                   std::memcpy(&value, buffer + offset, sizeof(value));
-                                  if constexpr (std::is_floating_point_v<T>)
-                                  {
-                                      if (!MemUtils::IsValidFloat(value)) continue;
-                                  }
                                   if (!MemUtils::Compare(value, target, mode, T{}, rangeMax)) continue;
                                   appendCandidate(output.get(), outputBuffer, {address + offset, storeValue(value)});
                                   liveCount_ = ++count;
@@ -1489,12 +1478,7 @@ private:
                 T value{};
                 const size_t offset = static_cast<size_t>(record.address - pageBase);
                 const bool readable = offset + sizeof(T) <= page.size() && pageReadable ? (std::memcpy(&value, page.data() + offset, sizeof(value)), true) : scanReadExact(record.address, &value, sizeof(value));
-                bool valid = readable;
-                if constexpr (std::is_floating_point_v<T>)
-                {
-                    valid = valid && MemUtils::IsValidFloat(value);
-                }
-                if (valid && MemUtils::Compare(value, target, mode, loadValue<T>(record.value), rangeMax))
+                if (readable && MemUtils::Compare(value, target, mode, loadValue<T>(record.value), rangeMax))
                 {
                     appendCandidate(output.get(), outputBuffer, {record.address, storeValue(value)});
                     liveCount_ = ++count;
@@ -1623,6 +1607,7 @@ private:
         outputBuffer.reserve(4096);
         std::vector<CandidateRecord> pageCandidates;
         std::vector<uint8_t> window(Config::Constants::SCAN_BUFFER + needle.size() - 1);
+        std::vector<uint8_t> fallback;
         size_t processed = 0;
         size_t count = 0;
 
@@ -1636,8 +1621,8 @@ private:
                 bool matches = offset + needle.size() <= window.size() && windowReadable && std::memcmp(window.data() + offset, needle.data(), needle.size()) == 0;
                 if (!windowReadable)
                 {
-                    std::vector<uint8_t> value(needle.size());
-                    matches = scanReadExact(record.address, value.data(), value.size()) && std::memcmp(value.data(), needle.data(), needle.size()) == 0;
+                    fallback.resize(needle.size());
+                    matches = scanReadExact(record.address, fallback.data(), fallback.size()) && std::memcmp(fallback.data(), needle.data(), needle.size()) == 0;
                 }
                 if (matches)
                 {
@@ -1668,7 +1653,7 @@ private:
         publishCandidates(std::move(output), count, Types::FuzzyMode::String);
     }
 
-    template <typename T> void runScan(T target, Types::DataType dataType, Types::FuzzyMode mode, bool isFirst, T rangeMax)
+    template <typename T> void runScan(T target, Types::FuzzyMode mode, bool isFirst, T rangeMax)
     {
         std::lock_guard operationLock(operationMutex_);
         ScanRunGuard guard{scanning_, progress_};
@@ -1677,8 +1662,8 @@ private:
         {
             if (isFirst)
             {
-                if (mode == Types::FuzzyMode::Unknown) scanFirstUnknown<T>(dataType);
-                else scanFirst<T>(target, dataType, mode, rangeMax);
+                if (mode == Types::FuzzyMode::Unknown) scanFirstUnknown<T>();
+                else scanFirst<T>(target, mode, rangeMax);
             }
             else
             {
@@ -1841,7 +1826,7 @@ public:
         bool accepted = pid > 0 && pid == dr->GetGlobalPid() && dataType == actualType && mode != Types::FuzzyMode::String && (mode != Types::FuzzyMode::Pointer || dataType == Types::DataType::I64);
         if (isFirst)
         {
-            accepted = accepted && mode != Types::FuzzyMode::Increased && mode != Types::FuzzyMode::Decreased && mode != Types::FuzzyMode::Changed && mode != Types::FuzzyMode::Unchanged;
+            accepted = accepted && !(mode >= Types::FuzzyMode::Increased && mode <= Types::FuzzyMode::Unchanged);
         }
         else
         {
@@ -1867,7 +1852,7 @@ public:
         lock.unlock();
         try
         {
-            Config::IoThreadPool().detach_task([this, target, dataType, mode, isFirst, rangeMax] { runScan(target, dataType, mode, isFirst, rangeMax); });
+            Config::IoThreadPool().detach_task([this, target, mode, isFirst, rangeMax] { runScan(target, mode, isFirst, rangeMax); });
         }
         catch (...)
         {
@@ -1968,17 +1953,6 @@ private:
         return std::ranges::find_if(items_, [addr](const auto &item) { return item.address == addr; });
     }
 
-    static std::optional<uintptr_t> offsetAddress(uintptr_t address, uintptr_t offset, bool negative)
-    {
-        if (negative)
-        {
-            if (address < offset) return std::nullopt;
-            return address - offset;
-        }
-        if (address > std::numeric_limits<uintptr_t>::max() - offset) return std::nullopt;
-        return address + offset;
-    }
-
     static std::string readValue(const Item &item)
     {
         if (item.kind == Types::SavedValueKind::Pointer) return MemUtils::ReadAsPointerString(item.address);
@@ -2070,8 +2044,7 @@ public:
             if (saved == items_.end()) return false;
             item = *saved;
         }
-        const bool written = writeValue(item.address, item.type, item.kind, value);
-        if (!written) return false;
+        if (!writeValue(item.address, item.type, item.kind, value)) return false;
         std::lock_guard lock(mutex_);
         if (auto locked = find(addr); locked != locks_.end()) locked->value = std::string(value);
         return true;
@@ -2149,12 +2122,12 @@ public:
         std::list<LockItem> shiftedLocks;
         for (const auto &item : items_)
         {
-            const auto address = offsetAddress(item.address, offset, negative);
-            if (!address || std::ranges::any_of(shifted, [&](const auto &saved) { return saved.address == *address; })) continue;
+            if (negative ? item.address < offset : item.address > std::numeric_limits<uintptr_t>::max() - offset) continue;
+            const uintptr_t address = negative ? item.address - offset : item.address + offset;
             Item shiftedItem = item;
-            shiftedItem.address = *address;
+            shiftedItem.address = address;
             shifted.push_back(shiftedItem);
-            if (find(item.address) != locks_.end()) shiftedLocks.push_back({*address, item.type, item.kind, readValue(shiftedItem)});
+            if (find(item.address) != locks_.end()) shiftedLocks.push_back({address, item.type, item.kind, readValue(shiftedItem)});
         }
         items_.swap(shifted);
         locks_.swap(shiftedLocks);
@@ -2255,12 +2228,6 @@ public:
         return disasmBusy_;
     }
 
-    void pollDisasm()
-    {
-        if (disasmFuture_.valid() && disasmFuture_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) waitDisasm();
-    }
-
-    // 切换浏览格式并触发刷新。
     void waitDisasm()
     {
         if (!disasmFuture_.valid()) return;
@@ -2276,10 +2243,9 @@ public:
         disasmBusy_ = false;
     }
 
-    void setFormat(Types::ViewFormat fmt)
+    void pollDisasm()
     {
-        format_ = fmt;
-        refresh();
+        if (disasmFuture_.valid() && disasmFuture_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) waitDisasm();
     }
 
     void clear()
@@ -2290,15 +2256,6 @@ public:
         readStatus_ = 0;
         std::ranges::fill(buffer_, 0);
         disasmCache_.clear();
-    }
-
-    // 打开指定地址并初始化浏览状态。
-    void open(uintptr_t addr, std::optional<Types::ViewFormat> format = std::nullopt)
-    {
-        if (format.has_value()) format_ = *format;
-        if (format_ == Types::ViewFormat::Disasm) addr &= ~static_cast<uintptr_t>(3); // 强制 4 字节对齐
-        base_ = addr;
-        refresh();
     }
 
     // 重新读取并刷新当前浏览缓存。
@@ -2329,12 +2286,10 @@ public:
             const size_t disasmSize = std::min(static_cast<size_t>(readBytes), buffer_.size()) & ~static_cast<size_t>(3);
             if (disasmSize > 0)
             {
-                auto base = base_;
-                auto bytes = buffer_;
                 try
                 {
                     disasmFuture_ = Config::CpuThreadPool().submit_task(
-                        [base, bytes = std::move(bytes), disasmSize]() mutable
+                        [base = base_, bytes = buffer_, disasmSize]
                         {
                             Disasm::Disassembler disasm;
                             if (!disasm.IsValid()) return std::vector<Disasm::DisasmLine>{};
@@ -2353,6 +2308,20 @@ public:
             disasmBusy_ = false;
             disasmCache_.clear();
         }
+    }
+
+    void setFormat(Types::ViewFormat fmt)
+    {
+        format_ = fmt;
+        refresh();
+    }
+
+    void open(uintptr_t addr, std::optional<Types::ViewFormat> format = std::nullopt)
+    {
+        if (format.has_value()) format_ = *format;
+        if (format_ == Types::ViewFormat::Disasm) addr &= ~static_cast<uintptr_t>(3);
+        base_ = addr;
+        refresh();
     }
 
     // 按指定方向应用无符号字节偏移。
@@ -2870,30 +2839,27 @@ private:
     {
         if (input.empty() || pointers_.empty()) return;
 
-        uintptr_t min_addr = regions_.front().first;
-        uintptr_t sub = regions_.back().second - min_addr;
-        std::vector<PtrData *> result;
+        const uintptr_t min_addr = regions_.front().first;
+        const uintptr_t sub = regions_.back().second - min_addr;
+        if (use_limit && limit == 0) return;
+        size_t matched = 0;
 
         for (auto &pd : pointers_)
         {
-            uintptr_t v = MemUtils::Normalize(pd.value);
+            const uintptr_t v = MemUtils::Normalize(pd.value);
             if ((v - min_addr) > sub) continue;
 
             const auto match = std::lower_bound(input.begin(), input.end(), v, [](const PtrDir &node, uintptr_t address) { return node.address < address; });
             if (match == input.end() || match->address - v > offset) continue;
 
-            result.push_back(&pd);
+            out.push_back(&pd);
+            if (use_limit && ++matched >= limit) break;
         }
-
-        size_t lim = use_limit ? std::min(limit, result.size()) : result.size();
-        out.reserve(lim);
-        for (size_t i = 0; i < lim; i++) out.push_back(result[i]);
     }
 
     // 通过活动区间同时匹配模块、手动和数组基址。
     void filter_to_ranges(std::vector<std::vector<PtrDir>> &dirs, std::vector<PtrRange> &ranges, std::vector<PtrData *> &curr, int level, const std::vector<BaseRange> &bases)
     {
-        std::unordered_set<PtrData *> matched;
         std::set<size_t> active;
         std::priority_queue<std::pair<uintptr_t, size_t>, std::vector<std::pair<uintptr_t, size_t>>, std::greater<>> expiry;
         std::map<size_t, PtrRange> found;
@@ -2914,8 +2880,12 @@ private:
                 expiry.pop();
             }
 
-            if (active.empty()) continue;
-            matched.insert(pointer);
+            const uintptr_t value = MemUtils::Normalize(pointer->value);
+            if (active.empty())
+            {
+                dirs[level].emplace_back(address, value, 0u, 1u);
+                continue;
+            }
             for (const size_t baseIndex : active)
             {
                 auto [entry, inserted] = found.try_emplace(baseIndex);
@@ -2924,22 +2894,11 @@ private:
                     entry->second.level = level;
                     entry->second.base = bases[baseIndex];
                 }
-                entry->second.results.emplace_back(address, MemUtils::Normalize(pointer->value), 0u, 1u);
+                entry->second.results.emplace_back(address, value, 0u, 1u);
             }
         }
 
         for (auto &[baseIndex, range] : found) ranges.push_back(std::move(range));
-
-        push_unmatched(dirs, matched, curr, level);
-    }
-
-    // 把未匹配项追加到下一层处理集合。
-    void push_unmatched(std::vector<std::vector<PtrDir>> &dirs, std::unordered_set<PtrData *> &matched, std::vector<PtrData *> &curr, int level)
-    {
-        for (auto *p : curr)
-        {
-            if (matched.find(p) == matched.end()) dirs[level].emplace_back(MemUtils::Normalize(p->address), MemUtils::Normalize(p->value), 0u, 1u);
-        }
     }
 
     // 回填父子区间索引关系。
@@ -3390,7 +3349,6 @@ private:
             bool wroteResults = false;
 
             dirs[0].emplace_back(target, 0, 0, 1);
-            std::sort(dirs[0].begin(), dirs[0].end(), [](const PtrDir &a, const PtrDir &b) { return a.address < b.address; });
             LS_LOGI_TAG_FMT("Pointer", "Level 0 初始化完成，目标地址数量: {}", dirs[0].size());
 
             for (int level = 1; level <= depth; level++)

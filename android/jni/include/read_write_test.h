@@ -65,8 +65,7 @@ inline int RunReadWriteTest()
     std::vector<int> randomValues(ARRAY_CAPACITY, 0);
     std::vector<int> readValues(ARRAY_CAPACITY, 0);
     std::vector<int> writeValues(ARRAY_CAPACITY, 0);
-    std::vector<int> readByteCounts(ARRAY_CAPACITY, 0);
-    std::vector<int> writeByteCounts(ARRAY_CAPACITY, 0);
+    std::vector<bool> transferFailed(ARRAY_CAPACITY);
 
     std::mt19937 rng(0xC0FFEEu);
     std::uniform_int_distribution<int> dist(-0x3FFFFFFF, 0x3FFFFFFF);
@@ -125,43 +124,31 @@ inline int RunReadWriteTest()
         {
             fillRandomValues(randomValues);
             resetTestArray(randomValues);
-            std::fill(readByteCounts.begin(), readByteCounts.end(), 0);
             r.readFailCount = 0;
             size_t readTransferred = 0;
 
             auto t0 = std::chrono::high_resolution_clock::now();
+            int readBytes = 0;
             if (largeBlock)
             {
-                int readBytes = dr->Read(testAddr, readValues.data(), ARRAY_BYTES);
-                readByteCounts[0] = readBytes;
+                readBytes = dr->Read(testAddr, readValues.data(), ARRAY_BYTES);
                 if (readBytes > 0) readTransferred += static_cast<size_t>(readBytes);
             }
             else for (int i = 0; i < TEST_COUNT; ++i)
             {
                 uint64_t currentAddr = testAddr + static_cast<uint64_t>(i * sizeof(int));
-                int readBytes = dr->Read(currentAddr, &readValues[static_cast<size_t>(i)], sizeof(int));
-                readByteCounts[static_cast<size_t>(i)] = readBytes;
+                readBytes = dr->Read(currentAddr, &readValues[static_cast<size_t>(i)], sizeof(int));
                 if (readBytes > 0) readTransferred += static_cast<size_t>(readBytes);
+                transferFailed[static_cast<size_t>(i)] = readBytes != static_cast<int>(sizeof(int));
             }
             auto t1 = std::chrono::high_resolution_clock::now();
             auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
 
-            const bool readSizeOk = largeBlock ? readByteCounts[0] == static_cast<int>(ARRAY_BYTES) : true;
-            if (!largeBlock)
+            for (size_t i = 0; i < ARRAY_CAPACITY; ++i)
             {
-                for (size_t i = 0; i < ARRAY_CAPACITY; ++i)
-                {
-                    if (readByteCounts[i] != static_cast<int>(sizeof(int)) || readValues[i] != randomValues[i]) r.readFailCount++;
-                }
+                if ((!largeBlock && transferFailed[i]) || readValues[i] != randomValues[i]) ++r.readFailCount;
             }
-            else
-            {
-                for (size_t i = 0; i < ARRAY_CAPACITY; ++i)
-                {
-                    if (readValues[i] != randomValues[i]) r.readFailCount++;
-                }
-                if (!readSizeOk && r.readFailCount == 0) r.readFailCount = 1;
-            }
+            if (largeBlock && readBytes != static_cast<int>(ARRAY_BYTES) && r.readFailCount == 0) r.readFailCount = 1;
 
             double totalS = ns / 1e9;
             r.readTotalMs = ns / 1e6;
@@ -173,43 +160,31 @@ inline int RunReadWriteTest()
         {
             resetTestArray(randomValues);
             fillRandomValues(writeValues);
-            std::fill(writeByteCounts.begin(), writeByteCounts.end(), 0);
             r.writeFailCount = 0;
             size_t writeTransferred = 0;
 
             auto t0 = std::chrono::high_resolution_clock::now();
+            int writeBytes = 0;
             if (largeBlock)
             {
-                int writeBytes = dr->Write(testAddr, writeValues.data(), ARRAY_BYTES);
-                writeByteCounts[0] = writeBytes;
+                writeBytes = dr->Write(testAddr, writeValues.data(), ARRAY_BYTES);
                 if (writeBytes > 0) writeTransferred += static_cast<size_t>(writeBytes);
             }
             else for (int i = 0; i < TEST_COUNT; ++i)
             {
                 uint64_t currentAddr = testAddr + static_cast<uint64_t>(i * sizeof(int));
-                int writeBytes = dr->Write(currentAddr, &writeValues[static_cast<size_t>(i)], sizeof(int));
-                writeByteCounts[static_cast<size_t>(i)] = writeBytes;
+                writeBytes = dr->Write(currentAddr, &writeValues[static_cast<size_t>(i)], sizeof(int));
                 if (writeBytes > 0) writeTransferred += static_cast<size_t>(writeBytes);
+                transferFailed[static_cast<size_t>(i)] = writeBytes != static_cast<int>(sizeof(int));
             }
             auto t1 = std::chrono::high_resolution_clock::now();
             auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
 
-            const bool writeSizeOk = largeBlock ? writeByteCounts[0] == static_cast<int>(ARRAY_BYTES) : true;
-            if (!largeBlock)
+            for (size_t i = 0; i < ARRAY_CAPACITY; ++i)
             {
-                for (size_t i = 0; i < ARRAY_CAPACITY; ++i)
-                {
-                    if (writeByteCounts[i] != static_cast<int>(sizeof(int)) || testArray[i] != writeValues[i]) r.writeFailCount++;
-                }
+                if ((!largeBlock && transferFailed[i]) || testArray[i] != writeValues[i]) ++r.writeFailCount;
             }
-            else
-            {
-                for (size_t i = 0; i < ARRAY_CAPACITY; ++i)
-                {
-                    if (testArray[i] != writeValues[i]) r.writeFailCount++;
-                }
-                if (!writeSizeOk && r.writeFailCount == 0) r.writeFailCount = 1;
-            }
+            if (largeBlock && writeBytes != static_cast<int>(ARRAY_BYTES) && r.writeFailCount == 0) r.writeFailCount = 1;
 
             double totalS = ns / 1e9;
             r.writeTotalMs = ns / 1e6;
