@@ -214,15 +214,13 @@ int hide_kgsl_install(pid_t pid)
         ret = inline_hook_install(g_kgsl_hooks);
         if (ret)
         {
-            ls_log_tag("kgsl_hide", "inline hook install failed: %d\n", ret);
+            ls_log_always_tag("kgsl_hide", "inline hook install failed: %d\n", ret);
             goto out_unlock;
         }
-        ls_log_tag("kgsl_hide", "inline hook installed\n");
     }
 
     // 先安装 hook，再写隐藏表，避免表里有 PID 但拦截点没生效。
     WRITE_ONCE(g_hide_kgsl_pids[empty], pid);
-    ls_log_tag("kgsl_hide", "hidden PID %d\n", pid);
 
 out_unlock:
     mutex_unlock(&g_hide_kgsl_lock);

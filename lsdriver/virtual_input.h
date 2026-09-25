@@ -262,7 +262,7 @@ static inline int v_touch_init(int request_virtual_slots, int *max_x, int *max_y
     struct class *input_class = (struct class *)generic_kallsyms_lookup_name("input_class");
     if (!input_class)
     {
-        ls_log_tag("vtouch", "input_class 查找失败\n");
+        ls_log_always_tag("vtouch", "input_class 查找失败\n");
         return -EFAULT;
     }
 
@@ -270,7 +270,7 @@ static inline int v_touch_init(int request_virtual_slots, int *max_x, int *max_y
     class_for_each_device(input_class, NULL, &found, match_touchscreen);
     if (!found)
     {
-        ls_log_tag("vtouch", "未找到触摸屏设备\n");
+        ls_log_always_tag("vtouch", "未找到触摸屏设备\n");
         return -ENODEV;
     }
 
@@ -280,7 +280,7 @@ static inline int v_touch_init(int request_virtual_slots, int *max_x, int *max_y
     ret = hijack_init_slots(found);
     if (ret)
     {
-        ls_log_tag("vtouch", "MT 劫持失败\n");
+        ls_log_always_tag("vtouch", "MT 劫持失败\n");
         put_device(&found->dev);
         vt.dev = NULL;
         return ret;

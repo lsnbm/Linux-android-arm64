@@ -28,16 +28,6 @@ static DEFINE_MUTEX(g_stepbp_mutex);
 static bool g_stepbp_stopping;
 static unsigned long g_stepbp_generation;
 
-#define STEPBP_LOG_LIMITED(counter, limit, fmt, ...)                                            \
-    do                                                                                          \
-    {                                                                                           \
-        if (atomic_inc_return(&(counter)) <= (limit)) ls_log_tag("stepbp", fmt, ##__VA_ARGS__); \
-    } while (0)
-
-static atomic_t g_stepbp_log_enable = ATOMIC_INIT(0);
-static atomic_t g_stepbp_log_switch = ATOMIC_INIT(0);
-static atomic_t g_stepbp_log_syscall = ATOMIC_INIT(0);
-static atomic_t g_stepbp_log_hit = ATOMIC_INIT(0);
 static atomic_t g_stepbp_returns_inflight = ATOMIC_INIT(0);
 static DECLARE_WAIT_QUEUE_HEAD(g_stepbp_return_wait);
 
@@ -203,7 +193,6 @@ static int work_trampoline_stepbp_syscall_trace_exit(struct pt_regs *hook_regs)
     struct pt_regs *regs;
     struct break_point *info;
     bool target_task;
-    bool deferred = false;
 
     if (!hook_regs) return 0;
 
@@ -225,11 +214,9 @@ static int work_trampoline_stepbp_syscall_trace_exit(struct pt_regs *hook_regs)
         hook_regs->regs[30] = (unsigned long)ret_trampoline_stepbp_syscall_trace_exit;
         stepbp_set_regs_single_step(regs);
         clear_thread_flag(TIF_SINGLESTEP);
-        deferred = true;
     }
     spin_unlock_irqrestore(&g_stepbp_lock, flags);
 
-    if (deferred) STEPBP_LOG_LIMITED(g_stepbp_log_syscall, 2, "syscall_exit defer single-step restore pid=%d tgid=%d\n", current->pid, current->tgid);
     return 0;
 }
 
@@ -255,7 +242,6 @@ static int work_trampoline_stepbp_switch(struct pt_regs *hook_regs)
     spin_unlock_irqrestore(&g_stepbp_lock, flags);
 
     if (target_tgid) stepbp_apply_task_single_step(next, enable);
-    if (enable) STEPBP_LOG_LIMITED(g_stepbp_log_switch, 4, "switch arm target_tgid=%d next pid=%d tgid=%d comm=%s\n", target_tgid, next->pid, next->tgid, next->comm);
 
     return 0;
 }
@@ -271,13 +257,11 @@ __attribute__((naked, used)) void ret_trampoline_stepbp_call_step_hook(void)
 
 static int __attribute__((used, __noinline__)) stepbp_finish_call_step_hook(int native_result, struct stepbp_return_frame *frame)
 {
-    size_t hit_slot = 0;
     int result = native_result;
     unsigned long flags;
     struct bp_point *hit_point = NULL;
     struct break_point *info;
     void (*hit_callback)(void *regs, void *fp_regs, void *hit_point) = NULL;
-    uint64_t hit_addr = 0;
     unsigned long hit_generation = 0;
     bool generation_matches;
     bool target_task = false;
@@ -297,9 +281,7 @@ static int __attribute__((used, __noinline__)) stepbp_finish_call_step_hook(int 
             hit_point = bp_info_find_point_by_pc_for_task(info, regs->pc, current);
             if (hit_point)
             {
-                hit_slot = hit_point - info->points;
                 hit_callback = READ_ONCE(hit_point->on_hit);
-                hit_addr = READ_ONCE(hit_point->hit_addr);
                 hit_generation = g_stepbp_generation;
             }
         }
@@ -313,7 +295,6 @@ static int __attribute__((used, __noinline__)) stepbp_finish_call_step_hook(int 
         spin_lock_irqsave(&g_stepbp_hit_lock, flags);
         if (!READ_ONCE(g_stepbp_stopping) && READ_ONCE(g_stepbp_generation) == hit_generation)
         {
-            STEPBP_LOG_LIMITED(g_stepbp_log_hit, 8, "hit slot=%zu pid=%d tgid=%d pc=0x%llx hit_addr=0x%llx record_count=%d\n", hit_slot, current->pid, current->tgid, (unsigned long long)regs->pc, (unsigned long long)hit_addr, READ_ONCE(hit_point->record_count));
             struct fp_regs fp_regs __attribute__((__uninitialized__));
             read_all_q_regs(&fp_regs);
             hit_callback(regs, &fp_regs, hit_point);
@@ -380,21 +361,6 @@ static struct hook_entry g_stepbp_switch_hook[] = {
     HOOK_ENTRY("__switch_to", work_trampoline_stepbp_switch),
 };
 
-static void stepbp_dump_hook_symbols(void)
-{
-    ls_log_tag("stepbp", "patch_text=0x%llx\n", (unsigned long long)fn_aarch64_insn_patch_text);
-    for (int i = 0; i < (int)(sizeof(g_stepbp_required_hooks) / sizeof(g_stepbp_required_hooks[0])); i++)
-    {
-        unsigned long addr = generic_kallsyms_lookup_name(g_stepbp_required_hooks[i].target_sym);
-        ls_log_tag("stepbp", "required symbol %s=0x%lx\n", g_stepbp_required_hooks[i].target_sym, addr);
-    }
-
-    for (int i = 0; i < (int)(sizeof(g_stepbp_switch_hook) / sizeof(g_stepbp_switch_hook[0])); i++)
-    {
-        unsigned long addr = generic_kallsyms_lookup_name(g_stepbp_switch_hook[i].target_sym);
-        ls_log_tag("stepbp", "optional symbol %s=0x%lx\n", g_stepbp_switch_hook[i].target_sym, addr);
-    }
-}
 static int stepbp_install_required_hooks(void)
 {
     int count = sizeof(g_stepbp_required_hooks) / sizeof(g_stepbp_required_hooks[0]);
@@ -404,12 +370,11 @@ static int stepbp_install_required_hooks(void)
         int ret = hook_entry_install(&g_stepbp_required_hooks[i]);
         if (ret)
         {
-            ls_log_tag("stepbp", "required hook failed index=%d symbol=%s status=%d target=0x%llx patch_text=0x%llx\n", i, g_stepbp_required_hooks[i].target_sym, ret, (unsigned long long)g_stepbp_required_hooks[i].target_addr, (unsigned long long)fn_aarch64_insn_patch_text);
+            ls_log_always_tag("stepbp", "required hook failed index=%d symbol=%s status=%d target=0x%llx patch_text=0x%llx\n", i, g_stepbp_required_hooks[i].target_sym, ret, (unsigned long long)g_stepbp_required_hooks[i].target_addr, (unsigned long long)fn_aarch64_insn_patch_text);
             while (--i >= 0) hook_entry_remove(&g_stepbp_required_hooks[i]);
             return ret;
         }
 
-        ls_log_tag("stepbp", "required hook ok index=%d symbol=%s target=0x%llx\n", i, g_stepbp_required_hooks[i].target_sym, (unsigned long long)g_stepbp_required_hooks[i].target_addr);
     }
 
     return 0;
@@ -425,11 +390,10 @@ static void stepbp_install_optional_switch_hook(void)
     int status = inline_hook_install_count(g_stepbp_switch_hook, sizeof(g_stepbp_switch_hook) / sizeof(g_stepbp_switch_hook[0]));
     if (status)
     {
-        ls_log_tag("stepbp", "optional switch hook skipped status=%d target=0x%llx\n", status, (unsigned long long)g_stepbp_switch_hook[0].target_addr);
+        ls_log_always_tag("stepbp", "optional switch hook skipped status=%d target=0x%llx\n", status, (unsigned long long)g_stepbp_switch_hook[0].target_addr);
         return;
     }
 
-    ls_log_tag("stepbp", "optional switch hook ok target=0x%llx\n", (unsigned long long)g_stepbp_switch_hook[0].target_addr);
 }
 
 // 调用方持有 g_stepbp_mutex；先清理目标线程保存现场，再移除 hook。
@@ -476,23 +440,18 @@ static inline int start_stepbp_monitor(struct break_point *info)
     first_point = bp_info_find_configured_scoped_type(info, BP_BREAKPOINT_X);
     if (!first_point)
     {
-        ls_log_tag("stepbp", "start rejected tgid=%d no active execute point\n", info ? READ_ONCE(info->tgid) : -1);
+        ls_log_always_tag("stepbp", "start rejected tgid=%d no active execute point\n", info ? READ_ONCE(info->tgid) : -1);
         return -EINVAL;
     }
 
     target_tgid = READ_ONCE(info->tgid);
 
     mutex_lock(&g_stepbp_mutex);
-    atomic_set(&g_stepbp_log_enable, 0);
-    atomic_set(&g_stepbp_log_switch, 0);
-    atomic_set(&g_stepbp_log_syscall, 0);
-    atomic_set(&g_stepbp_log_hit, 0);
-    stepbp_dump_hook_symbols();
 
     status = stepbp_install_required_hooks();
     if (status)
     {
-        ls_log_tag("stepbp", "hook install failed tgid=%d status=%d\n", target_tgid, status);
+        ls_log_always_tag("stepbp", "hook install failed tgid=%d status=%d\n", target_tgid, status);
         goto out_unlock;
     }
 
@@ -502,10 +461,7 @@ static inline int start_stepbp_monitor(struct break_point *info)
     stepbp_publish_monitor(info, false);
     spin_unlock_irqrestore(&g_stepbp_lock, flags);
 
-    status = stepbp_apply_info_tasks(info, true);
-    STEPBP_LOG_LIMITED(g_stepbp_log_enable, 2, "enable tgid=%d armed_tasks=%d current pid=%d tgid=%d comm=%s\n", target_tgid, status, current->pid, current->tgid, current->comm);
-
-    ls_log_tag("stepbp", "start ok tgid=%d first_addr=0x%llx bt=0x%x bs=0x%x\n", target_tgid, (unsigned long long)READ_ONCE(first_point->hit_addr), READ_ONCE(first_point->bt), READ_ONCE(first_point->bs));
+    stepbp_apply_info_tasks(info, true);
     status = 0;
 
 out_unlock:

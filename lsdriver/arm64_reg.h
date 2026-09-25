@@ -202,7 +202,7 @@ static uint64_t read_wb_reg(int reg, int n)
         GEN_READ_WB_REG_CASES(AARCH64_DBG_REG_WVR, AARCH64_DBG_REG_NAME_WVR, val);
         GEN_READ_WB_REG_CASES(AARCH64_DBG_REG_WCR, AARCH64_DBG_REG_NAME_WCR, val);
     default:
-        ls_log_tag("driver", "attempt to read from unknown breakpoint register %d\n", n);
+        ls_log_always_tag("driver", "attempt to read from unknown breakpoint register %d\n", n);
     }
 
     return val;
@@ -218,7 +218,7 @@ static void write_wb_reg(int reg, int n, uint64_t val)
         GEN_WRITE_WB_REG_CASES(AARCH64_DBG_REG_WVR, AARCH64_DBG_REG_NAME_WVR, val);
         GEN_WRITE_WB_REG_CASES(AARCH64_DBG_REG_WCR, AARCH64_DBG_REG_NAME_WCR, val);
     default:
-        ls_log_tag("driver", "attempt to write to unknown breakpoint register %d\n", n);
+        ls_log_always_tag("driver", "attempt to write to unknown breakpoint register %d\n", n);
     }
     isb();
 }

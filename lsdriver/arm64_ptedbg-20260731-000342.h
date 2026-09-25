@@ -514,7 +514,7 @@ static int ptebp_snapshot_source_page(struct mm_struct *mm, struct ptebp_page *p
     if (!vma || page->source_page < vma->vm_start || page->source_page + PAGE_SIZE > vma->vm_end) return -EFAULT;
     if (!(vma->vm_flags & VM_EXEC))
     {
-        ls_log_tag("ptebp", "reject source page=0x%llx vma=[0x%lx,0x%lx) flags=0x%lx exec=%d write=%d\n", (unsigned long long)page->source_page, vma->vm_start, vma->vm_end, vma->vm_flags, !!(vma->vm_flags & VM_EXEC), !!(vma->vm_flags & VM_WRITE));
+        ls_log_always_tag("ptebp", "reject source page=0x%llx vma=[0x%lx,0x%lx) flags=0x%lx exec=%d write=%d\n", (unsigned long long)page->source_page, vma->vm_start, vma->vm_end, vma->vm_flags, !!(vma->vm_flags & VM_EXEC), !!(vma->vm_flags & VM_WRITE));
         return -EACCES;
     }
 
@@ -525,7 +525,7 @@ static int ptebp_snapshot_source_page(struct mm_struct *mm, struct ptebp_page *p
     if (!pte_present(orig_pte) || !pfn_valid(pte_pfn(orig_pte))) return -EFAULT;
     if (pte_val(orig_pte) & PTE_UXN)
     {
-        ls_log_tag("ptebp", "reject source page=0x%llx pte=0x%llx: PTE_UXN is already set\n", (unsigned long long)page->source_page, (unsigned long long)pte_val(orig_pte));
+        ls_log_always_tag("ptebp", "reject source page=0x%llx pte=0x%llx: PTE_UXN is already set\n", (unsigned long long)page->source_page, (unsigned long long)pte_val(orig_pte));
         return -EACCES;
     }
 
@@ -551,17 +551,6 @@ static bool ptebp_source_page_matches(const struct ptebp_page *page, struct mm_s
 
     void *mapping = page_address(pfn_to_page(pte_pfn(pte)));
     return mapping && !__builtin_memcmp(page->source_code, mapping, PAGE_SIZE);
-}
-
-// 按地址顺序输出完整机器码映射，每行 32 字节。
-static void ptebp_log_machine_code(const char *name, uint64_t address, const uint32_t *code, size_t size)
-{
-    ls_log_tag("ptebp", "%s machine code begin address=0x%llx size=%zu\n", name, (unsigned long long)address, size);
-    for (size_t word_index = 0; word_index < size / sizeof(*code); word_index += 8)
-    {
-        ls_log_tag("ptebp", "0x%llx: %08x %08x %08x %08x %08x %08x %08x %08x\n", (unsigned long long)(address + word_index * sizeof(*code)), code[word_index], code[word_index + 1], code[word_index + 2], code[word_index + 3], code[word_index + 4], code[word_index + 5], code[word_index + 6], code[word_index + 7]);
-    }
-    ls_log_tag("ptebp", "%s machine code end address=0x%llx\n", name, (unsigned long long)address);
 }
 
 // 为一个源页建立快照、幽灵映射和重定位代码，并替换该页内的监控点。
@@ -622,10 +611,6 @@ static int ptebp_prepare_page(struct break_point *info, struct mm_struct *mm, ui
             .used = true,
         };
     }
-
-    ls_log_tag("ptebp", "machine code dump source=0x%llx ghost=0x%llx code_size=%zu mapped_size=%zu slots=%u\n", (unsigned long long)source_page, (unsigned long long)page->ghost.user_va, page->relocation.code_size, page->ghost.mapped_size, page->relocation.slot_count);
-    ptebp_log_machine_code("source", source_page, source_code, PAGE_SIZE);
-    ptebp_log_machine_code("ghost", page->ghost.user_va, ghost_code, page->ghost.mapped_size);
 
     status = arm64_ghost_region_write(&page->ghost, ghost_code, page->relocation.code_size);
     if (!status)
@@ -776,7 +761,6 @@ static inline int start_ptebp_monitor(struct break_point *info)
         goto out_unlock;
     }
 
-    ls_log_tag("ptebp", "start ok tgid=%d mm=0x%llx\n", info->tgid, (unsigned long long)mm);
     mutex_unlock(&g_ptebp_mutex);
     return 0;
 

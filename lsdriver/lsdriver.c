@@ -207,7 +207,7 @@ static int ConnectThreadFunction(void *data)
             pages = kmalloc_array(num_pages, sizeof(struct page *), GFP_KERNEL);
             if (!pages)
             {
-                ls_log_tag("core", "kmalloc_array 失败\n");
+                ls_log_always_tag("core", "kmalloc_array 失败\n");
                 goto out_put_mm;
             }
 
@@ -228,7 +228,7 @@ static int ConnectThreadFunction(void *data)
 
             if (ret < num_pages)
             {
-                ls_log_tag("core", "get_user_pages_remote 失败, ret=%d\n", ret);
+                ls_log_always_tag("core", "get_user_pages_remote 失败, ret=%d\n", ret);
                 goto out_put_pages;
             }
 
@@ -236,7 +236,7 @@ static int ConnectThreadFunction(void *data)
             req = vmap(pages, num_pages, VM_MAP, PAGE_KERNEL);
             if (!req)
             {
-                ls_log_tag("core", "vmap 失败\n");
+                ls_log_always_tag("core", "vmap 失败\n");
                 goto out_put_pages;
             }
             old_task = ls_process_task;
@@ -525,8 +525,6 @@ static int taskstats_exit_hook_work(struct pt_regs *regs)
     // 仅匹配用户态通过 PR_SET_NAME 设置的精确进程名。
     if (__builtin_strcmp(process_comm, "LS") == 0)
     {
-        ls_log_tag("core", "【进程监听】检测到 LS 线程组即将完全退出！TGID: %d, 进程名(comm): %s\n", task->tgid, process_comm);
-
         // 相应处理
 
         hide_task_remove(task->tgid); // 只取消当前用户进程的隐藏，不影响隐藏的内核线程
