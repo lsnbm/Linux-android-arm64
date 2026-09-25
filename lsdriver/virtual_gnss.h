@@ -210,7 +210,6 @@ static void vgnss_inspect_parcel(char __user *u_buf, size_t size, uint64_t lat_b
             {
                 if (vgnss_try_patch_location(stack_buf, probe_len, pos, u_buf, lat_bits, lon_bits))
                 {
-                    ls_log_tag("vgnss", "patched Location at offset=%zu size=%zu\n", pos, size);
                     return;
                 }
             }
@@ -289,7 +288,6 @@ static int vgnss_install_hook_locked(void)
         if (!inline_hook_install(vgnss_ioctl_hook_targets[i]))
         {
             vgps.hook_target = i;
-            ls_log_tag("vgnss", "hook %s ok\n", vgnss_ioctl_hook_targets[i][0].target_sym);
             return 0;
         }
     }

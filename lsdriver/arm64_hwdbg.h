@@ -634,7 +634,7 @@ static int start_task_run_monitor(struct break_point *bp_info)
 
     if (!bp_info || !bp_info_find_active_point(bp_info, NULL))
     {
-        ls_log_tag("hwbp", "breakpoint info error\n");
+        ls_log_always_tag("hwbp", "breakpoint info error\n");
         return -EINVAL;
     }
 
@@ -647,7 +647,6 @@ static int start_task_run_monitor(struct break_point *bp_info)
     if (g_bp_info)
     {
         g_bp_info = bp_info;
-        ls_log_tag("hwbp", "monitor config updated\n");
         return 0;
     }
 
@@ -656,7 +655,7 @@ static int start_task_run_monitor(struct break_point *bp_info)
     fn_perf_bp_event = (void (*)(struct perf_event *, void *))generic_kallsyms_lookup_name("perf_bp_event");
     if (!bp_on_reg || !wp_on_reg || !fn_perf_bp_event)
     {
-        ls_log_tag("hwbp", "lookup bp_on_reg/wp_on_reg/perf_bp_event failed\n");
+        ls_log_always_tag("hwbp", "lookup bp_on_reg/wp_on_reg/perf_bp_event failed\n");
         return -ENOENT;
     }
 
@@ -667,13 +666,11 @@ static int start_task_run_monitor(struct break_point *bp_info)
     ret = inline_hook_install(g_hwbp_hooks);
     if (ret)
     {
-        ls_log_tag("hwbp", "inline_hook_install hwbp hooks failed: %d\n", ret);
+        ls_log_always_tag("hwbp", "inline_hook_install hwbp hooks failed: %d\n", ret);
         g_bp_info = NULL;
         return ret;
     }
 
-    ls_log_tag("hwbp", "hwbp hooks installed\n");
-    ls_log_tag("hwbp", "monitor start\n");
     return 0;
 }
 
@@ -688,5 +685,4 @@ static void stop_task_run_monitor(void)
 
     inline_hook_remove(g_hwbp_hooks);
     WRITE_ONCE(g_bp_info, NULL);
-    ls_log_tag("hwbp", "monitor stop\n");
 }

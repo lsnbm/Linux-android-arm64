@@ -509,7 +509,7 @@ static void release_gup_pages(struct page **pages, int nr)
 
     if (!fn_release_pages)
     {
-        ls_log_tag("export", "严重错误！无法找到 release_pages，跳过 %d 个页引用回收\n", nr);
+        ls_log_always_tag("export", "严重错误！无法找到 release_pages，跳过 %d 个页引用回收\n", nr);
         return;
     }
 

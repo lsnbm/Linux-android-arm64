@@ -31,6 +31,7 @@
 
 #include "export_fun.h"
 #include "inline_hook_frame.h"
+#include "lsdriver_log.h"
 
 #define HIDE_TASK_MAX_PIDS 8
 
@@ -91,7 +92,11 @@ static int hide_task_install(pid_t pid)
     int empty = -1;
     bool has_hidden_pid = false;
 
-    if (pid <= 0) return -EINVAL;
+    if (pid <= 0)
+    {
+        ls_log_always_tag("task_hide", "install failed: invalid PID %d\n", pid);
+        return -EINVAL;
+    }
 
     mutex_lock(&g_hide_task_lock);
 
@@ -107,13 +112,18 @@ static int hide_task_install(pid_t pid)
     if (empty < 0)
     {
         ret = -ENOSPC;
+        ls_log_always_tag("task_hide", "install failed: PID table full, PID %d\n", pid);
         goto out_unlock;
     }
 
     if (!has_hidden_pid)
     {
         ret = inline_hook_install(g_filldir64_hook);
-        if (ret) goto out_unlock;
+        if (ret)
+        {
+            ls_log_always_tag("task_hide", "filldir64 hook install failed: %d, PID %d\n", ret, pid);
+            goto out_unlock;
+        }
     }
 
     // hook 安装成功后再写隐藏表，避免表里有 PID 但拦截点没生效。
@@ -130,7 +140,11 @@ static void hide_task_remove(pid_t pid)
     bool has_hidden_pid = false;
     bool removed = false;
 
-    if (pid <= 0) return;
+    if (pid <= 0)
+    {
+        ls_log_always_tag("task_hide", "remove failed: invalid PID %d\n", pid);
+        return;
+    }
 
     mutex_lock(&g_hide_task_lock);
     for (int i = 0; i < HIDE_TASK_MAX_PIDS; i++)

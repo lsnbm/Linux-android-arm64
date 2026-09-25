@@ -216,7 +216,7 @@ static int start_task_run_monitor(struct break_point *bp_info)
 
     if (!bp_info || !bp_info_find_active_point(bp_info, NULL))
     {
-        ls_log_tag("spe", "breakpoint info error\n");
+        ls_log_always_tag("spe", "breakpoint info error\n");
         return -EINVAL;
     }
 
@@ -244,12 +244,11 @@ static int start_task_run_monitor(struct break_point *bp_info)
     ret = inline_hook_install(g_spe_hooks);
     if (ret)
     {
-        ls_log_tag("spe", "inline_hook_install spe hooks failed: %d\n", ret);
+        ls_log_always_tag("spe", "inline_hook_install spe hooks failed: %d\n", ret);
         g_bp_info = NULL;
         return ret;
     }
 
-    ls_log_tag("spe", "SPE monitor started successfully\n");
     return 0;
 }
 
@@ -276,5 +275,4 @@ static void stop_task_run_monitor(void)
         g_spe_buffers = NULL;
     }
 
-    ls_log_tag("spe", "SPE monitor stopped\n");
 }

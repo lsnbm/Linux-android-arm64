@@ -49,7 +49,7 @@ static inline int allocate_physical_page_info(void)
 
     if (in_atomic())
     {
-        ls_log_tag("vmem", "原子上下文禁止调用 vmalloc\n");
+        ls_log_always_tag("vmem", "原子上下文禁止调用 vmalloc\n");
         return -EPERM;
     }
 
@@ -59,7 +59,7 @@ static inline int allocate_physical_page_info(void)
     vaddr = (uint64_t)vmalloc(PAGE_SIZE);
     if (!vaddr)
     {
-        ls_log_tag("vmem", "vmalloc 失败\n");
+        ls_log_always_tag("vmem", "vmalloc 失败\n");
         return -ENOMEM;
     }
 
@@ -70,7 +70,7 @@ static inline int allocate_physical_page_info(void)
     ptep = get_kernel_pte(vaddr);
     if (!ptep)
     {
-        ls_log_tag("vmem", "获取 PTE 失败\n");
+        ls_log_always_tag("vmem", "获取 PTE 失败\n");
         goto err_out;
     }
 
