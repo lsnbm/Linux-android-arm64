@@ -37,12 +37,14 @@ namespace ImGuiFloatingKeyboard
 
     inline void Open(char *buffer, size_t buffer_size, const char *title = "Keyboard")
     {
+        if (!buffer || buffer_size == 0) return;
+        buffer[buffer_size - 1] = '\0';
         Internal::target_buffer = buffer;
         Internal::target_buffer_size = buffer_size;
         Internal::is_visible = true;
         Internal::shift_active = false;
         Internal::caps_lock_active = false;
-        Internal::window_title = title;
+        Internal::window_title = title ? title : "Keyboard";
         Internal::request_focus = true;
         Internal::keyboard_mode = 0;
         Internal::result_buffer = nullptr;
@@ -121,19 +123,18 @@ namespace ImGuiFloatingKeyboard
     // ========== 辅助函数 ==========
     static inline void InsertChar(char c)
     {
-        if (!Internal::target_buffer) return;
+        if (!Internal::target_buffer || Internal::target_buffer_size < 2) return;
         size_t len = strlen(Internal::target_buffer);
-        if (len < Internal::target_buffer_size - 1)
-        {
-            Internal::target_buffer[len] = c;
-            Internal::target_buffer[len + 1] = '\0';
-        }
+        if (len >= Internal::target_buffer_size - 1) return;
+        Internal::target_buffer[len] = c;
+        Internal::target_buffer[len + 1] = '\0';
     }
 
     static inline void InsertString(const char *str)
     {
-        if (!Internal::target_buffer || !str) return;
+        if (!Internal::target_buffer || Internal::target_buffer_size < 2 || !str) return;
         size_t current_len = strlen(Internal::target_buffer);
+        if (current_len >= Internal::target_buffer_size - 1) return;
         size_t str_len = strlen(str);
         size_t available = Internal::target_buffer_size - current_len - 1;
         size_t copy_len = (str_len < available) ? str_len : available;

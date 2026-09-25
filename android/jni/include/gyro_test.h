@@ -1,25 +1,14 @@
 #pragma once
 
 #include <chrono>
-#include <cstdarg>
-#include <cstdio>
+#include <cstdlib>
 #include <thread>
 
 #include "driver.h"
 
-inline void GyroLog(const char *fmt, ...)
-{
-    char buf[256] = {};
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, args);
-    va_end(args);
-    LS_LOGI_TAG("Gyro", "%s", buf);
-}
-
 inline void DoGyroSweep(const char *name, int start, int end, int step, int axis)
 {
-    GyroLog("开始%s", name);
+    LS_LOGI_TAG("Gyro", "开始%s", name);
 
     if (step == 0) return;
 
@@ -43,7 +32,7 @@ inline void DoGyroSweep(const char *name, int start, int end, int step, int axis
 
 inline int RunGyroTest()
 {
-    GyroLog("初始化完成，开始自动上报测试序列");
+    LS_LOGI_TAG("Gyro", "初始化完成，开始自动上报测试序列");
 
     for (int i = 0; i < 20; ++i)
     {
@@ -64,6 +53,6 @@ inline int RunGyroTest()
         std::this_thread::sleep_for(std::chrono::milliseconds(30));
     }
 
-    GyroLog("全部测试序列执行完毕");
+    LS_LOGI_TAG("Gyro", "全部测试序列执行完毕");
     return 0;
 }

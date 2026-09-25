@@ -2,8 +2,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cmath>
-#include <cstdarg>
 #include <cstdio>
 #include <thread>
 
@@ -13,7 +11,6 @@
 inline void GetScreenLogicalSize(int &w, int &h)
 {
     // 优先通过属性读取系统屏幕分辨率
-    char bufW[64] = {}, bufH[64] = {};
     int wTmp = 1080, hTmp = 2340;
 
     FILE *pipe = popen("wm size", "r");
@@ -28,26 +25,8 @@ inline void GetScreenLogicalSize(int &w, int &h)
         pclose(pipe);
     }
 
-    if (wTmp > 0 && hTmp > 0)
-    {
-        w = wTmp;
-        h = hTmp;
-    }
-    else
-    {
-        w = 1080;
-        h = 2340;
-    }
-}
-
-inline void Log(const char *fmt, ...)
-{
-    char buf[256] = {};
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, args);
-    va_end(args);
-    LS_LOGI_TAG("TouchTest", "%s", buf);
+    w = wTmp;
+    h = hTmp;
 }
 
 // 单点连击测试：在 (x,y) 连续点击 taps 次
@@ -116,34 +95,34 @@ inline int RunTouchTest()
 {
     int screenW = 0, screenH = 0;
     GetScreenLogicalSize(screenW, screenH);
-    Log("屏幕逻辑尺寸: {}x{}", screenW, screenH);
+    LS_LOGI_TAG("TouchTest", "屏幕逻辑尺寸: %dx%d", screenW, screenH);
 
     // 1) 单击测试：屏幕左上 1/4 区域
-    Log("开始单击连点测试 (10次)");
+    LS_LOGI_TAG("TouchTest", "开始单击连点测试 (10次)");
     DoTapTest(0, screenW / 4, screenH / 4, screenW, screenH, 10);
     std::this_thread::sleep_for(std::chrono::milliseconds(800));
 
     // 2) 滑动测试：从左到右横滑
-    Log("开始横向滑动测试");
+    LS_LOGI_TAG("TouchTest", "开始横向滑动测试");
     DoSwipeTest(0, screenW / 8, screenH / 2, screenW * 7 / 8, screenH / 2, screenW, screenH, 60);
     std::this_thread::sleep_for(std::chrono::milliseconds(800));
 
     // 3) 滑动测试：从上到下纵滑
-    Log("开始纵向滑动测试");
+    LS_LOGI_TAG("TouchTest", "开始纵向滑动测试");
     DoSwipeTest(0, screenW / 2, screenH / 8, screenW / 2, screenH * 7 / 8, screenW, screenH, 60);
     std::this_thread::sleep_for(std::chrono::milliseconds(800));
 
     // 4) 双指捏合/张开测试（进行 2 轮）
-    Log("开始双指捏合/张开测试");
+    LS_LOGI_TAG("TouchTest", "开始双指捏合/张开测试");
     DoPinchTest(screenW, screenH);
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     DoPinchTest(screenW, screenH);
     std::this_thread::sleep_for(std::chrono::milliseconds(800));
 
     // 5) 快速连击 stress test
-    Log("开始快速连击压力测试 (50次)");
+    LS_LOGI_TAG("TouchTest", "开始快速连击压力测试 (50次)");
     DoTapTest(0, screenW / 2, screenH / 2, screenW, screenH, 50);
 
-    Log("全部测试序列执行完毕");
+    LS_LOGI_TAG("TouchTest", "全部测试序列执行完毕");
     return 0;
 }

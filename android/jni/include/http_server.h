@@ -283,30 +283,6 @@ namespace
         return count;
     }
 
-    Driver::bp_record *findHwbpRecordByFlatIndex(Driver::break_point &info, int index, int *pointIndex = nullptr, int *pointRecordIndex = nullptr)
-    {
-        if (index < 0) return nullptr;
-
-        int flatIndex = 0;
-        int currentPointIndex = 0;
-        for (auto &point : info.points)
-        {
-            const int recordCount = clampHwbpRecordCount(point.record_count);
-            if (index < flatIndex + recordCount)
-            {
-                const int localIndex = index - flatIndex;
-                if (pointIndex) *pointIndex = currentPointIndex;
-                if (pointRecordIndex) *pointRecordIndex = localIndex;
-                return &point.records[localIndex];
-            }
-
-            flatIndex += recordCount;
-            ++currentPointIndex;
-        }
-
-        return nullptr;
-    }
-
     int getHwbpTotalRecordCount(const Driver::break_point &info)
     {
         int total = 0;
@@ -571,11 +547,13 @@ namespace
     // 将字节数组编码为十六进制字符串
     std::string bytesToHex(const std::uint8_t *bytes, std::size_t count)
     {
+        constexpr char digits[] = "0123456789ABCDEF";
         std::string output;
-        output.reserve(count * 2);
+        output.resize(count * 2);
         for (std::size_t i = 0; i < count; ++i)
         {
-            std::format_to(std::back_inserter(output), "{:02X}", bytes[i]);
+            output[i * 2] = digits[bytes[i] >> 4];
+            output[i * 2 + 1] = digits[bytes[i] & 0x0F];
         }
         return output;
     }
@@ -583,42 +561,22 @@ namespace
     // 解析十六进制字节流
     std::optional<std::vector<std::uint8_t>> parseHexBytes(std::string_view text)
     {
-        std::string compact;
-        compact.reserve(text.size());
-
-        for (char ch : text)
-        {
-            if (std::isxdigit(static_cast<unsigned char>(ch)) != 0)
-            {
-                compact.push_back(ch);
-            }
-            else if (std::isspace(static_cast<unsigned char>(ch)) == 0)
-            {
-                return std::nullopt;
-            }
-        }
-
-        if (compact.empty() || (compact.size() % 2) != 0)
-        {
-            return std::nullopt;
-        }
-
         std::vector<std::uint8_t> bytes;
-        bytes.reserve(compact.size() / 2);
-
-        for (std::size_t i = 0; i < compact.size(); i += 2)
+        bytes.reserve(text.size() / 2);
+        int high = -1;
+        for (const unsigned char ch : text)
         {
-            const std::string hexPair = compact.substr(i, 2);
-            char *end = nullptr;
-            errno = 0;
-            const unsigned long value = std::strtoul(hexPair.c_str(), &end, 16);
-            if (errno != 0 || end == hexPair.c_str() || *end != '\0' || value > 0xFF)
+            if (std::isspace(ch) != 0) continue;
+            if (std::isxdigit(ch) == 0) return std::nullopt;
+            const int digit = ch >= '0' && ch <= '9' ? ch - '0' : ch >= 'a' && ch <= 'f' ? ch - 'a' + 10 : ch - 'A' + 10;
+            if (high < 0) high = digit;
+            else
             {
-                return std::nullopt;
+                bytes.push_back(static_cast<std::uint8_t>((high << 4) | digit));
+                high = -1;
             }
-            bytes.push_back(static_cast<std::uint8_t>(value));
         }
-
+        if (high >= 0 || bytes.empty()) return std::nullopt;
         return bytes;
     }
 
@@ -687,7 +645,7 @@ namespace
                 });
             }
 
-            root["modules"].push_back(moduleItem);
+            root["modules"].push_back(std::move(moduleItem));
         }
 
         for (int i = 0; i < regionCount; ++i)
@@ -727,7 +685,7 @@ namespace
                 item["valid"] = line.valid;
                 item["address"] = std::format("0x{:X}", line.address);
                 item["size"] = line.size;
-                item["bytes_hex"] = bytesToHex(line.bytes, line.size);
+                item["bytes_hex"] = bytesToHex(line.bytes, std::min(line.size, sizeof(line.bytes)));
                 item["mnemonic"] = sanitizeLine(line.mnemonic);
                 item["op_str"] = sanitizeLine(line.op_str);
                 root["disasm"].push_back(std::move(item));
@@ -970,16 +928,6 @@ namespace
         return std::nullopt;
     }
 
-    std::optional<std::string> getOptionalStringParam(const json &params, std::string_view key)
-    {
-        const auto it = params.find(std::string(key));
-        if (it == params.end() || it->is_null())
-        {
-            return std::nullopt;
-        }
-        return getRequiredStringParam(params, key);
-    }
-
     json dispatchStructuredOperationDirect(std::string_view operation, const json &params)
     {
         const std::string op(operation);
@@ -1072,7 +1020,6 @@ namespace
                 point.bs = *bpScope;
                 points.push_back(point);
             }
-            if (points.empty()) return BreakpointPointsResult{std::in_place_index<1>, fail("points 为空")};
             return BreakpointPointsResult{std::in_place_index<0>, std::move(points)};
         };
 
@@ -1097,7 +1044,7 @@ namespace
 
         auto optionalString = [&](std::string_view key) -> std::string
         {
-            const auto value = getOptionalStringParam(params, key);
+            const auto value = getRequiredStringParam(params, key);
             return value.has_value() ? *value : "";
         };
 
@@ -1316,13 +1263,7 @@ namespace
             return MemUtils::DispatchType(*dataType,
                                           [&]<typename T>() -> json
                                           {
-                                              if (*fuzzyMode == Types::FuzzyMode::Unknown)
-                                              {
-                                                  if (!MemoryTool::Scanner().startAsync<T>(pid, T{}, *dataType, *fuzzyMode, isFirst)) return fail("扫描请求被拒绝，请检查任务状态、数据类型和扫描模式");
-                                                  return okData(scannerStateJson());
-                                              }
-
-                                              if (*fuzzyMode == Types::FuzzyMode::Increased || *fuzzyMode == Types::FuzzyMode::Decreased || *fuzzyMode == Types::FuzzyMode::Changed || *fuzzyMode == Types::FuzzyMode::Unchanged)
+                                              if (*fuzzyMode == Types::FuzzyMode::Unknown || (*fuzzyMode >= Types::FuzzyMode::Increased && *fuzzyMode <= Types::FuzzyMode::Unchanged))
                                               {
                                                   if (!MemoryTool::Scanner().startAsync<T>(pid, T{}, *dataType, *fuzzyMode, isFirst)) return fail("扫描请求被拒绝，请检查任务状态、数据类型和扫描模式");
                                                   return okData(scannerStateJson());
@@ -1550,14 +1491,31 @@ namespace
             const auto value = MemUtils::ParseUInt128(std::get<std::string>(valueText));
             if (!value.has_value()) return fail(std::format("operation={} 参数 value 无效", op));
             auto &info = const_cast<Driver::break_point &>(dr->GetHwbpInfoRef());
+            const int recordIndex = std::get<int>(index);
+            if (recordIndex < 0) return fail("index 越界");
             int pointIndex = -1;
             int pointRecordIndex = -1;
-            auto *record = findHwbpRecordByFlatIndex(info, std::get<int>(index), &pointIndex, &pointRecordIndex);
+            Driver::bp_record *record = nullptr;
+            int flatIndex = 0;
+            int currentPointIndex = 0;
+            for (auto &point : info.points)
+            {
+                const int recordCount = clampHwbpRecordCount(point.record_count);
+                if (recordIndex < flatIndex + recordCount)
+                {
+                    pointIndex = currentPointIndex;
+                    pointRecordIndex = recordIndex - flatIndex;
+                    record = &point.records[pointRecordIndex];
+                    break;
+                }
+                flatIndex += recordCount;
+                ++currentPointIndex;
+            }
             if (!record) return fail("index 越界");
             auto copy = *record;
             if (!MemUtils::AssignHwbpRecordField(copy, std::get<std::string>(field), *value)) return fail("field 无效");
             *record = copy;
-            return okData({{"index", std::get<int>(index)}, {"point_index", pointIndex}, {"point_record_index", pointRecordIndex}, {"field", std::get<std::string>(field)}, {"value_hex", MemUtils::FormatUInt128Hex(*value)}});
+            return okData({{"index", recordIndex}, {"point_index", pointIndex}, {"point_record_index", pointRecordIndex}, {"field", std::get<std::string>(field)}, {"value_hex", MemUtils::FormatUInt128Hex(*value)}});
         }
 
         if (op == "signature.create")
@@ -1753,27 +1711,26 @@ namespace
             return json({{"ok", false}, {"error", "请求必须是 JSON 对象"}}).dump();
         }
 
-        if (parsedReq.contains("operation"))
+        if (const auto operation = parsedReq.find("operation"); operation != parsedReq.end())
         {
-            if (!parsedReq["operation"].is_string())
+            if (!operation->is_string())
             {
                 return makeProtocolError("operation 字段必须是字符串").dump();
             }
 
-            const std::string operationName = parsedReq["operation"].get<std::string>();
-            json params = json::object();
-            if (parsedReq.contains("params"))
+            const auto &operationName = operation->get_ref<const std::string &>();
+            if (const auto params = parsedReq.find("params"); params != parsedReq.end())
             {
-                if (!parsedReq["params"].is_object())
+                if (!params->is_object())
                 {
                     json error = makeProtocolError("params 字段必须是对象");
                     error["operation"] = operationName;
                     return error.dump();
                 }
-                params = parsedReq["params"];
+                return dispatchStructuredOperationDirect(operationName, *params).dump();
             }
 
-            return dispatchStructuredOperationDirect(operationName, params).dump();
+            return dispatchStructuredOperationDirect(operationName, json::object()).dump();
         }
 
         return makeProtocolError("请求缺少 operation 字段").dump();
