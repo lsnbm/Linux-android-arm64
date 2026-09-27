@@ -419,7 +419,8 @@ static void install_hwbp_regs_on_cpu(struct break_point *bp_info)
     size_t point_slot = 0;
     struct bp_point *point;
 
-    //这里输出的话，必须目标进程有调度才会输出一直运行的话，可能就输出一次，实际测试发现目标在断点检测下会疯狂调用ptrace让task进调度安装硬件断点
+    //目标进程有调度才会输出一直运行的话，也是符合常理perf task断点也是调度安装不是安装到所有cpu，调度时输出当前cpu的即可
+    //实际测试发现目标在断点检测下会疯狂调用ptrace让task进调度安装硬件断点
     //dump_perf_breakpoint_slots();
 
     while ((point = bp_info_find_active_point(bp_info, &point_slot)))
@@ -537,7 +538,57 @@ static int work_trampoline_finish_task_switch(struct pt_regs *hook_regs)
     return 0;
 }
 
-// 硬件调试异常和调度返回 hook 统一安装、回滚与卸载。
+/*
+硬件调试异常和调度返回 hook 统一安装、回滚与卸载。
+安装位置约束：本实现必须 hook breakpoint_handler/watchpoint_handler，不能移到
+el0t_64_sync_handler/el0_sync_handler 顶层 C 入口并在处理后直接返回。
+原因是 ptrace 在断点 handler 完成后的异常退出路径还有额外处理，回调执行完并不代表处理结束。
+
+以下以 Android 14/Linux 6.1 中 EL0 命中 ptrace 注册的硬件断点为例，区分两个阶段：
+
+1. 断点回调给被跟踪线程登记待处理信号，还没有暂停线程或通知调试器。
+   ptrace 注册时把 ptrace_hbptriggered 绑定为该 perf_event 的 overflow_handler。
+   breakpoint_handler/watchpoint_handler 本身不直接发送这个信号，而是调用：
+   perf_bp_event -> perf 内部事件分发 -> ptrace_hbptriggered
+       -> arm64_force_sig_fault(SIGTRAP, TRAP_HWBKPT, ...) -> force_sig_fault。
+   这里的 SIGTRAP 登记给当前被跟踪线程，不是发给调试器，也不是再次触发 CPU 异常。
+   不是所有 perf 回调都产生 SIGTRAP；普通默认输出回调通常只记录样本。
+
+2. 正常异常退出路径取出该信号，暂停被跟踪线程并通知调试器。
+   exit_to_user_mode -> do_notify_resume -> do_signal -> get_signal
+       -> ptrace_signal -> ptrace_stop。
+   get_signal 取出 SIGTRAP 并检查 current->ptrace；跟踪关系仍有效且没有致命信号等
+   例外时，ptrace_stop 将线程设为 TASK_TRACED，保存停止原因和 siginfo，
+   通过 do_notify_parent_cldstop 通知调试器并唤醒等待者，再调用 schedule 暂停线程。
+   调试器用 waitpid/waitid 得到“目标因 SIGTRAP 停止”的状态，必要时用
+   PTRACE_GETSIGINFO 读取详情。不是退出路径再向调试器发送一次 SIGTRAP。
+
+所谓 ptrace 停止，就是目标线程等待调试器下达后续请求；
+调试器可检查/修改寄存器和断点，再用 PTRACE_CONT 继续或 PTRACE_SINGLESTEP 请求单步，其他后续处理都交给ptrace由内核执行请求
+
+hook 具体 handler 时，跳过其本体后仍返回 do_debug_exception，保留后续异常退出路径；ptrace完整处理流程跑通
+hook 顶层 C 入口并 return 1 则直接返回汇编 ret_to_user，没有任何断点信号给ptrace，ptrace完整处理流程不能跑通，就直接被其他调试器察觉了
+
+因此保留当前安装位置，让登记信号之后的暂停、通知和等待调试器等处理正常完成。
+
+但是我主动忽略ptrace的断点干扰，把异常接管直接安排到顶层c入口多设备测了一下，
+实际结果效率还是不如pte异常快
+不知道为何同样顶层c入口吞异常，为何硬件断点效率没有pte异常快
+
+我猜大概率是硬件异常在不同的硬件单元导致：
+
+mmu硬件单元是绝对的核心硬件单元
+CPU 每一个周期都在疯狂取指，每一个load/store时都要工作，
+TLB 命中缓存，TLB完成权限检查，如果权限不符，直接最前端的单周期电路中。硬件以最高优先级、最短电路直接产生 Fault 标记。芯片厂商也会对 MMU硬件单元晶体管电路设计优化
+TLB Miss, 由核心硬件页表遍历器（PTW）权限检查，同样的也是最前，最快，最短电路产生异常
+
+硬件调试逻辑是外围辅助单元：
+硬件断点寄存器（DBGBVRn_EL1 / DBGBCRn_EL1）属于 CoreSight / CPU Debug 子系统。因此，调试比较器通常挂在旁路甚至与取指主通路存在缓冲解耦，它的电路设计优先级远低于 MMU。
+
+并且MMU 通常可以从 TLB 缓存中取得翻译和权限信息，加上mmu权限检查时在没有取指时就可以提前触发异常，硬件断点者需要把指令带进cpu流水线，并且触发同步精确异常时会直接清空流水线，
+虽然mmu同步异常也会清空流水线，但是好处是根本不会进流水线，就不会有回滚投机状态。
+
+*/
 static struct hook_entry g_hwbp_hooks[] = {
     HOOK_ENTRY("breakpoint_handler", work_trampoline_breakpoint),
     HOOK_ENTRY("watchpoint_handler", work_trampoline_watchpoint),

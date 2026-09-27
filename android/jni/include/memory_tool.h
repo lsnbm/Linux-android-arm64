@@ -2605,7 +2605,7 @@ private:
         auto snapshot = std::make_unique<Driver::virtual_memory>();
         const auto &sharedInfo = dr->GetMemoryInfoRef();
         {
-            std::scoped_lock<Driver::SpinLock> driverLock(dr->m_mutex);
+            std::scoped_lock<Driver::SpinLock> driverLock(dr->request_lock);
             *snapshot = sharedInfo;
         }
         const auto &info = *snapshot;

@@ -44,28 +44,58 @@ class Driver
 {
 public: // 共有结构体和锁
     // 轻量高性能自旋锁
-    class SpinLock
+    /*
+    [技巧 1] 硬件级防伪共享
+    强制 64 字节对齐（一个标准 CPU Cache Line 大小）。
+    确保锁变量独自占据一个独立的缓存行，防止和临近的高频读写变量相互干扰引发总线颠簸。
+    在锁作为全局变量时SpinLock request_lock;闭眼加
+        编译器和链接器会把全局变量、静态变量紧密地塞在 .bss或.data 中,如果 request_lock紧挨着一个统计计数器或标志位或其他全局变量，会引发伪共享，导致其他核抢锁变慢。
+    在锁为锁数组时SpinLock bucket_locks[16];闭眼加
+        当 CPU 核心 0 抢 bucket_locks[0]，CPU 核心 1 抢 bucket_locks[1] 时，它们在逻辑上互不影响，但在物理上会失效缓存行
+    在锁为嵌入到数据结构体时struct Entry {SpinLock lock;  uint32_t data; };不建议加，多实例分配内存利用低+容易挤满缓存 
+        */
+    class alignas(64) SpinLock
     {
-        unsigned char locked = 0;
+        uint8_t locked = 0;
 
     public:
-        void lock() noexcept
+        __always_inline void lock() noexcept
         {
-            while (__atomic_exchange_n(&locked, 1, __ATOMIC_ACQUIRE))
-            {
-                while (__atomic_load_n(&locked, __ATOMIC_RELAXED))
-                {
-                    asm volatile("yield");
-                }
-            }
+            uint32_t scratch;
+            uint32_t delay;
+            uint32_t value;
+            asm volatile(".arch_extension lse\n"
+                         "mov %w[value], #1\n"
+                         "mov %w[delay], #1\n"
+                         // 快路径：抢到锁就直接进入临界区，跳过轮询和退避。
+                         "1:\n"
+                         "swpab %w[value], %w[scratch], [%[address]]\n"
+                         "cbz %w[scratch], 5f\n"
+                         // 慢路径：每轮忙等待后退避翻倍，最多 64；观察到空闲立即重新争抢。
+                         "2:\n"
+                         "ldrb %w[scratch], [%[address]]\n"
+                         "cbz %w[scratch], 1b\n"
+                         "mov %w[scratch], %w[delay]\n"
+                         "3:\n"
+                         "yield\n"
+                         "subs %w[scratch], %w[scratch], #1\n"
+                         "b.ne 3b\n"
+                         "cmp %w[delay], #64\n"
+                         "b.hs 2b\n"
+                         "lsl %w[delay], %w[delay], #1\n"
+                         "b 2b\n"
+                         "5:\n"
+                         : [scratch] "=&r"(scratch), [delay] "=&r"(delay), [value] "=&r"(value)
+                         : [address] "r"(&locked)
+                         : "cc", "memory");
         }
 
-        void unlock() noexcept
+        __always_inline void unlock() noexcept
         {
-            __atomic_store_n(&locked, 0, __ATOMIC_RELEASE);
+            asm volatile("stlrb wzr, [%[address]]" : : [address] "r"(&locked) : "memory");
         }
     };
-    SpinLock m_mutex;
+    SpinLock request_lock;
 #define TLS_THREAD_NAME_LEN 16
     struct env_params
     {
@@ -419,14 +449,14 @@ public: // 外部初始化
 public:
     void NullIo()
     {
-        std::scoped_lock<SpinLock> lock(m_mutex);
+        std::scoped_lock<SpinLock> lock(request_lock);
         StoreRequestOp(request_op_none);
         IoCommitAndWait();
     }
     void ExitKernel()
     {
         // 内核停止运行
-        std::scoped_lock<SpinLock> lock(m_mutex);
+        std::scoped_lock<SpinLock> lock(request_lock);
         StoreRequestOp(request_op_kernel_exit);
         IoCommitAndWait();
     }
@@ -903,8 +933,7 @@ private: // 私有实现，外部无需关系
 
     inline int LoadRequestStatus()
     {
-        int status = req->status;
-        return status;
+        return req->status;
     }
 
     inline void IoCommitAndWait()
@@ -952,7 +981,7 @@ private: // 私有实现，外部无需关系
     void InitTouch(int requested_slots)
     {
         if (requested_slots <= 0) return;
-        std::scoped_lock<SpinLock> lock(m_mutex);
+        std::scoped_lock<SpinLock> lock(request_lock);
         StoreRequestOp(request_op_touch_init);
         req->vinput_info.request_virtual_slots = requested_slots;
         IoCommitAndWait();
@@ -962,7 +991,7 @@ private: // 私有实现，外部无需关系
     void InitGyro(bool enable)
     {
         if (!enable) return;
-        std::scoped_lock<SpinLock> lock(m_mutex);
+        std::scoped_lock<SpinLock> lock(request_lock);
         StoreRequestOp(request_op_gyro_init);
         IoCommitAndWait();
     }
@@ -971,7 +1000,7 @@ private: // 私有实现，外部无需关系
     void InitGnss(bool enable)
     {
         if (!enable) return;
-        std::scoped_lock<SpinLock> lock(m_mutex);
+        std::scoped_lock<SpinLock> lock(request_lock);
         StoreRequestOp(request_op_gnss_init);
         IoCommitAndWait();
     }
@@ -982,7 +1011,7 @@ private: // 私有实现，外部无需关系
         if (!buffer || size == 0) return -EINVAL;
         if (op != request_op_vmem_read && op != request_op_vmem_write) return -EINVAL;
 
-        std::scoped_lock<SpinLock> lock(m_mutex);
+        std::scoped_lock<SpinLock> lock(request_lock);
         const bool is_read = (op == request_op_vmem_read);
         size_t processed = 0;
         size_t successfulBytes = 0;
@@ -1047,7 +1076,7 @@ private: // 私有实现，外部无需关系
     // 获取进程虚拟内存信息事件
     int HandleVirtualMemoryInfo()
     {
-        std::scoped_lock<SpinLock> lock(m_mutex);
+        std::scoped_lock<SpinLock> lock(request_lock);
         StoreRequestOp(request_op_vmem_info);
         req->tgid = global_pid;
         IoCommitAndWait();
@@ -1057,7 +1086,7 @@ private: // 私有实现，外部无需关系
     // 触摸事件
     void HandleTouchEvent(request_op op, int slot, int x, int y, int screenW, int screenH)
     {
-        std::scoped_lock<SpinLock> lock(m_mutex);
+        std::scoped_lock<SpinLock> lock(request_lock);
 
         // 下面代码绝对不要使用整数除法
         if (screenW <= 0 || screenH <= 0 || req->vinput_info.POSITION_X <= 0 || req->vinput_info.POSITION_Y <= 0) return;
@@ -1094,7 +1123,7 @@ private: // 私有实现，外部无需关系
     // 陀螺仪事件，单位为 rad/s * 1000
     void HandleGyroReport(int gyro_x_mrad_s, int gyro_y_mrad_s, int gyro_z_mrad_s)
     {
-        std::scoped_lock<SpinLock> lock(m_mutex);
+        std::scoped_lock<SpinLock> lock(request_lock);
         StoreRequestOp(request_op_gyro_report);
         req->vgyro_info.gyro_x_mrad_s = gyro_x_mrad_s;
         req->vgyro_info.gyro_y_mrad_s = gyro_y_mrad_s;
@@ -1105,7 +1134,7 @@ private: // 私有实现，外部无需关系
     // 虚拟定位事件，单位为 degrees * 10000000
     void HandleGnssReport(int latitude_e7, int longitude_e7)
     {
-        std::scoped_lock<SpinLock> lock(m_mutex);
+        std::scoped_lock<SpinLock> lock(request_lock);
         StoreRequestOp(request_op_gnss_report);
         req->vgnss_info.latitude_e7 = latitude_e7;
         req->vgnss_info.longitude_e7 = longitude_e7;
@@ -1115,7 +1144,7 @@ private: // 私有实现，外部无需关系
     // 硬件断点事件
     int HandleHwbpEvent(request_op op, std::span<const bp_point> points = {})
     {
-        std::scoped_lock<SpinLock> lock(m_mutex);
+        std::scoped_lock<SpinLock> lock(request_lock);
         if (op != request_op_hwbp_set && op != request_op_hwbp_remove) return -1;
 
         StoreRequestOp(op);
@@ -1140,7 +1169,7 @@ private: // 私有实现，外部无需关系
     // PTEBP 复用 bp_info.points 和 records 存储命中现场
     int HandlePtebpEvent(request_op op, std::span<const bp_point> points = {})
     {
-        std::scoped_lock<SpinLock> lock(m_mutex);
+        std::scoped_lock<SpinLock> lock(request_lock);
         if (op != request_op_ptebp_set && op != request_op_ptebp_remove) return -1;
 
         StoreRequestOp(op);
@@ -1165,7 +1194,7 @@ private: // 私有实现，外部无需关系
     // STEPBP 复用 bp_info.points 和 records 存储命中现场
     int HandleStepbpEvent(request_op op, std::span<const bp_point> points = {})
     {
-        std::scoped_lock<SpinLock> lock(m_mutex);
+        std::scoped_lock<SpinLock> lock(request_lock);
         if (op != request_op_stepbp_set && op != request_op_stepbp_remove) return -1;
 
         StoreRequestOp(op);
@@ -1191,7 +1220,7 @@ private: // 私有实现，外部无需关系
     // DPTDBG 复用 bp_info.points 和 records 存储命中现场
     int HandleDptdbgEvent(request_op op, std::span<const bp_point> points = {})
     {
-        std::scoped_lock<SpinLock> lock(m_mutex);
+        std::scoped_lock<SpinLock> lock(request_lock);
         if (op != request_op_dptdbg_set && op != request_op_dptdbg_remove) return -1;
 
         StoreRequestOp(op);
@@ -1220,7 +1249,7 @@ private: // 私有实现，外部无需关系
     // Android shell 实时查看输出：su -c "dmesg -w | grep -E 'lsdriver'"
     int HandleSyscallMonitorEvent(request_op op, int tgid)
     {
-        std::scoped_lock<SpinLock> lock(m_mutex);
+        std::scoped_lock<SpinLock> lock(request_lock);
         if ((op != request_op_syscall_monitor_set && op != request_op_syscall_monitor_remove) || tgid <= 0) return -1;
 
         StoreRequestOp(op);
@@ -1232,7 +1261,7 @@ private: // 私有实现，外部无需关系
 
     int HandleCntvctMonitorEvent(request_op op, int tgid)
     {
-        std::scoped_lock<SpinLock> lock(m_mutex);
+        std::scoped_lock<SpinLock> lock(request_lock);
         if ((op != request_op_cntvct_monitor_set && op != request_op_cntvct_monitor_remove) || tgid <= 0) return -EINVAL;
 
         StoreRequestOp(op);
@@ -1245,7 +1274,7 @@ private: // 私有实现，外部无需关系
     // 获取指定进程的线程 TLS 或 PACGA 环境参数
     int HandleEnvGetParams(std::string_view threadName)
     {
-        std::scoped_lock<SpinLock> lock(m_mutex);
+        std::scoped_lock<SpinLock> lock(request_lock);
         if (global_pid <= 0) return -1;
 
         StoreRequestOp(request_op_env_get_params);

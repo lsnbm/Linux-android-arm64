@@ -211,14 +211,27 @@ COW:当前进程准备写入一个仍与其他进程或映射共享的物理页�
 
 /* ======================== 总入口：执行器缓存、解码、构建与执行 ======================== */
 
-bool emulate_inst(struct pt_regs *regs, struct fp_regs *fp_regs, uint32_t specified_inst)
+/*
+与解码缓存相同，将未命中才需要的 decoded/local_entry 和解码、构建、插入调用
+隔离到不可内联的慢路径，避免这些临时对象扩大每次缓存命中的栈帧和寄存器保存范围。
+命中仍直接使用已发布的不可变条目；只有执行成功才插入，满桶仍放弃缓存。
+*/
+static __attribute__((__noinline__)) enum emu_inst_result emulate_inst_slow(struct pt_regs *regs, struct fp_regs *fp_regs, uint32_t inst)
 {
     struct arm64_decoded_instruction decoded __attribute__((__uninitialized__));
     struct arm64_executor_entry local_entry __attribute__((__uninitialized__));
-    const struct arm64_executor_entry *entry;
+
+    if (arm64_decode_instruction(inst, &decoded) != ARM64_DECODE_OK || !emu_build_executor_entry(&decoded, &local_entry)) return EMU_INST_SKIP;
+
+    enum emu_inst_result result = emu_execute_executor_entry(regs, fp_regs, &local_entry);
+    if (result == EMU_INST_HANDLED) arm64_executor_cache_insert(inst, &local_entry);
+    return result;
+}
+
+bool emulate_inst(struct pt_regs *regs, struct fp_regs *fp_regs, uint32_t specified_inst)
+{
     uint64_t pc = regs->pc;
     uint32_t inst = specified_inst;
-    enum emu_inst_result result = EMU_INST_SKIP;
 
     /* 生产调用点来自异常/内核上下文 不建议硬编码
     asm volatile("msr PAN, #0x0" ::: "memory");
@@ -236,15 +249,15 @@ bool emulate_inst(struct pt_regs *regs, struct fp_regs *fp_regs, uint32_t specif
         inst = READ_ONCE(*(const uint32_t *)(uintptr_t)regs->pc);
     }
 
-    entry = arm64_executor_cache_lookup(inst);
+    const struct arm64_executor_entry *entry = arm64_executor_cache_lookup(inst);
+    enum emu_inst_result result;
     if (entry)
     {
         result = emu_execute_executor_entry(regs, fp_regs, entry);
     }
-    else if (arm64_decode_instruction(inst, &decoded) == ARM64_DECODE_OK && emu_build_executor_entry(&decoded, &local_entry))
+    else
     {
-        result = emu_execute_executor_entry(regs, fp_regs, &local_entry);
-        if (result == EMU_INST_HANDLED) arm64_executor_cache_insert(inst, &local_entry);
+        result = emulate_inst_slow(regs, fp_regs, inst);
     }
 
     uaccess_disable_privileged();

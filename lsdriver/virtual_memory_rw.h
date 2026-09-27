@@ -95,6 +95,31 @@ static inline void free_physical_page_info(void)
     }
 }
 
+static inline void physical_copy(void *destination, const void *source, size_t size)
+{
+    switch (size)
+    {
+    case 1:
+        __builtin_memcpy(destination, source, 1);
+        break;
+    case 2:
+        __builtin_memcpy(destination, source, 2);
+        break;
+    case 4:
+        __builtin_memcpy(destination, source, 4);
+        break;
+    case 8:
+        __builtin_memcpy(destination, source, 8);
+        break;
+    case 16:
+        __builtin_memcpy(destination, source, 16);
+        break;
+    default:
+        __builtin_memcpy(destination, source, size);
+        break;
+    }
+}
+
 // 验证参数并直接操作PTE建立物理页映射
 static inline void *pte_map_page(phys_addr_t paddr, size_t size, const void *buffer)
 {
@@ -164,28 +189,7 @@ static inline int pte_read_physical(phys_addr_t paddr, void *buffer, size_t size
         return PTR_ERR(mapped);
     }
 
-    // 极限性能且安全的内存拷贝 (防未对齐崩溃)
-    switch (size)
-    {
-    case 1:
-        __builtin_memcpy(buffer, mapped, 1);
-        break;
-    case 2:
-        __builtin_memcpy(buffer, mapped, 2);
-        break;
-    case 4:
-        __builtin_memcpy(buffer, mapped, 4);
-        break;
-    case 8:
-        __builtin_memcpy(buffer, mapped, 8);
-        break;
-    case 16:
-        __builtin_memcpy(buffer, mapped, 16);
-        break;
-    default:
-        __builtin_memcpy(buffer, mapped, size);
-        break;
-    }
+    physical_copy(buffer, mapped, size);
 
     return 0;
 }
@@ -199,27 +203,7 @@ static inline int pte_write_physical(phys_addr_t paddr, const void *buffer, size
         return PTR_ERR(mapped);
     }
 
-    switch (size)
-    {
-    case 1:
-        __builtin_memcpy(mapped, buffer, 1);
-        break;
-    case 2:
-        __builtin_memcpy(mapped, buffer, 2);
-        break;
-    case 4:
-        __builtin_memcpy(mapped, buffer, 4);
-        break;
-    case 8:
-        __builtin_memcpy(mapped, buffer, 8);
-        break;
-    case 16:
-        __builtin_memcpy(mapped, buffer, 16);
-        break;
-    default:
-        __builtin_memcpy(mapped, buffer, size);
-        break;
-    }
+    physical_copy(mapped, buffer, size);
 
     return 0;
 }
@@ -384,28 +368,7 @@ phys_to_virt()它算出的 VA 不在线性映射区。解引用这个未映射�
     //if (!virt_addr_valid(kernel_vaddr)) return -EFAULT;
     if (!__is_lm_address(kernel_vaddr)) return -EFAULT;
 
-    // 极限性能且安全的内存拷贝 (防未对齐崩溃)
-    switch (size)
-    {
-    case 1:
-        __builtin_memcpy(buffer, kernel_vaddr, 1);
-        break;
-    case 2:
-        __builtin_memcpy(buffer, kernel_vaddr, 2);
-        break;
-    case 4:
-        __builtin_memcpy(buffer, kernel_vaddr, 4);
-        break;
-    case 8:
-        __builtin_memcpy(buffer, kernel_vaddr, 8);
-        break;
-    case 16:
-        __builtin_memcpy(buffer, kernel_vaddr, 16);
-        break;
-    default:
-        __builtin_memcpy(buffer, kernel_vaddr, size);
-        break;
-    }
+    physical_copy(buffer, kernel_vaddr, size);
 
     return 0;
 }
@@ -419,27 +382,7 @@ static inline int linear_write_physical(phys_addr_t paddr, const void *buffer, s
     if ((paddr & ~PAGE_MASK) + size > PAGE_SIZE) return -EINVAL;
     if (!__is_lm_address(kernel_vaddr)) return -EFAULT;
 
-    switch (size)
-    {
-    case 1:
-        __builtin_memcpy(kernel_vaddr, buffer, 1);
-        break;
-    case 2:
-        __builtin_memcpy(kernel_vaddr, buffer, 2);
-        break;
-    case 4:
-        __builtin_memcpy(kernel_vaddr, buffer, 4);
-        break;
-    case 8:
-        __builtin_memcpy(kernel_vaddr, buffer, 8);
-        break;
-    case 16:
-        __builtin_memcpy(kernel_vaddr, buffer, 16);
-        break;
-    default:
-        __builtin_memcpy(kernel_vaddr, buffer, size);
-        break;
-    }
+    physical_copy(kernel_vaddr, buffer, size);
 
     return 0;
 }

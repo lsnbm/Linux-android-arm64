@@ -70,7 +70,6 @@ enum bp_len
     BP_BREAKPOINT_LEN_6 = 6,
     BP_BREAKPOINT_LEN_7 = 7,
     BP_BREAKPOINT_LEN_8 = 8,
-
 };
 // 断点作用线程范围
 enum bp_scope
@@ -311,7 +310,6 @@ enum request_op
     request_op_env_get_params, // 获取指定task环境参数
 
     request_op_kernel_exit, // 内核线程退出
-
 };
 
 // 将在队列中使用的请求实例结构体
