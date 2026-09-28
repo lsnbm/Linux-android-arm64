@@ -59,8 +59,8 @@ HEADER_END
 printf '\nINSTALL_DRIVER_VERSION=%s\n' "$PACKAGE_VERSION"
 cat << 'HEADER_END'
 
-# Android 临时目录
-TEMP_KO="/data/local/tmp/driver_auto_$$.ko"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)" || exit 1
+TEMP_KO="$SCRIPT_DIR/driver_auto_$$.ko"
 
 # 清理
 cleanup() {

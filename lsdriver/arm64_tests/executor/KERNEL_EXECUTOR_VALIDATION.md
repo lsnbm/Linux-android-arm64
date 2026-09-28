@@ -32,6 +32,8 @@ make build
 主机需要对应 Android 内核源码树和 NDK 工具链。设备需要 AArch64、root shell，
 并允许加载匹配当前内核的测试模块。
 
+修改 `instruction.txt` 后，需要重新构建测试模块和 runner，让两端使用同一份指令表。
+
 ## 执行
 
 在 Windows PowerShell 中运行：
@@ -66,14 +68,10 @@ status=4 action=skip emulator=not_called
 `status=4` 仅用于实体 CPU 同步异常。该项不调用模拟器、不更新连续现场，并在下一
 项重建 CPU session。CPU 正常执行但模拟器拒绝时测试失败。
 
-当前 2047 项语料的预期汇总为：
-
-```text
-continuous test passed cases=2047
-case_counts=compared=2046 skipped=1
-runner_status=0
-cleanup_status=0
-```
+语料包含 5119 条非空记录、1844 个不同的指令 word。完整运行后，
+`continuous test passed cases=5119` 表示遍历完成，`compared + skipped` 应等于 5119，
+`runner_status` 和 `cleanup_status` 均应为 0。实际对拍与跳过数量以设备日志为准；
+跳过的项目不计入模拟器验证通过的数量。
 
 index 1798 的 `0x41363A88` 是 undefined word，应输出 SKIP；其前后项目应正常
 对拍。每项结果、汇总计数、protocol/build identity 和退出码均由主机脚本校验。
