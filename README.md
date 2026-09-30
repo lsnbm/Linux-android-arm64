@@ -91,9 +91,9 @@ GitHub 的 Download ZIP 不包含子模块源码，请使用 Git 克隆仓库。
 - `Read<T>` / `Read(address, buffer, size)` / `Write(...)`
 - `ReadString`
 - `GetPid` / `SetGlobalPid`
-- `GetMemoryInfoRef` / `GetModuleAddress` / `GetScanRegions`
+- `GetMemoryInfo` / `GetModuleAddress` / `GetScanRegions`
 - `DumpMemory`，按模块名或 `start-end` 地址范围导出内存到 `.bin` 文件
-- `GetHwbpInfoRef` / `SetProcessHwbpRef` / `RemoveProcessHwbpRef`
+- `GetBreakpointInfo` / `SetProcessHwbpRef` / `RemoveProcessHwbpRef`
 - `SetProcessPtebpRef` / `SetProcessStepbpRef` / `SetProcessDptdbgRef`，以及对应的 `RemoveProcess...Ref`
 - `TouchDown` / `TouchMove` / `TouchUp` / `GyroReport` / `GnssReport`
 - `StartSyscallMonitor` / `StopSyscallMonitor` / `StartCntvctMonitor` / `StopCntvctMonitor`
@@ -402,7 +402,7 @@ BSS 区段的 `index` 固定为 `-1`，后续不会参与普通连续 index 编�
 先通过 `GetPid(packageName)` 查找进程，再用 `SetGlobalPid(pid)` 设置内存和断点操作的目标。
 
 - `Read<T>()`、`Read()`、`Write()` 提供模板或缓冲区读写。
-- `GetMemoryInfoRef()` 请求内存布局并返回共享结果的引用。
+- `GetMemoryInfo()` 请求内存布局，在锁内复制并按值返回独立的 `virtual_memory` 对象；失败时记录日志并返回空对象。该结构约 12.5 MiB，调用方使用 `std::unique_ptr<Driver::virtual_memory> snapshot(new Driver::virtual_memory(dr->GetMemoryInfo()));` 直接在堆上接收，通过 `snapshot->` 访问成员，避免局部大对象或传给 `std::make_unique` 的大型临时对象占用线程栈。
 - `GetModuleAddress(moduleName, segmentIndex, outAddress, isStart)` 按模块名和区段 `index` 查询起止地址。
 - `GetScanRegions()` 汇总扫描区域和模块区段，按地址排序。
 - `DumpMemory()` 支持模块名和半开地址范围 `[start, end)`，导出到 `/sdcard/dump/`，单次最多 500MB，失败的读取块以零填充。
@@ -417,7 +417,7 @@ BSS 区段的 `index` 固定为 `-1`，后续不会参与普通连续 index 编�
 
 `SetProcessHwbpRef(points)` 设置硬件断点，`RemoveProcessHwbpRef()` 移除配置。PTE、单步和 DPT 接口使用相同的配置结构。
 
-`GetHwbpInfoRef()` 直接返回共享的 `bp_info` 引用，不发起刷新请求，也不是独立快照。命中记录会由内核继续更新。
+`GetBreakpointInfo()` 直接返回共享内存中 `bp_info` 的可写引用 `break_point &`，适用于共用该结构的各类断点，不分配、不复制、不加锁，也不发起刷新请求。调用方使用 `auto &info = dr->GetBreakpointInfo();` 接收，通过 `info.points` 访问成员；仅需读取时可使用 `const auto &`，不要用按值的 `auto` 接收而复制整个结构体。通过引用修改字段会直接修改共享内存，调用方不得释放被引用对象，且只能在共享映射有效期间使用。并发访问需要调用方协调，内核异步更新时不保证多个字段来自同一时刻。
 
 `StartSyscallMonitor(pid)` / `StopSyscallMonitor(pid)` 和 `StartCntvctMonitor(pid)` / `StopCntvctMonitor(pid)` 分别管理两类进程监控。系统调用记录输出到内核日志，不从共享请求返回日志正文。
 
@@ -446,7 +446,7 @@ BSS 区段的 `index` 固定为 `-1`，后续不会参与普通连续 index 编�
 bash build_all.sh 6.1-Android14
 ```
 
-不传参数会依次构建所有目标。脚本先询问是否剥离调试符号；6.6、6.12、6.18 目标保留符号。产物以版本名保存到驱动目录，随后自动调用 [packer.sh](packer.sh) 生成 [install_driver.sh](install_driver.sh)，并推进 [install_driver.version](install_driver.version) 中的下一次打包版本号。只构建一个目标时，安装包仍会收集目录里已有的其他版本模块。
+不传参数会依次构建所有目标。脚本先询问是否剥离调试符号；6.6、6.12、6.18 目标保留符号。产物以版本名保存到驱动目录，随后自动调用 [packer.sh](packer.sh) 递增版本号并生成 [install_driver.sh](install_driver.sh)，打包成功后将相同版本号写入 [install_driver.version](install_driver.version)，使其与安装脚本输出一致。只构建一个目标时，安装包仍会收集目录里已有的其他版本模块。
 
 已经准备好目标内核及其输出目录时，也可以从仓库根目录直接使用 Kbuild：
 

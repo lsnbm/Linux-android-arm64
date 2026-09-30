@@ -294,7 +294,7 @@ static int vgnss_install_hook_locked(void)
     return -ENOENT;
 }
 
-static inline int v_gnss_init(void)
+static int v_gnss_init(void)
 {
     mutex_lock(&vgnss_lock);
     smp_store_release(&vgps.has_fix, false);
@@ -303,7 +303,7 @@ static inline int v_gnss_init(void)
     return ret;
 }
 
-static inline int v_gnss_report(int latitude_e7, int longitude_e7)
+static int v_gnss_report(int latitude_e7, int longitude_e7)
 {
     if (latitude_e7 < -900000000 || latitude_e7 > 900000000) return -EINVAL;
     if (longitude_e7 < -1800000000 || longitude_e7 > 1800000000) return -EINVAL;
@@ -325,7 +325,7 @@ static inline int v_gnss_report(int latitude_e7, int longitude_e7)
     return 0;
 }
 
-static inline void v_gnss_destroy(void)
+static void v_gnss_destroy(void)
 {
     mutex_lock(&vgnss_lock);
     smp_store_release(&vgps.has_fix, false);

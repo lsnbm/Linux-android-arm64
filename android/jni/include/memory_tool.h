@@ -2602,15 +2602,9 @@ private:
         regions_.clear();
         moduleBases_.clear();
 
-        auto snapshot = std::make_unique<Driver::virtual_memory>();
-        const auto &sharedInfo = dr->GetMemoryInfoRef();
-        {
-            std::scoped_lock<Driver::SpinLock> driverLock(dr->request_lock);
-            *snapshot = sharedInfo;
-        }
-        const auto &info = *snapshot;
-        const int regionCount = std::clamp(info.region_count, 0, MAX_SCAN_REGIONS);
-        const int moduleCount = std::clamp(info.module_count, 0, MAX_MODULES);
+        const std::unique_ptr<Driver::virtual_memory> snapshot(new Driver::virtual_memory(dr->GetMemoryInfo()));
+        const int regionCount = std::clamp(snapshot->region_count, 0, MAX_SCAN_REGIONS);
+        const int moduleCount = std::clamp(snapshot->module_count, 0, MAX_MODULES);
         auto addRegion = [this](uintptr_t rawStart, uintptr_t rawEnd)
         {
             constexpr uintptr_t alignment = sizeof(uintptr_t);
@@ -2623,11 +2617,11 @@ private:
             if (start < end) regions_.emplace_back(start, end);
         };
 
-        for (int i = 0; i < regionCount; ++i) addRegion(info.regions[i].start, info.regions[i].end);
+        for (int i = 0; i < regionCount; ++i) addRegion(snapshot->regions[i].start, snapshot->regions[i].end);
 
         for (int moduleIndex = 0; moduleIndex < moduleCount; ++moduleIndex)
         {
-            const auto &module = info.modules[moduleIndex];
+            const auto &module = snapshot->modules[moduleIndex];
             const size_t pathLength = strnlen(module.name, sizeof(module.name));
             const std::string fullPath(module.name, pathLength);
             const std::string name(MemUtils::BaseName(fullPath));

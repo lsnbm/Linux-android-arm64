@@ -1170,8 +1170,8 @@ namespace
             const int pid = dr->GetGlobalPid();
             if (pid <= 0) return fail("全局PID未设置，请先执行 target.select 或 target.attach");
 
-            if (!dr->GetEnvParams(threadName)) return fail("获取环境参数失败");
-            const auto &info = dr->GetEnvParamsRef();
+            const auto info = dr->GetEnvParams(threadName);
+            if (info.tls_status != 0 && info.pacga_status != 0) return fail("获取环境参数失败");
 
             return okData({
                 {"pid", pid},
@@ -1186,8 +1186,8 @@ namespace
 
         if (op == "memory.map")
         {
-            const auto &info = dr->GetMemoryInfoRef();
-            return okData(buildMemoryInfoJson(0, info));
+            const std::unique_ptr<Driver::virtual_memory> info(new Driver::virtual_memory(dr->GetMemoryInfo()));
+            return okData(buildMemoryInfoJson(0, *info));
         }
 
         if (op == "module.resolve")
@@ -1443,7 +1443,7 @@ namespace
 
         if (op == "breakpoint.get")
         {
-            const auto &info = dr->GetHwbpInfoRef();
+            const auto &info = dr->GetBreakpointInfo();
             return okData(buildHwbpInfoJson(info));
         }
 
@@ -1490,32 +1490,22 @@ namespace
             if (std::holds_alternative<json>(valueText)) return std::get<json>(valueText);
             const auto value = MemUtils::ParseUInt128(std::get<std::string>(valueText));
             if (!value.has_value()) return fail(std::format("operation={} 参数 value 无效", op));
-            auto &info = const_cast<Driver::break_point &>(dr->GetHwbpInfoRef());
             const int recordIndex = std::get<int>(index);
             if (recordIndex < 0) return fail("index 越界");
-            int pointIndex = -1;
-            int pointRecordIndex = -1;
-            Driver::bp_record *record = nullptr;
-            int flatIndex = 0;
-            int currentPointIndex = 0;
-            for (auto &point : info.points)
+            auto &info = dr->GetBreakpointInfo();
+            int pointRecordIndex = recordIndex;
+            for (int pointIndex = 0; pointIndex < BP_CONFIG_MAX; ++pointIndex)
             {
-                const int recordCount = clampHwbpRecordCount(point.record_count);
-                if (recordIndex < flatIndex + recordCount)
+                auto &point = info.points[pointIndex];
+                const int recordCount = std::clamp(point.record_count, 0, BP_RECORD_MAX);
+                if (pointRecordIndex < recordCount)
                 {
-                    pointIndex = currentPointIndex;
-                    pointRecordIndex = recordIndex - flatIndex;
-                    record = &point.records[pointRecordIndex];
-                    break;
+                    if (!MemUtils::AssignHwbpRecordField(point.records[pointRecordIndex], std::get<std::string>(field), *value)) return fail("field 无效");
+                    return okData({{"index", recordIndex}, {"point_index", pointIndex}, {"point_record_index", pointRecordIndex}, {"field", std::get<std::string>(field)}, {"value_hex", MemUtils::FormatUInt128Hex(*value)}});
                 }
-                flatIndex += recordCount;
-                ++currentPointIndex;
+                pointRecordIndex -= recordCount;
             }
-            if (!record) return fail("index 越界");
-            auto copy = *record;
-            if (!MemUtils::AssignHwbpRecordField(copy, std::get<std::string>(field), *value)) return fail("field 无效");
-            *record = copy;
-            return okData({{"index", recordIndex}, {"point_index", pointIndex}, {"point_record_index", pointRecordIndex}, {"field", std::get<std::string>(field)}, {"value_hex", MemUtils::FormatUInt128Hex(*value)}});
+            return fail("index 越界");
         }
 
         if (op == "signature.create")

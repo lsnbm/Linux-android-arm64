@@ -237,7 +237,7 @@ static int match_touchscreen(struct device *dev, void *data)
     return 0;
 }
 
-static inline int v_touch_init(int request_virtual_slots, int *max_x, int *max_y)
+static int v_touch_init(int request_virtual_slots, int *max_x, int *max_y)
 {
     if (!max_x || !max_y) return -EINVAL;
 
@@ -298,7 +298,7 @@ static inline int v_touch_init(int request_virtual_slots, int *max_x, int *max_y
     return 0;
 }
 
-static inline void v_touch_destroy(void)
+static void v_touch_destroy(void)
 {
     // 防止重复调用
     if (!vt.initialized) return;
@@ -340,7 +340,7 @@ static inline void v_touch_destroy(void)
     for (int i = 0; i < virtual_slots; i++) vt.tracking_ids[i] = -1;
 }
 
-static inline void v_touch_event(enum request_op op, int slot, int x, int y)
+static void v_touch_event(enum request_op op, int slot, int x, int y)
 {
     if (!vt.initialized) return;
 

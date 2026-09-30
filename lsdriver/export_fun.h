@@ -286,28 +286,15 @@ static inline pte_t *get_kernel_pte(uint64_t vaddr)
 
     // PUD Level (可能遇到 1GB 大页)
     pud_t *pud = pud_offset(p4d, vaddr);
-    if (pud_none(*pud)) return NULL;
-
-    // 检查是否是 1G 大页
-    if (pud_leaf(*pud)) return NULL;
-
     if (pud_bad(*pud)) return NULL;
 
     // PMD Level (可能遇到 2MB 大页)
     pmd_t *pmd = pmd_offset(pud, vaddr);
-    if (pmd_none(*pmd)) return NULL;
-
-    // 检查是否是 2M 大页
-    if (pmd_leaf(*pmd)) return NULL;
-
     if (pmd_bad(*pmd)) return NULL;
 
     // PTE Level (普通的 4KB 页)
     // 较新内核中 __pte_offset_map 不导出，对于 64位 系统直接使用 pte_offset_kernel 即可
-    pte_t *ptep = pte_offset_kernel(pmd, vaddr);
-    if (!ptep) return NULL;
-
-    return ptep;
+    return pte_offset_kernel(pmd, vaddr);
 }
 
 // 获取用户态虚拟地址的pte
@@ -325,28 +312,15 @@ static inline pte_t *get_user_pte(struct mm_struct *mm, uint64_t vaddr)
 
     // PUD Level (可能遇到 1GB 大页)
     pud_t *pud = pud_offset(p4d, vaddr);
-    if (pud_none(*pud)) return NULL;
-
-    // 检查是否是 1G 大页
-    if (pud_leaf(*pud)) return NULL;
-
     if (pud_bad(*pud)) return NULL;
 
     // PMD Level (可能遇到 2MB 大页)
     pmd_t *pmd = pmd_offset(pud, vaddr);
-    if (pmd_none(*pmd)) return NULL;
-
-    // 检查是否是 2M 大页
-    if (pmd_leaf(*pmd)) return NULL;
-
     if (pmd_bad(*pmd)) return NULL;
 
     // PTE Level (普通的 4KB 页)
     // 较新内核中 __pte_offset_map 不导出，对于 64位 系统直接使用 pte_offset_kernel 即可
-    pte_t *ptep = pte_offset_kernel(pmd, vaddr);
-    if (!ptep) return NULL;
-
-    return ptep;
+    return pte_offset_kernel(pmd, vaddr);
 }
 
 // 根据 pid 获取 task_struct，调用方负责 put_task_struct。
@@ -381,43 +355,42 @@ static inline pte_t *get_or_alloc_user_pte(struct mm_struct *mm, uint64_t vaddr)
     if (!mm) return NULL;
 
     pgd_t *pgd = pgd_offset(mm, vaddr);
-    if (pgd_bad(*pgd)) return NULL;
     if (pgd_none(*pgd))
     {
         p4d_t *new_p4d = p4d_alloc_one(mm, vaddr);
         if (!new_p4d) return NULL;
         pgd_populate(mm, pgd, new_p4d);
     }
+    else if (pgd_bad(*pgd)) return NULL;
 
     p4d_t *p4d = p4d_offset(pgd, vaddr);
-    if (p4d_bad(*p4d)) return NULL;
     if (p4d_none(*p4d))
     {
         pud_t *new_pud = pud_alloc_one(mm, vaddr);
         if (!new_pud) return NULL;
         p4d_populate(mm, p4d, new_pud);
     }
+    else if (p4d_bad(*p4d)) return NULL;
 
     pud_t *pud = pud_offset(p4d, vaddr);
-    if (pud_leaf(*pud) || pud_bad(*pud)) return NULL;
     if (pud_none(*pud))
     {
         pmd_t *new_pmd = pmd_alloc_one(mm, vaddr);
         if (!new_pmd) return NULL;
         pud_populate(mm, pud, new_pmd);
     }
+    else if (pud_bad(*pud)) return NULL;
 
     pmd_t *pmd = pmd_offset(pud, vaddr);
-    if (pmd_leaf(*pmd) || pmd_bad(*pmd)) return NULL;
     if (pmd_none(*pmd))
     {
         pgtable_t new_pte = pte_alloc_one(mm);
         if (!new_pte) return NULL;
         pmd_populate(mm, pmd, new_pte);
     }
+    else if (pmd_bad(*pmd)) return NULL;
 
-    pte_t *ptep = pte_offset_kernel(pmd, vaddr);
-    return ptep;
+    return pte_offset_kernel(pmd, vaddr);
 }
 
 // 检查一段用户 VA 范围是否没有 present PTE，调用方负责持有合适的 mmap 锁。
@@ -449,38 +422,6 @@ static inline int read_user_pte_value(struct mm_struct *mm, uint64_t addr, pteva
     return 0;
 }
 
-static inline int get_present_user_pages(struct mm_struct *mm, unsigned long start, int page_count, struct page **pages)
-{
-    if (!mm || !pages || page_count <= 0) return -EINVAL;
-
-    for (int page_index = 0; page_index < page_count; page_index++)
-    {
-        unsigned long page_addr = start + (unsigned long)page_index * PAGE_SIZE;
-        pte_t *ptep = get_user_pte(mm, page_addr);
-        struct page *page;
-
-        if (!ptep) return page_index;
-        pte_t pte = READ_ONCE(*ptep);
-        if (!pte_present(pte) || !pfn_valid(pte_pfn(pte))) return page_index;
-
-        page = pfn_to_page(pte_pfn(pte));
-        if (!try_get_page(page)) return page_index;
-        pages[page_index] = page;
-    }
-    return page_count;
-}
-
-static inline void put_present_user_pages(struct page **pages, int page_count)
-{
-    if (!pages || page_count <= 0) return;
-
-    for (int page_index = 0; page_index < page_count; page_index++)
-    {
-        if (pages[page_index]) page_ref_dec(compound_head(pages[page_index]));
-        pages[page_index] = NULL;
-    }
-}
-
 // 写入用户地址所在页的 PTE，并用汇编刷新该用户页 TLB。
 static inline int write_user_pte_value(struct mm_struct *mm, uint64_t addr, pteval_t new_pte)
 {
@@ -495,25 +436,6 @@ static inline int write_user_pte_value(struct mm_struct *mm, uint64_t addr, ptev
     set_pte(ptep, __pte(new_pte));
     flush_tlb_addr_all_asid_all_cpus(addr);
     return 0;
-}
-
-// 释放一批通过GUP获取的page *;避免使用 put_page() 把 page_pinner 拉进来。
-static void release_gup_pages(struct page **pages, int nr)
-{
-    typedef void (*release_pages_t)(struct page **pages, int nr);
-    static release_pages_t fn_release_pages;
-
-    if (!pages || nr <= 0) return;
-
-    if (!fn_release_pages) fn_release_pages = (release_pages_t)generic_kallsyms_lookup_name("release_pages");
-
-    if (!fn_release_pages)
-    {
-        ls_log_always_tag("export", "严重错误！无法找到 release_pages，跳过 %d 个页引用回收\n", nr);
-        return;
-    }
-
-    fn_release_pages(pages, nr);
 }
 
 // 分配页对齐的内核 RWX 内存；fixed_address 为 NULL 时随机分配，否则必须传入希望占用的页对齐虚拟地址。

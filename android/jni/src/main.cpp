@@ -345,19 +345,17 @@ private:
 
         if (result == ImGuiFloatingKeyboard::Result::Accepted)
         {
-            if (const auto value = MemUtils::ParseUInt128(bpParams_.regEditBuf, 16); value.has_value())
+            if (const auto value = MemUtils::ParseUInt128(bpParams_.regEditBuf, 16); value.has_value() && recordIndex >= 0)
             {
-                auto &info = const_cast<Driver::break_point &>(dr->GetHwbpInfoRef());
-                int flatIndex = 0;
-                for (auto &point : info.points)
+                for (auto &point : dr->GetBreakpointInfo().points)
                 {
                     const int recordCount = std::clamp(point.record_count, 0, BP_RECORD_MAX);
-                    if (recordIndex >= flatIndex && recordIndex < flatIndex + recordCount)
+                    if (recordIndex < recordCount)
                     {
-                        MemUtils::HwbpWriteRegisterValue(point.records[recordIndex - flatIndex], regIndex, *value);
+                        MemUtils::HwbpWriteRegisterValue(point.records[recordIndex], regIndex, *value);
                         break;
                     }
-                    flatIndex += recordCount;
+                    recordIndex -= recordCount;
                 }
             }
         }
@@ -1114,8 +1112,11 @@ private:
                     if (UI::Btn(labels[i], {bw, h - S(14)}, c))
                     {
                         state_.tab = i;
-                        if (i == 5) dr->GetMemoryInfoRef();
-                        if (i == 6) dr->GetHwbpInfoRef();
+                        if (i == 5)
+                        {
+                            const std::unique_ptr<Driver::virtual_memory> snapshot(new Driver::virtual_memory(dr->GetMemoryInfo()));
+                        }
+                        if (i == 6) dr->GetBreakpointInfo();
                         if (i == 2 && memViewer_.base()) memViewer_.refresh();
                     }
                 }
@@ -1141,9 +1142,9 @@ private:
         if (UI::Btn("获取环境参数", {w, S(48)}, Colors::BTN_TEAL))
         {
             envParams_.pid = pid;
-            envParams_.success = dr->GetEnvParams(buf_.envThread);
+            envParams_.info = dr->GetEnvParams(buf_.envThread);
+            envParams_.success = envParams_.info.tls_status == 0 || envParams_.info.pacga_status == 0;
             envParams_.hasResult = true;
-            if (envParams_.success) envParams_.info = dr->GetEnvParamsRef();
         }
         ImGui::EndDisabled();
 
@@ -1684,11 +1685,11 @@ private:
         UI::Space(S(4));
         if (UI::Btn("刷新模块", {w, S(48)}, Colors::BTN_TEAL))
         {
-            const auto &info = dr->GetMemoryInfoRef();
+            const std::unique_ptr<Driver::virtual_memory> snapshot(new Driver::virtual_memory(dr->GetMemoryInfo()));
             moduleRows_.clear();
-            for (int i = 0; i < info.module_count; ++i)
+            for (int i = 0; i < snapshot->module_count; ++i)
             {
-                const auto &mod = info.modules[i];
+                const auto &mod = snapshot->modules[i];
                 const std::string name(MemUtils::BaseName(mod.name));
                 for (int j = 0; j < mod.seg_count; ++j)
                 {
@@ -1904,20 +1905,20 @@ private:
         UI::Space(S(4));
 
         // 硬件信息
-        const auto &info = dr->GetHwbpInfoRef();
+        const auto &snapshot = dr->GetBreakpointInfo();
         const auto &activeMode = MemoryTool::HwbpMode();
         const bool anyBpActive = !activeMode.empty();
         int activePointCount = 0;
         uintptr_t firstAddress = 0;
-        for (const auto &point : info.points)
+        for (const auto &point : snapshot.points)
         {
             if (!point.hit_addr) continue;
             if (!firstAddress) firstAddress = point.hit_addr;
             ++activePointCount;
         }
-        UI::LabelValue(Colors::ADDR_CYAN, "执行断点寄存器: ", Colors::ADDR_GREEN, "%llu", (unsigned long long)info.num_brps);
+        UI::LabelValue(Colors::ADDR_CYAN, "执行断点寄存器: ", Colors::ADDR_GREEN, "%llu", (unsigned long long)snapshot.num_brps);
         ImGui::SameLine();
-        UI::LabelValue(Colors::ADDR_CYAN, "  访问断点寄存器: ", Colors::ADDR_GREEN, "%llu", (unsigned long long)info.num_wrps);
+        UI::LabelValue(Colors::ADDR_CYAN, "  访问断点寄存器: ", Colors::ADDR_GREEN, "%llu", (unsigned long long)snapshot.num_wrps);
         UI::Text(activeMode == "ptebp" ? Colors::OK : Colors::HINT, activeMode == "ptebp" ? "PTEBP: 已激活" : "PTEBP: 未激活");
         UI::Text(activeMode == "stepbp" ? Colors::OK : Colors::HINT, activeMode == "stepbp" ? "STEPBP: 已激活" : "STEPBP: 未激活");
 
@@ -2011,7 +2012,7 @@ private:
         UI::Space(S(8));
         const char *activeModeLabel = activeMode == "stepbp" ? "STEPBP" : (activeMode == "ptebp" ? "PTEBP" : "HWBP");
         anyBpActive ? UI::Text(Colors::OK, "● 断点已激活  地址数: %d  首地址: 0x%lX  模式: %s", activePointCount, firstAddress, activeModeLabel) : UI::Text(Colors::HINT, "○ 断点未激活");
-        for (const auto &point : info.points)
+        for (const auto &point : snapshot.points)
         {
             if (point.hit_addr) UI::Text(Colors::ADDR_CYAN, "监控地址: 0x%llX", (unsigned long long)point.hit_addr);
         }
@@ -2022,7 +2023,7 @@ private:
         UI::Text(Colors::TITLE, "━━ 命中信息 ━━");
         UI::Space(S(4));
 
-        if (activePointCount > 0) drawBpRecords(info, w);
+        if (activePointCount > 0) drawBpRecords(snapshot, w);
         else UI::Text(Colors::HINT, "暂无命中记录");
     }
 

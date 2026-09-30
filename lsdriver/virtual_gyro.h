@@ -271,7 +271,7 @@ static int vgyro_install_hook_locked(void)
 }
 
 // 初始化虚拟陀螺仪状态
-static inline int v_gyro_init(void)
+static int v_gyro_init(void)
 {
     mutex_lock(&vgyro_lock);
 
@@ -291,7 +291,7 @@ static inline int v_gyro_init(void)
 }
 
 // 更新虚拟陀螺仪三轴偏移值（单位: rad/s * 1000）
-static inline int v_gyro_report(int gyro_x_mrad_s, int gyro_y_mrad_s, int gyro_z_mrad_s)
+static int v_gyro_report(int gyro_x_mrad_s, int gyro_y_mrad_s, int gyro_z_mrad_s)
 {
     // 提前计算浮点 Bits，移出热路径
     uint32_t fx = vgyro_milli_to_float_bits(gyro_x_mrad_s);
@@ -310,7 +310,7 @@ static inline int v_gyro_report(int gyro_x_mrad_s, int gyro_y_mrad_s, int gyro_z
 }
 
 // 停用虚拟陀螺仪并卸载 hook
-static inline void v_gyro_destroy(void)
+static void v_gyro_destroy(void)
 {
     mutex_lock(&vgyro_lock);
 

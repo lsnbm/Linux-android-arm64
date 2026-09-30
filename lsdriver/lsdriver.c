@@ -151,7 +151,7 @@ static int DispatchThreadFunction(void *data)
                 if (spin_count < 5000)
                 {
                     spin_count++;
-                    cpu_relax(); // 告诉 CPU 我在忙等，降低功耗
+                    //cpu_relax(); // arm64下yield等同于nop
                 }
                 else
                 {
@@ -213,7 +213,9 @@ static int ConnectThreadFunction(void *data)
 
             // 远程获取用户空间地址对应的物理页（将用户地址映射到内核）
             mmap_read_lock(mm);
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0) // 内核 6.12
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0) // 内核 6.18 及以上
+            ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0) // 内核 6.12 到 6.18
             ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)  // 内核 6.5 到 6.12
             ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL);
@@ -240,7 +242,7 @@ static int ConnectThreadFunction(void *data)
                 goto out_put_pages;
             }
             old_task = ls_process_task;
-            if (old_task && !(READ_ONCE(old_task->flags) & PF_EXITING)) send_sig(SIGKILL, old_task, 0); // 杀死旧的task
+            if (old_task && !(READ_ONCE(old_task->flags) & PF_EXITING)) send_sig(SIGKILL, old_task, 0); // 杀死旧的task线程组
 
             // 成功 get_user_pages_remote 持有页面引用，只需释放 mm
             ls_process_task = task;        // 保存用户进程指针
@@ -254,7 +256,7 @@ static int ConnectThreadFunction(void *data)
             break; // 找到目标进程，退出遍历
 
         out_put_pages:
-            release_gup_pages(pages, ret);
+            if (ret > 0) release_pages(pages, ret);
             kfree(pages);
             pages = NULL;
 
@@ -581,7 +583,38 @@ static void hide_myself(void)
 {
     // 内核模块结构体
     struct module_use *use, *tmp;
-    // 小于内核 6.12才能隐藏vmap_area_list和_vmap_area_root，高版本移除了这个数据结构，由https://github.com/wenyounb，发现
+
+    /*
+
+    2026/9/30/10/40已重新核对的5.10、5.15 6.1、6.6 源码使用全局 vmap_area_list 和 vmap_area_root 管理在用区域；
+    6.12、6.18 改为分节点管理，
+
+    旧版内核全局变量，
+    vmap_area_list	链表头	    按地址顺序遍历区域
+    vmap_area_root	红黑树根	根据地址快速查找区域
+    内核虚拟地址区域的结构体:
+    struct vmap_area {
+    unsigned long va_start;
+    unsigned long va_end;
+    struct rb_node rb_node;  // 加入红黑树
+    struct list_head list;   // 加入链表
+    // 其他字段
+    };
+                        
+    同一批 vmap_area 对象
+    vmap_area_list → 通过各区域的 list 成员串成链表
+    vmap_area_root → 通过各区域的 rb_node 成员组成红黑树
+    一份数据、两种查找方式。
+
+    */
+
+    /*
+    不同版本判断链由https://github.com/wenyounb提交
+    停用：vmap_area_list/vmap_area_root 是内核 vmap 虚拟地址区域的管理索引，并非仅用于信息展示。
+    这套机制服务于 vmalloc/vzalloc、vmap、常规动态 ioremap，以及使用该机制的模块内存分配路径。
+    此处仅尝试摘除包含 THIS_MODULE 的区域记录，不会解除页表映射或释放内存，却可能使该区域后续查询、解除映射和释放异常。
+
+    相关内部结构及模块分配路径存在架构和内核版本差异
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
     struct vmap_area *va, *vtmp;
     struct list_head *_vmap_area_list;
@@ -602,6 +635,7 @@ static void hide_myself(void)
     }
 
 #endif
+    */
 
     // 摘除链表，/proc/modules 中不可见。
     list_del_init(&THIS_MODULE->list);

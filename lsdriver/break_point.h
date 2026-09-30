@@ -610,12 +610,12 @@ static inline void sample_hbp_handler(struct pt_regs *regs, struct fp_regs *fp_r
     }
 }
 
-static inline void sample_hbp_handler_entry(void *regs, void *fp_regs, void *hit_point)
+static void sample_hbp_handler_entry(void *regs, void *fp_regs, void *hit_point)
 {
     sample_hbp_handler((struct pt_regs *)regs, (struct fp_regs *)fp_regs, (struct bp_point *)hit_point);
 }
 
-static inline void prepare_break_point_handlers(struct break_point *info)
+static void prepare_break_point_handlers(struct break_point *info)
 {
     size_t point_slot = 0;
     struct bp_point *point;
@@ -627,7 +627,7 @@ static inline void prepare_break_point_handlers(struct break_point *info)
 }
 
 #include "arm64_hwdbg.h"
-static inline int set_process_hwbp(struct break_point *info)
+static int set_process_hwbp(struct break_point *info)
 {
     if (!info) return -EINVAL;
 
@@ -639,7 +639,7 @@ static inline int set_process_hwbp(struct break_point *info)
     return 0;
 }
 
-static inline void remove_process_hwbp(void)
+static void remove_process_hwbp(void)
 {
     struct break_point *info = READ_ONCE(g_bp_info);
 
@@ -652,7 +652,7 @@ static inline void remove_process_hwbp(void)
 */
 #include "arm64_ptedbg.h"
 //#include "arm64_ptedbg-20260822-000439.h"
-static inline int set_process_ptebp(struct break_point *info)
+static int set_process_ptebp(struct break_point *info)
 {
     if (!info) return -EINVAL;
 
@@ -661,7 +661,7 @@ static inline int set_process_ptebp(struct break_point *info)
     return start_ptebp_monitor(info);
 }
 
-static inline void remove_process_ptebp(void)
+static void remove_process_ptebp(void)
 {
     struct break_point *info = g_ptebp_info;
 
@@ -670,7 +670,7 @@ static inline void remove_process_ptebp(void)
 }
 
 //#include "arm64_dptdbg.h"
-static inline int set_process_dptdbg(struct break_point *info)
+static int set_process_dptdbg(struct break_point *info)
 {
     return -EINVAL;
     // if (!info) return -EINVAL;
@@ -678,7 +678,7 @@ static inline int set_process_dptdbg(struct break_point *info)
     // return dptdbg_start_monitor(info);
 }
 
-static inline void remove_process_dptdbg(void)
+static void remove_process_dptdbg(void)
 {
     // struct break_point *info = g_dptdbg_info;
     // dptdbg_stop_monitor();
@@ -686,7 +686,7 @@ static inline void remove_process_dptdbg(void)
 }
 
 #include "arm64_stepdbg.h"
-static inline int set_process_stepbp(struct break_point *info)
+static int set_process_stepbp(struct break_point *info)
 {
     if (!info) return -EINVAL;
 
@@ -695,7 +695,7 @@ static inline int set_process_stepbp(struct break_point *info)
     return start_stepbp_monitor(info);
 }
 
-static inline void remove_process_stepbp(void)
+static void remove_process_stepbp(void)
 {
     struct break_point *info = g_stepbp_info;
 

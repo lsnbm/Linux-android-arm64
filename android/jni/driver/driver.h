@@ -62,32 +62,16 @@ public: // 共有结构体和锁
         __always_inline void lock() noexcept
         {
             uint32_t scratch;
-            uint32_t delay;
             uint32_t value;
             asm volatile(".arch_extension lse\n"
                          "mov %w[value], #1\n"
-                         "mov %w[delay], #1\n"
-                         // 快路径：抢到锁就直接进入临界区，跳过轮询和退避。
+                         // 原子争抢，失败立即重试，成功即退出。
                          "1:\n"
                          "swpab %w[value], %w[scratch], [%[address]]\n"
-                         "cbz %w[scratch], 5f\n"
-                         // 慢路径：每轮忙等待后退避翻倍，最多 64；观察到空闲立即重新争抢。
-                         "2:\n"
-                         "ldrb %w[scratch], [%[address]]\n"
-                         "cbz %w[scratch], 1b\n"
-                         "mov %w[scratch], %w[delay]\n"
-                         "3:\n"
-                         "yield\n"
-                         "subs %w[scratch], %w[scratch], #1\n"
-                         "b.ne 3b\n"
-                         "cmp %w[delay], #64\n"
-                         "b.hs 2b\n"
-                         "lsl %w[delay], %w[delay], #1\n"
-                         "b 2b\n"
-                         "5:\n"
-                         : [scratch] "=&r"(scratch), [delay] "=&r"(delay), [value] "=&r"(value)
+                         "cbnz %w[scratch], 1b\n"
+                         : [scratch] "=&r"(scratch), [value] "=&r"(value)
                          : [address] "r"(&locked)
-                         : "cc", "memory");
+                         : "memory");
         }
 
         __always_inline void unlock() noexcept
@@ -95,7 +79,9 @@ public: // 共有结构体和锁
             asm volatile("stlrb wzr, [%[address]]" : : [address] "r"(&locked) : "memory");
         }
     };
+
     SpinLock request_lock;
+
 #define TLS_THREAD_NAME_LEN 16
     struct env_params
     {
@@ -408,7 +394,11 @@ public: // 共有结构体和锁
     dmb:指令访问顺序屏障,load/store 内存访问指令的约束乱序访问
    
     然后dsb,isb,dmb指令操作数都是共享域范围:ish / nsh / osh / ishst
+
+    其实根本不用管这个数据缓存的，也不需要等内存读写完成，用volatile确保编译器不要长期缓存就行了
+    cpu会自动处理 缓存一致性，这个核写数据进缓存，cpu会确保其他核缓存同步的。如果这个共享不进缓存，直接从内存读写了
     现在轮询标志位kernel和user的方式互相通知完美运行极速低功耗无任何问题，也有一种sev和wfe指令可以用于互相唤醒通知，暂时不变
+    
     */
         volatile bool kernel;        // 由用户模式设置 true = 内核有待处理的请求, false = 请求已完成
         volatile bool user;          // 由内核模式设置 true = 用户模式有待处理的请求, false = 请求已完成
@@ -573,15 +563,9 @@ public: // 外部输入接口
     }
 
 public: // 外部获取内存信息
-    // 获取内部结构体实例 内部成员调用不需要显示使用this指针，隐式this
-    const virtual_memory &GetMemoryInfoRef()
+    virtual_memory GetMemoryInfo()
     {
-        if (HandleVirtualMemoryInfo() != 0)
-        {
-            LS_LOGE_TAG("Driver", "获取内存信息失败");
-            __builtin_memset(&req->vmem_info, 0, sizeof(req->vmem_info));
-        }
-        return req->vmem_info;
+        return HandleVirtualMemoryInfo();
     }
 
     // 获取模块地址，true为起始地址，false为结束地址
@@ -595,11 +579,11 @@ public: // 外部获取内存信息
 
         *outAddress = 0;
 
-        const auto &info = GetMemoryInfoRef();
+        const std::unique_ptr<virtual_memory> snapshot(new virtual_memory(GetMemoryInfo()));
 
-        for (int i = 0; i < info.module_count; ++i)
+        for (int i = 0; i < snapshot->module_count; ++i)
         {
-            const auto &mod = info.modules[i];
+            const auto &mod = snapshot->modules[i];
 
             std::string_view fullPath(mod.name);
 
@@ -634,20 +618,15 @@ public: // 外部获取内存信息
         LS_LOGE_TAG("Driver", "未找到模块 '%.*s'", (int)moduleName.size(), moduleName.data());
         return false;
     }
-    // 驱动获取扫描区域
+
+    // 获取扫描区域
     std::vector<std::pair<uintptr_t, uintptr_t>> GetScanRegions()
     {
         std::vector<std::pair<uintptr_t, uintptr_t>> regions;
 
-        if (HandleVirtualMemoryInfo() != 0)
-        {
-            LS_LOGE_TAG("Driver", "驱动获取内存信息失败");
-            return regions;
-        }
-
-        const auto &info = req->vmem_info;
-        const int regionCount = std::clamp(info.region_count, 0, MAX_SCAN_REGIONS);
-        const int moduleCount = std::clamp(info.module_count, 0, MAX_MODULES);
+        const std::unique_ptr<virtual_memory> snapshot(new virtual_memory(GetMemoryInfo()));
+        const int regionCount = std::clamp(snapshot->region_count, 0, MAX_SCAN_REGIONS);
+        const int moduleCount = std::clamp(snapshot->module_count, 0, MAX_MODULES);
 
         // 预分配空间 (堆内存数量 + 模块数量 * 平均段数)
         regions.reserve(static_cast<size_t>(regionCount) + static_cast<size_t>(moduleCount) * 3);
@@ -655,14 +634,14 @@ public: // 外部获取内存信息
         //  压入所有匿名的堆内存区域
         for (int i = 0; i < regionCount; ++i)
         {
-            const auto &r = info.regions[i];
+            const auto &r = snapshot->regions[i];
             if (r.end > r.start) regions.emplace_back(r.start, r.end);
         }
 
         // 压入所有模块的静态基址区域
         for (int i = 0; i < moduleCount; ++i)
         {
-            const auto &mod = info.modules[i];
+            const auto &mod = snapshot->modules[i];
             const int segmentCount = std::clamp(mod.seg_count, 0, MAX_SEGS_PER_MODULE);
             for (int j = 0; j < segmentCount; ++j)
             {
@@ -699,73 +678,81 @@ public: // 外部获取内存信息
         }
         target = target.substr(first, target.find_last_not_of(" \t\r\n") - first + 1);
 
-        auto parseAddress = [](std::string_view text, uint64_t *value)
-        {
-            const size_t begin = text.find_first_not_of(" \t\r\n");
-            if (begin == std::string_view::npos) return false;
-            text = text.substr(begin, text.find_last_not_of(" \t\r\n") - begin + 1);
-
-            std::string token(text);
-            char *end = nullptr;
-            errno = 0;
-            const unsigned long long parsed = std::strtoull(token.c_str(), &end, 16);
-            if (errno == ERANGE || end == token.c_str() || *end != '\0') return false;
-            *value = static_cast<uint64_t>(parsed);
-            return true;
-        };
-
         uint64_t baseAddr = 0;
         uint64_t maxEnd = 0;
-        std::string outputName;
         bool rangeDump = false;
-        int matchedModuleCount = 0;
-        size_t segmentCount = 0;
 
         const size_t separator = target.find('-');
         if (separator != std::string_view::npos)
         {
-            uint64_t rangeStart = 0;
-            uint64_t rangeEnd = 0;
-            if (parseAddress(target.substr(0, separator), &rangeStart) && parseAddress(target.substr(separator + 1), &rangeEnd))
+            uint64_t addresses[2]{};
+            size_t parsedCount = 0;
+            for (std::string_view text : {target.substr(0, separator), target.substr(separator + 1)})
             {
-                baseAddr = rangeStart;
-                maxEnd = rangeEnd;
-                rangeDump = true;
+                const size_t begin = text.find_first_not_of(" \t\r\n");
+                if (begin == std::string_view::npos) break;
+                text = text.substr(begin, text.find_last_not_of(" \t\r\n") - begin + 1);
 
-                char name[64]{};
-                std::snprintf(name, sizeof(name), "0x%llX-0x%llX.bin", (unsigned long long)baseAddr, (unsigned long long)maxEnd);
-                outputName = name;
+                if (text.starts_with('+')) text.remove_prefix(1);
+                if (text.starts_with("0x") || text.starts_with("0X")) text.remove_prefix(2);
+                const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), addresses[parsedCount], 16);
+                if (error != std::errc{} || end != text.data() + text.size()) break;
+                ++parsedCount;
+            }
+            rangeDump = parsedCount == std::size(addresses);
+            if (rangeDump)
+            {
+                baseAddr = addresses[0];
+                maxEnd = addresses[1];
             }
         }
 
         if (!rangeDump)
         {
-            const auto &info = GetMemoryInfoRef();
+            const std::unique_ptr<virtual_memory> snapshot(new virtual_memory(GetMemoryInfo()));
             baseAddr = ~0ULL;
+            const int moduleCount = std::clamp(snapshot->module_count, 0, MAX_MODULES);
 
             // 模块名使用包含匹配，命中的所有有效区段按完整地址跨度导出。
-            for (int i = 0; i < info.module_count; ++i)
+            for (int moduleIndex = 0; moduleIndex < moduleCount; ++moduleIndex)
             {
-                const auto &mod = info.modules[i];
-                if (std::string_view(mod.name).find(target) == std::string_view::npos) continue;
+                const auto &mod = snapshot->modules[moduleIndex];
+                if (std::string_view(mod.name, strnlen(mod.name, sizeof(mod.name))).find(target) == std::string_view::npos) continue;
 
-                matchedModuleCount++;
-                for (int j = 0; j < mod.seg_count; ++j)
+                const int count = std::clamp(mod.seg_count, 0, MAX_SEGS_PER_MODULE);
+                for (int segmentIndex = 0; segmentIndex < count; ++segmentIndex)
                 {
-                    const auto &seg = mod.segs[j];
+                    const auto &seg = mod.segs[segmentIndex];
                     if (seg.start >= seg.end) continue;
                     baseAddr = std::min(baseAddr, seg.start);
                     maxEnd = std::max(maxEnd, seg.end);
-                    segmentCount++;
                 }
             }
 
-            if (segmentCount == 0)
+            if (baseAddr == ~0ULL)
             {
                 LS_LOGE_TAG("Dump", "未找到模块 '%.*s' 或模块没有有效区段", (int)target.size(), target.data());
                 return false;
             }
+        }
 
+        constexpr uint64_t MAX_DUMP_SIZE = 1024ULL * 1024 * 500;
+        if (baseAddr >= maxEnd || maxEnd - baseAddr > MAX_DUMP_SIZE)
+        {
+            LS_LOGE_TAG("Dump", "地址范围无效或大小超过 500MB");
+            return false;
+        }
+        const uint64_t spanSize = maxEnd - baseAddr;
+
+        std::string outPath = "/sdcard/dump/";
+        if (rangeDump)
+        {
+            char name[64];
+            std::snprintf(name, sizeof(name), "0x%llX-0x%llX", (unsigned long long)baseAddr, (unsigned long long)maxEnd);
+            outPath += name;
+        }
+        else
+        {
             const size_t slashPos = target.find_last_of("/\\");
             std::string_view baseName = slashPos == std::string_view::npos ? target : target.substr(slashPos + 1);
             const size_t extensionPos = baseName.find_last_of('.');
@@ -775,19 +762,11 @@ public: // 外部获取内存信息
                 LS_LOGE_TAG("Dump", "无法从模块名生成输出文件名");
                 return false;
             }
-            outputName = std::string(baseName) + ".bin";
+            outPath += baseName;
         }
-
-        constexpr uint64_t MAX_DUMP_SIZE = 1024ULL * 1024 * 500; // 500MB 防御 OOM
-        const uint64_t spanSize = maxEnd - baseAddr;
-        if (baseAddr >= maxEnd || baseAddr == ~0ULL || spanSize == 0 || spanSize > MAX_DUMP_SIZE)
-        {
-            LS_LOGE_TAG("Dump", "地址范围无效或大小超过 500MB");
-            return false;
-        }
+        outPath += ".bin";
 
         LS_LOGI_TAG("Dump", "目标=%.*s", (int)target.size(), target.data());
-        if (!rangeDump) LS_LOGI_TAG("Dump", "匹配模块=%d 区段=%zu", matchedModuleCount, segmentCount);
         LS_LOGI_TAG("Dump", "范围=0x%llX-0x%llX 大小=0x%llX (%llu MB)", (unsigned long long)baseAddr, (unsigned long long)maxEnd, (unsigned long long)spanSize, (unsigned long long)(spanSize / 1024 / 1024));
 
         if (mkdir("/sdcard/dump", 0777) != 0 && errno != EEXIST)
@@ -796,7 +775,7 @@ public: // 外部获取内存信息
             return false;
         }
 
-        const std::string outPath = "/sdcard/dump/" + outputName;
+        std::vector<uint8_t> page(PAGE_SIZE);
         FILE *fp = fopen(outPath.c_str(), "wb");
         if (!fp)
         {
@@ -804,36 +783,35 @@ public: // 外部获取内存信息
             return false;
         }
 
-        std::vector<uint8_t> page(PAGE_SIZE, 0);
         size_t totalRead = 0;
         size_t failedBlocks = 0;
+        bool written = true;
 
-        for (uint64_t addr = baseAddr; addr < maxEnd; addr += PAGE_SIZE)
+        for (uint64_t addr = baseAddr; addr < maxEnd;)
         {
-            size_t toRead = static_cast<size_t>(std::min<uint64_t>(PAGE_SIZE, maxEnd - addr));
-            std::fill(page.begin(), page.begin() + toRead, 0);
+            const size_t toRead = static_cast<size_t>(std::min<uint64_t>(page.size(), maxEnd - addr));
+            __builtin_memset(page.data(), 0, toRead);
 
             const int readBytes = Read(addr, page.data(), toRead);
-            if (readBytes > 0)
-            {
-                totalRead += std::min<size_t>(static_cast<size_t>(readBytes), toRead);
-                if (readBytes < static_cast<int>(toRead)) failedBlocks++;
-            }
-            else
-            {
-                failedBlocks++;
-            }
+            const size_t copied = readBytes > 0 ? std::min(static_cast<size_t>(readBytes), toRead) : 0;
+            totalRead += copied;
+            failedBlocks += copied != toRead;
 
             if (fwrite(page.data(), 1, toRead, fp) != toRead)
             {
-                LS_LOGE_TAG("Dump", "写入文件失败 %s: %s", outPath.c_str(), std::strerror(errno));
-                fclose(fp);
-                remove(outPath.c_str());
-                return false;
+                written = false;
+                break;
             }
+            addr += toRead;
         }
 
-        fclose(fp);
+        if (fclose(fp) != 0) written = false;
+        if (!written)
+        {
+            LS_LOGE_TAG("Dump", "写入或关闭文件失败 %s", outPath.c_str());
+            remove(outPath.c_str());
+            return false;
+        }
         if (dumpPath) *dumpPath = outPath;
         LS_LOGI_TAG("Dump", "读取完成: 成功 0x%zX 字节，失败或部分读取 %zu 块", totalRead, failedBlocks);
         LS_LOGI_TAG("Dump", "完成: 路径=%s 大小=0x%llX (%llu MB)", outPath.c_str(), (unsigned long long)spanSize, (unsigned long long)(spanSize / 1024 / 1024));
@@ -841,12 +819,13 @@ public: // 外部获取内存信息
         return true;
     }
 
-public: // 外部硬件断点接口
+public: // 外部断点接口
     // 获取断点结构体信息
-    const break_point &GetHwbpInfoRef()
+    break_point &GetBreakpointInfo()
     {
         return req->bp_info;
     }
+
     // 设置多个断点地址
     int SetProcessHwbpRef(std::span<const bp_point> points)
     {
@@ -906,15 +885,9 @@ public: // 外部 CNTVCT_EL0 读取监控接口
 
 public:
     // 查询指定线程的 TLS 和目标进程的 PACGA 环境参数
-    bool GetEnvParams(std::string_view threadName)
+    env_params GetEnvParams(std::string_view threadName)
     {
-        return HandleEnvGetParams(threadName) == 0;
-    }
-
-    // 获取最近一次环境参数查询结果
-    const env_params &GetEnvParamsRef() const
-    {
-        return req->env_info;
+        return HandleEnvGetParams(threadName);
     }
 
 private: // 私有实现，外部无需关系
@@ -947,6 +920,31 @@ private: // 私有实现，外部无需关系
         }
         // 消费完成标志
         req->user = false;
+    }
+
+    static inline void memory_copy(void *destination, const void *source, size_t size)
+    {
+        switch (size)
+        {
+        case 1:
+            __builtin_memcpy(destination, source, 1);
+            break;
+        case 2:
+            __builtin_memcpy(destination, source, 2);
+            break;
+        case 4:
+            __builtin_memcpy(destination, source, 4);
+            break;
+        case 8:
+            __builtin_memcpy(destination, source, 8);
+            break;
+        case 16:
+            __builtin_memcpy(destination, source, 16);
+            break;
+        default:
+            __builtin_memcpy(destination, source, size);
+            break;
+        }
     }
 
     // 初始化驱动
@@ -1011,61 +1009,38 @@ private: // 私有实现，外部无需关系
         if (!buffer || size == 0) return -EINVAL;
         if (op != request_op_vmem_read && op != request_op_vmem_write) return -EINVAL;
 
-        std::scoped_lock<SpinLock> lock(request_lock);
         const bool is_read = (op == request_op_vmem_read);
+        const int tgid = GetGlobalPid();
         size_t processed = 0;
         size_t successfulBytes = 0;
         int lastStatus = -EIO;
-        const auto copy_virtual_memory_chunk = [](void *destination, const void *source, size_t copy_size)
-        {
-            switch (copy_size)
-            {
-            case 1:
-                __builtin_memcpy(destination, source, 1);
-                break;
-            case 2:
-                __builtin_memcpy(destination, source, 2);
-                break;
-            case 4:
-                __builtin_memcpy(destination, source, 4);
-                break;
-            case 8:
-                __builtin_memcpy(destination, source, 8);
-                break;
-            case 16:
-                __builtin_memcpy(destination, source, 16);
-                break;
-            default:
-                __builtin_memcpy(destination, source, copy_size);
-                break;
-            }
-        };
         while (processed < size)
         {
             const size_t chunk = std::min(size - processed, sizeof(req->vmemrw_info.user_buffer));
-            StoreRequestOp(op);
-            req->tgid = global_pid;
-            req->vmemrw_info.rw_addr = addr + processed;
-            req->vmemrw_info.size = chunk;
-            StoreRequestStatus(0);
-
-            if (is_read)
             {
-                if (size > 8) __builtin_memset(req->vmemrw_info.user_buffer, 0, chunk);
-                // 小尺寸读取先保存调用方原值；内核读取失败且未覆盖共享缓冲区时，回拷仍保持原值。
-                else copy_virtual_memory_chunk(req->vmemrw_info.user_buffer, static_cast<uint8_t *>(buffer) + processed, chunk);
-            }
-            else
-            {
-                copy_virtual_memory_chunk(req->vmemrw_info.user_buffer, static_cast<uint8_t *>(buffer) + processed, chunk);
-            }
-            IoCommitAndWait();
+                std::scoped_lock<SpinLock> lock(request_lock);
+                StoreRequestOp(op);
+                req->tgid = tgid;
+                req->vmemrw_info.rw_addr = addr + processed;
+                req->vmemrw_info.size = chunk;
+                StoreRequestStatus(0);
 
-            const int requestStatus = LoadRequestStatus();
-            lastStatus = requestStatus;
-            if (requestStatus > 0) successfulBytes += std::min(static_cast<size_t>(requestStatus), chunk);
+                if (is_read)
+                {
+                    if (size > 8) __builtin_memset(req->vmemrw_info.user_buffer, 0, chunk);
+                    // 小尺寸读取先保存调用方原值；内核读取失败且未覆盖共享缓冲区时，回拷仍保持原值。
+                    else memory_copy(req->vmemrw_info.user_buffer, static_cast<uint8_t *>(buffer) + processed, chunk);
+                }
+                else
+                {
+                    memory_copy(req->vmemrw_info.user_buffer, static_cast<uint8_t *>(buffer) + processed, chunk);
+                }
+                IoCommitAndWait();
 
-            if (is_read) copy_virtual_memory_chunk(static_cast<uint8_t *>(buffer) + processed, req->vmemrw_info.user_buffer, chunk);
+                lastStatus = LoadRequestStatus();
+                if (is_read) memory_copy(static_cast<uint8_t *>(buffer) + processed, req->vmemrw_info.user_buffer, chunk);
+            }
+            if (lastStatus > 0) successfulBytes += std::min(static_cast<size_t>(lastStatus), chunk);
 
             processed += chunk;
         }
@@ -1074,30 +1049,35 @@ private: // 私有实现，外部无需关系
     }
 
     // 获取进程虚拟内存信息事件
-    int HandleVirtualMemoryInfo()
+    virtual_memory HandleVirtualMemoryInfo()
     {
-        std::scoped_lock<SpinLock> lock(request_lock);
-        StoreRequestOp(request_op_vmem_info);
-        req->tgid = global_pid;
-        IoCommitAndWait();
-        return LoadRequestStatus();
+        const int tgid = GetGlobalPid();
+        {
+            std::scoped_lock<SpinLock> lock(request_lock);
+            StoreRequestOp(request_op_vmem_info);
+            req->tgid = tgid;
+            IoCommitAndWait();
+            if (LoadRequestStatus() == 0) return req->vmem_info;
+        }
+        LS_LOGE_TAG("Driver", "获取内存信息失败");
+        return {};
     }
 
     // 触摸事件
     void HandleTouchEvent(request_op op, int slot, int x, int y, int screenW, int screenH)
     {
-        std::scoped_lock<SpinLock> lock(request_lock);
-
         // 下面代码绝对不要使用整数除法
-        if (screenW <= 0 || screenH <= 0 || req->vinput_info.POSITION_X <= 0 || req->vinput_info.POSITION_Y <= 0) return;
-
+        if (screenW <= 0 || screenH <= 0) return;
         if (x < 0 || y < 0 || x > screenW || y > screenH) return;
 
-        StoreRequestOp(op);
-        req->vinput_info.slot = slot;
         // 浮点运算提到前面，保持清晰
         double normX = static_cast<double>(x) / screenW;
         double normY = static_cast<double>(y) / screenH;
+
+        std::scoped_lock<SpinLock> lock(request_lock);
+        if (req->vinput_info.POSITION_X <= 0 || req->vinput_info.POSITION_Y <= 0) return;
+        StoreRequestOp(op);
+        req->vinput_info.slot = slot;
 
         // 横竖屏映射逻辑
         if (screenW > screenH && req->vinput_info.POSITION_X < req->vinput_info.POSITION_Y)
@@ -1144,16 +1124,17 @@ private: // 私有实现，外部无需关系
     // 硬件断点事件
     int HandleHwbpEvent(request_op op, std::span<const bp_point> points = {})
     {
-        std::scoped_lock<SpinLock> lock(request_lock);
         if (op != request_op_hwbp_set && op != request_op_hwbp_remove) return -1;
+        const int tgid = GetGlobalPid();
+        const size_t count = std::min(points.size(), static_cast<size_t>(BP_CONFIG_MAX));
 
+        std::scoped_lock<SpinLock> lock(request_lock);
         StoreRequestOp(op);
         StoreRequestStatus(0);
         if (op == request_op_hwbp_set)
         {
-            req->tgid = global_pid;
-            req->bp_info.tgid = global_pid;
-            const size_t count = std::min(points.size(), std::size(req->bp_info.points));
+            req->tgid = tgid;
+            req->bp_info.tgid = tgid;
             for (size_t i = 0; i < count; ++i)
             {
                 req->bp_info.points[i].hit_addr = points[i].hit_addr;
@@ -1169,16 +1150,17 @@ private: // 私有实现，外部无需关系
     // PTEBP 复用 bp_info.points 和 records 存储命中现场
     int HandlePtebpEvent(request_op op, std::span<const bp_point> points = {})
     {
-        std::scoped_lock<SpinLock> lock(request_lock);
         if (op != request_op_ptebp_set && op != request_op_ptebp_remove) return -1;
+        const int tgid = GetGlobalPid();
+        const size_t count = std::min(points.size(), static_cast<size_t>(BP_CONFIG_MAX));
 
+        std::scoped_lock<SpinLock> lock(request_lock);
         StoreRequestOp(op);
         StoreRequestStatus(0);
         if (op == request_op_ptebp_set)
         {
-            req->tgid = global_pid;
-            req->bp_info.tgid = global_pid;
-            const size_t count = std::min(points.size(), std::size(req->bp_info.points));
+            req->tgid = tgid;
+            req->bp_info.tgid = tgid;
             for (size_t index = 0; index < count; ++index)
             {
                 req->bp_info.points[index].hit_addr = points[index].hit_addr;
@@ -1194,16 +1176,17 @@ private: // 私有实现，外部无需关系
     // STEPBP 复用 bp_info.points 和 records 存储命中现场
     int HandleStepbpEvent(request_op op, std::span<const bp_point> points = {})
     {
-        std::scoped_lock<SpinLock> lock(request_lock);
         if (op != request_op_stepbp_set && op != request_op_stepbp_remove) return -1;
+        const int tgid = GetGlobalPid();
+        const size_t count = std::min(points.size(), static_cast<size_t>(BP_CONFIG_MAX));
 
+        std::scoped_lock<SpinLock> lock(request_lock);
         StoreRequestOp(op);
         StoreRequestStatus(0);
         if (op == request_op_stepbp_set)
         {
-            req->tgid = global_pid;
-            req->bp_info.tgid = global_pid;
-            const size_t count = std::min(points.size(), std::size(req->bp_info.points));
+            req->tgid = tgid;
+            req->bp_info.tgid = tgid;
             for (size_t index = 0; index < count; ++index)
             {
                 req->bp_info.points[index].hit_addr = points[index].hit_addr;
@@ -1220,16 +1203,17 @@ private: // 私有实现，外部无需关系
     // DPTDBG 复用 bp_info.points 和 records 存储命中现场
     int HandleDptdbgEvent(request_op op, std::span<const bp_point> points = {})
     {
-        std::scoped_lock<SpinLock> lock(request_lock);
         if (op != request_op_dptdbg_set && op != request_op_dptdbg_remove) return -1;
+        const int tgid = GetGlobalPid();
+        const size_t count = std::min(points.size(), static_cast<size_t>(BP_CONFIG_MAX));
 
+        std::scoped_lock<SpinLock> lock(request_lock);
         StoreRequestOp(op);
         StoreRequestStatus(0);
         if (op == request_op_dptdbg_set)
         {
-            req->tgid = global_pid;
-            req->bp_info.tgid = global_pid;
-            const size_t count = std::min(points.size(), std::size(req->bp_info.points));
+            req->tgid = tgid;
+            req->bp_info.tgid = tgid;
             for (size_t index = 0; index < count; ++index)
             {
                 req->bp_info.points[index].hit_addr = points[index].hit_addr;
@@ -1249,9 +1233,9 @@ private: // 私有实现，外部无需关系
     // Android shell 实时查看输出：su -c "dmesg -w | grep -E 'lsdriver'"
     int HandleSyscallMonitorEvent(request_op op, int tgid)
     {
-        std::scoped_lock<SpinLock> lock(request_lock);
         if ((op != request_op_syscall_monitor_set && op != request_op_syscall_monitor_remove) || tgid <= 0) return -1;
 
+        std::scoped_lock<SpinLock> lock(request_lock);
         StoreRequestOp(op);
         req->tgid = tgid;
         StoreRequestStatus(0);
@@ -1261,9 +1245,9 @@ private: // 私有实现，外部无需关系
 
     int HandleCntvctMonitorEvent(request_op op, int tgid)
     {
-        std::scoped_lock<SpinLock> lock(request_lock);
         if ((op != request_op_cntvct_monitor_set && op != request_op_cntvct_monitor_remove) || tgid <= 0) return -EINVAL;
 
+        std::scoped_lock<SpinLock> lock(request_lock);
         StoreRequestOp(op);
         req->tgid = tgid;
         StoreRequestStatus(0);
@@ -1272,19 +1256,33 @@ private: // 私有实现，外部无需关系
     }
 
     // 获取指定进程的线程 TLS 或 PACGA 环境参数
-    int HandleEnvGetParams(std::string_view threadName)
+    env_params HandleEnvGetParams(std::string_view threadName)
     {
-        std::scoped_lock<SpinLock> lock(request_lock);
-        if (global_pid <= 0) return -1;
+        const int tgid = GetGlobalPid();
+        env_params params{};
+        const size_t copyLen = std::min(threadName.size(), sizeof(params.thread_name) - 1);
+        if (copyLen > 0) __builtin_memcpy(params.thread_name, threadName.data(), copyLen);
 
-        StoreRequestOp(request_op_env_get_params);
-        req->tgid = global_pid;
-        StoreRequestStatus(0);
-        __builtin_memset(&req->env_info, 0, sizeof(req->env_info));
-        const size_t copyLen = std::min(threadName.size(), sizeof(req->env_info.thread_name) - 1);
-        if (copyLen > 0) __builtin_memcpy(req->env_info.thread_name, threadName.data(), copyLen);
-        IoCommitAndWait();
-        return LoadRequestStatus();
+        if (tgid <= 0)
+        {
+            params.tls_status = params.pacga_status = -EINVAL;
+            return params;
+        }
+
+        params.tls_status = params.pacga_status = -EIO;
+        int status;
+        {
+            std::scoped_lock<SpinLock> lock(request_lock);
+            StoreRequestOp(request_op_env_get_params);
+            req->tgid = tgid;
+            StoreRequestStatus(0);
+            req->env_info = params;
+            IoCommitAndWait();
+            status = LoadRequestStatus();
+            params = req->env_info;
+        }
+        if (status != 0 && (params.tls_status == 0 || params.pacga_status == 0)) params.tls_status = params.pacga_status = status;
+        return params;
     }
 };
 
