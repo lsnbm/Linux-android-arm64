@@ -916,7 +916,6 @@ private: // 私有实现，外部无需关系
         // 等内核完成
         while (!req->user)
         {
-            asm volatile("yield");
         }
         // 消费完成标志
         req->user = false;

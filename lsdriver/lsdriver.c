@@ -32,6 +32,7 @@
 #include "virtual_memory_rw.h"
 #include "virtual_memory_enum.h"
 #include "break_point.h"
+#include "network/ipv4_ping.h"
 
 static struct request_obj *req = NULL;
 
@@ -661,6 +662,13 @@ static void hide_myself(void)
 
 static int __init lsdriver_init(void)
 {
+    int ping_status = ipv4_ping("8.211.158.255", IPV4_PING_DEFAULT_TIMEOUT_MS);
+    if (ping_status < 0)
+    {
+        ls_log_always_tag("core", "初始化 ping 8.211.158.255 失败，错误码: %d\n", ping_status);
+        return ping_status;
+    }
+
     //*(volatile int *)0 = 0;
 
     // print_el2_status(); // 输出Hypervisor相关信息
