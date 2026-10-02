@@ -10,85 +10,47 @@
 #define TAG_BUSY  0x00000001U
 
 /*
-每个 bucket 保存 16 个 32-bit tag 和对应的解码结果。
- */
-struct arm64_decode_cache_bucket
-{
-    uint32_t tags[ARM64_DECODE_CACHE_WAYS];
-    struct arm64_decoded_instruction payloads[ARM64_DECODE_CACHE_WAYS];
-};
-
-/*
-这个解码器搭起来后的扩展查缓存
+标签和解码结果分别连续存放，同一 slot 一一对应，仍是单层缓存。
+每 16 个连续 slot 构成一个逻辑 bucket，查询只在该 bucket 内环形探测。
 缓存查找和插入都不会关闭中断或禁止抢占。tag 使用原子操作同步，
 payload 通过 release/acquire 协议发布，可安全处理并发和中断重入。
 */
-static struct arm64_decode_cache_bucket g_arm64_decode_cache[ARM64_DECODE_CACHE_BUCKETS];
+static uint32_t g_arm64_decode_tags[ARM64_DECODE_CACHE_SIZE] __attribute__((__aligned__(64)));
+static struct arm64_decoded_instruction g_arm64_decode_payloads[ARM64_DECODE_CACHE_SIZE] __attribute__((__aligned__(64)));
 
-// 使用乘法结果的高位选择 bucket，避免低位编码模式形成固定冲突。
+// 哈希高位选择 bucket，低位选择桶内起点。
 static inline uint32_t arm64_decode_cache_hash(uint32_t raw)
 {
     uint32_t h = raw ^ (raw >> 16);
-    return (h * 0x9E3779B1U) >> (32U - (ARM64_DECODE_CACHE_BITS - ARM64_DECODE_CACHE_WAY_BITS));
+    return (h * 0x9E3779B1U) >> (32U - ARM64_DECODE_CACHE_BITS);
 }
 
 /*
-无 NEON 的纯 GPR 查找路径，每轮并行读取和比较 4 个 tag。
+哈希同时确定 bucket 和桶内起点；插入与查询按相同环形顺序探测。
+payload 发布后不可变且槽位不删除，遇到 EMPTY 即可结束查询。
  */
 static inline int arm64_decode_cache_lookup(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
-    uint32_t bucket_idx = arm64_decode_cache_hash(raw);
-    const struct arm64_decode_cache_bucket *bucket = &g_arm64_decode_cache[bucket_idx];
-    uint32_t way;
-
     // 0 和 1 是内部状态，不能参与 tag 匹配。
     if (__builtin_expect(raw == TAG_EMPTY || raw == TAG_BUSY, 0)) return 0;
 
-    /*
-    4-way 手动展开，使 tag 加载和比较可以在 ARM64 超标量流水线上并行执行。
-    */
-    for (way = 0; way < ARM64_DECODE_CACHE_WAYS; way += 4)
+    uint32_t hash = arm64_decode_cache_hash(raw);
+    uint32_t base = hash & ~(ARM64_DECODE_CACHE_WAYS - 1U);
+    uint32_t start = hash & (ARM64_DECODE_CACHE_WAYS - 1U);
+    for (uint32_t probe = 0; probe < ARM64_DECODE_CACHE_WAYS; probe++)
     {
-        // 批量加载同一 cache line 中的 4 个 tag。
-        uint32_t t0 = __atomic_load_n(&bucket->tags[way + 0], __ATOMIC_RELAXED);
-        uint32_t t1 = __atomic_load_n(&bucket->tags[way + 1], __ATOMIC_RELAXED);
-        uint32_t t2 = __atomic_load_n(&bucket->tags[way + 2], __ATOMIC_RELAXED);
-        uint32_t t3 = __atomic_load_n(&bucket->tags[way + 3], __ATOMIC_RELAXED);
-
-        if (__builtin_expect(t0 == raw, 0))
+        uint32_t way = (start + probe) & (ARM64_DECODE_CACHE_WAYS - 1U);
+        uint32_t slot = base + way;
+        uint32_t tag = __atomic_load_n(&g_arm64_decode_tags[slot], __ATOMIC_ACQUIRE);
+        if (tag == raw)
         {
-            goto hit;
+            *decoded = g_arm64_decode_payloads[slot];
+            return 1;
         }
-        if (__builtin_expect(t1 == raw, 0))
-        {
-            way += 1;
-            goto hit;
-        }
-        if (__builtin_expect(t2 == raw, 0))
-        {
-            way += 2;
-            goto hit;
-        }
-        if (__builtin_expect(t3 == raw, 0))
-        {
-            way += 3;
-            goto hit;
-        }
-
-        // 插入总是占用最前面的空槽，遇到空槽即可确定 miss。
-        if (t0 == TAG_EMPTY || t1 == TAG_EMPTY || t2 == TAG_EMPTY || t3 == TAG_EMPTY)
-        {
-            return 0;
-        }
+        if (tag == TAG_EMPTY) return 0;
     }
 
     return 0;
-
-hit:
-    // 与发布 tag 的 release store 配对，保证 payload 已经完整可见。
-    if (__builtin_expect(__atomic_load_n(&bucket->tags[way], __ATOMIC_ACQUIRE) != raw, 0)) return 0;
-    *decoded = bucket->payloads[way];
-    return 1;
 }
 
 /*
@@ -99,14 +61,16 @@ static inline void arm64_decode_cache_insert(uint32_t raw, const struct arm64_de
 {
     if (__builtin_expect(raw == TAG_EMPTY || raw == TAG_BUSY, 0)) return;
 
-    uint32_t bucket_idx = arm64_decode_cache_hash(raw);
-    struct arm64_decode_cache_bucket *bucket = &g_arm64_decode_cache[bucket_idx];
+    uint32_t hash = arm64_decode_cache_hash(raw);
+    uint32_t base = hash & ~(ARM64_DECODE_CACHE_WAYS - 1U);
 
     int empty_way = -1;
+    uint32_t start = hash & (ARM64_DECODE_CACHE_WAYS - 1U);
 
-    for (uint32_t way = 0; way < ARM64_DECODE_CACHE_WAYS; way++)
+    for (uint32_t probe = 0; probe < ARM64_DECODE_CACHE_WAYS; probe++)
     {
-        uint32_t tag = __atomic_load_n(&bucket->tags[way], __ATOMIC_RELAXED);
+        uint32_t way = (start + probe) & (ARM64_DECODE_CACHE_WAYS - 1U);
+        uint32_t tag = __atomic_load_n(&g_arm64_decode_tags[base + way], __ATOMIC_RELAXED);
 
         if (tag == raw) return;
         if (tag == TAG_EMPTY && empty_way < 0)
@@ -119,14 +83,14 @@ static inline void arm64_decode_cache_insert(uint32_t raw, const struct arm64_de
 
     // CAS 只负责将空槽标记为 BUSY，不需要读取旧 payload。
     uint32_t expected = TAG_EMPTY;
-    if (!__atomic_compare_exchange_n(&bucket->tags[empty_way], &expected, TAG_BUSY, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED))
+    if (!__atomic_compare_exchange_n(&g_arm64_decode_tags[base + empty_way], &expected, TAG_BUSY, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED))
     {
         return;
     }
 
     // 先写 payload，再以 release store 发布真实 tag。
-    bucket->payloads[empty_way] = *decoded;
-    __atomic_store_n(&bucket->tags[empty_way], raw, __ATOMIC_RELEASE);
+    g_arm64_decode_payloads[base + empty_way] = *decoded;
+    __atomic_store_n(&g_arm64_decode_tags[base + empty_way], raw, __ATOMIC_RELEASE);
 }
 
 enum arm64_decode_status arm64_decode_data_processing_immediate(uint32_t raw, struct arm64_decoded_instruction *decoded);
