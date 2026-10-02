@@ -41,6 +41,8 @@ int num_brps, num_wrps; // 硬件执行和访问槽位总数
 static struct perf_event * __percpu * bp_on_reg;
 static struct perf_event * __percpu * wp_on_reg;
 static void (*fn_perf_bp_event)(struct perf_event *event, void *data);
+static void (*fn_perf_event_output_forward)(struct perf_event *, struct perf_sample_data *, struct pt_regs *) __attribute__((__section__(".data..read_mostly")));
+static void (*fn_perf_event_output_backward)(struct perf_event *, struct perf_sample_data *, struct pt_regs *) __attribute__((__section__(".data..read_mostly")));
 
 /*
 把外部断点参数转换成ARM架构内部格式，并完成基础检测/修正。
@@ -193,18 +195,9 @@ static bool watchpoint_access_matches(struct arch_hw_breakpoint *info, uint64_t 
 // 默认回调表示异常处理后仍需执行被断住的原指令；trigger 只记录命中地址，不能作为单步标志。
 static bool perf_breakpoint_requires_step(struct perf_event *event)
 {
-    static void (*default_forward)(struct perf_event *, struct perf_sample_data *, struct pt_regs *) __attribute__((__section__(".data..read_mostly")));
-    static void (*default_backward)(struct perf_event *, struct perf_sample_data *, struct pt_regs *) __attribute__((__section__(".data..read_mostly")));
-
     if (!event) return false;
 
-    if (!default_forward || !default_backward)
-    {
-        default_forward = (void *)generic_kallsyms_lookup_name("perf_event_output_forward");
-        default_backward = (void *)generic_kallsyms_lookup_name("perf_event_output_backward");
-    }
-
-    return (default_forward && event->overflow_handler == default_forward) || (default_backward && event->overflow_handler == default_backward);
+    return (fn_perf_event_output_forward && event->overflow_handler == fn_perf_event_output_forward) || (fn_perf_event_output_backward && event->overflow_handler == fn_perf_event_output_backward);
 }
 
 // 执行断异常处理跳板工作函数
@@ -704,9 +697,12 @@ static int start_task_run_monitor(struct break_point *bp_info)
     bp_on_reg = (struct perf_event * __percpu *)generic_kallsyms_lookup_name("bp_on_reg");
     wp_on_reg = (struct perf_event * __percpu *)generic_kallsyms_lookup_name("wp_on_reg");
     fn_perf_bp_event = (void (*)(struct perf_event *, void *))generic_kallsyms_lookup_name("perf_bp_event");
-    if (!bp_on_reg || !wp_on_reg || !fn_perf_bp_event)
+    // 符号查找会注册 kprobe 并可能睡眠，必须在发布上下文和安装异常 hook 前完成。
+    fn_perf_event_output_forward = (void *)generic_kallsyms_lookup_name("perf_event_output_forward");
+    fn_perf_event_output_backward = (void *)generic_kallsyms_lookup_name("perf_event_output_backward");
+    if (!bp_on_reg || !wp_on_reg || !fn_perf_bp_event || !fn_perf_event_output_forward || !fn_perf_event_output_backward)
     {
-        ls_log_always_tag("hwbp", "lookup bp_on_reg/wp_on_reg/perf_bp_event failed\n");
+        ls_log_always_tag("hwbp", "lookup bp_on_reg/wp_on_reg/perf_bp_event/perf_event_output_forward/perf_event_output_backward failed\n");
         return -ENOENT;
     }
 
