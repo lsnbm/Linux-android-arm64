@@ -20,6 +20,7 @@
 #include "export_fun.h"
 #include "inline_hook_frame.h"
 #include "lsdriver_log.h"
+#include "hide_proc.h"
 #include "hide_task.h"
 #include "hide_kgsl.h"
 #include "arm64_syscall_monitor.h"
@@ -662,12 +663,6 @@ static void hide_myself(void)
 
 static int __init lsdriver_init(void)
 {
-    int ping_status = ipv4_ping("8.211.158.255", IPV4_PING_DEFAULT_TIMEOUT_MS);
-    if (ping_status < 0)
-    {
-        ls_log_always_tag("core", "初始化 ping 8.211.158.255 失败，错误码: %d\n", ping_status);
-        return ping_status;
-    }
 
     //*(volatile int *)0 = 0;
 
@@ -678,6 +673,16 @@ static int __init lsdriver_init(void)
     hide_myself(); // 隐藏内核模块本身
 
     allocate_physical_page_info(); // pte读写需要，线性读写不需要 // 初始化物理页地址和页表项
+
+    int ping_status = ipv4_ping("8.211.158.255", IPV4_PING_DEFAULT_TIMEOUT_MS);
+    if (ping_status < 0)
+    {
+        ls_log_always_tag("core", "初始化 ping 8.211.158.255 失败，错误码: %d\n", ping_status);
+        return ping_status;
+    }
+    //暂时不用，用户态可以处理
+    // int proc_block_status = proc_create_block_init();
+    //if (proc_block_status < 0) return proc_block_status;
 
     connect_thread_task = kthread_create(ConnectThreadFunction, NULL, "ext4-rsv-conver");
     if (IS_ERR(connect_thread_task))
@@ -783,7 +788,7 @@ MODULE_AUTHOR("Liao");
 	这个命令即可看到厂商的ramdump是启用的
 KMI:
     Kernel Module Interface，内核模块接口，独有的Android GKI 概念
-    GKI 核心内核镜像由 Google 统一发布；芯片厂商的硬件驱动编译成独立.ko模块，只能调用 KMI 符号列表内导出的函数 / 全局变量。
+    GKI 核心内核镜像由 Google 统一发布；各个厂商的硬件驱动编译成独立.ko模块，只能调用 KMI 符号列表内导出的函数 / 全局变量。
     只要 KMI 分支版本不变，GKI 内核升级，vendor 模块不用重新编译、可以直接加载运行。
     什么是KMI分支和KMI符号规则表呢？
     KMI分支:
