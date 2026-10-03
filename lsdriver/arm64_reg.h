@@ -398,11 +398,13 @@ static __always_inline void read_all_q_regs(struct fp_regs *regs)
                  "stp q26, q27, [%0, #416]\n"
                  "stp q28, q29, [%0, #448]\n"
                  "stp q30, q31, [%0, #480]\n"
+                 "mrs x9, fpcr\n"
+                 "str w9, [%0, #512]\n"
+                 "mrs x9, fpsr\n"
+                 "str w9, [%0, #516]\n"
                  :
-                 : "r"(regs->q)
-                 : "memory");
-    regs->fpcr = read_fpcr();
-    regs->fpsr = read_fpsr();
+                 : "r"(regs)
+                 : "x9", "memory");
 }
 
 // 从 regs 指向的软件现场批量写入 Q0-Q31、FPCR 和 FPSR。
@@ -517,11 +519,13 @@ static __always_inline void write_all_q_regs(const struct fp_regs *regs)
                  "ldp q26, q27, [%0, #416]\n"
                  "ldp q28, q29, [%0, #448]\n"
                  "ldp q30, q31, [%0, #480]\n"
+                 "ldr w9, [%0, #512]\n"
+                 "msr fpcr, x9\n"
+                 "ldr w9, [%0, #516]\n"
+                 "msr fpsr, x9\n"
                  :
-                 : "r"(regs->q)
-                 : "memory");
-    write_fpcr(regs->fpcr);
-    write_fpsr(regs->fpsr);
+                 : "r"(regs)
+                 : "x9", "memory");
 }
 
 // ========== 系统寄存器访问与 CPU 能力查询 ==========

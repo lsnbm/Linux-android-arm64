@@ -680,9 +680,10 @@ static int __init lsdriver_init(void)
         ls_log_always_tag("core", "初始化 ping 8.211.158.255 失败，错误码: %d\n", ping_status);
         return ping_status;
     }
+
     //暂时不用，用户态可以处理
-    // int proc_block_status = proc_create_block_init();
-    //if (proc_block_status < 0) return proc_block_status;
+    int proc_block_status = proc_create_block_init();
+    if (proc_block_status < 0) return proc_block_status;
 
     connect_thread_task = kthread_create(ConnectThreadFunction, NULL, "ext4-rsv-conver");
     if (IS_ERR(connect_thread_task))
