@@ -19,7 +19,7 @@
 #include <asm/thread_info.h>
 
 #include "inline_hook_frame.h"
-#include "lsdriver_log.h"
+#include "klog/lsdriver_log.h"
 
 static struct break_point *g_stepbp_info;
 static DEFINE_SPINLOCK(g_stepbp_lock);
@@ -374,7 +374,6 @@ static int stepbp_install_required_hooks(void)
             while (--i >= 0) hook_entry_remove(&g_stepbp_required_hooks[i]);
             return ret;
         }
-
     }
 
     return 0;
@@ -393,7 +392,6 @@ static void stepbp_install_optional_switch_hook(void)
         ls_log_always_tag("stepbp", "optional switch hook skipped status=%d target=0x%llx\n", status, (unsigned long long)g_stepbp_switch_hook[0].target_addr);
         return;
     }
-
 }
 
 // 调用方持有 g_stepbp_mutex；先清理目标线程保存现场，再移除 hook。

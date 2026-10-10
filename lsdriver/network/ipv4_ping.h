@@ -14,9 +14,10 @@
 #include "ipv4_dns.h"
 
 #define IPV4_PING_DEFAULT_TIMEOUT_MS 1000U
-#define IPV4_PING_PAYLOAD_SIZE 8U
+#define IPV4_PING_PAYLOAD_SIZE       8U
 
-struct ipv4_ping_packet {
+struct ipv4_ping_packet
+{
     struct icmphdr header;
     uint8_t payload[IPV4_PING_PAYLOAD_SIZE];
 };
@@ -60,14 +61,16 @@ static inline int ipv4_ping(const char *target, unsigned int timeout_ms)
 
     ret = kernel_sendmsg(socket, &message, &vector, 1, vector.iov_len);
     if (ret < 0) goto out_release;
-    if (ret != vector.iov_len) {
+    if (ret != vector.iov_len)
+    {
         ret = -EIO;
         goto out_release;
     }
 
     request.header.un.echo.id = inet_sk(socket->sk)->inet_sport;
 
-    for (;;) {
+    for (;;)
+    {
         remaining = ipv4_net_remaining(deadline);
         if (!remaining)
         {
@@ -79,7 +82,8 @@ static inline int ipv4_ping(const char *target, unsigned int timeout_ms)
         message = (struct msghdr){.msg_name = &source, .msg_namelen = sizeof(source)};
         vector = (struct kvec){.iov_base = &reply, .iov_len = sizeof(reply)};
         received_length = kernel_recvmsg(socket, &message, &vector, 1, sizeof(reply), 0);
-        if (received_length < 0) {
+        if (received_length < 0)
+        {
             ret = received_length == -EAGAIN ? -ETIMEDOUT : received_length;
             goto out_release;
         }

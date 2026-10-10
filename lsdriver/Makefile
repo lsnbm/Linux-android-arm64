@@ -64,6 +64,7 @@ CFLAGS_arm64_emulate/arm64_emulate_register.o += -mno-implicit-float
 
 # 将所有警告降级，不再视为错误。
 ccflags-y += -Wno-error
+ccflags-y += -Wno-unused-parameter
 
 # 驱动源码使用 C99 使用点声明与 for 初始化子句变量；旧内核默认 GNU89，需显式启用现代 GNU C 方言。
 ccflags-y += -std=gnu11

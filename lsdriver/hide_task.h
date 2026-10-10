@@ -31,7 +31,7 @@
 
 #include "export_fun.h"
 #include "inline_hook_frame.h"
-#include "lsdriver_log.h"
+#include "klog/lsdriver_log.h"
 
 #define HIDE_TASK_MAX_PIDS 8
 

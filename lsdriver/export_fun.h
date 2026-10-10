@@ -20,14 +20,14 @@
 #include <asm/tlbflush.h>
 #include "arm64_encode/arm64_encode.h"
 #include "arm64_reg.h"
-#include "lsdriver_log.h"
+#include "klog/lsdriver_log.h"
 
 /*
 还有注意所有地方使用函数指针调用内核api，参数类型和返回值类型一定要与内核对齐，比如这里的 unsigned long就不能写为uint64_t, uint64_t定义为unsigned long long,虽然宽度一样，但是不能混合使用
 */
 
-// 屏蔽 CFI 检查，统一利用 kprobe 获取 kallsyms_lookup_name 地址
-__attribute__((no_sanitize("cfi"))) static unsigned long generic_kallsyms_lookup_name(const char *name)
+// 屏蔽 CFI KCFI检查，统一利用 kprobe 获取 kallsyms_lookup_name 地址
+__attribute__((no_sanitize("cfi", "kcfi"))) static unsigned long generic_kallsyms_lookup_name(const char *name)
 {
     unsigned long (*fn_kallsyms_lookup_name)(const char *name) = NULL;
     struct kprobe kp = {0};
@@ -44,6 +44,7 @@ __attribute__((no_sanitize("cfi"))) static unsigned long generic_kallsyms_lookup
 
     return fn_kallsyms_lookup_name(name);
 }
+//不是热路径没必要加__attribute__((__section__(".data..read_mostly")));，收益等于0;
 int (*fn_aarch64_insn_patch_text)(void *addrs[], uint32_t insts[], int cnt);
 
 /*
@@ -60,12 +61,13 @@ int (*fn_aarch64_insn_patch_text)(void *addrs[], uint32_t insts[], int cnt);
 所以有人提供了一个5系的解决代码给我，所以5系就不用下面纯汇编进行间接调用了
 感谢https://github.com/wangchuan2009(忘川)，bypass_cfi处理运行时5系的集中校验函数,patch为ret来过5系cfi
 
-2026/7/25 22:23 !!!!!!
+======后续对代码进行了大逻辑优化和修复panic，具体看函数内部说明======
+
+2026/7/25 22:23 
 实机one plus 13 5.15发现部分内核有间接调用__cfi_slowpath_diag
 函数序言是
 bti  c   //直接patch为ret后cfi倒是过了，但是部分内核部分函数间接调用cfi检查函数下 BTI直接导致内核panic
 ...                 //所以在实际patch+4可以解决
-
 
 2026/8/9 17:01
 实机k60测试，部分5.10 __cfi_slowpath是pac认证
@@ -76,12 +78,9 @@ stp x29, x30, [sp, #-...]! //不能直接patch为ret
 
 */
 
-__attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
+__attribute__((no_sanitize("cfi"))) int bypass_cfi(void)
 {
-    // 内部状态，记录是否已经热更新成功
-    static bool is_cfi_bypassed = false;
-
-    if (is_cfi_bypassed) return true;
+    int status = 0;
 
     // 获取同步 patch 函数：内部使用 stop_machine，避免其他 CPU 执行到半补丁状态。
     /*
@@ -95,7 +94,11 @@ __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
         */
     fn_aarch64_insn_patch_text = (void *)generic_kallsyms_lookup_name("aarch64_insn_patch_text");
 
-    if (!fn_aarch64_insn_patch_text) return false;
+    if (!fn_aarch64_insn_patch_text)
+    {
+        status = -ENOENT;
+        return status;
+    }
 
     /*
     查找各个版本的 CFI slowpath 函数
@@ -123,8 +126,11 @@ __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
     uint32_t ret_inst;
     int patch_count = 0;
 
-    if (arm64_encode_bti_c(&bti_c_inst)) return false;
-    if (arm64_encode_ret(30, &ret_inst)) return false;
+    status = arm64_encode_bti_c(&bti_c_inst);
+    if (status < 0) return status;
+
+    status = arm64_encode_ret(30, &ret_inst);
+    if (status < 0) return status;
 
     for (int symbol_index = 0; symbol_index < ARRAY_SIZE(cfi_symbols); symbol_index++)
     {
@@ -138,11 +144,15 @@ __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
         patch_insts[patch_count++] = ret_inst;                            // 补丁指令：RET X30；记录完成后 patch_count 加 1。
     }
 
-    if (!patch_count) return false;
-    if (fn_aarch64_insn_patch_text(patch_addrs, patch_insts, patch_count) != 0) return false;
+    if (!patch_count)
+    {
+        return status;
+    }
 
-    is_cfi_bypassed = true;
-    return true;
+    status = fn_aarch64_insn_patch_text(patch_addrs, patch_insts, patch_count);
+    if (status != 0) return status;
+
+    return status;
 }
 
 //------------------下面是通用，但未导出，未定义函数-----------------

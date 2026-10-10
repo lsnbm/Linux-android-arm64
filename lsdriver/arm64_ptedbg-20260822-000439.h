@@ -23,7 +23,7 @@
 #include "arm64_reg.h"
 #include "export_fun.h"
 #include "inline_hook_frame.h"
-#include "io_struct.h"
+#include "io_version/io_struct.h"
 #include "arm64_emulate/emulate_inst.h"
 #include "virtual_memory_rw.h"
 

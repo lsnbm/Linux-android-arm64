@@ -1,15 +1,10 @@
-#include <linux/module.h>
 #include <linux/bitops.h>
 #include <linux/kernel.h>
-#include <linux/kallsyms.h>
-#include <linux/memory.h>
 #include <linux/percpu.h>
 #include <linux/perf_event.h>
 #include <linux/cpu.h>
 #include <linux/rcupdate.h>
 #include <linux/smp.h>
-#include <linux/stop_machine.h>
-#include <linux/version.h>
 #include <linux/sched.h>
 #include <asm/cacheflush.h>
 #include <asm/debug-monitors.h>
@@ -20,8 +15,8 @@
 #include "export_fun.h"
 #include "arm64_reg.h"
 #include "inline_hook_frame.h"
-#include "lsdriver_log.h"
-#include "io_struct.h"
+#include "klog/lsdriver_log.h"
+#include "io_version/io_struct.h"
 #include "arm64_emulate/emulate_inst.h"
 
 /*
@@ -36,11 +31,11 @@ DBGWCRn_EL1：第 n 个数据观察点控制寄存器
 既然使用全局指针传递上下文，那么<统一>使用传递的全局上下文，不在使用附带参数
 内核很多子系统的做法也一样
 */
-struct break_point *g_bp_info;
-int num_brps, num_wrps; // 硬件执行和访问槽位总数
-static struct perf_event * __percpu * bp_on_reg;
-static struct perf_event * __percpu * wp_on_reg;
-static void (*fn_perf_bp_event)(struct perf_event *event, void *data);
+struct break_point *g_bp_info __attribute__((__section__(".data..read_mostly")));
+int num_brps, num_wrps __attribute__((__section__(".data..read_mostly"))); // 硬件执行和访问槽位总数
+static struct perf_event * __percpu * bp_on_reg __attribute__((__section__(".data..read_mostly")));
+static struct perf_event * __percpu * wp_on_reg __attribute__((__section__(".data..read_mostly")));
+static void (*fn_perf_bp_event)(struct perf_event *event, void *data) __attribute__((__section__(".data..read_mostly")));
 static void (*fn_perf_event_output_forward)(struct perf_event *, struct perf_sample_data *, struct pt_regs *) __attribute__((__section__(".data..read_mostly")));
 static void (*fn_perf_event_output_backward)(struct perf_event *, struct perf_sample_data *, struct pt_regs *) __attribute__((__section__(".data..read_mostly")));
 

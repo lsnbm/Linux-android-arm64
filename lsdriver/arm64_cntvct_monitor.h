@@ -31,7 +31,7 @@
 
 #include "export_fun.h"
 #include "inline_hook_frame.h"
-#include "lsdriver_log.h"
+#include "klog/lsdriver_log.h"
 
 #define CNTVCT_MONITOR_MAX_RANGES                   128                                               //表容量
 #define CNTVCT_MONITOR_MAX_PC_DISTANCE_INSTRUCTIONS 10                                                //两条 MRS 的最大指令数距离

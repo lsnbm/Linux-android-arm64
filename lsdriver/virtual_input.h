@@ -1,13 +1,8 @@
 #include <linux/kernel.h>
-#include <linux/module.h>
 #include <linux/input.h>
 #include <linux/input/mt.h>
 #include <linux/device.h>
-#include <linux/delay.h>
-#include <linux/slab.h>
-#include <linux/version.h>
-#include <linux/compiler.h>
-#include "lsdriver_log.h"
+#include "klog/lsdriver_log.h"
 
 /*
 在 Linux 输入子系统中，上报一个手指的事件不是通过一个结构体一次性发过去的，而是像下面这样流式（Stream）分步发送的：

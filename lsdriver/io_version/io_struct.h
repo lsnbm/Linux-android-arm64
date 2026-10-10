@@ -16,7 +16,6 @@
 #include <linux/sort.h>
 #include <linux/types.h>
 #include <asm/ptrace.h>
-#include "arm64_reg.h"
 
 #define TLS_THREAD_NAME_LEN 16
 struct env_params

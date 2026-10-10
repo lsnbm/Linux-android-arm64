@@ -8,7 +8,11 @@
 #include <string.h>
 #endif
 
-#define ARM64_NOP 0xD503201FU
+#define ARM64_NOP                 0xD503201FU
+#define ARM64_REG31               31U
+#define ARM64_SYSREG_OP0_MIN      2U
+#define ARM64_SYSREG_OP0_MAX      3U
+#define ARM64_INT64_MIN_MAGNITUDE 0x8000000000000000ULL
 
 static bool arm64_encode_valid_reg(uint8_t reg)
 {
@@ -19,17 +23,15 @@ static int arm64_encode_signed_delta(uint64_t from, uint64_t to, int64_t *delta)
 {
     if (!delta) return -EINVAL;
 
-    if (to >= from)
+    uint64_t unsigned_delta = to - from;
+    if (unsigned_delta <= 0x7FFFFFFFFFFFFFFFULL)
     {
-        uint64_t magnitude = to - from;
-        if (magnitude > 0x7FFFFFFFFFFFFFFFULL) return -ERANGE;
-        *delta = (int64_t)magnitude;
+        *delta = (int64_t)unsigned_delta;
     }
     else
     {
-        uint64_t magnitude = from - to;
-        if (magnitude > 0x8000000000000000ULL) return -ERANGE;
-        *delta = magnitude == 0x8000000000000000ULL ? (int64_t)0x8000000000000000ULL : -(int64_t)magnitude;
+        uint64_t magnitude = 0ULL - unsigned_delta;
+        *delta = magnitude == ARM64_INT64_MIN_MAGNITUDE ? (int64_t)ARM64_INT64_MIN_MAGNITUDE : -(int64_t)magnitude;
     }
 
     return 0;
@@ -37,20 +39,19 @@ static int arm64_encode_signed_delta(uint64_t from, uint64_t to, int64_t *delta)
 
 static int arm64_encode_pc_delta(uint64_t pc, uint64_t target, int64_t *delta)
 {
-    if ((pc | target) & 0x3U) return -EINVAL;
+    if (!ARM64_ENCODE_IS_ALIGNED(pc, 4U) || !ARM64_ENCODE_IS_ALIGNED(target, 4U)) return -EINVAL;
     return arm64_encode_signed_delta(pc, target, delta);
 }
 
 static int arm64_encode_scaled_imm(uint32_t base, int64_t byte_offset, uint8_t imm_bits, uint8_t imm_shift, uint32_t *instruction)
 {
-    if (!instruction || (byte_offset & 0x3) || !imm_bits || imm_bits > 31 || imm_shift + imm_bits > 32) return -EINVAL;
+    if (!instruction || !ARM64_ENCODE_IS_ALIGNED(byte_offset, 4U) || !imm_bits || imm_bits > 31 || imm_shift > 31 || imm_shift + imm_bits > 32) return -EINVAL;
 
     int64_t immediate = byte_offset / 4;
     int64_t limit = 1LL << (imm_bits - 1);
     if (immediate < -limit || immediate >= limit) return -ERANGE;
 
-    uint32_t mask = (uint32_t)((1ULL << imm_bits) - 1);
-    *instruction = base | (((uint32_t)immediate & mask) << imm_shift);
+    *instruction = base | ARM64_ENCODE_FIELD(immediate, imm_bits - 1U, 0U, imm_shift);
     return 0;
 }
 
@@ -65,7 +66,7 @@ static int arm64_encode_direct_branch(uint32_t base, uint64_t pc, uint64_t targe
 static int arm64_encode_register_branch(uint32_t base, uint8_t rn, uint32_t *instruction)
 {
     if (!instruction || !arm64_encode_valid_reg(rn)) return -EINVAL;
-    *instruction = base | ((uint32_t)rn << 5);
+    *instruction = base | ARM64_ENCODE_FIELD(rn, 4U, 0U, 5U);
     return 0;
 }
 
@@ -76,16 +77,16 @@ static int arm64_encode_pc_address(uint32_t base, uint8_t rd, int64_t immediate,
     int64_t limit = 1LL << 20;
     if (immediate < -limit || immediate >= limit) return -ERANGE;
 
-    uint32_t encoded = (uint32_t)immediate & 0x1FFFFFU;
-    *instruction = base | ((encoded & 0x3U) << 29) | ((encoded >> 2) << 5) | rd;
+    uint32_t encoded = ARM64_ENCODE_FIELD((uint32_t)immediate, 20U, 0U, 0U);
+    *instruction = base | ARM64_ENCODE_FIELD(encoded, 1U, 0U, 29U) | ARM64_ENCODE_FIELD(encoded, 20U, 2U, 5U) | ARM64_ENCODE_FIELD(rd, 4U, 0U, 0U);
     return 0;
 }
 
 static int arm64_encode_system_register(uint32_t base, uint8_t rt, uint8_t op0, uint8_t op1, uint8_t crn, uint8_t crm, uint8_t op2, uint32_t *instruction)
 {
-    if (!instruction || !arm64_encode_valid_reg(rt) || op0 > 3 || op1 > 7 || crn > 15 || crm > 15 || op2 > 7) return -EINVAL;
+    if (!instruction || !arm64_encode_valid_reg(rt) || op0 < ARM64_SYSREG_OP0_MIN || op0 > ARM64_SYSREG_OP0_MAX || op1 > 7 || crn > 15 || crm > 15 || op2 > 7) return -EINVAL;
 
-    *instruction = base | ((uint32_t)op0 << 19) | ((uint32_t)op1 << 16) | ((uint32_t)crn << 12) | ((uint32_t)crm << 8) | ((uint32_t)op2 << 5) | rt;
+    *instruction = base | ARM64_ENCODE_FIELD(op0, 0U, 0U, 19U) | ARM64_ENCODE_FIELD(op1, 2U, 0U, 16U) | ARM64_ENCODE_FIELD(crn, 3U, 0U, 12U) | ARM64_ENCODE_FIELD(crm, 3U, 0U, 8U) | ARM64_ENCODE_FIELD(op2, 2U, 0U, 5U) | ARM64_ENCODE_FIELD(rt, 4U, 0U, 0U);
     return 0;
 }
 
@@ -108,7 +109,7 @@ int arm64_encode_brk(uint32_t immediate, uint32_t *instruction)
     if (!instruction) return -EINVAL;
     if (immediate > 0xFFFFU) return -ERANGE;
 
-    *instruction = 0xD4200000U | (immediate << 5);
+    *instruction = 0xD4200000U | ARM64_ENCODE_FIELD(immediate, 15U, 0U, 5U);
     return 0;
 }
 
@@ -129,7 +130,7 @@ int arm64_encode_b_cond(uint64_t pc, uint64_t target, uint8_t condition, uint32_
     int64_t offset;
     int status = arm64_encode_pc_delta(pc, target, &offset);
     if (status) return status;
-    return arm64_encode_scaled_imm(0x54000000U | condition, offset, 19, 5, instruction);
+    return arm64_encode_scaled_imm(0x54000000U | ARM64_ENCODE_FIELD(condition, 3U, 0U, 0U), offset, 19, 5, instruction);
 }
 
 static inline int arm64_encode_compare_branch(uint64_t pc, uint64_t target, bool nonzero, bool is_64bit, uint8_t rt, uint32_t *instruction)
@@ -140,7 +141,7 @@ static inline int arm64_encode_compare_branch(uint64_t pc, uint64_t target, bool
     int status = arm64_encode_pc_delta(pc, target, &offset);
     if (status) return status;
 
-    uint32_t base = 0x34000000U | (nonzero ? 0x01000000U : 0) | (is_64bit ? 0x80000000U : 0) | rt;
+    uint32_t base = 0x34000000U | ARM64_ENCODE_BIT(nonzero, 0U, 24U) | ARM64_ENCODE_BIT(is_64bit, 0U, 31U) | ARM64_ENCODE_FIELD(rt, 4U, 0U, 0U);
     return arm64_encode_scaled_imm(base, offset, 19, 5, instruction);
 }
 
@@ -162,7 +163,7 @@ static inline int arm64_encode_test_branch(uint64_t pc, uint64_t target, bool no
     int status = arm64_encode_pc_delta(pc, target, &offset);
     if (status) return status;
 
-    uint32_t base = 0x36000000U | (nonzero ? 0x01000000U : 0) | ((uint32_t)(test_bit & 0x20U) << 26) | ((uint32_t)(test_bit & 0x1FU) << 19) | rt;
+    uint32_t base = 0x36000000U | ARM64_ENCODE_BIT(nonzero, 0U, 24U) | ARM64_ENCODE_BIT(test_bit, 5U, 31U) | ARM64_ENCODE_FIELD(test_bit, 4U, 0U, 19U) | ARM64_ENCODE_FIELD(rt, 4U, 0U, 0U);
     return arm64_encode_scaled_imm(base, offset, 14, 5, instruction);
 }
 
@@ -193,6 +194,8 @@ int arm64_encode_ret(uint8_t rn, uint32_t *instruction)
 
 int arm64_encode_adr(uint8_t rd, uint64_t pc, uint64_t target, uint32_t *instruction)
 {
+    if (!ARM64_ENCODE_IS_ALIGNED(pc, 4U)) return -EINVAL;
+
     int64_t immediate;
     int status = arm64_encode_signed_delta(pc, target, &immediate);
     if (status) return status;
@@ -201,8 +204,10 @@ int arm64_encode_adr(uint8_t rd, uint64_t pc, uint64_t target, uint32_t *instruc
 
 int arm64_encode_adrp(uint8_t rd, uint64_t pc, uint64_t target, uint32_t *instruction)
 {
+    if (!ARM64_ENCODE_IS_ALIGNED(pc, 4U)) return -EINVAL;
+
     int64_t byte_offset;
-    int status = arm64_encode_signed_delta(pc & ~0xFFFULL, target & ~0xFFFULL, &byte_offset);
+    int status = arm64_encode_signed_delta(ARM64_ENCODE_ALIGN_DOWN(pc, 0x1000U), ARM64_ENCODE_ALIGN_DOWN(target, 0x1000U), &byte_offset);
     if (status) return status;
     return arm64_encode_pc_address(0x90000000U, rd, byte_offset / 0x1000, instruction);
 }
@@ -215,22 +220,22 @@ int arm64_encode_add_sub_imm(bool is_64bit, bool subtract, bool set_flags, uint8
     uint64_t encoded_immediate = immediate;
     if (encoded_immediate > 0xFFF)
     {
-        if (encoded_immediate & 0xFFF) return -ERANGE;
+        if (!ARM64_ENCODE_IS_ALIGNED(encoded_immediate, 0x1000U)) return -ERANGE;
         encoded_immediate >>= 12;
         shift = 1;
     }
     if (encoded_immediate > 0xFFF) return -ERANGE;
 
-    *instruction = 0x11000000U | (is_64bit ? 1U << 31 : 0) | (subtract ? 1U << 30 : 0) | (set_flags ? 1U << 29 : 0) | (shift << 22) | ((uint32_t)encoded_immediate << 10) | ((uint32_t)rn << 5) | rd;
+    *instruction = 0x11000000U | ARM64_ENCODE_BIT(is_64bit, 0U, 31U) | ARM64_ENCODE_BIT(subtract, 0U, 30U) | ARM64_ENCODE_BIT(set_flags, 0U, 29U) | ARM64_ENCODE_BIT(shift, 0U, 22U) | ARM64_ENCODE_FIELD(encoded_immediate, 11U, 0U, 10U) | ARM64_ENCODE_FIELD(rn, 4U, 0U, 5U) | ARM64_ENCODE_FIELD(rd, 4U, 0U, 0U);
     return 0;
 }
 
 int arm64_encode_add_sub_shifted(bool is_64bit, bool subtract, bool set_flags, uint8_t rd, uint8_t rn, uint8_t rm, enum arm64_encode_shift shift, uint8_t shift_amount, uint32_t *instruction)
 {
     if (!instruction || !arm64_encode_valid_reg(rd) || !arm64_encode_valid_reg(rn) || !arm64_encode_valid_reg(rm)) return -EINVAL;
-    if (shift > ARM64_ENCODE_SHIFT_ASR || shift_amount >= (is_64bit ? 64 : 32)) return -EINVAL;
+    if (shift < ARM64_ENCODE_SHIFT_LSL || shift > ARM64_ENCODE_SHIFT_ASR || shift_amount >= (is_64bit ? 64 : 32)) return -EINVAL;
 
-    *instruction = 0x0B000000U | (is_64bit ? 1U << 31 : 0) | (subtract ? 1U << 30 : 0) | (set_flags ? 1U << 29 : 0) | ((uint32_t)shift << 22) | ((uint32_t)rm << 16) | ((uint32_t)shift_amount << 10) | ((uint32_t)rn << 5) | rd;
+    *instruction = 0x0B000000U | ARM64_ENCODE_BIT(is_64bit, 0U, 31U) | ARM64_ENCODE_BIT(subtract, 0U, 30U) | ARM64_ENCODE_BIT(set_flags, 0U, 29U) | ARM64_ENCODE_FIELD(shift, 1U, 0U, 22U) | ARM64_ENCODE_FIELD(rm, 4U, 0U, 16U) | ARM64_ENCODE_FIELD(shift_amount, 5U, 0U, 10U) | ARM64_ENCODE_FIELD(rn, 4U, 0U, 5U) | ARM64_ENCODE_FIELD(rd, 4U, 0U, 0U);
     return 0;
 }
 
@@ -270,35 +275,37 @@ int arm64_encode_load_store_unsigned_offset(bool load, enum arm64_encode_load_st
     default:
         return -EINVAL;
     }
-    if (byte_offset % access_bytes) return -EINVAL;
+    if (!ARM64_ENCODE_IS_ALIGNED(byte_offset, access_bytes)) return -EINVAL;
 
     uint32_t immediate = byte_offset / access_bytes;
     if (immediate > 0xFFF) return -ERANGE;
 
-    *instruction = base | (immediate << 10) | ((uint32_t)rn << 5) | rt;
+    *instruction = base | ARM64_ENCODE_FIELD(immediate, 11U, 0U, 10U) | ARM64_ENCODE_FIELD(rn, 4U, 0U, 5U) | ARM64_ENCODE_FIELD(rt, 4U, 0U, 0U);
     return 0;
 }
 
 int arm64_encode_load_store_gpr64_pre_post_indexed(bool load, bool pre_index, uint8_t rt, uint8_t rn, int16_t byte_offset, uint32_t *instruction)
 {
     if (!instruction || !arm64_encode_valid_reg(rt) || !arm64_encode_valid_reg(rn)) return -EINVAL;
+    if (rn != ARM64_REG31 && rn == rt) return -EINVAL;
     if (byte_offset < -256 || byte_offset > 255) return -ERANGE;
 
     uint32_t base = load ? 0xF8400000U : 0xF8000000U;
-    base |= pre_index ? 0x00000C00U : 0x00000400U;
-    *instruction = base | (((uint32_t)byte_offset & 0x1FFU) << 12) | ((uint32_t)rn << 5) | rt;
+    base |= ARM64_ENCODE_FIELD(pre_index ? 3U : 1U, 1U, 0U, 10U);
+    *instruction = base | ARM64_ENCODE_FIELD(byte_offset, 8U, 0U, 12U) | ARM64_ENCODE_FIELD(rn, 4U, 0U, 5U) | ARM64_ENCODE_FIELD(rt, 4U, 0U, 0U);
     return 0;
 }
 
 int arm64_encode_load_store_pair_gpr64(bool load, uint8_t rt, uint8_t rt2, uint8_t rn, int16_t byte_offset, uint32_t *instruction)
 {
     if (!instruction || !arm64_encode_valid_reg(rt) || !arm64_encode_valid_reg(rt2) || !arm64_encode_valid_reg(rn)) return -EINVAL;
-    if (byte_offset & 0x7) return -EINVAL;
+    if (load && rt == rt2) return -EINVAL;
+    if (!ARM64_ENCODE_IS_ALIGNED(byte_offset, 8U)) return -EINVAL;
 
     int16_t immediate = byte_offset / 8;
     if (immediate < -64 || immediate > 63) return -ERANGE;
 
-    *instruction = (load ? 0xA9400000U : 0xA9000000U) | (((uint32_t)immediate & 0x7FU) << 15) | ((uint32_t)rt2 << 10) | ((uint32_t)rn << 5) | rt;
+    *instruction = (load ? 0xA9400000U : 0xA9000000U) | ARM64_ENCODE_FIELD(immediate, 6U, 0U, 15U) | ARM64_ENCODE_FIELD(rt2, 4U, 0U, 10U) | ARM64_ENCODE_FIELD(rn, 4U, 0U, 5U) | ARM64_ENCODE_FIELD(rt, 4U, 0U, 0U);
     return 0;
 }
 
@@ -334,7 +341,7 @@ int arm64_encode_ldr_literal(enum arm64_encode_load_store_kind kind, uint8_t rt,
     int64_t offset;
     int status = arm64_encode_pc_delta(pc, target, &offset);
     if (status) return status;
-    return arm64_encode_scaled_imm(base | rt, offset, 19, 5, instruction);
+    return arm64_encode_scaled_imm(base | ARM64_ENCODE_FIELD(rt, 4U, 0U, 0U), offset, 19, 5, instruction);
 }
 
 int arm64_encode_prfm_literal(uint8_t operation, uint64_t pc, uint64_t target, uint32_t *instruction)
@@ -344,7 +351,7 @@ int arm64_encode_prfm_literal(uint8_t operation, uint64_t pc, uint64_t target, u
     int64_t offset;
     int status = arm64_encode_pc_delta(pc, target, &offset);
     if (status) return status;
-    return arm64_encode_scaled_imm(0xD8000000U | operation, offset, 19, 5, instruction);
+    return arm64_encode_scaled_imm(0xD8000000U | ARM64_ENCODE_FIELD(operation, 4U, 0U, 0U), offset, 19, 5, instruction);
 }
 
 int arm64_encode_mrs(uint8_t rt, uint8_t op0, uint8_t op1, uint8_t crn, uint8_t crm, uint8_t op2, uint32_t *instruction)
@@ -366,7 +373,7 @@ int arm64_encode_fill_nops(uint32_t *output, size_t word_count)
 
 int arm64_emit_abs_jump(uint64_t target, uint8_t scratch, uint32_t *output, size_t word_count)
 {
-    if (!output || word_count < 4 || !arm64_encode_valid_reg(scratch)) return -EINVAL;
+    if (!output || word_count < 4 || !arm64_encode_valid_reg(scratch) || scratch == ARM64_REG31) return -EINVAL;
 
     int status = arm64_encode_fill_nops(output, word_count);
     if (status) return status;
@@ -374,6 +381,6 @@ int arm64_emit_abs_jump(uint64_t target, uint8_t scratch, uint32_t *output, size
     if (status) return status;
     status = arm64_encode_ret(scratch, &output[1]);
     if (status) return status;
-    memcpy(&output[2], &target, sizeof(target));
+    __builtin_memcpy(&output[2], &target, sizeof(target));
     return 0;
 }

@@ -1,9 +1,11 @@
 obj-m += arm64_kernel_executor_test_module.o
 
 ccflags-y += -I$(src)/../..
+ccflags-y += -I$(src)/../../klog
 ccflags-y += -I$(src)/../../arm64_decode
 ccflags-y += -std=gnu11 -Wall -Wextra
 ccflags-y += -Wno-error
+ccflags-y += -Wno-unused-parameter
 ccflags-y += -march=armv8.6-a+bf16+i8mm+fp16fml+fp16+lse+rcpc+crc
 ccflags-y += -include $(src)/arm64_instruction_table.h
 CFLAGS_REMOVE_../../arm64_emulate/emulate_inst.o += -mgeneral-regs-only

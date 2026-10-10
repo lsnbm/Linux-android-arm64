@@ -19,6 +19,7 @@
 
 #include "memory_tool.h"
 #include "driver.h"
+#include "driver_loader.h"
 #include "disassembler.h"
 #include "read_write_test.h"
 #include "http_server.h"
@@ -2312,7 +2313,7 @@ static bool daemonize(const char *log_path)
         if (devnull > STDERR_FILENO) close(devnull);
     }
 
-    int fd = open(log_path, O_WRONLY | O_CREAT | O_APPEND, 0666);
+    int fd = open(log_path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
     if (fd != -1)
     {
         // 将标准输出 (1) 定向到 fd
@@ -2360,19 +2361,46 @@ int main()
 
     LS_LOGI_TAG_FMT("Main", "启动模式: {}", mode);
 
-    dr = new Driver((mode == 2 || mode == 3) ? 5 : 0, mode == 5, mode == 6);
+    const int virtual_slots = (mode == 2 || mode == 3) ? 5 : 0;
+    const bool init_gyro = mode == 5;
+    const bool init_gnss = mode == 6;
+
+    try
+    {
+        dr = new Driver(virtual_slots, init_gyro, init_gnss);
+    }
+    catch (const std::exception &ex)
+    {
+        LS_LOGW_TAG_FMT("Main", "驱动握手失败: {}，开始自动加载模块", ex.what());
+        const int load_status = DriverLoader::LoadKernelModule();
+        if (load_status < 0)
+        {
+            LS_LOGE_TAG("Main", "自动加载驱动失败: error=%d", load_status);
+            return load_status;
+        }
+
+        try
+        {
+            dr = new Driver(virtual_slots, init_gyro, init_gnss);
+        }
+        catch (const std::exception &retry_ex)
+        {
+            LS_LOGE_TAG_FMT("Main", "驱动加载后仍无法连接: {}", retry_ex.what());
+            return 1;
+        }
+    }
 
     int (*const run[])() = {[]
-                                        {
-                                            dr->ExitKernel();
-                                            return 0;
-                                        },
-                                        RunReadWriteTest,
-                                        RunTouchTest,
-                                        RunMemoryTool,
-                                        http_server,
-                                        RunGyroTest,
-                                        RunGnssTest};
+                            {
+                                dr->ExitKernel();
+                                return 0;
+                            },
+                            RunReadWriteTest,
+                            RunTouchTest,
+                            RunMemoryTool,
+                            http_server,
+                            RunGyroTest,
+                            RunGnssTest};
     rc = run[mode]();
     Config::CpuThreadPool().purge();
     Config::IoThreadPool().purge();

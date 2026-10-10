@@ -28,6 +28,7 @@
 #include <span>
 #include <sstream>
 #include <string>
+#include <stdexcept>
 #include <sys/mman.h>
 #include <sys/prctl.h>
 #include <sys/stat.h>
@@ -963,9 +964,17 @@ private: // 私有实现，外部无需关系
         LS_LOGI_TAG("Driver", "分配虚拟地址成功: 地址=%p 大小=%zu", req, sizeof(request_obj));
         LS_LOGI_TAG("Driver", "当前进程 PID=%d，等待驱动握手", getpid());
 
+        //获取单调时钟+5秒
+        const auto handshake_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
         while (!req->user)
         {
-            asm volatile("yield");
+            //判断是否已近为5秒后了，超时抛异常
+            if (std::chrono::steady_clock::now() >= handshake_deadline)
+            {
+                munmap(req, sizeof(request_obj));
+                req = nullptr;
+                throw std::runtime_error("驱动握手超时");
+            }
         }
         req->user = false;
 

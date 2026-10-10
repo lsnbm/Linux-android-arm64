@@ -14,7 +14,7 @@
 
 #include "export_fun.h"
 #include "inline_hook_frame.h"
-#include "lsdriver_log.h"
+#include "klog/lsdriver_log.h"
 
 // 最多同时监控 8 个进程组；按 tgid 匹配会覆盖目标进程的所有线程。
 #define ARM_SYSCALL_MONITOR_MAX_PIDS 8

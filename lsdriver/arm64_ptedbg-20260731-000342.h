@@ -21,8 +21,8 @@
 #include "arm64_ghost/arm64_page_reloc.h"
 #include "arm64_emulate/emulate_inst.h"
 #include "inline_hook_frame.h"
-#include "io_struct.h"
-#include "lsdriver_log.h"
+#include "io_version/io_struct.h"
+#include "klog/lsdriver_log.h"
 
 #define PTEBP_ESR_EC_IABT_LOW 0x20        //来自较低异常级的指令访问异常，当前内核处于 EL1，目标进程运行在 EL0，因此源页因 PTE_UXN 无法取指时，异常类别就是这个值。
 #define PTEBP_ESR_FSC_PERM_L3 0x0f        //三级页表末级 PTE 的权限异常，pte是在页表第4级

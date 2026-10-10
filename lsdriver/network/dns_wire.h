@@ -11,9 +11,9 @@
 #include <errno.h>
 #endif
 
-#define DNS_NAME_SIZE 255U
+#define DNS_NAME_SIZE   255U
 #define DNS_HEADER_SIZE 12U
-#define DNS_QUERY_SIZE (DNS_HEADER_SIZE + DNS_NAME_SIZE + 4U)
+#define DNS_QUERY_SIZE  (DNS_HEADER_SIZE + DNS_NAME_SIZE + 4U)
 #define DNS_CNAME_LIMIT 8U
 
 static inline uint16_t dns_read16(const uint8_t *bytes)
@@ -43,8 +43,7 @@ static inline int dns_encode_name(const char *host, uint8_t *name)
         while (*host && *host != '.')
         {
             uint8_t value = (uint8_t)*host++;
-            if (!((value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') ||
-                  (value >= '0' && value <= '9') || value == '-')) return -EINVAL;
+            if (!((value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') || (value >= '0' && value <= '9') || value == '-')) return -EINVAL;
             if (used - label > 63 || used >= DNS_NAME_SIZE - 1) return -ENAMETOOLONG;
             name[used++] = dns_lower(value);
         }
@@ -130,9 +129,7 @@ static inline int dns_make_query(const uint8_t *name, uint16_t id, uint8_t *quer
     return DNS_HEADER_SIZE + name_length + 4;
 }
 
-static inline int dns_parse_answer(const uint8_t *packet, size_t length, uint16_t id,
-                                   const uint8_t *question, uint8_t *next_name,
-                                   unsigned int *aliases, uint8_t *address)
+static inline int dns_parse_answer(const uint8_t *packet, size_t length, uint16_t id, const uint8_t *question, uint8_t *next_name, unsigned int *aliases, uint8_t *address)
 {
     if (length < DNS_HEADER_SIZE) return -EBADMSG;
     uint16_t flags = dns_read16(packet + 2);

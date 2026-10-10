@@ -1,3 +1,9 @@
+/*
+ARM64 指令解码器：分支、异常与系统类。
+
+从原始指令提取 B/BL、条件分支、比较/测试分支、间接分支与返回，以及 SVC/HVC/SMC、系统提示、屏障、系统寄存器访问等编码字段。
+
+*/
 #include "arm64_decode.h"
 
 static inline enum arm64_decode_status arm64_decode_branch_immediate(uint32_t raw, struct arm64_decoded_instruction *decoded)
@@ -52,7 +58,7 @@ static inline enum arm64_decode_status arm64_decode_branch_conditional(uint32_t 
 
 static inline enum arm64_decode_status arm64_decode_branch_exception(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
-    switch (raw & 0xFFE0001FU)
+    switch (ARM64_DECODE_MASK(raw, 0xFFE0001FU))
     {
     case 0xD4000001U:
         decoded->instruction = ARM64_INST_SVC;
@@ -91,7 +97,29 @@ static inline enum arm64_decode_status arm64_decode_branch_system(uint32_t raw, 
         decoded->operand_width = 64;
         return ARM64_DECODE_OK;
     }
-    switch (raw & 0xFFFFF01FU)
+    switch (ARM64_DECODE_MASK(raw, 0xFFFFF0FFU))
+    {
+    case 0xD503305FU:
+        decoded->instruction = ARM64_INST_CLREX;
+        decoded->immediate = ARM64_DECODE_FIELD(raw, 11, 8);
+        return ARM64_DECODE_OK;
+    case 0xD503309FU:
+        decoded->instruction = ARM64_INST_DSB;
+        decoded->immediate = ARM64_DECODE_FIELD(raw, 11, 8);
+        return ARM64_DECODE_OK;
+    case 0xD50330BFU:
+        decoded->instruction = ARM64_INST_DMB;
+        decoded->immediate = ARM64_DECODE_FIELD(raw, 11, 8);
+        return ARM64_DECODE_OK;
+    case 0xD50330DFU:
+        decoded->immediate = ARM64_DECODE_FIELD(raw, 11, 8);
+        decoded->instruction = ARM64_INST_ISB;
+        return ARM64_DECODE_OK;
+    default:
+        break;
+    }
+
+    switch (ARM64_DECODE_MASK(raw, 0xFFFFF01FU))
     {
     case 0xD503201FU:
     {
@@ -133,30 +161,7 @@ static inline enum arm64_decode_status arm64_decode_branch_system(uint32_t raw, 
         break;
     }
 
-    switch (raw & 0xFFFFF0FFU)
-    {
-    case 0xD503305FU:
-        decoded->instruction = ARM64_INST_CLREX;
-        decoded->immediate = ARM64_DECODE_FIELD(raw, 11, 8);
-        return ARM64_DECODE_OK;
-    case 0xD503309FU:
-        decoded->instruction = ARM64_INST_DSB;
-        decoded->immediate = ARM64_DECODE_FIELD(raw, 11, 8);
-        return ARM64_DECODE_OK;
-    case 0xD50330BFU:
-        decoded->instruction = ARM64_INST_DMB;
-        decoded->immediate = ARM64_DECODE_FIELD(raw, 11, 8);
-        return ARM64_DECODE_OK;
-    case 0xD50330DFU:
-        if (ARM64_DECODE_FIELD(raw, 11, 8) != 0xF) return ARM64_DECODE_UNALLOCATED;
-        decoded->immediate = 0xF;
-        decoded->instruction = ARM64_INST_ISB;
-        return ARM64_DECODE_OK;
-    default:
-        break;
-    }
-
-    switch (raw & 0xFFF00000U)
+    switch (ARM64_DECODE_MASK(raw, 0xFFF00000U))
     {
     case 0xD5100000U:
         decoded->instruction = ARM64_INST_MSR_REGISTER;
@@ -182,7 +187,7 @@ static inline enum arm64_decode_status arm64_decode_branch_register(uint32_t raw
         return ARM64_DECODE_UNSUPPORTED;
     }
 
-    switch (raw & 0xFFFFFC1FU)
+    switch (ARM64_DECODE_MASK(raw, 0xFFFFFC1FU))
     {
     case 0xD61F0000U:
         decoded->rn = ARM64_DECODE_FIELD(raw, 9, 5);

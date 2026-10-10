@@ -13,8 +13,8 @@
 #include <net/sock.h>
 #include "dns_wire.h"
 
-#define IPV4_DNS_PRIMARY "8.8.8.8"
-#define IPV4_DNS_SECONDARY "8.8.4.4"
+#define IPV4_DNS_PRIMARY       "8.8.8.8"
+#define IPV4_DNS_SECONDARY     "8.8.4.4"
 #define IPV4_DNS_RESPONSE_SIZE 65535U
 
 static inline long ipv4_net_remaining(unsigned long deadline)
@@ -23,8 +23,7 @@ static inline long ipv4_net_remaining(unsigned long deadline)
     return time_before(now, deadline) ? (long)(deadline - now) : 0;
 }
 
-static inline int ipv4_dns_transfer(struct socket *socket, uint8_t *data, size_t length,
-                                    bool sending, unsigned long deadline)
+static inline int ipv4_dns_transfer(struct socket *socket, uint8_t *data, size_t length, bool sending, unsigned long deadline)
 {
     size_t done = 0;
     while (done < length)
@@ -35,8 +34,7 @@ static inline int ipv4_dns_transfer(struct socket *socket, uint8_t *data, size_t
         WRITE_ONCE(socket->sk->sk_rcvtimeo, remaining);
         struct msghdr message = {.msg_flags = sending ? MSG_NOSIGNAL : 0};
         struct kvec vector = {.iov_base = data + done, .iov_len = length - done};
-        int status = sending ? kernel_sendmsg(socket, &message, &vector, 1, vector.iov_len) :
-                               kernel_recvmsg(socket, &message, &vector, 1, vector.iov_len, 0);
+        int status = sending ? kernel_sendmsg(socket, &message, &vector, 1, vector.iov_len) : kernel_recvmsg(socket, &message, &vector, 1, vector.iov_len, 0);
         if (status < 0) return status == -EAGAIN ? -ETIMEDOUT : status;
         if (!status) return -ECONNRESET;
         done += status;
@@ -44,16 +42,14 @@ static inline int ipv4_dns_transfer(struct socket *socket, uint8_t *data, size_t
     return 0;
 }
 
-static inline int ipv4_dns_exchange(const char *server, uint8_t *query, size_t query_length,
-                                    uint8_t *response, bool tcp, unsigned long deadline)
+static inline int ipv4_dns_exchange(const char *server, uint8_t *query, size_t query_length, uint8_t *response, bool tcp, unsigned long deadline)
 {
     struct sockaddr_in destination = {.sin_family = AF_INET, .sin_port = htons(53)};
     if (!in4_pton(server, -1, (uint8_t *)&destination.sin_addr.s_addr, '\0', NULL)) return -EINVAL;
     long remaining = ipv4_net_remaining(deadline);
     if (!remaining) return -ETIMEDOUT;
     struct socket *socket = NULL;
-    int status = sock_create_kern(&init_net, AF_INET, tcp ? SOCK_STREAM : SOCK_DGRAM,
-                                  tcp ? IPPROTO_TCP : IPPROTO_UDP, &socket);
+    int status = sock_create_kern(&init_net, AF_INET, tcp ? SOCK_STREAM : SOCK_DGRAM, tcp ? IPPROTO_TCP : IPPROTO_UDP, &socket);
     if (status < 0) return status;
     WRITE_ONCE(socket->sk->sk_sndtimeo, remaining);
     status = kernel_connect(socket, (struct sockaddr *)&destination, sizeof(destination), 0);
@@ -158,24 +154,19 @@ static inline int ipv4_dns_resolve_until(const char *host, __be32 *address, unsi
             }
             unsigned long attempt_deadline = server_index ? deadline : jiffies + (remaining + 1) / 2;
             unsigned int attempt_aliases = aliases;
-            int received = ipv4_dns_exchange(servers[server_index], workspace->query, query_length,
-                                             workspace->response, false, attempt_deadline);
-            status = received < 0 ? received : dns_parse_answer(workspace->response, received, id,
-                       workspace->question, workspace->next_name, &attempt_aliases, (uint8_t *)&parsed);
+            int received = ipv4_dns_exchange(servers[server_index], workspace->query, query_length, workspace->response, false, attempt_deadline);
+            status = received < 0 ? received : dns_parse_answer(workspace->response, received, id, workspace->question, workspace->next_name, &attempt_aliases, (uint8_t *)&parsed);
             if (status == -EMSGSIZE)
             {
-                received = ipv4_dns_exchange(servers[server_index], workspace->query, query_length,
-                                             workspace->response, true, attempt_deadline);
-                status = received < 0 ? received : dns_parse_answer(workspace->response, received, id,
-                           workspace->question, workspace->next_name, &attempt_aliases, (uint8_t *)&parsed);
+                received = ipv4_dns_exchange(servers[server_index], workspace->query, query_length, workspace->response, true, attempt_deadline);
+                status = received < 0 ? received : dns_parse_answer(workspace->response, received, id, workspace->question, workspace->next_name, &attempt_aliases, (uint8_t *)&parsed);
             }
             if (!status || status == -EINPROGRESS)
             {
                 aliases = attempt_aliases;
                 break;
             }
-            if (status == -ENOENT || status == -ENODATA || status == -ELOOP ||
-                status == -EINTR || status == -ERESTARTSYS) break;
+            if (status == -ENOENT || status == -ENODATA || status == -ELOOP || status == -EINTR || status == -ERESTARTSYS) break;
         }
         if (status != -EINPROGRESS) break;
         __builtin_memcpy(workspace->question, workspace->next_name, DNS_NAME_SIZE);

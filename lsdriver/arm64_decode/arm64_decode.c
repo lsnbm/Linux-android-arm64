@@ -1,3 +1,4 @@
+
 #include "arm64_decode.h"
 
 #define ARM64_DECODE_CACHE_BITS     13U
@@ -6,11 +7,11 @@
 #define ARM64_DECODE_CACHE_WAY_BITS 4U
 #define ARM64_DECODE_CACHE_BUCKETS  (ARM64_DECODE_CACHE_SIZE / ARM64_DECODE_CACHE_WAYS)
 
-#define TAG_EMPTY 0x00000000U
-#define TAG_BUSY  0x00000001U
+#define ARM64_DECODE_TAG_EMPTY 0x00000000U
+#define ARM64_DECODE_TAG_BUSY  0x00000001U
 
 /*
-标签和解码结果分别连续存放，同一 slot 一一对应，仍是单层缓存。
+标签和解码结果分别连续存放，同一 slot 一一对应，单层缓存。
 每 16 个连续 slot 构成一个逻辑 bucket，查询只在该 bucket 内环形探测。
 缓存查找和插入都不会关闭中断或禁止抢占。tag 使用原子操作同步，
 payload 通过 release/acquire 协议发布，可安全处理并发和中断重入。
@@ -32,7 +33,7 @@ payload 发布后不可变且槽位不删除，遇到 EMPTY 即可结束查询�
 static inline int arm64_decode_cache_lookup(uint32_t raw, struct arm64_decoded_instruction *decoded)
 {
     // 0 和 1 是内部状态，不能参与 tag 匹配。
-    if (__builtin_expect(raw == TAG_EMPTY || raw == TAG_BUSY, 0)) return 0;
+    if (__builtin_expect(raw == ARM64_DECODE_TAG_EMPTY || raw == ARM64_DECODE_TAG_BUSY, 0)) return 0;
 
     uint32_t hash = arm64_decode_cache_hash(raw);
     uint32_t base = hash & ~(ARM64_DECODE_CACHE_WAYS - 1U);
@@ -47,7 +48,7 @@ static inline int arm64_decode_cache_lookup(uint32_t raw, struct arm64_decoded_i
             *decoded = g_arm64_decode_payloads[slot];
             return 1;
         }
-        if (tag == TAG_EMPTY) return 0;
+        if (tag == ARM64_DECODE_TAG_EMPTY) return 0;
     }
 
     return 0;
@@ -59,7 +60,7 @@ static inline int arm64_decode_cache_lookup(uint32_t raw, struct arm64_decoded_i
  */
 static inline void arm64_decode_cache_insert(uint32_t raw, const struct arm64_decoded_instruction *decoded)
 {
-    if (__builtin_expect(raw == TAG_EMPTY || raw == TAG_BUSY, 0)) return;
+    if (__builtin_expect(raw == ARM64_DECODE_TAG_EMPTY || raw == ARM64_DECODE_TAG_BUSY, 0)) return;
 
     uint32_t hash = arm64_decode_cache_hash(raw);
     uint32_t base = hash & ~(ARM64_DECODE_CACHE_WAYS - 1U);
@@ -73,7 +74,7 @@ static inline void arm64_decode_cache_insert(uint32_t raw, const struct arm64_de
         uint32_t tag = __atomic_load_n(&g_arm64_decode_tags[base + way], __ATOMIC_RELAXED);
 
         if (tag == raw) return;
-        if (tag == TAG_EMPTY && empty_way < 0)
+        if (tag == ARM64_DECODE_TAG_EMPTY && empty_way < 0)
         {
             empty_way = (int)way;
         }
@@ -82,8 +83,8 @@ static inline void arm64_decode_cache_insert(uint32_t raw, const struct arm64_de
     if (empty_way < 0) return;
 
     // CAS 只负责将空槽标记为 BUSY，不需要读取旧 payload。
-    uint32_t expected = TAG_EMPTY;
-    if (!__atomic_compare_exchange_n(&g_arm64_decode_tags[base + empty_way], &expected, TAG_BUSY, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED))
+    uint32_t expected = ARM64_DECODE_TAG_EMPTY;
+    if (!__atomic_compare_exchange_n(&g_arm64_decode_tags[base + empty_way], &expected, ARM64_DECODE_TAG_BUSY, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED))
     {
         return;
     }
@@ -106,7 +107,6 @@ enum arm64_decode_status arm64_decode_sme(uint32_t raw, struct arm64_decoded_ins
 否则编译器可能在查缓存之前，就为跨子解码器调用存活的参数保存寄存器、建立栈帧，
 即使命中并提前返回也要承担保存/恢复开销。拆分后命中只查缓存并复制结果，未命中
 可尾调用此函数；实际是否消除栈访问取决于编译器，需检查最终机器码。
-__noinline__ 使用保留属性拼写，避免与内核的 noinline 宏冲突；缓存发布协议不变。
 实际测试效率提升约10%左右
 */
 static __attribute__((__noinline__)) enum arm64_decode_status arm64_decode_instruction_slow(uint32_t raw, struct arm64_decoded_instruction *decoded)

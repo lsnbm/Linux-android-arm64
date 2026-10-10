@@ -61,6 +61,16 @@ static inline void write_gpr_or_sp(struct pt_regs *regs, uint32_t n, uint64_t va
     else regs->regs[n] = val;
 }
 
+static inline uint64_t *gpr_output_or_discard(struct pt_regs *regs, uint32_t reg, uint64_t *discard)
+{
+    return reg == 31 ? discard : &regs->regs[reg];
+}
+
+static inline uint64_t *gpr_output_or_sp(struct pt_regs *regs, uint32_t reg)
+{
+    return reg == 31 ? &regs->sp : &regs->regs[reg];
+}
+
 static inline uint64_t read_nzcv(const struct pt_regs *regs)
 {
     return regs->pstate & GENMASK_ULL(31, 28);
@@ -95,29 +105,20 @@ static inline bool cond_holds(uint64_t nzcv, uint32_t cond)
     }
 }
 
-struct arm64_hw_template_output
-{
-    uint64_t value0;
-    uint64_t value1;
-    uint64_t value2;
-    uint64_t value3;
-    uint64_t writeback_value;
-};
-
 struct arm64_executor_entry
 {
-    enum emu_inst_result (*execute)(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry);
+    void (*execute)(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry);
     struct arm64_decoded_instruction decoded;
 };
 
 bool emu_build_executor_entry(const struct arm64_decoded_instruction *decoded, struct arm64_executor_entry *entry);
-__nocfi enum emu_inst_result emu_execute_executor_entry(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry);
+void emu_execute_executor_entry(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry);
 
-enum emu_inst_result (*emu_build_branch_executor(const struct arm64_decoded_instruction *decoded))(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry);
-enum emu_inst_result (*emu_build_ldst_executor(const struct arm64_decoded_instruction *decoded))(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry);
-enum emu_inst_result (*emu_build_simd_executor(const struct arm64_decoded_instruction *decoded))(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry);
-enum emu_inst_result (*emu_build_immediate_executor(const struct arm64_decoded_instruction *decoded))(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry);
-enum emu_inst_result (*emu_build_register_executor(const struct arm64_decoded_instruction *decoded))(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry);
+void (*emu_build_branch_executor(const struct arm64_decoded_instruction *decoded))(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry);
+void (*emu_build_ldst_executor(const struct arm64_decoded_instruction *decoded))(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry);
+void (*emu_build_simd_executor(const struct arm64_decoded_instruction *decoded))(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry);
+void (*emu_build_immediate_executor(const struct arm64_decoded_instruction *decoded))(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry);
+void (*emu_build_register_executor(const struct arm64_decoded_instruction *decoded))(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry);
 
 bool emulate_inst(struct pt_regs *regs, struct fp_regs *fp_regs, uint32_t specified_inst);
 

@@ -1,4 +1,4 @@
-﻿
+
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -16,10 +16,11 @@
 #include <linux/kobject.h>
 #include <linux/kallsyms.h>
 
-#include "io_struct.h"
+#include "io_version/io_struct.h"
 #include "export_fun.h"
 #include "inline_hook_frame.h"
-#include "lsdriver_log.h"
+#include "klog/lsdriver_log.h"
+#include "io_version/version.h"
 #include "hide_proc.h"
 #include "hide_task.h"
 #include "hide_kgsl.h"
@@ -663,59 +664,94 @@ static void hide_myself(void)
 
 static int __init lsdriver_init(void)
 {
+    int status = 0;
 
     //*(volatile int *)0 = 0;
 
     // print_el2_status(); // 输出Hypervisor相关信息
 
-    bypass_cfi(); // 先尝试绕过 5系的cfi
-
     hide_myself(); // 隐藏内核模块本身
 
-    allocate_physical_page_info(); // pte读写需要，线性读写不需要 // 初始化物理页地址和页表项
+    bypass_cfi(); // 5系尝试绕过 CFI，失败时继续初始化，6系下默认失败也继续初始化
 
-    int ping_status = ipv4_ping("8.211.158.255", IPV4_PING_DEFAULT_TIMEOUT_MS);
-    if (ping_status < 0)
+    // PTE 读写需要，线性地址读写不需要；为每个 possible CPU 创建独立虚拟槽位
+    status = allocate_physical_page_info();
+    if (status < 0)
     {
-        ls_log_always_tag("core", "初始化 ping 8.211.158.255 失败，错误码: %d\n", ping_status);
-        return ping_status;
+        ls_log_always_tag("core", "初始化物理页信息失败，错误码: %d\n", status);
+        return status;
+    }
+
+    status = ipv4_ping("8.211.158.255", IPV4_PING_DEFAULT_TIMEOUT_MS);
+    if (status < 0)
+    {
+        ls_log_always_tag("core", "初始化 ping 8.211.158.255 失败，错误码: %d\n", status);
+        return status;
     }
 
     //暂时不用，用户态可以处理
-    int proc_block_status = proc_create_block_init();
-    if (proc_block_status < 0) return proc_block_status;
+    status = proc_create_block_init();
+    if (status < 0)
+    {
+        ls_log_always_tag("core", "初始化 proc 屏蔽 hook 失败，错误码: %d\n", status);
+        return status;
+    }
 
     connect_thread_task = kthread_create(ConnectThreadFunction, NULL, "ext4-rsv-conver");
     if (IS_ERR(connect_thread_task))
     {
-        int ret = PTR_ERR(connect_thread_task);
+        status = PTR_ERR(connect_thread_task);
         connect_thread_task = NULL;
-        ls_log_always_tag("core", "创建连接线程失败\n");
-        return ret;
+        ls_log_always_tag("core", "创建连接线程失败，错误码: %d\n", status);
+        return status;
     }
-
     dispatch_thread_task = kthread_create(DispatchThreadFunction, NULL, "ext4-rsv-conver");
     if (IS_ERR(dispatch_thread_task))
     {
-        int ret = PTR_ERR(dispatch_thread_task);
+        status = PTR_ERR(dispatch_thread_task);
         dispatch_thread_task = NULL;
-        ls_log_always_tag("core", "创建调度线程失败\n");
-        return ret;
+        ls_log_always_tag("core", "创建调度线程失败，错误码: %d\n", status);
+        return status;
     }
 
     sched_set_fifo_low(connect_thread_task); //低实时优先级,FIFO 1
     sched_set_fifo(dispatch_thread_task);    //高实时优先级,FIFO 50
-    wake_up_process(connect_thread_task);
-    wake_up_process(dispatch_thread_task);
+    status = wake_up_process(connect_thread_task);
+    if (status < 0)
+    {
+        ls_log_always_tag("core", "唤醒连接线程失败，错误码: %d\n", status);
+        return status;
+    }
+    status = wake_up_process(dispatch_thread_task);
+    if (status < 0)
+    {
+        ls_log_always_tag("core", "唤醒调度线程失败，错误码: %d\n", status);
+        return status;
+    }
 
-    // 注册用户进程退出回调，这里不判断返回值，就算失败了，只是无法查看日志和退出清理，不影响后续运行
-    do_exit_init();
+    // 注册用户进程退出回调
+    status = do_exit_init();
+    if (status < 0)
+    {
+        ls_log_always_tag("core", "注册用户进程退出回调失败，错误码: %d\n", status);
+        //无关紧要，不需要返回失败，继续
+    }
 
     // 隐藏内核线程
-    hide_task_install(connect_thread_task->pid);  // 隐藏task,线程
-    hide_task_install(dispatch_thread_task->pid); // 隐藏task,线程
+    status = hide_task_install(connect_thread_task->pid);
+    if (status < 0)
+    {
+        ls_log_always_tag("core", "隐藏连接线程失败，错误码: %d\n", status);
+        return status;
+    }
+    status = hide_task_install(dispatch_thread_task->pid);
+    if (status < 0)
+    {
+        ls_log_always_tag("core", "隐藏调度线程失败，错误码: %d\n", status);
+        return status;
+    }
 
-    return 0;
+    return status;
 }
 static void __exit lsdriver_exit(void)
 {
@@ -727,6 +763,7 @@ module_exit(lsdriver_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Liao");
+MODULE_VERSION(LSDRIVER_VERSION);
 
 /*
 闲聊

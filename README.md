@@ -4,7 +4,7 @@
 
 交流群：
 QQ:1092055800
-TG:https://t.me/+ArHIx-Km9jkxNjZl  
+TG:https://t.me/LuckyStarDump
 
 
 ---
@@ -446,7 +446,7 @@ BSS 区段的 `index` 固定为 `-1`，后续不会参与普通连续 index 编�
 bash build_all.sh 6.1-Android14
 ```
 
-不传参数会依次构建所有目标。脚本先询问是否剥离调试符号；6.6、6.12、6.18 目标保留符号。产物以版本名保存到驱动目录，随后自动调用 [packer.sh](packer.sh) 递增版本号并生成 [install_driver.sh](install_driver.sh)，打包成功后将相同版本号写入 [install_driver.version](install_driver.version)，使其与安装脚本输出一致。只构建一个目标时，安装包仍会收集目录里已有的其他版本模块。
+不传参数会依次构建所有目标。脚本先询问是否剥离调试符号；6.6、6.12、6.18 目标保留符号。每次构建开始时，脚本读取 [version.h](lsdriver/io_version/version.h) 中的 `LSDRIVER_VERSION` 并按 `x.y.z` 规则递增：补丁号和次版本号均最多为 `12`，达到上限后自动进位，最大版本为 `12.12.12`。一次构建多个内核目标只递增一次。编译完成后自动调用 [packer.sh](packer.sh)，将 `lsdriver` 根目录下的全部 `.ko` 移动到 `lsdriver/byte_stream/`。只构建一个目标时，打包器仍会收集目录里已有的其他根目录模块。
 
 已经准备好目标内核及其输出目录时，也可以从仓库根目录直接使用 Kbuild：
 
@@ -481,23 +481,19 @@ Windows 下在仓库根目录执行：
 
 ### 12.3 加载与启动
 
-先将安装脚本传到设备：
+打包后的模块位于 `lsdriver/byte_stream/`，按设备实际内核版本选择对应 `.ko` 文件后自行推送并加载：
 
 ```powershell
-adb push install_driver.sh /data/local/tmp/install_driver.sh
-adb shell
+adb push lsdriver/byte_stream/6.1-Android14.ko /data/local/tmp/6.1-Android14.ko
+adb shell su -c 'insmod /data/local/tmp/6.1-Android14.ko'
 ```
 
-在设备 shell 中执行：
+模块初始化时会把 `LSDRIVER_VERSION` 写入内核日志。加载成功后启动 Android 程序：
 
 ```sh
-su
-sh /data/local/tmp/install_driver.sh
 cd /data/akernel
 ./LS_KTool
 ```
-
-安装脚本按设备内核选择内嵌模块并调用 `insmod`。加载前会清空内核日志缓冲，需要保留先前日志时应先导出。
 
 程序启动后选择模式：
 
@@ -548,9 +544,10 @@ python windows/build_executables.py windows/LuckyStar.py
 ```bash
 make -C lsdriver/arm64_tests/decoder contract-test
 make -C lsdriver/arm64_tests/decoder strict-test
+make -C lsdriver/arm64_tests/encoder contract-test
 ```
 
-`contract-test` 检查输出契约和 CAS/CASP 组合，`strict-test` 使用 Android clang-r487747c / LLVM 17.0.2 做逐项审计。默认工具链位置及固定语料基线见 [lsdriver/arm64_tests/decoder/Makefile](lsdriver/arm64_tests/decoder/Makefile)，判定规则和带日期的结果见 [lsdriver/arm64_tests/decoder/VALIDATION.md](lsdriver/arm64_tests/decoder/VALIDATION.md)。
+decoder 的 `contract-test` 检查输出契约和 CAS/CASP 组合，`strict-test` 使用 Android clang-r487747c / LLVM 17.0.2 做逐项审计；encoder 的 `contract-test` 检查生产编码器的机器字、范围错误和跳板序列。默认工具链位置及固定语料基线见 [lsdriver/arm64_tests/decoder/Makefile](lsdriver/arm64_tests/decoder/Makefile)，判定规则见 [lsdriver/arm64_tests/decoder/VALIDATION.md](lsdriver/arm64_tests/decoder/VALIDATION.md) 和 [lsdriver/arm64_tests/encoder/VALIDATION.md](lsdriver/arm64_tests/encoder/VALIDATION.md)。
 
 模拟执行器测试需要实体 ARM64 设备、root 和匹配内核的测试模块。先在 Linux 或 WSL 中构建：
 

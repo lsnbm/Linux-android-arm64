@@ -13,6 +13,7 @@
 
 #define ARM64_DECODE_FIELD(raw, high, low)                (((raw) >> (low)) & (~0U >> (31U - ((high) - (low)))))
 #define ARM64_DECODE_BIT(raw, bit)                        (((raw) >> (bit)) & 1U)
+#define ARM64_DECODE_MASK(raw, mask)                      ((raw) & (mask))
 #define ARM64_DECODE_MATCH(raw, mask, value)              (((raw) & (mask)) == (value))
 #define ARM64_DECODE_BIT_PAIR(raw, high, low)             ((ARM64_DECODE_BIT((raw), (high)) << 1U) | ARM64_DECODE_BIT((raw), (low)))
 #define ARM64_DECODE_BIT_TRIPLE(raw, high, middle, low)   ((ARM64_DECODE_BIT((raw), (high)) << 2U) | (ARM64_DECODE_BIT((raw), (middle)) << 1U) | ARM64_DECODE_BIT((raw), (low)))
@@ -20,6 +21,7 @@
 #define ARM64_DECODE_SHIFTED_FIELD(raw, high, low, shift) ((uint64_t)ARM64_DECODE_FIELD((raw), (high), (low)) << (shift))
 #define ARM64_DECODE_SCALE(value, shift)                  ((uint64_t)(value) << (shift))
 #define ARM64_DECODE_CONCAT(high, low, bits)              (ARM64_DECODE_SCALE((high), (bits)) | (uint64_t)(low))
+#define ARM64_DECODE_ROR(value, rotation, width, mask)    ((((value) >> (rotation)) | ((value) << ((width) - (rotation)))) & (mask))
 #define ARM64_DECODE_JOIN_BIT_FIELD(raw, bit, high, low)  ARM64_DECODE_CONCAT(ARM64_DECODE_BIT((raw), (bit)), ARM64_DECODE_FIELD((raw), (high), (low)), ((high) - (low) + 1U))
 #define ARM64_DECODE_GPR_WIDTH(raw)                       (ARM64_DECODE_BIT((raw), 31U) ? 64U : 32U)
 #define ARM64_DECODE_SIGN_EXTEND(value, bits)             ((int64_t)((((uint64_t)(value) ^ (1ULL << ((bits) - 1U))) - (1ULL << ((bits) - 1U)))))
@@ -38,10 +40,10 @@ enum
 
 enum arm64_decode_status
 {
-    ARM64_DECODE_OK,
-    ARM64_DECODE_UNSUPPORTED,
-    ARM64_DECODE_UNPREDICTABLE,
-    ARM64_DECODE_UNALLOCATED,
+    ARM64_DECODE_OK,            // decoded 中的完整结果有效。
+    ARM64_DECODE_UNSUPPORTED,   // 解码失败；编码形式未实现或不属于当前候选格式。
+    ARM64_DECODE_UNPREDICTABLE, // 解码失败；编码对应的行为不可预测。
+    ARM64_DECODE_UNALLOCATED,   // 解码失败；编码未分配。
 };
 
 /*
@@ -772,7 +774,12 @@ struct arm64_decoded_instruction
     uint8_t condition; // 条件码；如 B.EQ label 或 CSEL X0,X1,X2,NE 中的 EQ/NE。
     uint8_t nzcv;      // 条件不满足时写入的 NZCV 值；如 CCMP X0,X1,#0xA,EQ 中的 #0xA。
 
-    uint64_t immediate; // 指令中的立即数；如 ADD X0,X1,#0x12。SVC #0x80 。MOVI V0.4S,#0x12 中的立即数。
+    /*
+    当前指令的立即数操作数或立即数载荷；具体位宽和表示形式由 instruction 决定。
+    通常保存解码后的有效值；例如 ADD X0,X1,#0x12 保存 0x12，SVC #0x80 保存 0x80。
+    AdvSIMD modified-immediate 指令中保存编码得到的 imm8，需结合 simd_cmode 和 element_width 解释。
+    */
+    uint64_t immediate;
 
     /*
     immr 和 imms 是 A64 位掩码编码中的两个 6 位字段，分别对应 R（旋转量）和 S。
@@ -785,7 +792,7 @@ struct arm64_decoded_instruction
     uint8_t imms;
     uint64_t bitfield_wmask; // SBFM/BFM/UBFM 的 DecodeBitMasks 写掩码 WMask。
     uint64_t bitfield_tmask; // SBFM/BFM/UBFM 的 DecodeBitMasks 顶部掩码 TMask。
-    uint8_t simd_cmode;      // AdvSIMD modified immediate 的 raw cmode 字段；如 MOVI V0.4S,#0x12 中参与编码立即数形状的 cmode。
+    uint8_t simd_cmode;      // AdvSIMD modified-immediate 的原始 cmode[3:0] 编码；它决定 immediate 中 imm8 的元素宽度、移位或特殊扩展形式，不是独立的立即数。
 
     // 寄存器扩展、移位及其他操作数修饰。
     uint8_t extend_type;  // 扩展类型编码；如 ADD X0,X1,W2,UXTW #2 中的 UXTW。
@@ -821,9 +828,8 @@ struct arm64_decoded_instruction
 调用方提供最终结果存储地址，decoder 直接填充该对象，避免大结构体按值返回时
 产生隐藏返回槽以及调用端的结构体复制。
 
-返回值为 OK 时，instruction 和该指令对应的 operands 完整有效。
-返回值为 UNSUPPORTED 时，只保证 instruction_class；调用方不得依赖 instruction 或 operands 执行或重定位。
-返回值为 UNPREDICTABLE 或 UNALLOCATED 时，不保证输出结构中的字段有效。
+返回值为 OK 时，instruction_class、instruction 和该指令对应的 operands 完整有效。
+返回值不是 OK 时，decoded 整体无效并被置零；调用方不得依赖其中任何字段执行或重定位。
 参数0:待解码的一条 32 位 A64 指令机器码
 参数1:解码结果
 */

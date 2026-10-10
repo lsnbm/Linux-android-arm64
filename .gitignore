@@ -1,6 +1,7 @@
 # 忽略编译生成的中间文件
 *.o
 *.ko
+lsdriver/arm64_ptedbg.h
 *.mod
 *.mod.c
 *.order
@@ -9,6 +10,8 @@
 .tmp_versions/
 *.lds
 *.usyms
+!lsdriver/byte_stream/
+!lsdriver/byte_stream/*.ko
 
 # 忽略 VS Code 配置
 .vscode/
@@ -38,6 +41,8 @@ lsdriver/arm64_tests/*
 !lsdriver/arm64_tests/decoder/*
 !lsdriver/arm64_tests/executor/
 !lsdriver/arm64_tests/executor/*
+!lsdriver/arm64_tests/encoder/
+!lsdriver/arm64_tests/encoder/*
 
 # Local ARM64 executor outputs
 lsdriver/arm64_tests/executor/arm64_instruction_table.h

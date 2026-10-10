@@ -1,6 +1,9 @@
-#include "arm64_decode.h"
+/*
+ARM64 指令解码器：数据处理立即数类。
 
-/* ======================== 位掩码立即数 ======================== */
+解析 ADR/ADRP、加减立即数、逻辑立即数、MOVN/MOVZ/MOVK、位域操作和 EXTR，并计算位掩码、旋转量、符号扩展与操作数宽度。
+*/
+#include "arm64_decode.h"
 
 static inline uint64_t arm64_decode_immediate_low_mask(uint8_t bits)
 {
@@ -8,7 +11,7 @@ static inline uint64_t arm64_decode_immediate_low_mask(uint8_t bits)
     {
         return ~0ULL;
     }
-    return (1ULL << bits) - 1;
+    return ARM64_DECODE_SCALE(1ULL, bits) - 1ULL;
 }
 
 static inline uint64_t arm64_decode_immediate_ror_element(uint64_t value, uint8_t rotation, uint8_t width)
@@ -16,22 +19,22 @@ static inline uint64_t arm64_decode_immediate_ror_element(uint64_t value, uint8_
     uint64_t mask = arm64_decode_immediate_low_mask(width);
 
     rotation %= width;
-    value &= mask;
+    value = ARM64_DECODE_MASK(value, mask);
     if (!rotation)
     {
         return value;
     }
-    return ((value >> rotation) | (value << (width - rotation))) & mask;
+    return ARM64_DECODE_ROR(value, rotation, width, mask);
 }
 
 static inline uint64_t arm64_decode_immediate_replicate(uint64_t value, uint8_t element_width, uint8_t width)
 {
     uint64_t result = 0;
 
-    value &= arm64_decode_immediate_low_mask(element_width);
+    value = ARM64_DECODE_MASK(value, arm64_decode_immediate_low_mask(element_width));
     for (uint8_t offset = 0; offset < width; offset += element_width)
     {
-        result |= value << offset;
+        result |= ARM64_DECODE_SCALE(value, offset);
     }
     return result;
 }
@@ -39,7 +42,7 @@ static inline uint64_t arm64_decode_immediate_replicate(uint64_t value, uint8_t 
 static inline int arm64_decode_immediate_bit_masks(uint8_t n, uint8_t immr, uint8_t imms, uint8_t width, int immediate, uint64_t *wmask, uint64_t *tmask)
 {
     /* 按 ARM ARM DecodeBitMasks 规则校验编码并展开 WMask/TMask。 */
-    uint32_t value = ((uint32_t)n << 6) | (~imms & 0x3F);
+    uint32_t value = ARM64_DECODE_CONCAT(n, ARM64_DECODE_MASK(~imms, 0x3F), 6U);
 
     if (!value)
     {
@@ -51,16 +54,16 @@ static inline int arm64_decode_immediate_bit_masks(uint8_t n, uint8_t immr, uint
         return 0;
     }
 
-    uint8_t levels = (1U << len) - 1;
-    uint8_t s = imms & levels;
-    uint8_t r = immr & levels;
+    uint8_t levels = ARM64_DECODE_SCALE(1U, len) - 1;
+    uint8_t s = ARM64_DECODE_MASK(imms, levels);
+    uint8_t r = ARM64_DECODE_MASK(immr, levels);
     if (immediate && s == levels)
     {
         return 0;
     }
 
-    uint8_t element_width = 1U << len;
-    uint8_t d = (s - r) & levels;
+    uint8_t element_width = ARM64_DECODE_SCALE(1U, len);
+    uint8_t d = ARM64_DECODE_MASK(s - r, levels);
     uint64_t welem = arm64_decode_immediate_ror_element(arm64_decode_immediate_low_mask(s + 1), r, element_width);
     uint64_t telem = arm64_decode_immediate_low_mask(d + 1);
     *wmask = arm64_decode_immediate_replicate(welem, element_width, width);
@@ -241,7 +244,7 @@ static inline enum arm64_decode_status arm64_decode_immediate_bitfield(uint32_t 
     uint8_t imms = ARM64_DECODE_FIELD(raw, 15, 10);
     uint64_t wmask;
     uint64_t tmask;
-    if (high_bit != (width == 64) || (width == 32 && ((immr | imms) & 0x20))) return ARM64_DECODE_UNALLOCATED;
+    if (high_bit != (width == 64) || (width == 32 && (ARM64_DECODE_BIT(immr, 5) || ARM64_DECODE_BIT(imms, 5)))) return ARM64_DECODE_UNALLOCATED;
     if (!arm64_decode_immediate_bit_masks(high_bit, immr, imms, width, 0, &wmask, &tmask)) return ARM64_DECODE_UNALLOCATED;
 
     decoded->instruction = instruction;
@@ -276,7 +279,7 @@ enum arm64_decode_status arm64_decode_data_processing_immediate(uint32_t raw, st
     struct arm64_decoded_instruction result = *decoded;
     struct arm64_decoded_instruction *candidate = &result;
     enum arm64_decode_status status;
-    switch (raw & 0x1F800000U)
+    switch (ARM64_DECODE_MASK(raw, 0x1F800000U))
     {
     case 0x10000000U:
     case 0x10800000U:

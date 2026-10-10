@@ -12,7 +12,7 @@
 #include <linux/of.h>
 #include <linux/string.h>
 
-#include "lsdriver_log.h"
+#include "klog/lsdriver_log.h"
 
 // Linux 6.18 使用 MDSCR_EL1_* 替代旧 DBG_MDSCR_* 名称，寄存器位定义不变。
 // 仅在旧宏缺失时映射到新名称，旧内核继续使用自身定义。
@@ -231,8 +231,8 @@ static void write_wb_reg(int reg, int n, uint64_t val)
 struct fp_regs
 {
     __uint128_t q[ARM64_FP_Q_REG_COUNT];
-    uint32_t fpcr;
-    uint32_t fpsr;
+    uint32_t fpcr; //浮点控制寄存器:在 99% 的运行时间几乎不变，整个系统共同遵循同一套默认规则IEEE 754。特殊场景可能会改为Flush-to-Zero
+    uint32_t fpsr; //浮点状态寄存器: 浮点向量指令完成后硬件自动更新，模拟的话需要手动更
 };
 
 _Static_assert(__builtin_offsetof(struct fp_regs, q) == 0, "fp_regs q offset must match register assembly");
@@ -350,33 +350,27 @@ static __always_inline void write_q_reg(int n, const void *src)
 */
 
 // 读取当前 FPCR 控制配置，用于保存浮点运算环境。
-static __always_inline uint32_t read_fpcr(void)
+static __always_inline void read_fpcr(uint32_t *val)
 {
-    uint64_t v;
-    asm volatile("mrs %0, fpcr" : "=r"(v));
-    return (uint32_t)v;
+    asm volatile("mrs %x0, fpcr" : "=r"(*val));
 }
 
 // 写入 FPCR 控制配置，用于恢复浮点运算环境；不会修改 FPSR 状态。
 static __always_inline void write_fpcr(uint32_t val)
 {
-    uint64_t v = val;
-    asm volatile("msr fpcr, %0" : : "r"(v));
+    asm volatile("msr fpcr, %x0" : : "r"(val));
 }
 
 // 读取当前 FPSR 状态标志，用于保存浮点运算结果状态。
-static __always_inline uint32_t read_fpsr(void)
+static __always_inline void read_fpsr(uint32_t *val)
 {
-    uint64_t v;
-    asm volatile("mrs %0, fpsr" : "=r"(v));
-    return (uint32_t)v;
+    asm volatile("mrs %x0, fpsr" : "=r"(*val));
 }
 
 // 写入 FPSR 状态标志，用于恢复累计异常等状态；不会修改 FPCR 配置。
 static __always_inline void write_fpsr(uint32_t val)
 {
-    uint64_t v = val;
-    asm volatile("msr fpsr, %0" : : "r"(v));
+    asm volatile("msr fpsr, %x0" : : "r"(val));
 }
 
 // 批量读取 Q0-Q31、FPCR 和 FPSR，输出到 regs 指向的软件现场。
@@ -548,57 +542,6 @@ static inline uint64_t arm64_read_tpidrro_el0(void)
 static inline uint64_t arm64_read_cntvct_el0(void)
 {
     return read_sysreg(cntvct_el0);
-}
-
-static inline bool arm64_current_cpu_has_rdm(void)
-{
-    return cpuid_feature_extract_unsigned_field(read_sysreg(id_aa64isar0_el1), 28) >= 1;
-}
-
-static inline bool arm64_current_cpu_has_dotprod(void)
-{
-    return cpuid_feature_extract_unsigned_field(read_sysreg(id_aa64isar0_el1), 44) >= 1;
-}
-
-static inline bool arm64_current_cpu_has_fhm(void)
-{
-    return cpuid_feature_extract_unsigned_field(read_sysreg(id_aa64isar0_el1), 48) >= 1;
-}
-
-static inline bool arm64_current_cpu_has_fcma(void)
-{
-    return cpuid_feature_extract_unsigned_field(read_sysreg(id_aa64isar1_el1), 16) >= 1;
-}
-
-static inline bool arm64_current_cpu_has_bf16(void)
-{
-    return cpuid_feature_extract_unsigned_field(read_sysreg(id_aa64isar1_el1), 44) >= 1;
-}
-
-static inline bool arm64_current_cpu_has_i8mm(void)
-{
-    return cpuid_feature_extract_unsigned_field(read_sysreg(id_aa64isar1_el1), 52) >= 1;
-}
-
-static inline bool arm64_current_cpu_has_fp16(void)
-{
-    return ((read_sysreg(id_aa64pfr0_el1) >> 20) & 0xFULL) == 1;
-}
-
-static inline bool arm64_current_cpu_has_faminmax(void)
-{
-    uint64_t value;
-
-    asm volatile("mrs %0, S3_0_C0_C6_3" : "=r"(value));
-    return ((value >> 4) & 0xFULL) >= 1;
-}
-
-static inline bool arm64_current_cpu_has_f8cvt(void)
-{
-    uint64_t value;
-
-    asm volatile("mrs %0, S3_0_C0_C4_7" : "=r"(value));
-    return value & (1ULL << 31);
 }
 
 // 读取 CurrentEL

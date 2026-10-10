@@ -19,7 +19,7 @@
 #include "arm64_reg.h"
 #include "export_fun.h"
 #include "inline_hook_frame.h"
-#include "io_struct.h"
+#include "io_version/io_struct.h"
 #include "arm64_emulate/emulate_inst.h"
 #include "virtual_memory_rw.h"
 
@@ -31,10 +31,14 @@ static inline uint8_t mtebp_instruction_bytes(const struct arm64_decoded_instruc
 {
     switch (decoded->instruction)
     {
-    case ARM64_INST_LDAPURSB: return 1;
-    case ARM64_INST_LDAPURSH: return 2;
-    case ARM64_INST_LDAPURSW: return 4;
-    default: break;
+    case ARM64_INST_LDAPURSB:
+        return 1;
+    case ARM64_INST_LDAPURSH:
+        return 2;
+    case ARM64_INST_LDAPURSW:
+        return 4;
+    default:
+        break;
     }
     return decoded->operand_width ? (uint8_t)(decoded->operand_width / 8) : 0;
 }
@@ -438,11 +442,18 @@ static enum emu_inst_result mtebp_emulate_load_store(struct pt_regs *regs, uint3
 
             switch (decoded->extend_type)
             {
-            case 2: index = (uint32_t)index; break;
-            case 3: break;
-            case 6: index = (uint64_t)(int64_t)(int32_t)index; break;
-            case 7: break;
-            default: goto emulate_failed;
+            case 2:
+                index = (uint32_t)index;
+                break;
+            case 3:
+                break;
+            case 6:
+                index = (uint64_t)(int64_t)(int32_t)index;
+                break;
+            case 7:
+                break;
+            default:
+                goto emulate_failed;
             }
             address = base + (index << decoded->shift_amount);
         }

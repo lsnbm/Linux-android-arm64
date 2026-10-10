@@ -16,6 +16,7 @@
 #define VIRTUAL_MEMORY_RW_H
 #include <linux/vmalloc.h>
 #include <linux/mm.h>
+#include <linux/percpu.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <asm/pgtable.h>
@@ -23,76 +24,94 @@
 #include <asm/memory.h>
 #include <asm/barrier.h>
 #include <linux/sched.h>
-#include "lsdriver_log.h"
+#include "klog/lsdriver_log.h"
 #include <linux/sched/mm.h>
 #include <linux/sched/signal.h>
 #include <linux/pid.h>
 #include <linux/sort.h>
 #include "export_fun.h"
-#include "io_struct.h"
+#include "io_version/io_struct.h"
 
 //============方案1:PTE读写+MMU硬件翻译地址(翻译和读写可以混搭)============
 
 struct pte_physical_page_info
 {
     void *base_address;
-    size_t size;
     pte_t *pte_address;
+    struct page *placeholder_page;
 };
-static struct pte_physical_page_info pte_info;
 
-// 初始化
+// 每个 possible CPU 拥有独立的虚拟槽位
+static DEFINE_PER_CPU(struct pte_physical_page_info, pte_info);
+
+static inline void free_physical_page_info(void)
+{
+    int cpu;
+
+    for_each_possible_cpu(cpu)
+    {
+        struct pte_physical_page_info *info = per_cpu_ptr(&pte_info, cpu);
+
+        if (info->base_address) vunmap(info->base_address);
+        if (info->placeholder_page) __free_page(info->placeholder_page);
+        __builtin_memset(info, 0, sizeof(*info));
+    }
+}
+
+// 为每个 possible CPU 创建独立虚拟槽位，并记录该槽位对应的末级 PTE。
 static inline int allocate_physical_page_info(void)
 {
-    uint64_t vaddr;
-    pte_t *ptep;
+    int cpu;
+    int status = 0;
 
     if (in_atomic())
     {
-        ls_log_always_tag("vmem", "原子上下文禁止调用 vmalloc\n");
+        ls_log_always_tag("vmem", "原子上下文禁止调用 vmap\n");
         return -EPERM;
     }
 
-    __builtin_memset(&pte_info, 0, sizeof(pte_info));
-
-    // 分配内存
-    vaddr = (uint64_t)vmalloc(PAGE_SIZE);
-    if (!vaddr)
+    for_each_possible_cpu(cpu)
     {
-        ls_log_always_tag("vmem", "vmalloc 失败\n");
-        return -ENOMEM;
+        struct pte_physical_page_info *info = per_cpu_ptr(&pte_info, cpu);
+        info->placeholder_page = alloc_page(GFP_KERNEL | __GFP_ZERO);
+        if (!info->placeholder_page)
+        {
+            ls_log_always_tag("vmem", "占位页分配失败，cpu=%d\n", cpu);
+            status = -ENOMEM;
+            goto err_out;
+        }
+
+        uint64_t vaddr = (uint64_t)vmap(&info->placeholder_page, 1, VM_MAP, PAGE_KERNEL_RO);
+        pte_t *ptep;
+
+        if (!vaddr)
+        {
+            ls_log_always_tag("vmem", "vmap 失败，cpu=%d\n", cpu);
+            __free_page(info->placeholder_page);
+            info->placeholder_page = NULL;
+            status = -ENOMEM;
+            goto err_out;
+        }
+
+        ptep = get_kernel_pte(vaddr);
+        if (!ptep)
+        {
+            ls_log_always_tag("vmem", "获取 PTE 失败，cpu=%d\n", cpu);
+            vunmap((void *)vaddr);
+            __free_page(info->placeholder_page);
+            info->placeholder_page = NULL;
+            status = -EFAULT;
+            goto err_out;
+        }
+
+        info->base_address = (void *)vaddr;
+        info->pte_address = ptep;
     }
-
-    // 必须 memset 触发缺页，让内核填充 TTBR1 指向的页表
-    __builtin_memset((void *)vaddr, 0xAA, PAGE_SIZE);
-
-    // 获取内核地址对应的 PTE 指针
-    ptep = get_kernel_pte(vaddr);
-    if (!ptep)
-    {
-        ls_log_always_tag("vmem", "获取 PTE 失败\n");
-        goto err_out;
-    }
-
-    pte_info.base_address = (void *)vaddr;
-    pte_info.size = PAGE_SIZE;
-    pte_info.pte_address = ptep;
     return 0;
 
 err_out:
-    vfree((void *)vaddr);
-    __builtin_memset(&pte_info, 0, sizeof(pte_info));
-    return -EFAULT;
-}
-// 释放
-static inline void free_physical_page_info(void)
-{
-    if (pte_info.base_address)
-    {
-        // 释放之前通过 vmalloc 分配的虚拟内存
-        vfree(pte_info.base_address);
-        __builtin_memset(&pte_info, 0, sizeof(pte_info));
-    }
+    free_physical_page_info();
+    return status;
 }
 
 static inline void memory_copy(void *destination, const void *source, size_t size)
@@ -238,9 +257,15 @@ static inline int mmu_translate_va_to_pa(struct mm_struct *mm, uint64_t va, phys
     return ret;
 }
 
-// 验证参数并直接操作PTE建立物理页映射
+/*
+验证参数并直接操作当前 CPU 槽位的 PTE 建立物理页映射。
+调用方必须在修改 PTE、刷新 TLB 和访问映射的整个期间禁止抢占，
+防止其他任务复用同一个 CPU 槽位并改写其 PTE。
+*/
 static inline void *pte_map_page(phys_addr_t paddr, size_t size, const void *buffer)
 {
+    struct pte_physical_page_info *info = this_cpu_ptr(&pte_info);
+
     // 普通内存页表配置
     /*
     我建议使用MT_NORMAL(有缓存)，RAM是口语化表达广泛含义表内存，DRAM是内存硬件具体的硬件存储介质
@@ -266,7 +291,7 @@ static inline void *pte_map_page(phys_addr_t paddr, size_t size, const void *buf
     更宽的块访问
     非自然对齐访问
     只要 mapped 地址不是对应宽度自然对齐，或者指令形式不适合 Device memory，就可能直接死
-    尤其这里返回的是return (uint8_t *)pte_info.base_address + (paddr & ~PAGE_MASK);
+    尤其这里返回的是return (uint8_t *)info->base_address + (paddr & ~PAGE_MASK);
     如果 paddr 页内偏移不是 4/8/16 对齐，而 memcpy 刚好生成宽访问，Device 就很容易炸。Normal_NC 映射下 CPU 可以处理很多非对齐访问；Device mapping 下不行。
 
     // 硬件设备寄存器专用页表配置（不要使用硬件寄存器页表配置去读取普通物理页，原因不过多解释，太复杂了问AI去）
@@ -279,51 +304,51 @@ static inline void *pte_map_page(phys_addr_t paddr, size_t size, const void *buf
 
     // 参数检查
     if (!size || !buffer) return ERR_PTR(-EINVAL);
+    if (!info->base_address || !info->pte_address) return ERR_PTR(-ENODEV);
     // PFN 有效性检查：确保物理页帧在系统内存管理范围内
     if (!pfn_valid(pfn)) return ERR_PTR(-EFAULT);
     // 跨页检查：读写可能跨越页边界，访问到未映射的下一页
     if (((paddr & ~PAGE_MASK) + size) > PAGE_SIZE) return ERR_PTR(-EINVAL);
 
     // 修改 PTE 指向目标物理页
-    set_pte(pte_info.pte_address, pfn_pte(pfn, __pgprot(FLAGS)));
+    set_pte(info->pte_address, pfn_pte(pfn, __pgprot(FLAGS)));
 
-    // 可能跨 CPU 使用，广播刷新对应 VA 的 TLB。
-    flush_tlb_addr_all_asid_all_cpus((uint64_t)pte_info.base_address);
+    // 当前槽位只由当前 CPU 使用，因此只刷新当前 CPU 的该 VA TLB 项。
+    flush_tlb_addr_all_asid_current_cpu((uint64_t)info->base_address);
 
-    // 刷新该页的 TLB, 内部含：dsb(ish) + TLBI + dsb(ish)+isb(),手写刷新需取消dsbisb注释
-    // flush_tlb_kernel_range((uint64_t)pte_info.base_address, (uint64_t)pte_info.base_address + PAGE_SIZE);
-    // 刷新全部cpu核心TLB
-    // flush_tlb_all();
-
-    return (uint8_t *)pte_info.base_address + (paddr & ~PAGE_MASK);
+    return (uint8_t *)info->base_address + (paddr & ~PAGE_MASK);
 }
 
 // 读取
 static inline int pte_read_physical(phys_addr_t paddr, void *buffer, size_t size)
 {
-    void *mapped = pte_map_page(paddr, size, buffer);
-    if (IS_ERR(mapped))
-    {
-        return PTR_ERR(mapped);
-    }
+    void *mapped;
+    int status = 0;
 
-    memory_copy(buffer, mapped, size);
+    // 防止当前槽位在映射后被同一 CPU 上的其他任务复用。
+    preempt_disable();
+    mapped = pte_map_page(paddr, size, buffer);
+    if (IS_ERR(mapped)) status = PTR_ERR(mapped);
+    else memory_copy(buffer, mapped, size);
+    preempt_enable();
 
-    return 0;
+    return status;
 }
 
 // 写入
 static inline int pte_write_physical(phys_addr_t paddr, const void *buffer, size_t size)
 {
-    void *mapped = pte_map_page(paddr, size, (void *)buffer);
-    if (IS_ERR(mapped))
-    {
-        return PTR_ERR(mapped);
-    }
+    void *mapped;
+    int status = 0;
 
-    memory_copy(mapped, buffer, size);
+    // 防止当前槽位在映射后被同一 CPU 上的其他任务复用。
+    preempt_disable();
+    mapped = pte_map_page(paddr, size, (void *)buffer);
+    if (IS_ERR(mapped)) status = PTR_ERR(mapped);
+    else memory_copy(mapped, buffer, size);
+    preempt_enable();
 
-    return 0;
+    return status;
 }
 
 //============方案2:内核已经映射的线性地址读写+手动走页表翻译地址(翻译和读写可以混搭)============
