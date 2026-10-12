@@ -1,6 +1,7 @@
 #ifndef LSDRIVER_ARM64_REG_H
 #define LSDRIVER_ARM64_REG_H
 
+#include <linux/kconfig.h>
 #include <linux/bits.h>
 #include <linux/types.h>
 #include <asm/cpufeature.h>
@@ -581,6 +582,435 @@ static inline unsigned int read_vhe_support(void)
                  :
                  : "cc");
     return (unsigned int)val;
+}
+
+// ========== 自托管追踪寄存器与能力查询 ==========
+
+/* ETMv4/ETE system-register encodings. */
+#ifndef SYS_TRCACVR
+#define SYS_TRCACVR(m) sys_reg(2, 1, 2, ((m & 7) << 1), (m >> 3))
+#endif
+#ifndef SYS_TRCACATR
+#define SYS_TRCACATR(m) sys_reg(2, 1, 2, ((m & 7) << 1), (2 | (m >> 3)))
+#endif
+#ifndef SYS_TRCVICTLR
+#define SYS_TRCVICTLR sys_reg(2, 1, 0, 0, 2)
+#endif
+#ifndef SYS_TRCVIIECTLR
+#define SYS_TRCVIIECTLR sys_reg(2, 1, 0, 1, 2)
+#endif
+#ifndef SYS_TRCVISSCTLR
+#define SYS_TRCVISSCTLR sys_reg(2, 1, 0, 2, 2)
+#endif
+#ifndef SYS_TRCPRGCTLR
+#define SYS_TRCPRGCTLR sys_reg(2, 1, 0, 1, 0)
+#endif
+#ifndef SYS_TRCTRACEIDR
+#define SYS_TRCTRACEIDR sys_reg(2, 1, 0, 0, 1)
+#endif
+#ifndef SYS_TRCDEVARCH
+#define SYS_TRCDEVARCH sys_reg(2, 1, 7, 15, 6)
+#endif
+#ifndef SYS_TRFCR_EL1
+#define SYS_TRFCR_EL1 sys_reg(3, 0, 1, 2, 1)
+#endif
+
+/* TRBE system-register encodings. */
+#ifndef SYS_TRBBASER_EL1
+#define SYS_TRBBASER_EL1 sys_reg(3, 0, 9, 11, 2)
+#endif
+#ifndef SYS_TRBPTR_EL1
+#define SYS_TRBPTR_EL1 sys_reg(3, 0, 9, 11, 1)
+#endif
+#ifndef SYS_TRBLIMITR_EL1
+#define SYS_TRBLIMITR_EL1 sys_reg(3, 0, 9, 11, 0)
+#endif
+#ifndef SYS_TRBSR_EL1
+#define SYS_TRBSR_EL1 sys_reg(3, 0, 9, 11, 3)
+#endif
+
+/* BRBE system-register encodings. */
+#ifndef SYS_BRBFCR_EL1
+#define SYS_BRBFCR_EL1 sys_reg(2, 1, 9, 0, 1)
+#endif
+#ifndef SYS_BRBCR_EL1
+#define SYS_BRBCR_EL1 sys_reg(2, 1, 9, 0, 0)
+#endif
+#ifndef SYS_BRBIDR0_EL1
+#define SYS_BRBIDR0_EL1 sys_reg(2, 1, 9, 2, 0)
+#endif
+#ifndef SYS_BRBINF_EL1
+#define SYS_BRBINF_EL1(n) sys_reg(2, 1, 8, (n & 15), (((n & 16) >> 2) | 0))
+#endif
+#ifndef SYS_BRBSRC_EL1
+#define SYS_BRBSRC_EL1(n) sys_reg(2, 1, 8, (n & 15), (((n & 16) >> 2) | 1))
+#endif
+#ifndef SYS_BRBTGT_EL1
+#define SYS_BRBTGT_EL1(n) sys_reg(2, 1, 8, (n & 15), (((n & 16) >> 2) | 2))
+#endif
+
+/* SPE system-register encodings. */
+#ifndef SYS_PMSCR_EL1
+#define SYS_PMSCR_EL1 sys_reg(3, 0, 9, 9, 0)
+#endif
+#ifndef SYS_PMSICR_EL1
+#define SYS_PMSICR_EL1 sys_reg(3, 0, 9, 9, 2)
+#endif
+#ifndef SYS_PMSFCR_EL1
+#define SYS_PMSFCR_EL1 sys_reg(3, 0, 9, 9, 4)
+#endif
+#ifndef SYS_PMSEVFR_EL1
+#define SYS_PMSEVFR_EL1 sys_reg(3, 0, 9, 9, 5)
+#endif
+#ifndef SYS_PMSADR_EL1
+#define SYS_PMSADR_EL1 sys_reg(3, 0, 9, 9, 6)
+#endif
+#ifndef SYS_PMBPTR_EL1
+#define SYS_PMBPTR_EL1 sys_reg(3, 0, 9, 10, 0)
+#endif
+#ifndef SYS_PMBSR_EL1
+#define SYS_PMBSR_EL1 sys_reg(3, 0, 9, 10, 1)
+#endif
+#ifndef SYS_PMBLIMITR_EL1
+#define SYS_PMBLIMITR_EL1 sys_reg(3, 0, 9, 10, 2)
+#endif
+
+#define ARM64_TRACE_DFR0_TRACEVER_SHIFT       4
+#define ARM64_TRACE_DFR0_TRACEFILT_SHIFT      40
+#define ARM64_TRACE_DFR0_BRBE_SHIFT           52
+#define ARM64_TRACE_DFR0_TRACEBUFFER_SHIFT    44
+#define ARM64_TRACE_DFR0_PMSVER_SHIFT         32
+
+#define ARM64_TRACE_TRCDEVARCH_PRESENT       BIT(20)
+#define ARM64_TRACE_TRCDEVARCH_ARCHITECT     ((0x4U << 28) | (0x3bU << 21))
+#define ARM64_TRACE_TRCDEVARCH_ETE           (ARM64_TRACE_TRCDEVARCH_ARCHITECT | (0x5U << 12) | 0xa13U | ARM64_TRACE_TRCDEVARCH_PRESENT)
+#define ARM64_TRACE_TRCDEVARCH_ETMV4X        (ARM64_TRACE_TRCDEVARCH_ARCHITECT | (0x4U << 12) | 0xa13U | ARM64_TRACE_TRCDEVARCH_PRESENT)
+#define ARM64_TRACE_TRCDEVARCH_ID_MASK       (GENMASK(31, 21) | GENMASK(15, 0) | BIT(20))
+
+#define ARM64_TRACE_TRCVICTLR_EVENT_ALWAYS   0x1U
+#define ARM64_TRACE_TRCVICTLR_SSSTATUS       BIT(9)
+#define ARM64_TRACE_TRCACATR_EXLEVEL_SHIFT   8
+#define ARM64_TRACE_EXLEVEL_APP              BIT(4)
+#define ARM64_TRACE_EXLEVEL_OS               BIT(5)
+#define ARM64_TRACE_EXLEVEL_HYP              BIT(6)
+#define ARM64_TRACE_TRFCR_E0TRE              BIT(0)
+#define ARM64_TRACE_TRFCR_EXTRE              BIT(1)
+#define ARM64_TRACE_TRFCR_TS_VIRTUAL         BIT(5)
+#define ARM64_TRACE_TRBLIMITR_LIMIT_MASK     GENMASK_ULL(63, 12)
+#define ARM64_TRACE_TRBLIMITR_TM_STOP        0
+#define ARM64_TRACE_TRBLIMITR_TM_IRQ         BIT(3)
+#define ARM64_TRACE_TRBLIMITR_E              BIT(0)
+#define ARM64_TRACE_TRBSR_IRQ                BIT(22)
+#define ARM64_TRACE_TRBSR_WRAP               BIT(20)
+#define ARM64_TRACE_TRBSR_ABORT              BIT(18)
+#define ARM64_TRACE_ID_BASE                  0x10
+
+#define ARM64_TRACE_BRBIDR_CC_MASK           GENMASK(15, 12)
+#define ARM64_TRACE_BRBIDR_FORMAT_MASK       GENMASK(11, 8)
+#define ARM64_TRACE_BRBIDR_NUMREC_MASK       GENMASK(7, 0)
+#define ARM64_TRACE_BRBIDR_CC_20_BIT         0x5
+#define ARM64_TRACE_BRBIDR_FORMAT_0          0
+#define ARM64_TRACE_BRBCR_E0BRE              BIT(0)
+#define ARM64_TRACE_BRBCR_EXBRE              BIT(1)
+#define ARM64_TRACE_BRBCR_CC                 BIT(3)
+#define ARM64_TRACE_BRBCR_MPRED              BIT(4)
+#define ARM64_TRACE_BRBCR_TS_VIRTUAL         BIT(5)
+#define ARM64_TRACE_BRBCR_FZP                BIT(8)
+#define ARM64_TRACE_BRBFCR_DIRECT            BIT(17)
+#define ARM64_TRACE_BRBFCR_INDIRECT          BIT(18)
+#define ARM64_TRACE_BRBFCR_RETURN            BIT(19)
+#define ARM64_TRACE_BRBFCR_INDIRECT_CALL     BIT(20)
+#define ARM64_TRACE_BRBFCR_DIRECT_CALL       BIT(21)
+#define ARM64_TRACE_BRBFCR_COND_DIRECT       BIT(22)
+#define ARM64_TRACE_BRBFCR_PAUSED            BIT(7)
+#define ARM64_TRACE_BRBFCR_BANK_MASK         GENMASK(29, 28)
+#define ARM64_TRACE_BRBINF_VALID_MASK        GENMASK(1, 0)
+#define ARM64_TRACE_BRBINF_MISPRED           BIT(5)
+#define ARM64_TRACE_BRBINF_EL_MASK           GENMASK(7, 6)
+#define ARM64_TRACE_BRBINF_TYPE_MASK         GENMASK(13, 8)
+#define ARM64_TRACE_BRBINF_CC_UNAVAILABLE    BIT(46)
+
+static __always_inline uint64_t arm64_reg_read_dfr0(void)
+{
+    return read_sysreg(id_aa64dfr0_el1);
+}
+
+static __always_inline uint64_t arm64_reg_read_etm_devarch(void)
+{
+    return read_sysreg_s(SYS_TRCDEVARCH);
+}
+
+static __always_inline void arm64_reg_write_etm_program_control(uint64_t value)
+{
+    write_sysreg_s(value, SYS_TRCPRGCTLR);
+}
+
+static __always_inline void arm64_reg_write_etm_trace_id(uint64_t value)
+{
+    write_sysreg_s(value, SYS_TRCTRACEIDR);
+}
+
+static __always_inline void arm64_reg_write_etm_view_inst_control(uint64_t value)
+{
+    write_sysreg_s(value, SYS_TRCVICTLR);
+}
+
+static __always_inline void arm64_reg_write_etm_view_inst_include(uint64_t value)
+{
+    write_sysreg_s(value, SYS_TRCVIIECTLR);
+}
+
+static __always_inline void arm64_reg_write_etm_view_inst_start_stop(uint64_t value)
+{
+    write_sysreg_s(value, SYS_TRCVISSCTLR);
+}
+
+static __always_inline void arm64_reg_write_etm_address_value(unsigned int index, uint64_t value)
+{
+    switch (index)
+    {
+    case 0:
+        write_sysreg_s(value, SYS_TRCACVR(0));
+        break;
+    case 1:
+        write_sysreg_s(value, SYS_TRCACVR(1));
+        break;
+    default:
+        break;
+    }
+}
+
+static __always_inline void arm64_reg_write_etm_address_access(unsigned int index, uint64_t value)
+{
+    switch (index)
+    {
+    case 0:
+        write_sysreg_s(value, SYS_TRCACATR(0));
+        break;
+    case 1:
+        write_sysreg_s(value, SYS_TRCACATR(1));
+        break;
+    default:
+        break;
+    }
+}
+
+static __always_inline void arm64_reg_write_etm_trace_filter(uint64_t value)
+{
+    write_sysreg_s(value, SYS_TRFCR_EL1);
+}
+
+static __always_inline uint64_t arm64_reg_read_trbe_status(void)
+{
+    return read_sysreg_s(SYS_TRBSR_EL1);
+}
+
+static __always_inline uint64_t arm64_reg_read_trbe_pointer(void)
+{
+    return read_sysreg_s(SYS_TRBPTR_EL1);
+}
+
+static __always_inline void arm64_reg_write_trbe_base(uint64_t value)
+{
+    write_sysreg_s(value, SYS_TRBBASER_EL1);
+}
+
+static __always_inline void arm64_reg_write_trbe_pointer(uint64_t value)
+{
+    write_sysreg_s(value, SYS_TRBPTR_EL1);
+}
+
+static __always_inline void arm64_reg_write_trbe_limit(uint64_t value)
+{
+    write_sysreg_s(value, SYS_TRBLIMITR_EL1);
+}
+
+static __always_inline void arm64_reg_write_trbe_status(uint64_t value)
+{
+    write_sysreg_s(value, SYS_TRBSR_EL1);
+}
+
+static __always_inline uint64_t arm64_reg_read_brbe_id(void)
+{
+    return read_sysreg_s(SYS_BRBIDR0_EL1);
+}
+
+static __always_inline uint64_t arm64_reg_read_brbe_control(void)
+{
+    return read_sysreg_s(SYS_BRBCR_EL1);
+}
+
+static __always_inline void arm64_reg_write_brbe_control(uint64_t value)
+{
+    write_sysreg_s(value, SYS_BRBCR_EL1);
+}
+
+static __always_inline uint64_t arm64_reg_read_brbe_filter(void)
+{
+    return read_sysreg_s(SYS_BRBFCR_EL1);
+}
+
+static __always_inline void arm64_reg_write_brbe_filter(uint64_t value)
+{
+    write_sysreg_s(value, SYS_BRBFCR_EL1);
+}
+
+#define ARM64_REG_BRBE_INDEX_CASES(op) \
+    op(0) op(1) op(2) op(3) op(4) op(5) op(6) op(7) \
+    op(8) op(9) op(10) op(11) op(12) op(13) op(14) op(15) \
+    op(16) op(17) op(18) op(19) op(20) op(21) op(22) op(23) \
+    op(24) op(25) op(26) op(27) op(28) op(29) op(30) op(31) \
+    op(32) op(33) op(34) op(35) op(36) op(37) op(38) op(39) \
+    op(40) op(41) op(42) op(43) op(44) op(45) op(46) op(47) \
+    op(48) op(49) op(50) op(51) op(52) op(53) op(54) op(55) \
+    op(56) op(57) op(58) op(59) op(60) op(61) op(62) op(63)
+
+#define ARM64_REG_BRBE_INFO_CASE(index) case index: return read_sysreg_s(SYS_BRBINF_EL1(index));
+#define ARM64_REG_BRBE_SOURCE_CASE(index) case index: return read_sysreg_s(SYS_BRBSRC_EL1(index));
+#define ARM64_REG_BRBE_TARGET_CASE(index) case index: return read_sysreg_s(SYS_BRBTGT_EL1(index));
+
+static __always_inline uint64_t arm64_reg_read_brbe_info(unsigned int index)
+{
+    switch (index)
+    {
+        ARM64_REG_BRBE_INDEX_CASES(ARM64_REG_BRBE_INFO_CASE)
+    default:
+        return 0;
+    }
+}
+
+static __always_inline uint64_t arm64_reg_read_brbe_source(unsigned int index)
+{
+    switch (index)
+    {
+        ARM64_REG_BRBE_INDEX_CASES(ARM64_REG_BRBE_SOURCE_CASE)
+    default:
+        return 0;
+    }
+}
+
+static __always_inline uint64_t arm64_reg_read_brbe_target(unsigned int index)
+{
+    switch (index)
+    {
+        ARM64_REG_BRBE_INDEX_CASES(ARM64_REG_BRBE_TARGET_CASE)
+    default:
+        return 0;
+    }
+}
+
+static __always_inline void arm64_reg_brbe_invalidate(void)
+{
+#ifdef BRB_IALL_INSN
+    isb();
+    asm volatile(BRB_IALL_INSN);
+    isb();
+#endif
+}
+
+static __always_inline uint64_t arm64_reg_read_spe_status(void)
+{
+    return read_sysreg_s(SYS_PMBSR_EL1);
+}
+
+static __always_inline void arm64_reg_write_spe_control(uint64_t value)
+{
+    write_sysreg_s(value, SYS_PMSCR_EL1);
+}
+
+static __always_inline void arm64_reg_write_spe_pointer(uint64_t value)
+{
+    write_sysreg_s(value, SYS_PMBPTR_EL1);
+}
+
+static __always_inline void arm64_reg_write_spe_limit(uint64_t value)
+{
+    write_sysreg_s(value, SYS_PMBLIMITR_EL1);
+}
+
+static __always_inline void arm64_reg_write_spe_status(uint64_t value)
+{
+    write_sysreg_s(value, SYS_PMBSR_EL1);
+}
+
+static __always_inline void arm64_reg_write_spe_address(uint64_t value)
+{
+    write_sysreg_s(value, SYS_PMSADR_EL1);
+}
+
+static __always_inline void arm64_reg_write_spe_filter(uint64_t value)
+{
+    write_sysreg_s(value, SYS_PMSFCR_EL1);
+}
+
+static __always_inline void arm64_reg_write_spe_interval(uint64_t value)
+{
+    write_sysreg_s(value, SYS_PMSICR_EL1);
+}
+
+static __always_inline void arm64_reg_write_spe_event_filter(uint64_t value)
+{
+    write_sysreg_s(value, SYS_PMSEVFR_EL1);
+}
+
+static __always_inline unsigned int arm64_reg_trace_version(void)
+{
+    return (arm64_reg_read_dfr0() >> ARM64_TRACE_DFR0_TRACEVER_SHIFT) & 0xfU;
+}
+
+static __always_inline bool arm64_reg_supports_sysreg_trace(void)
+{
+    return arm64_reg_trace_version() != 0;
+}
+
+static __always_inline bool arm64_reg_supports_trace_filter(void)
+{
+    return ((arm64_reg_read_dfr0() >> ARM64_TRACE_DFR0_TRACEFILT_SHIFT) & 0xfU) != 0;
+}
+
+static __always_inline bool arm64_reg_supports_trbe(void)
+{
+    return ((arm64_reg_read_dfr0() >> ARM64_TRACE_DFR0_TRACEBUFFER_SHIFT) & 0xfU) != 0;
+}
+
+static __always_inline bool arm64_reg_supports_spe(void)
+{
+    return ((arm64_reg_read_dfr0() >> ARM64_TRACE_DFR0_PMSVER_SHIFT) & 0xfU) != 0;
+}
+
+static __always_inline bool arm64_reg_supports_brbe(void)
+{
+    unsigned int version = (arm64_reg_read_dfr0() >> ARM64_TRACE_DFR0_BRBE_SHIFT) & 0xfU;
+    uint64_t brbidr;
+
+    if (version != 1 && version != 2) return false;
+
+    brbidr = arm64_reg_read_brbe_id();
+    return ((brbidr & ARM64_TRACE_BRBIDR_CC_MASK) >> 12) == ARM64_TRACE_BRBIDR_CC_20_BIT &&
+           ((brbidr & ARM64_TRACE_BRBIDR_FORMAT_MASK) >> 8) == ARM64_TRACE_BRBIDR_FORMAT_0;
+}
+
+static __always_inline unsigned int arm64_reg_brbe_record_count(void)
+{
+    uint64_t brbidr = arm64_reg_read_brbe_id();
+    unsigned int count = brbidr & ARM64_TRACE_BRBIDR_NUMREC_MASK;
+
+    return count == 8 || count == 16 || count == 32 || count == 64 ? count : 0;
+}
+
+static __always_inline uint32_t arm64_reg_trace_devarch(void)
+{
+    return (uint32_t)arm64_reg_read_etm_devarch();
+}
+
+static __always_inline bool arm64_reg_has_etm_source(void)
+{
+    uint32_t devarch;
+
+    if (!arm64_reg_supports_sysreg_trace()) return false;
+
+    devarch = arm64_reg_trace_devarch() & ARM64_TRACE_TRCDEVARCH_ID_MASK;
+    return devarch == ARM64_TRACE_TRCDEVARCH_ETE || devarch == ARM64_TRACE_TRCDEVARCH_ETMV4X;
 }
 
 // 读取 SCTLR_EL1

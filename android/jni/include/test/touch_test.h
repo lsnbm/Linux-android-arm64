@@ -5,29 +5,7 @@
 #include <cstdio>
 #include <thread>
 
-#include "driver.h"
-
-// 获取屏幕方向对应的逻辑尺寸
-inline void GetScreenLogicalSize(int &w, int &h)
-{
-    // 优先通过属性读取系统屏幕分辨率
-    int wTmp = 1080, hTmp = 2340;
-
-    FILE *pipe = popen("wm size", "r");
-    if (pipe)
-    {
-        char line[128] = {};
-        if (fgets(line, sizeof(line), pipe))
-        {
-            // 格式: Physical size: 1080x2340
-            if (sscanf(line, "Physical size: %dx%d", &wTmp, &hTmp) != 2) sscanf(line, "Override size: %dx%d", &wTmp, &hTmp);
-        }
-        pclose(pipe);
-    }
-
-    w = wTmp;
-    h = hTmp;
-}
+#include "../../driver/driver.h"
 
 // 单点连击测试：在 (x,y) 连续点击 taps 次
 inline void DoTapTest(int slot, int x, int y, int screenW, int screenH, int taps = 3)
@@ -93,8 +71,17 @@ inline void DoPinchTest(int screenW, int screenH)
 
 inline int RunTouchTest()
 {
-    int screenW = 0, screenH = 0;
-    GetScreenLogicalSize(screenW, screenH);
+    int screenW = 1080, screenH = 2340;
+    if (FILE *pipe = popen("wm size", "r"))
+    {
+        char line[128] = {};
+        if (fgets(line, sizeof(line), pipe))
+        {
+            if (sscanf(line, "Physical size: %dx%d", &screenW, &screenH) != 2) sscanf(line, "Override size: %dx%d", &screenW, &screenH);
+        }
+        pclose(pipe);
+    }
+
     LS_LOGI_TAG("TouchTest", "屏幕逻辑尺寸: %dx%d", screenW, screenH);
 
     // 1) 单击测试：屏幕左上 1/4 区域

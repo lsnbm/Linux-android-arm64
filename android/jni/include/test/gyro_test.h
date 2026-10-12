@@ -4,7 +4,7 @@
 #include <cstdlib>
 #include <thread>
 
-#include "driver.h"
+#include "../../driver/driver.h"
 
 inline void DoGyroSweep(const char *name, int start, int end, int step, int axis)
 {

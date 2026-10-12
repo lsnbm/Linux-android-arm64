@@ -8,38 +8,11 @@
 #include <linux/slab.h>
 #include <asm/cacheflush.h>
 #include <asm/esr.h>
-#include <asm/sysreg.h>
 #include "export_fun.h"
 #include "arm64_reg.h"
 #include "inline_hook_frame.h"
 #include "klog/lsdriver_log.h"
 #include "io_version/io_struct.h"
-
-// SPE 系统寄存器编码宏定义 (部分低版本内核头文件未定义时备用)
-#ifndef SYS_PMSCR_EL1
-#define SYS_PMSCR_EL1 sys_reg(3, 0, 9, 9, 0)
-#endif
-#ifndef SYS_PMSICR_EL1
-#define SYS_PMSICR_EL1 sys_reg(3, 0, 9, 9, 2)
-#endif
-#ifndef SYS_PMSFCR_EL1
-#define SYS_PMSFCR_EL1 sys_reg(3, 0, 9, 9, 4)
-#endif
-#ifndef SYS_PMSEVFR_EL1
-#define SYS_PMSEVFR_EL1 sys_reg(3, 0, 9, 9, 5)
-#endif
-#ifndef SYS_PMSADR_EL1
-#define SYS_PMSADR_EL1 sys_reg(3, 0, 9, 9, 6)
-#endif
-#ifndef SYS_PMBPTR_EL1
-#define SYS_PMBPTR_EL1 sys_reg(3, 0, 9, 10, 0)
-#endif
-#ifndef SYS_PMBSR_EL1
-#define SYS_PMBSR_EL1 sys_reg(3, 0, 9, 10, 1)
-#endif
-#ifndef SYS_PMBLIMIT_EL1
-#define SYS_PMBLIMIT_EL1 sys_reg(3, 0, 9, 10, 2)
-#endif
 
 // SPE 硬件中断滑步允许的窗口大小 (16字节 = 4条指令)
 #define SPE_SKID_WINDOW_BYTES  0x10
@@ -51,9 +24,7 @@ static void *__percpu *g_spe_buffers; // 每个 CPU 专属的 SPE 硬件写入�
 // 检查当前 CPU 硬件是否支持 ARMv8.2+ SPE
 static bool is_cpu_support_spe(void)
 {
-    uint64_t dfr0 = read_sysreg(id_aa64dfr0_el1);
-    uint32_t pmsver = (dfr0 >> 32) & 0xF;
-    return pmsver >= 1; // PMSVer >= 1 表示支持 SPE
+    return arm64_reg_supports_spe();
 }
 
 // 在当前 CPU 上安装并激活 SPE 地址过滤监控
@@ -70,32 +41,32 @@ static void install_spe_regs_on_cpu(struct break_point *bp_info)
     uint64_t target_pc = untagged_addr(point->hit_addr) & ~0x3ULL;
 
     // 1. 禁用当前核心的 SPE
-    write_sysreg_s(0, SYS_PMSCR_EL1);
+    arm64_reg_write_spe_control(0);
     isb();
 
     // 2. 清除状态寄存器
-    write_sysreg_s(0, SYS_PMBSR_EL1);
+    arm64_reg_write_spe_status(0);
 
     // 3. 配置硬件写入缓冲区 (首地址与极小上限，单次命中立即触发中断)
-    write_sysreg_s(buf_addr, SYS_PMBPTR_EL1);
+    arm64_reg_write_spe_pointer(buf_addr);
     // 限制仅允许写入 1 条样本 (64 字节)，PMBLIMIT.E=1 使能中断
-    write_sysreg_s((buf_addr + 64) | 1ULL, SYS_PMBLIMIT_EL1);
+    arm64_reg_write_spe_limit((buf_addr + 64) | 1ULL);
 
     // 4. 配置地址比较器：仅监听指定 PC
-    write_sysreg_s(target_pc, SYS_PMSADR_EL1);
+    arm64_reg_write_spe_address(target_pc);
 
     // 5. 配置过滤器 (PMSFCR_EL1): FE=1(开启过滤), FT=0(匹配 PC 取指)
-    write_sysreg_s(1ULL, SYS_PMSFCR_EL1);
+    arm64_reg_write_spe_filter(1ULL);
 
     // 6. 设置采样间隔 (PMSICR_EL1 = 1)，保证经过必抓
-    write_sysreg_s(1ULL, SYS_PMSICR_EL1);
+    arm64_reg_write_spe_interval(1ULL);
 
     // 7. 仅统计指令退休事件 (Retired)
-    write_sysreg_s(0ULL, SYS_PMSEVFR_EL1);
+    arm64_reg_write_spe_event_filter(0ULL);
 
     // 8. 激活 EL0 用户态 SPE 监控 (E0SPE = 1, E1SPE = 0 过滤内核态)
     uint64_t pmscr = (1ULL << 1);
-    write_sysreg_s(pmscr, SYS_PMSCR_EL1);
+    arm64_reg_write_spe_control(pmscr);
     isb();
 
     ls_log_always_tag("spe", "cpu=%d arm spe for pid=%d target_pc=0x%llx\n", smp_processor_id(), bp_info->tgid, target_pc);
@@ -106,9 +77,9 @@ static void clear_spe_regs_on_cpu(void *data)
 {
     (void)data;
     // 关闭 SPE 采样与缓冲区使能
-    write_sysreg_s(0, SYS_PMSCR_EL1);
-    write_sysreg_s(0, SYS_PMBLIMIT_EL1);
-    write_sysreg_s(0, SYS_PMBSR_EL1);
+    arm64_reg_write_spe_control(0);
+    arm64_reg_write_spe_limit(0);
+    arm64_reg_write_spe_status(0);
     isb();
 }
 
@@ -156,8 +127,8 @@ static int work_trampoline_spe_irq(struct pt_regs *hook_regs)
     void *buf = *this_cpu_ptr(g_spe_buffers);
     if (buf)
     {
-        write_sysreg_s((uint64_t)buf, SYS_PMBPTR_EL1);
-        write_sysreg_s(0, SYS_PMBSR_EL1);
+        arm64_reg_write_spe_pointer((uint64_t)buf);
+        arm64_reg_write_spe_status(0);
         isb();
     }
 

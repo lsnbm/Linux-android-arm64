@@ -63,6 +63,8 @@ namespace DriverLoader
         }
 
         LS_LOGI_TAG("DriverLoader", "内核版本 %d.%d，候选模块数量=%zu", major, minor, candidates.size());
+        std::println(stderr, "[DriverLoader] 内核版本 {}.{}, 候选模块数量={}", major, minor, candidates.size());
+        std::fflush(stderr);
         return candidates;
     }
 
@@ -145,6 +147,8 @@ namespace DriverLoader
         for (const std::string &module_name : candidates)
         {
             LS_LOGI_TAG("DriverLoader", "尝试下载并加载: %s", module_name.c_str());
+            std::println(stderr, "[DriverLoader] 尝试下载并加载: {}", module_name);
+            std::fflush(stderr);
 
             std::vector<uint8_t> module_image;
             if (!DownloadModule(module_name, module_image))
@@ -166,6 +170,8 @@ namespace DriverLoader
             if (result == 0)
             {
                 LS_LOGI_TAG("DriverLoader", "内核模块加载成功: %s", module_name.c_str());
+                std::println(stderr, "[DriverLoader] 内核模块加载成功: {}", module_name);
+                std::fflush(stderr);
                 return 0;
             }
             last_error = -errno;
