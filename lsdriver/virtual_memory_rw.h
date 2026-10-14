@@ -482,12 +482,18 @@ static int virtual_memory_rw(enum request_op op, pid_t pid, uint64_t vaddr, void
     size_t bytes_processed = 0;
     size_t bytes_done = 0;
     int status = 0;
+    unsigned long irq_flags;
 
     if (!buffer || size == 0) return -EINVAL;
 
-    //不在缓存mm,不知道为何缓存mm会导致小块和大块拷贝都出现概率性的数据读取失败，不缓存就没有这个问题
+    //奇怪的就是这只获取mm并加上了引用计数，没有任何屏障或者原子同步，
+    //缓存mm会导致后续的小块和大块拷贝读概率失败，不缓存就没有这个问题，并且唯一区别就是缓存和不缓存都没屏障和同步，真的奇怪
     struct mm_struct *mm = get_mm_by_pid(pid);
     if (!mm) return -EINVAL;
+
+    //关闭中断和抢占，也有可能是被中断和抢占导致，这里加上
+    preempt_disable();
+    local_irq_save(irq_flags);
 
     /* ---------- 逐页循环 ---------- */
     while (bytes_processed < size)
@@ -528,6 +534,10 @@ static int virtual_memory_rw(enum request_op op, pid_t pid, uint64_t vaddr, void
         bytes_processed += bytes_this_page;
         current_vaddr += bytes_this_page;
     }
+
+    //打开中断和抢占
+    local_irq_restore(irq_flags);
+    preempt_enable();
 
     mmput(mm);
     return (bytes_done == 0) ? status : (int)bytes_done;

@@ -675,60 +675,60 @@ static inline unsigned int read_vhe_support(void)
 #define SYS_PMBLIMITR_EL1 sys_reg(3, 0, 9, 10, 2)
 #endif
 
-#define ARM64_TRACE_DFR0_TRACEVER_SHIFT       4
-#define ARM64_TRACE_DFR0_TRACEFILT_SHIFT      40
-#define ARM64_TRACE_DFR0_BRBE_SHIFT           52
-#define ARM64_TRACE_DFR0_TRACEBUFFER_SHIFT    44
-#define ARM64_TRACE_DFR0_PMSVER_SHIFT         32
+#define ARM64_TRACE_DFR0_TRACEVER_SHIFT    4
+#define ARM64_TRACE_DFR0_TRACEFILT_SHIFT   40
+#define ARM64_TRACE_DFR0_BRBE_SHIFT        52
+#define ARM64_TRACE_DFR0_TRACEBUFFER_SHIFT 44
+#define ARM64_TRACE_DFR0_PMSVER_SHIFT      32
 
-#define ARM64_TRACE_TRCDEVARCH_PRESENT       BIT(20)
-#define ARM64_TRACE_TRCDEVARCH_ARCHITECT     ((0x4U << 28) | (0x3bU << 21))
-#define ARM64_TRACE_TRCDEVARCH_ETE           (ARM64_TRACE_TRCDEVARCH_ARCHITECT | (0x5U << 12) | 0xa13U | ARM64_TRACE_TRCDEVARCH_PRESENT)
-#define ARM64_TRACE_TRCDEVARCH_ETMV4X        (ARM64_TRACE_TRCDEVARCH_ARCHITECT | (0x4U << 12) | 0xa13U | ARM64_TRACE_TRCDEVARCH_PRESENT)
-#define ARM64_TRACE_TRCDEVARCH_ID_MASK       (GENMASK(31, 21) | GENMASK(15, 0) | BIT(20))
+#define ARM64_TRACE_TRCDEVARCH_PRESENT   BIT(20)
+#define ARM64_TRACE_TRCDEVARCH_ARCHITECT ((0x4U << 28) | (0x3bU << 21))
+#define ARM64_TRACE_TRCDEVARCH_ETE       (ARM64_TRACE_TRCDEVARCH_ARCHITECT | (0x5U << 12) | 0xa13U | ARM64_TRACE_TRCDEVARCH_PRESENT)
+#define ARM64_TRACE_TRCDEVARCH_ETMV4X    (ARM64_TRACE_TRCDEVARCH_ARCHITECT | (0x4U << 12) | 0xa13U | ARM64_TRACE_TRCDEVARCH_PRESENT)
+#define ARM64_TRACE_TRCDEVARCH_ID_MASK   (GENMASK(31, 21) | GENMASK(15, 0) | BIT(20))
 
-#define ARM64_TRACE_TRCVICTLR_EVENT_ALWAYS   0x1U
-#define ARM64_TRACE_TRCVICTLR_SSSTATUS       BIT(9)
-#define ARM64_TRACE_TRCACATR_EXLEVEL_SHIFT   8
-#define ARM64_TRACE_EXLEVEL_APP              BIT(4)
-#define ARM64_TRACE_EXLEVEL_OS               BIT(5)
-#define ARM64_TRACE_EXLEVEL_HYP              BIT(6)
-#define ARM64_TRACE_TRFCR_E0TRE              BIT(0)
-#define ARM64_TRACE_TRFCR_EXTRE              BIT(1)
-#define ARM64_TRACE_TRFCR_TS_VIRTUAL         BIT(5)
-#define ARM64_TRACE_TRBLIMITR_LIMIT_MASK     GENMASK_ULL(63, 12)
-#define ARM64_TRACE_TRBLIMITR_TM_STOP        0
-#define ARM64_TRACE_TRBLIMITR_TM_IRQ         BIT(3)
-#define ARM64_TRACE_TRBLIMITR_E              BIT(0)
-#define ARM64_TRACE_TRBSR_IRQ                BIT(22)
-#define ARM64_TRACE_TRBSR_WRAP               BIT(20)
-#define ARM64_TRACE_TRBSR_ABORT              BIT(18)
-#define ARM64_TRACE_ID_BASE                  0x10
+#define ARM64_TRACE_TRCVICTLR_EVENT_ALWAYS 0x1U
+#define ARM64_TRACE_TRCVICTLR_SSSTATUS     BIT(9)
+#define ARM64_TRACE_TRCACATR_EXLEVEL_SHIFT 8
+#define ARM64_TRACE_EXLEVEL_APP            BIT(4)
+#define ARM64_TRACE_EXLEVEL_OS             BIT(5)
+#define ARM64_TRACE_EXLEVEL_HYP            BIT(6)
+#define ARM64_TRACE_TRFCR_E0TRE            BIT(0)
+#define ARM64_TRACE_TRFCR_EXTRE            BIT(1)
+#define ARM64_TRACE_TRFCR_TS_VIRTUAL       BIT(5)
+#define ARM64_TRACE_TRBLIMITR_LIMIT_MASK   GENMASK_ULL(63, 12)
+#define ARM64_TRACE_TRBLIMITR_TM_STOP      0
+#define ARM64_TRACE_TRBLIMITR_TM_IRQ       BIT(3)
+#define ARM64_TRACE_TRBLIMITR_E            BIT(0)
+#define ARM64_TRACE_TRBSR_IRQ              BIT(22)
+#define ARM64_TRACE_TRBSR_WRAP             BIT(20)
+#define ARM64_TRACE_TRBSR_ABORT            BIT(18)
+#define ARM64_TRACE_ID_BASE                0x10
 
-#define ARM64_TRACE_BRBIDR_CC_MASK           GENMASK(15, 12)
-#define ARM64_TRACE_BRBIDR_FORMAT_MASK       GENMASK(11, 8)
-#define ARM64_TRACE_BRBIDR_NUMREC_MASK       GENMASK(7, 0)
-#define ARM64_TRACE_BRBIDR_CC_20_BIT         0x5
-#define ARM64_TRACE_BRBIDR_FORMAT_0          0
-#define ARM64_TRACE_BRBCR_E0BRE              BIT(0)
-#define ARM64_TRACE_BRBCR_EXBRE              BIT(1)
-#define ARM64_TRACE_BRBCR_CC                 BIT(3)
-#define ARM64_TRACE_BRBCR_MPRED              BIT(4)
-#define ARM64_TRACE_BRBCR_TS_VIRTUAL         BIT(5)
-#define ARM64_TRACE_BRBCR_FZP                BIT(8)
-#define ARM64_TRACE_BRBFCR_DIRECT            BIT(17)
-#define ARM64_TRACE_BRBFCR_INDIRECT          BIT(18)
-#define ARM64_TRACE_BRBFCR_RETURN            BIT(19)
-#define ARM64_TRACE_BRBFCR_INDIRECT_CALL     BIT(20)
-#define ARM64_TRACE_BRBFCR_DIRECT_CALL       BIT(21)
-#define ARM64_TRACE_BRBFCR_COND_DIRECT       BIT(22)
-#define ARM64_TRACE_BRBFCR_PAUSED            BIT(7)
-#define ARM64_TRACE_BRBFCR_BANK_MASK         GENMASK(29, 28)
-#define ARM64_TRACE_BRBINF_VALID_MASK        GENMASK(1, 0)
-#define ARM64_TRACE_BRBINF_MISPRED           BIT(5)
-#define ARM64_TRACE_BRBINF_EL_MASK           GENMASK(7, 6)
-#define ARM64_TRACE_BRBINF_TYPE_MASK         GENMASK(13, 8)
-#define ARM64_TRACE_BRBINF_CC_UNAVAILABLE    BIT(46)
+#define ARM64_TRACE_BRBIDR_CC_MASK        GENMASK(15, 12)
+#define ARM64_TRACE_BRBIDR_FORMAT_MASK    GENMASK(11, 8)
+#define ARM64_TRACE_BRBIDR_NUMREC_MASK    GENMASK(7, 0)
+#define ARM64_TRACE_BRBIDR_CC_20_BIT      0x5
+#define ARM64_TRACE_BRBIDR_FORMAT_0       0
+#define ARM64_TRACE_BRBCR_E0BRE           BIT(0)
+#define ARM64_TRACE_BRBCR_EXBRE           BIT(1)
+#define ARM64_TRACE_BRBCR_CC              BIT(3)
+#define ARM64_TRACE_BRBCR_MPRED           BIT(4)
+#define ARM64_TRACE_BRBCR_TS_VIRTUAL      BIT(5)
+#define ARM64_TRACE_BRBCR_FZP             BIT(8)
+#define ARM64_TRACE_BRBFCR_DIRECT         BIT(17)
+#define ARM64_TRACE_BRBFCR_INDIRECT       BIT(18)
+#define ARM64_TRACE_BRBFCR_RETURN         BIT(19)
+#define ARM64_TRACE_BRBFCR_INDIRECT_CALL  BIT(20)
+#define ARM64_TRACE_BRBFCR_DIRECT_CALL    BIT(21)
+#define ARM64_TRACE_BRBFCR_COND_DIRECT    BIT(22)
+#define ARM64_TRACE_BRBFCR_PAUSED         BIT(7)
+#define ARM64_TRACE_BRBFCR_BANK_MASK      GENMASK(29, 28)
+#define ARM64_TRACE_BRBINF_VALID_MASK     GENMASK(1, 0)
+#define ARM64_TRACE_BRBINF_MISPRED        BIT(5)
+#define ARM64_TRACE_BRBINF_EL_MASK        GENMASK(7, 6)
+#define ARM64_TRACE_BRBINF_TYPE_MASK      GENMASK(13, 8)
+#define ARM64_TRACE_BRBINF_CC_UNAVAILABLE BIT(46)
 
 static __always_inline uint64_t arm64_reg_read_dfr0(void)
 {
@@ -855,19 +855,17 @@ static __always_inline void arm64_reg_write_brbe_filter(uint64_t value)
     write_sysreg_s(value, SYS_BRBFCR_EL1);
 }
 
-#define ARM64_REG_BRBE_INDEX_CASES(op) \
-    op(0) op(1) op(2) op(3) op(4) op(5) op(6) op(7) \
-    op(8) op(9) op(10) op(11) op(12) op(13) op(14) op(15) \
-    op(16) op(17) op(18) op(19) op(20) op(21) op(22) op(23) \
-    op(24) op(25) op(26) op(27) op(28) op(29) op(30) op(31) \
-    op(32) op(33) op(34) op(35) op(36) op(37) op(38) op(39) \
-    op(40) op(41) op(42) op(43) op(44) op(45) op(46) op(47) \
-    op(48) op(49) op(50) op(51) op(52) op(53) op(54) op(55) \
-    op(56) op(57) op(58) op(59) op(60) op(61) op(62) op(63)
+#define ARM64_REG_BRBE_INDEX_CASES(op) op(0) op(1) op(2) op(3) op(4) op(5) op(6) op(7) op(8) op(9) op(10) op(11) op(12) op(13) op(14) op(15) op(16) op(17) op(18) op(19) op(20) op(21) op(22) op(23) op(24) op(25) op(26) op(27) op(28) op(29) op(30) op(31) op(32) op(33) op(34) op(35) op(36) op(37) op(38) op(39) op(40) op(41) op(42) op(43) op(44) op(45) op(46) op(47) op(48) op(49) op(50) op(51) op(52) op(53) op(54) op(55) op(56) op(57) op(58) op(59) op(60) op(61) op(62) op(63)
 
-#define ARM64_REG_BRBE_INFO_CASE(index) case index: return read_sysreg_s(SYS_BRBINF_EL1(index));
-#define ARM64_REG_BRBE_SOURCE_CASE(index) case index: return read_sysreg_s(SYS_BRBSRC_EL1(index));
-#define ARM64_REG_BRBE_TARGET_CASE(index) case index: return read_sysreg_s(SYS_BRBTGT_EL1(index));
+#define ARM64_REG_BRBE_INFO_CASE(index) \
+    case index:                         \
+        return read_sysreg_s(SYS_BRBINF_EL1(index));
+#define ARM64_REG_BRBE_SOURCE_CASE(index) \
+    case index:                           \
+        return read_sysreg_s(SYS_BRBSRC_EL1(index));
+#define ARM64_REG_BRBE_TARGET_CASE(index) \
+    case index:                           \
+        return read_sysreg_s(SYS_BRBTGT_EL1(index));
 
 static __always_inline uint64_t arm64_reg_read_brbe_info(unsigned int index)
 {
@@ -986,8 +984,7 @@ static __always_inline bool arm64_reg_supports_brbe(void)
     if (version != 1 && version != 2) return false;
 
     brbidr = arm64_reg_read_brbe_id();
-    return ((brbidr & ARM64_TRACE_BRBIDR_CC_MASK) >> 12) == ARM64_TRACE_BRBIDR_CC_20_BIT &&
-           ((brbidr & ARM64_TRACE_BRBIDR_FORMAT_MASK) >> 8) == ARM64_TRACE_BRBIDR_FORMAT_0;
+    return ((brbidr & ARM64_TRACE_BRBIDR_CC_MASK) >> 12) == ARM64_TRACE_BRBIDR_CC_20_BIT && ((brbidr & ARM64_TRACE_BRBIDR_FORMAT_MASK) >> 8) == ARM64_TRACE_BRBIDR_FORMAT_0;
 }
 
 static __always_inline unsigned int arm64_reg_brbe_record_count(void)
