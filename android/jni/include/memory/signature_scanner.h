@@ -1,5 +1,7 @@
 #pragma once
 #include "../base/memory_utils.h"
+#include <fstream>
+#include <sstream>
 
 namespace SignatureScanner
 {

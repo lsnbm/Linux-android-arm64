@@ -1,6 +1,10 @@
 #pragma once
 #include "../base/memory_utils.h"
+#include <atomic>
+#include <mutex>
 #include <numeric>
+#include <optional>
+#include <shared_mutex>
 
 class MemScanner
 {

@@ -1,5 +1,12 @@
 #pragma once
 #include "../base/memory_utils.h"
+#include <atomic>
+#include <functional>
+#include <map>
+#include <mutex>
+#include <optional>
+#include <set>
+#include <tuple>
 
 class PointerManager
 {

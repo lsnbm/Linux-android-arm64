@@ -58,21 +58,21 @@ struct dptdbg_page
 
 struct dptdbg_context
 {
-    struct break_point *info;                                        // 已发布的断点配置和回调；为 NULL 时异常与切换 hook 不处理监控
-    struct mm_struct *mm;                                            // 持有引用的目标地址空间，用于线程匹配、读取原页表和刷新 TLB
+    struct break_point *info; // 已发布的断点配置和回调；为 NULL 时异常与切换 hook 不处理监控
+    struct mm_struct *mm;     // 持有引用的目标地址空间，用于线程匹配、读取原页表和刷新 TLB
 
-    struct dptdbg_page pages[BP_CONFIG_MAX];                         // 按虚拟页去重的受管页列表，page_vaddr 为 0 表示空槽
+    struct dptdbg_page pages[BP_CONFIG_MAX]; // 按虚拟页去重的受管页列表，page_vaddr 为 0 表示空槽
 
     struct page *shadow_pgd_page;                                    // 私有影子页表根页，切入断点视图时作为 TTBR0 的页表基址
     struct page *table_pages[BP_CONFIG_MAX * CONFIG_PGTABLE_LEVELS]; // 自行分配的中间页表页，供回收使用；NULL 表示空槽
 
-    struct mmu_notifier mmu_notifier;                                // 目标映射失效或地址空间释放时通知停止监控
+    struct mmu_notifier mmu_notifier; // 目标映射失效或地址空间释放时通知停止监控
 
-    spinlock_t lock;                                                 // 保护异常、线程切换和停止路径共享的运行状态，不允许持锁睡眠
-    struct mutex lifecycle_lock;                                     // 串行化启动、停止和异步资源回收，允许持锁睡眠
-    struct work_struct abort_work;                                   // 将异常或映射失效触发的可睡眠清理交给工作队列
+    spinlock_t lock;               // 保护异常、线程切换和停止路径共享的运行状态，不允许持锁睡眠
+    struct mutex lifecycle_lock;   // 串行化启动、停止和异步资源回收，允许持锁睡眠
+    struct work_struct abort_work; // 将异常或映射失效触发的可睡眠清理交给工作队列
 
-    bool stopping;                                                   // 停止切入影子页表，但保留配置供尚未退出的 UDF 异常恢复原指令
+    bool stopping; // 停止切入影子页表，但保留配置供尚未退出的 UDF 异常恢复原指令
 };
 
 static struct dptdbg_context g_dptdbg = {
@@ -125,8 +125,7 @@ static void dptdbg_flush_view_translations(void)
     struct mm_struct *mm = READ_ONCE(g_dptdbg.mm);
 
     if (!mm) return;
-    flush_tlb_mm(mm);
-    isb();
+    flush_tlb_all();
 }
 
 static uint64_t dptdbg_compose_ttbr0(uint64_t template, phys_addr_t pgd_pa, bool clean_view)

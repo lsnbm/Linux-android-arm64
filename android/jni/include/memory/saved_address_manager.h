@@ -1,5 +1,8 @@
 #pragma once
 #include "../base/memory_utils.h"
+#include <atomic>
+#include <list>
+#include <mutex>
 
 class SavedAddressManager
 {

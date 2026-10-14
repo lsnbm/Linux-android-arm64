@@ -325,7 +325,7 @@ static inline int pte_read_physical(phys_addr_t paddr, void *buffer, size_t size
     void *mapped;
     int status = 0;
 
-    // 防止当前槽位在映射后被同一 CPU 上的其他任务复用。
+    // 禁止抢占，主要防task迁移cpu，防止当前槽位在映射修改后，被迁移到其他 CPU 上，导致使用了其他cpu 上的pte映射
     preempt_disable();
     mapped = pte_map_page(paddr, size, buffer);
     if (IS_ERR(mapped)) status = PTR_ERR(mapped);
@@ -341,7 +341,6 @@ static inline int pte_write_physical(phys_addr_t paddr, const void *buffer, size
     void *mapped;
     int status = 0;
 
-    // 防止当前槽位在映射后被同一 CPU 上的其他任务复用。
     preempt_disable();
     mapped = pte_map_page(paddr, size, (void *)buffer);
     if (IS_ERR(mapped)) status = PTR_ERR(mapped);
@@ -478,22 +477,39 @@ static inline int linear_write_physical(phys_addr_t paddr, const void *buffer, s
 // 进程读写
 static int virtual_memory_rw(enum request_op op, pid_t pid, uint64_t vaddr, void *buffer, size_t size)
 {
+    static pid_t cached_pid = 0;
+    static struct mm_struct *cached_mm = NULL;
+
     uint64_t current_vaddr = untagged_addr(vaddr);
     size_t bytes_processed = 0;
     size_t bytes_done = 0;
     int status = 0;
-    unsigned long irq_flags;
 
+    //主动资源清理释放缓存mm引用
+    if (pid == 0)
+    {
+        if (cached_mm) mmput(cached_mm);
+        cached_mm = NULL;
+        cached_pid = 0;
+        return 0;
+    }
+    //参数检查往后移
     if (!buffer || size == 0) return -EINVAL;
 
-    //奇怪的就是这只获取mm并加上了引用计数，没有任何屏障或者原子同步，
-    //缓存mm会导致后续的小块和大块拷贝读概率失败，不缓存就没有这个问题，并且唯一区别就是缓存和不缓存都没屏障和同步，真的奇怪
-    struct mm_struct *mm = get_mm_by_pid(pid);
-    if (!mm) return -EINVAL;
+    //缓存mm,提升函数整体一半以上的效率
+    if (!cached_mm || pid != cached_pid)
+    {
+        struct mm_struct *new_mm = get_mm_by_pid(pid);
+        if (!new_mm) return -EINVAL;
 
-    //关闭中断和抢占，也有可能是被中断和抢占导致，这里加上
-    preempt_disable();
-    local_irq_save(irq_flags);
+        //释放旧mm引用计数
+        if (cached_mm) mmput(cached_mm);
+        //缓存新mm
+        cached_mm = new_mm;
+        cached_pid = pid;
+    }
+
+    struct mm_struct *mm = cached_mm;
 
     /* ---------- 逐页循环 ---------- */
     while (bytes_processed < size)
@@ -526,20 +542,19 @@ static int virtual_memory_rw(enum request_op op, pid_t pid, uint64_t vaddr, void
         {
             bytes_done += bytes_this_page;
         }
-        else if (op == request_op_vmem_read && size > 8)
+        else if (op == request_op_vmem_read && size < 8)
         {
-            __builtin_memset((uint8_t *)buffer + bytes_processed, 0, bytes_this_page);
+            __builtin_memset(buffer, 0, size); //失败时清空对应字节残留，8字节指针是最不应该保留的
+        }
+        else
+        {
+            __builtin_memset((uint8_t *)buffer + bytes_processed, 0, bytes_this_page); //大拷贝只清空失败的数据
         }
 
         bytes_processed += bytes_this_page;
         current_vaddr += bytes_this_page;
     }
 
-    //打开中断和抢占
-    local_irq_restore(irq_flags);
-    preempt_enable();
-
-    mmput(mm);
     return (bytes_done == 0) ? status : (int)bytes_done;
 }
 

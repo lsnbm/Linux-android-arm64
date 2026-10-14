@@ -315,6 +315,7 @@ enum request_op
 struct request_obj
 {
     /*
+        我这个写的额外补充注释，不是当前实际代码的描述
     两者都不保证 ARM64 多核间的硬件内存顺序
     volatile 约束对象的每次访问，防止编译器省略、合并或用寄存器缓存该字段
     但不会绕过 CPU Cache。对应到硬件屏障就是
@@ -329,10 +330,13 @@ struct request_obj
     dmb:指令访问顺序屏障,load/store 内存访问指令的约束乱序访问
    
     然后dsb,isb,dmb指令操作数都是共享域范围:ish / nsh / osh / ishst
+
+    其实根本不用管这个数据缓存的，也不需要等内存读写完成，用volatile确保编译器不要长期缓存就行了
+    cpu会自动处理 缓存一致性，这个核写数据进缓存，cpu会确保其他核缓存同步的。如果这个共享不进缓存，直接从内存读写了
     现在轮询标志位kernel和user的方式互相通知完美运行极速低功耗无任何问题，也有一种sev和wfe指令可以用于互相唤醒通知，暂时不变
     */
-    volatile bool kernel;        // 由用户模式设置 true = 内核有待处理的请求, false = 请求已完成
-    volatile bool user;          // 由内核模式设置 true = 用户模式有待处理的请求, false = 请求已完成
+    volatile int kernel;         // 用户态发布请求；内核态原子读取旧值并清零
+    volatile int user;           // 内核态发布完成通知；用户态原子读取旧值并清零
     volatile enum request_op op; // 请求操作类型
     volatile int status;         // 请求操作状态
 
@@ -353,5 +357,4 @@ struct request_obj
     // 环境参数信息
     struct env_params env_info;
 };
-
 #endif // IO_STRUCT_H

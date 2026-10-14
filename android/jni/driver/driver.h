@@ -1,44 +1,28 @@
 ﻿#pragma once
 #include <algorithm>
-#include <atomic>
 #include <cerrno>
 #include <charconv>
 #include <chrono>
-#include <cmath>
-#include <concepts>
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <dirent.h>
-#include <elf.h>
 #include <fcntl.h>
-#include <fstream>
-#include <functional>
-#include <iostream>
 #include <iterator>
-#include <list>
-#include <map>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <ranges>
-#include <set>
-#include <shared_mutex>
 #include <span>
-#include <sstream>
 #include <string>
+#include <string_view>
 #include <stdexcept>
 #include <sys/mman.h>
 #include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <thread>
 #include <unistd.h>
-#include <variant>
+#include <utility>
 #include <vector>
-#include <sys/mount.h>
-#include <unistd.h>
 
 #define PAGE_SIZE 4096
 class Driver
@@ -52,7 +36,7 @@ public: // 共有结构体和锁
     在锁作为全局变量时SpinLock request_lock;闭眼加
         编译器和链接器会把全局变量、静态变量紧密地塞在 .bss或.data 中,如果 request_lock紧挨着一个统计计数器或标志位或其他全局变量，会引发伪共享，导致其他核抢锁变慢。
     在锁为锁数组时SpinLock bucket_locks[16];闭眼加
-        当 CPU 核心 0 抢 bucket_locks[0]，CPU 核心 1 抢 bucket_locks[1] 时，它们在逻辑上互不影响，但在物理上会失效缓存行
+        当 CPU 核心 0 抢 bucket_locks[0]，CPU 核心 1 抢 bucket_locks[1] 时，它们在逻辑上互不影响，如果不对齐在物理上会失效缓存行
     在锁为嵌入到数据结构体时struct Entry {SpinLock lock;  uint32_t data; };不建议加，多实例分配内存利用低+容易挤满缓存 
         */
     class alignas(64) SpinLock
@@ -381,6 +365,7 @@ public: // 共有结构体和锁
     struct request_obj
     {
         /*
+        我这个写的额外补充注释，不是当前实际代码的描述
     两者都不保证 ARM64 多核间的硬件内存顺序
     volatile 约束对象的每次访问，防止编译器省略、合并或用寄存器缓存该字段
     但不会绕过 CPU Cache。对应到硬件屏障就是
@@ -401,8 +386,8 @@ public: // 共有结构体和锁
     现在轮询标志位kernel和user的方式互相通知完美运行极速低功耗无任何问题，也有一种sev和wfe指令可以用于互相唤醒通知，暂时不变
     
     */
-        volatile bool kernel;        // 由用户模式设置 true = 内核有待处理的请求, false = 请求已完成
-        volatile bool user;          // 由内核模式设置 true = 用户模式有待处理的请求, false = 请求已完成
+        volatile int kernel;         // 用户态发布请求；内核态原子读取旧值并清零
+        volatile int user;           // 内核态发布完成通知；用户态原子读取旧值并清零
         volatile enum request_op op; // 请求操作类型
         volatile int status;         // 请求操作状态
 
@@ -897,29 +882,28 @@ private: // 私有实现，外部无需关系
 
     inline void StoreRequestOp(request_op op)
     {
-        req->op = op;
+        __atomic_store_n(&req->op, op, __ATOMIC_RELAXED);
     }
 
     inline void StoreRequestStatus(int status)
     {
-        req->status = status;
+        __atomic_store_n(&req->status, status, __ATOMIC_RELAXED);
     }
 
     inline int LoadRequestStatus()
     {
-        return req->status;
+        return __atomic_load_n(&req->status, __ATOMIC_RELAXED);
     }
 
     inline void IoCommitAndWait()
     {
-        req->kernel = true;
+        __atomic_store_n(&req->kernel, 1, __ATOMIC_RELEASE);
 
         // 等内核完成
-        while (!req->user)
+        while (!__atomic_load_n(&req->user, __ATOMIC_ACQUIRE))
         {
         }
-        // 消费完成标志
-        req->user = false;
+        __atomic_store_n(&req->user, 0, __ATOMIC_RELAXED); // 清除完成标志
     }
 
     static inline void memory_copy(void *destination, const void *source, size_t size)
@@ -966,7 +950,7 @@ private: // 私有实现，外部无需关系
 
         //获取单调时钟+5秒
         const auto handshake_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-        while (!req->user)
+        while (!__atomic_load_n(&req->user, __ATOMIC_ACQUIRE))
         {
             //判断是否已近为5秒后了，超时抛异常
             if (std::chrono::steady_clock::now() >= handshake_deadline)
@@ -976,7 +960,7 @@ private: // 私有实现，外部无需关系
                 throw std::runtime_error("驱动握手超时");
             }
         }
-        req->user = false;
+        __atomic_store_n(&req->user, 0, __ATOMIC_RELAXED);
 
         LS_LOGI_TAG("Driver", "驱动已经连接");
     }
@@ -1017,8 +1001,6 @@ private: // 私有实现，外部无需关系
         if (!buffer || size == 0) return -EINVAL;
         if (op != request_op_vmem_read && op != request_op_vmem_write) return -EINVAL;
 
-        const bool is_read = (op == request_op_vmem_read);
-        const int tgid = GetGlobalPid();
         size_t processed = 0;
         size_t successfulBytes = 0;
         int lastStatus = -EIO;
@@ -1028,25 +1010,22 @@ private: // 私有实现，外部无需关系
             {
                 std::scoped_lock<SpinLock> lock(request_lock);
                 StoreRequestOp(op);
-                req->tgid = tgid;
+                req->tgid = GetGlobalPid();
                 req->vmemrw_info.rw_addr = addr + processed;
                 req->vmemrw_info.size = chunk;
                 StoreRequestStatus(0);
 
-                if (is_read)
-                {
-                    if (size > 8) __builtin_memset(req->vmemrw_info.user_buffer, 0, chunk);
-                    // 小尺寸读取先保存调用方原值；内核读取失败且未覆盖共享缓冲区时，回拷仍保持原值。
-                    else memory_copy(req->vmemrw_info.user_buffer, static_cast<uint8_t *>(buffer) + processed, chunk);
-                }
-                else
+                if (op == request_op_vmem_write)
                 {
                     memory_copy(req->vmemrw_info.user_buffer, static_cast<uint8_t *>(buffer) + processed, chunk);
                 }
                 IoCommitAndWait();
 
                 lastStatus = LoadRequestStatus();
-                if (is_read) memory_copy(static_cast<uint8_t *>(buffer) + processed, req->vmemrw_info.user_buffer, chunk);
+                if (op == request_op_vmem_read)
+                {
+                    memory_copy(static_cast<uint8_t *>(buffer) + processed, req->vmemrw_info.user_buffer, chunk);
+                }
             }
             if (lastStatus > 0) successfulBytes += std::min(static_cast<size_t>(lastStatus), chunk);
 
@@ -1059,11 +1038,10 @@ private: // 私有实现，外部无需关系
     // 获取进程虚拟内存信息事件
     virtual_memory HandleVirtualMemoryInfo()
     {
-        const int tgid = GetGlobalPid();
         {
             std::scoped_lock<SpinLock> lock(request_lock);
             StoreRequestOp(request_op_vmem_info);
-            req->tgid = tgid;
+            req->tgid = GetGlobalPid();
             IoCommitAndWait();
             if (LoadRequestStatus() == 0) return req->vmem_info;
         }
