@@ -614,6 +614,12 @@ static inline unsigned int read_vhe_support(void)
 #ifndef SYS_TRFCR_EL1
 #define SYS_TRFCR_EL1 sys_reg(3, 0, 1, 2, 1)
 #endif
+#ifndef SYS_OSLAR_EL1
+#define SYS_OSLAR_EL1 sys_reg(2, 0, 1, 0, 4)
+#endif
+#ifndef SYS_OSLSR_EL1
+#define SYS_OSLSR_EL1 sys_reg(2, 0, 1, 1, 4)
+#endif
 
 /* TRBE system-register encodings. */
 #ifndef SYS_TRBBASER_EL1
@@ -627,6 +633,9 @@ static inline unsigned int read_vhe_support(void)
 #endif
 #ifndef SYS_TRBSR_EL1
 #define SYS_TRBSR_EL1 sys_reg(3, 0, 9, 11, 3)
+#endif
+#ifndef SYS_TRBIDR_EL1
+#define SYS_TRBIDR_EL1 sys_reg(3, 0, 9, 11, 7)
 #endif
 
 /* BRBE system-register encodings. */
@@ -686,6 +695,8 @@ static inline unsigned int read_vhe_support(void)
 #define ARM64_TRACE_TRCDEVARCH_ETE       (ARM64_TRACE_TRCDEVARCH_ARCHITECT | (0x5U << 12) | 0xa13U | ARM64_TRACE_TRCDEVARCH_PRESENT)
 #define ARM64_TRACE_TRCDEVARCH_ETMV4X    (ARM64_TRACE_TRCDEVARCH_ARCHITECT | (0x4U << 12) | 0xa13U | ARM64_TRACE_TRCDEVARCH_PRESENT)
 #define ARM64_TRACE_TRCDEVARCH_ID_MASK   (GENMASK(31, 21) | GENMASK(15, 0) | BIT(20))
+#define ARM64_TRACE_OSLSR_OSLM_NI        0x0U
+#define ARM64_TRACE_OSLSR_OSLM_PE        0x4U
 
 #define ARM64_TRACE_TRCVICTLR_EVENT_ALWAYS 0x1U
 #define ARM64_TRACE_TRCVICTLR_SSSTATUS     BIT(9)
@@ -703,6 +714,9 @@ static inline unsigned int read_vhe_support(void)
 #define ARM64_TRACE_TRBSR_IRQ              BIT(22)
 #define ARM64_TRACE_TRBSR_WRAP             BIT(20)
 #define ARM64_TRACE_TRBSR_ABORT            BIT(18)
+#define ARM64_TRACE_TRBSR_STOP             BIT(17)
+#define ARM64_TRACE_TRBIDR_ALIGN_MASK      GENMASK(3, 0)
+#define ARM64_TRACE_TRBIDR_PROG            BIT(4)
 #define ARM64_TRACE_ID_BASE                0x10
 
 #define ARM64_TRACE_BRBIDR_CC_MASK        GENMASK(15, 12)
@@ -740,9 +754,24 @@ static __always_inline uint64_t arm64_reg_read_etm_devarch(void)
     return read_sysreg_s(SYS_TRCDEVARCH);
 }
 
+static __always_inline uint64_t arm64_reg_read_etm_os_lock_status(void)
+{
+    return read_sysreg_s(SYS_OSLSR_EL1);
+}
+
 static __always_inline void arm64_reg_write_etm_program_control(uint64_t value)
 {
     write_sysreg_s(value, SYS_TRCPRGCTLR);
+}
+
+static __always_inline void arm64_reg_write_etm_os_lock(uint64_t value)
+{
+    uint64_t oslsr = read_sysreg_s(SYS_OSLSR_EL1);
+    uint32_t oslm = (uint32_t)(((oslsr & GENMASK(4, 3)) >> 2) | (oslsr & BIT(0)));
+
+    if (oslm != ARM64_TRACE_OSLSR_OSLM_PE) return;
+    write_sysreg_s(value, SYS_OSLAR_EL1);
+    isb();
 }
 
 static __always_inline void arm64_reg_write_etm_trace_id(uint64_t value)
@@ -800,6 +829,11 @@ static __always_inline void arm64_reg_write_etm_trace_filter(uint64_t value)
     write_sysreg_s(value, SYS_TRFCR_EL1);
 }
 
+static __always_inline uint64_t arm64_reg_read_etm_trace_filter(void)
+{
+    return read_sysreg_s(SYS_TRFCR_EL1);
+}
+
 static __always_inline uint64_t arm64_reg_read_trbe_status(void)
 {
     return read_sysreg_s(SYS_TRBSR_EL1);
@@ -808,6 +842,11 @@ static __always_inline uint64_t arm64_reg_read_trbe_status(void)
 static __always_inline uint64_t arm64_reg_read_trbe_pointer(void)
 {
     return read_sysreg_s(SYS_TRBPTR_EL1);
+}
+
+static __always_inline uint64_t arm64_reg_read_trbe_id(void)
+{
+    return read_sysreg_s(SYS_TRBIDR_EL1);
 }
 
 static __always_inline void arm64_reg_write_trbe_base(uint64_t value)
@@ -968,7 +1007,14 @@ static __always_inline bool arm64_reg_supports_trace_filter(void)
 
 static __always_inline bool arm64_reg_supports_trbe(void)
 {
-    return ((arm64_reg_read_dfr0() >> ARM64_TRACE_DFR0_TRACEBUFFER_SHIFT) & 0xfU) != 0;
+    uint64_t trbidr;
+    uint64_t alignment;
+
+    if (((arm64_reg_read_dfr0() >> ARM64_TRACE_DFR0_TRACEBUFFER_SHIFT) & 0xfU) == 0) return false;
+    trbidr = arm64_reg_read_trbe_id();
+    if (!(trbidr & ARM64_TRACE_TRBIDR_PROG)) return false;
+    alignment = 1ULL << (trbidr & ARM64_TRACE_TRBIDR_ALIGN_MASK);
+    return alignment <= 2048;
 }
 
 static __always_inline bool arm64_reg_supports_spe(void)
@@ -1008,6 +1054,14 @@ static __always_inline bool arm64_reg_has_etm_source(void)
 
     devarch = arm64_reg_trace_devarch() & ARM64_TRACE_TRCDEVARCH_ID_MASK;
     return devarch == ARM64_TRACE_TRCDEVARCH_ETE || devarch == ARM64_TRACE_TRCDEVARCH_ETMV4X;
+}
+
+static __always_inline bool arm64_reg_has_etm_sysreg_control(void)
+{
+    uint64_t oslsr = arm64_reg_read_etm_os_lock_status();
+    uint32_t oslm = (uint32_t)(((oslsr & GENMASK(4, 3)) >> 2) | (oslsr & BIT(0)));
+
+    return oslm == ARM64_TRACE_OSLSR_OSLM_NI || oslm == ARM64_TRACE_OSLSR_OSLM_PE;
 }
 
 // 读取 SCTLR_EL1
