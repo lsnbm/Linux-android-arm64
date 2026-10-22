@@ -2093,7 +2093,6 @@ int RunMemoryTool(ApplicationRuntime &application)
             RenderVK::drawBegin();
             ui.draw();
             RenderVK::drawEnd();
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
     catch (const std::exception &ex)

@@ -38,6 +38,7 @@ namespace RenderVK
     static VkDescriptorPool g_DescriptorPool = VK_NULL_HANDLE;
 
     static VkFormat g_SwapchainFormat = VK_FORMAT_UNDEFINED;
+    static VkPresentModeKHR g_PresentMode = VK_PRESENT_MODE_FIFO_KHR;
     static VkExtent2D g_SwapchainExtent = {};
     static std::vector<VkImage> g_SwapchainImages;
     static std::vector<VkImageView> g_SwapchainImageViews;
@@ -163,7 +164,13 @@ namespace RenderVK
         else g_SwapchainExtent = {(uint32_t)displayInfo.width, (uint32_t)displayInfo.height};
         if (g_SwapchainExtent.width == 0 || g_SwapchainExtent.height == 0) return false;
 
+        const VkPresentModeKHR requestedPresentModes[] = {VK_PRESENT_MODE_FIFO_KHR};
+
+        //  const VkPresentModeKHR requestedPresentModes[] = {VK_PRESENT_MODE_MAILBOX_KHR, VK_PRESENT_MODE_IMMEDIATE_KHR, VK_PRESENT_MODE_FIFO_KHR};
+        g_PresentMode = ImGui_ImplVulkanH_SelectPresentMode(g_PhysicalDevice, g_Surface, requestedPresentModes, IM_ARRAYSIZE(requestedPresentModes));
+
         uint32_t imageCount = capabilities.minImageCount + 1;
+        if (g_PresentMode == VK_PRESENT_MODE_MAILBOX_KHR && imageCount < 3) imageCount = 3;
         if (capabilities.maxImageCount > 0 && imageCount > capabilities.maxImageCount) imageCount = capabilities.maxImageCount;
 
         VkSwapchainCreateInfoKHR createInfo{};
@@ -186,7 +193,7 @@ namespace RenderVK
         else if (capabilities.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR) createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR;
         else if (capabilities.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR) createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR;
         else return false;
-        createInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR; // Vsync
+        createInfo.presentMode = g_PresentMode;
         createInfo.clipped = VK_TRUE;
 
         // 传入旧交换链给 Android 底层，实现无缝过渡
@@ -287,6 +294,7 @@ namespace RenderVK
             CleanupSwapchain();
             return false;
         }
+        if (vulkan_backend_initialized) ImGui_ImplVulkan_SetMinImageCount(static_cast<uint32_t>(g_SwapchainImages.size()));
         return true;
     }
 
@@ -369,9 +377,7 @@ namespace RenderVK
         const int32_t sourceHeight = displayInfo.height;
         if (sourceWidth <= 0 || sourceHeight <= 0) return false;
 
-        if (s_recordSurface.mirrorReady && s_recordSurface.layerStack == target.layerStack &&
-            SameRecordDisplay(s_recordSurface.display, target) && s_recordSurface.source.orientation == displayInfo.orientation &&
-            s_recordSurface.source.width == sourceWidth && s_recordSurface.source.height == sourceHeight) return true;
+        if (s_recordSurface.mirrorReady && s_recordSurface.layerStack == target.layerStack && SameRecordDisplay(s_recordSurface.display, target) && s_recordSurface.source.orientation == displayInfo.orientation && s_recordSurface.source.width == sourceWidth && s_recordSurface.source.height == sourceHeight) return true;
 
         if (!s_recordSurface.mirrorReady || s_recordSurface.layerStack != target.layerStack)
         {
@@ -407,11 +413,10 @@ namespace RenderVK
         }
         UpdateScreenData(displayInfo.width, displayInfo.height, displayInfo.orientation);
 
-        int w = displayInfo.width;
-        int h = displayInfo.height;
-        int max_side = (h > w ? h : w);
+        const int w = displayInfo.width;
+        const int h = displayInfo.height;
 
-        native_window = android::SurfaceControlManager::Create("Lark", max_side, max_side, !allowCapture);
+        native_window = android::SurfaceControlManager::Create("Lark", w, h, !allowCapture);
         if (native_window == nullptr)
         {
             LS_LOGE_TAG("RenderVK", "创建 ANativeWindow 失败");
@@ -816,6 +821,7 @@ namespace RenderVK
             native_window = nullptr;
         }
         g_PhysicalDevice = VK_NULL_HANDLE;
+        g_PresentMode = VK_PRESENT_MODE_FIFO_KHR;
         g_QueueFamily = (uint32_t)-1;
         g_Queue = VK_NULL_HANDLE;
         g_Swapchain = VK_NULL_HANDLE;

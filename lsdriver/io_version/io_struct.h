@@ -331,7 +331,9 @@ struct request_obj
    
     然后dsb,isb,dmb指令操作数都是共享域范围:ish / nsh / osh / ishst
 
-    其实根本不用管这个数据缓存的，也不需要等内存读写完成，用volatile确保编译器不要长期缓存就行了
+    其实根本不用管这个数据缓存的，也不需要等内存读写完成，
+    用使用(__atomic_load_n(&req->kernel, __ATOMIC_ACQUIRE)，__ATOMIC_ACQUIRE这个是ldar指令，确保cpu对标志位访问不能乱序
+    不需要dmb这个批量内存访问防cpu乱序
     cpu会自动处理 缓存一致性，这个核写数据进缓存，cpu会确保其他核缓存同步的。如果这个共享不进缓存，直接从内存读写了
     现在轮询标志位kernel和user的方式互相通知完美运行极速低功耗无任何问题，也有一种sev和wfe指令可以用于互相唤醒通知，暂时不变
     */
