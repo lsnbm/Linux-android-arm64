@@ -693,18 +693,6 @@ static int __init lsdriver_init(void)
 
     // print_el2_status(); // 输出Hypervisor相关信息
 
-    /*
-    隐藏内核模块本身，其实应该放在初始化完成运行，
-    正常是不可能初始化失败，只能是人才重复刷驱动了(或刷了同类驱动或冲突hook)，这里靠这机制进行主动死机
-    下面任意初始化失败后内核会进入 free_module() 清理模块创建的资源。进行sysfs 回滚
-    taskstats_exit hook 返回 -95只是触发模块初始化失败和回滚
-    hide_myself() 提前 kobject_del()破坏了 sysfs 生命周期
-    mod_sysfs_teardown()在失效的 kobject 上继续清理
-    kernfs_remove_by_name_ns()输出了空指针警告
-    部分厂商内核的 kernfs 代码可能与上游不同，后续清理路径存在未防护的失效对象访问。panic
-    */
-    hide_myself();
-
     bypass_cfi(); // 5系尝试绕过 CFI，失败时继续初始化，6系下默认失败也继续初始化
 
     // PTE 读写需要，线性地址读写不需要；为每个 possible CPU 创建独立虚拟槽位
@@ -783,6 +771,20 @@ static int __init lsdriver_init(void)
         ls_log_always_tag("core", "隐藏调度线程失败，错误码: %d\n", status);
         return status;
     }
+
+    /*
+    隐藏内核模块本身必须放在所有初始化完成后运行。
+
+    正常是不可能初始化失败，只能是人才重复刷驱动了(或刷了同类驱动或冲突hook)，
+    上面任意初始化失败后内核会进入 free_module() 清理模块创建的资源。进行sysfs 回滚
+    taskstats_exit hook 返回 -95只是触发模块初始化失败和回滚
+    hide_myself() 提前 kobject_del()破坏了 sysfs 生命周期
+    mod_sysfs_teardown()在失效的 kobject 上继续清理
+    kernfs_remove_by_name_ns()输出了空指针警告
+    部分厂商内核的 kernfs 代码可能与上游不同，后续清理路径存在未防护的失效对象访问。panic
+    
+    */
+    hide_myself();
 
     return status;
 }
