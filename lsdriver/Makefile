@@ -82,14 +82,24 @@ ccflags-y += -fomit-frame-pointer
 # 尾调用优化：将函数末尾的 call + ret 合并为直接跳转，减少一次返回地址保存与恢复。
 ccflags-y += -foptimize-sibling-calls
 
-# 关闭 BTI 和返回地址指针认证：移除间接分支目标处的 BTI、函数入口 PACIASP 与返回前 AUTIASP。
+# 关闭 BTI ：移除间接分支目标处的 BTI、。
 # 这个不要进行关闭，讲一下原因
 # 真正的 C 函数 init_module;sub sp, sp, #0xd0;也就是驱动的c入口正常，没有BTI/PAC
 # 由于目标内核启用了 CFI/LTO，模块的 init 指针被规范化到 CFI jump table：init_module.cfi_jt: b init_module;
 # 由于编译配置显式使用 -mbranch-protection=none 关闭了 ARM64 BTI/PAC 保护，
 # 生成的 init_module.cfi_jt 跳板入口只有 b init_module 而缺少内核间接调用要求的 bti c
 # 导致内核通过 BLR 加载驱动时触发同步终止异常(BTI) 并最终 kernel panic。
-#ccflags-y += -mbranch-protection=none
+# -mbranch-protection=bti       PAC 关闭，BTI 开启
+# -mbranch-protection=pac-ret   PAC 开启，BTI 关闭
+# -mbranch-protection=standard  PAC 和 BTI 都开启
+# -mbranch-protection=none      PAC 和 BTI 都关闭
+
+# 仅关闭返回地址 PAC，保留 BTI；覆盖 Kbuild 继承的 pac-ret 分支保护模式。
+# 原因是部分设备如oppo find x9 pro使用漏洞解锁root权限
+# 不知道是那个函数的返回地址、栈指针或栈内容被漏洞修改
+# 然后autiasp 验证失败，LR 会变成无效地址，随后 ret 跳转异常，导致 kernel panic, panic原因变成普通的空指针访问
+ccflags-y += -mbranch-protection=bti
+
 
 # 关闭自动局部变量清零：避免编译器在函数入口为未初始化栈对象插入 memset/零存储。
 # 代码必须自行保证所有局部变量在首次读取前已完成初始化，否则会暴露真实的未初始化读取。
