@@ -24,8 +24,12 @@ $(obj)/lsdriver_main.o: $(src)/lsdriver.c FORCE
 #O3优化:启用更积极的内联、循环变换、指令调度和常量传播。
 ccflags-y += -O3
 
-# Full LTO：让主驱动与 decoder/encoder 在统一模块视图中进行跨文件内联和常量传播。
-ccflags-y += -flto
+# 不为每个函数和数据对象生成独立 ELF section，减少模块加载时为 section 属性分配的内核元数据。
+# 这条分配路径存在于各目标内核；6.6及以下版本内核，分配失败时仅跳过 section sysfs 属性，模块仍继续加载。
+# 6.12 及以上由 mod_sysfs_setup() 传播 -ENOMEM，同样的高阶连续页分配失败会直接使 init_module() 失败。
+# 外部模块由目标内核 Kbuild 编译，会继承 KBUILD_CFLAGS、Kconfig 派生选项和 module.lds；这里的kbuild只补充模块专属参数。
+# 所以不在外部模块中强制启用 -flto；LTO 应由目标内核 Kconfig 决定，CONFIG_LTO_NONE 下单独启用会放大 split section 且与内核构建配置不一致。
+ccflags-y += -fno-function-sections -fno-data-sections
 
 
 # 开启 debug 输出；需要 pr_debug 时手动启用。
