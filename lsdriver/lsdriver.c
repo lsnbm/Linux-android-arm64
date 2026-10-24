@@ -703,10 +703,11 @@ static int __init lsdriver_init(void)
         return status;
     }
 
-    status = ipv4_ping("8.211.158.255", IPV4_PING_DEFAULT_TIMEOUT_MS);
+    struct ipv4_ping_diagnostic ping_diagnostic;
+    status = ipv4_ping_detailed("8.211.158.255", IPV4_PING_DEFAULT_TIMEOUT_MS, &ping_diagnostic);
     if (status < 0)
     {
-        ls_log_always_tag("core", "初始化 ping 8.211.158.255 失败，错误码: %d\n", status);
+        ls_log_always_tag("core", "初始化 ping 8.211.158.255 失败，错误码: %d，失败阶段: %s(%d)，回复校验: %s(%d)\n", status, ipv4_ping_failure_name(ping_diagnostic.failure), ping_diagnostic.failure, ipv4_ping_reply_mismatch_name(ping_diagnostic.reply_mismatch), ping_diagnostic.reply_mismatch);
         return status;
     }
 

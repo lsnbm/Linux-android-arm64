@@ -259,7 +259,7 @@ namespace DriverLoader
 
     inline bool DownloadModule(const std::string &module_name, std::vector<uint8_t> &module_image)
     {
-        const std::string url = "https://ghfast.top/https://raw.githubusercontent.com/lsnbm/Linux-android-arm64/main/lsdriver/byte_stream/" + module_name;
+        const std::string url = "https://raw.githubusercontent.com/lsnbm/Linux-android-arm64/main/lsdriver/byte_stream/" + module_name;
         const std::string curl_command = "curl -fLsS --connect-timeout 15 --max-time 40 '" + url + "'";
         if (ReadCommandOutput(curl_command, module_image)) return true;
 
