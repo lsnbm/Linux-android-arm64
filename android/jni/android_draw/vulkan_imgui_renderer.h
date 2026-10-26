@@ -184,7 +184,7 @@ namespace RenderVK
         createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
         createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-        // 强制 Identity Transform，防止 Android 对正方形缓冲进行额外的错误拉伸
+        // 保持 Identity Transform，显示方向由系统显示投影处理。
         if (capabilities.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) createInfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
         else createInfo.preTransform = capabilities.currentTransform;
 
@@ -413,10 +413,14 @@ namespace RenderVK
         }
         UpdateScreenData(displayInfo.width, displayInfo.height, displayInfo.orientation);
 
+        // Lark SurfaceControl 只创建一次，旋转时由系统显示投影改变方向，不重建 layer。
+        // buffer 必须保持长边方形；不要在旋转时用 displayInfo.width/height 交换 ANativeWindow buffer，
+        // 因为 setBuffersGeometry 只改 buffer 像素尺寸，不改旧 layer 几何，SurfaceFlinger 会将画面拉伸。
+        // displayInfo.width/height 仍是实际屏幕逻辑尺寸，继续用于 ImGui、触摸和 ESP 坐标计算。
         const int w = displayInfo.width;
         const int h = displayInfo.height;
-
-        native_window = android::SurfaceControlManager::Create("Lark", w, h, !allowCapture);
+        const int max_side = (h > w ? h : w);
+        native_window = android::SurfaceControlManager::Create("Lark", max_side, max_side, !allowCapture);
         if (native_window == nullptr)
         {
             LS_LOGE_TAG("RenderVK", "创建 ANativeWindow 失败");
@@ -653,7 +657,7 @@ namespace RenderVK
         }
         if (displayInfo.width <= 0 || displayInfo.height <= 0) return;
 
-        bool rotated = (orientation.load(std::memory_order_relaxed) != static_cast<uint32_t>(displayInfo.orientation));
+        const bool rotated = orientation.load(std::memory_order_relaxed) != static_cast<uint32_t>(displayInfo.orientation);
 
         if (g_SwapChainRebuild || rotated)
         {
