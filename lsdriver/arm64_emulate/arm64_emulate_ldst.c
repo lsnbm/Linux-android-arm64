@@ -6,6 +6,7 @@ emu_* 函数直接调用访存硬件语义模板，完成 GPR 和 FP/SIMD 的单
 emu_build_ldst_executor() 负责按指令、宽度、元素宽度、扩展类型和寻址模式选择具体执行函数。
 */
 #include "emulate_inst.h"
+//#include "../export_fun.h"
 
 static inline void emu_sturb_gpr_w(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
@@ -1181,8 +1182,39 @@ static inline void emu_str_fp_simd_unsigned_offset_d(struct pt_regs *regs, struc
     regs->pc += 4;
     return;
 }
+
 static inline void emu_str_fp_simd_unsigned_offset_q(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
+
+    /*
+    经过死机的panic日志分析
+    CPU: 2 PID: 14913 Comm: GameThread
+    Unable to handle kernel access to user memory outside uaccess routines
+    FAR: 0x0000007460024090
+
+    Call trace:
+    emu_str_fp_simd_unsigned_offset_q+0x30/0x48 [lsdriver]
+    emulate_inst+0x2a4/0x424 [lsdriver]
+
+    Kernel panic - not syncing: Oops: Fatal exception
+
+    目标地址所在页不知为何会出现翻译成功映射有效，但是目标页的 PTE_WRITE 权限不满足
+    导致在 EL1 中模拟用户态 STR Q。这里的裸 str q 会绕过原始用户态写入
+    
+    可能是COW: VM_WRITE = 1、PTE_WRITE = 0 -> 可能是 COW，内核复制页面后重试
+    可能是mprotect主动权限修改不可写来用户态接受异常: VM_WRITE = 0  -> 权限异常，通常 SIGSEGV
+
+    mprotect权限异常情况下用户态通常能收到
+    signal: SIGSEGV
+    si_code: SEGV_ACCERR
+    si_addr: 0x7460024090
+    有 SIGSEGV handler 就进入 handler；没有 handler 则进程被终止。
+    */
+    // uint64_t base = read_gpr_or_sp(regs, entry->decoded.rn);
+    // uint64_t address = base + entry->decoded.offset;
+    // if (address < base || !user_range_writable(current->mm, address, sizeof(__uint128_t))) return;
+    // // 上面几行约新增加14.8 ns / 14%开销，然后可以暂时不用在特定环境下才需要，可使用特定方式避免
+
     str_q_base_offset(read_gpr_or_sp(regs, entry->decoded.rn), entry->decoded.offset, (uint64_t)&fp_regs->q[entry->decoded.rt], 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
     return;

@@ -150,6 +150,8 @@ static __attribute__((__noinline__)) bool emulate_inst_slow(struct pt_regs *regs
 
 bool emulate_inst(struct pt_regs *regs, struct fp_regs *fp_regs, uint32_t specified_inst)
 {
+    uint64_t pc_before = regs->pc;
+
     /* 生产调用点来自异常/内核上下文 不建议硬编码
     asm volatile("msr PAN, #0x0" ::: "memory");
     asm volatile("msr PAN, #0x1" ::: "memory");
@@ -179,5 +181,11 @@ bool emulate_inst(struct pt_regs *regs, struct fp_regs *fp_regs, uint32_t specif
     }
 
     uaccess_disable_privileged();
+    if (regs->pc == pc_before)
+    {
+        ls_log_always_tag("emulate_inst", "Execution failed; the PTE for the page containing the target address range is not writable. pc=0x%llx inst=0x%08x\n", (unsigned long long)regs->pc, specified_inst);
+        return false;
+    }
+
     return true;
 }

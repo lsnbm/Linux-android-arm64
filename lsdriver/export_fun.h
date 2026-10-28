@@ -27,7 +27,7 @@
 */
 
 // 屏蔽 CFI KCFI检查，统一利用 kprobe 获取 kallsyms_lookup_name 地址
-__attribute__((no_sanitize("cfi", "kcfi"))) static unsigned long generic_kallsyms_lookup_name(const char *name)
+__attribute__((no_sanitize("cfi", "kcfi"))) static inline unsigned long generic_kallsyms_lookup_name(const char *name)
 {
     unsigned long (*fn_kallsyms_lookup_name)(const char *name) = NULL;
     struct kprobe kp = {0};
@@ -45,7 +45,7 @@ __attribute__((no_sanitize("cfi", "kcfi"))) static unsigned long generic_kallsym
     return fn_kallsyms_lookup_name(name);
 }
 //不是热路径没必要加__attribute__((__section__(".data..read_mostly")));，收益等于0;
-int (*fn_aarch64_insn_patch_text)(void *addrs[], uint32_t insts[], int cnt);
+static int (*fn_aarch64_insn_patch_text)(void *addrs[], uint32_t insts[], int cnt);
 
 /*
 
@@ -78,7 +78,7 @@ stp x29, x30, [sp, #-...]! //不能直接patch为ret
 
 */
 
-__attribute__((no_sanitize("cfi"))) int bypass_cfi(void)
+__attribute__((no_sanitize("cfi"))) static inline int bypass_cfi(void)
 {
     int status = 0;
 
@@ -331,6 +331,38 @@ static inline pte_t *get_user_pte(struct mm_struct *mm, uint64_t vaddr)
     // PTE Level (普通的 4KB 页)
     // 较新内核中 __pte_offset_map 不导出，对于 64位 系统直接使用 pte_offset_kernel 即可
     return pte_offset_kernel(pmd, vaddr);
+}
+
+// 检查指定地址空间中用户地址所在页是否已映射且允许写入。
+static inline bool user_page_writable(struct mm_struct *mm, uint64_t address)
+{
+    pte_t *ptep = get_user_pte(mm, address & PAGE_MASK);
+    if (!ptep) return false;
+
+    pte_t pte = READ_ONCE(*ptep);
+    return pte_present(pte) && pte_write(pte);
+}
+
+// 检查指定地址空间中用户地址范围覆盖的所有页是否已映射且允许写入。
+static inline bool user_range_writable(struct mm_struct *mm, uint64_t address, size_t size)
+{
+    if (!mm || !size || address > U64_MAX - (size - 1)) return false;
+
+    uint64_t start = untagged_addr(address);
+    uint64_t end = start + size - 1;
+    if (start >= READ_ONCE(mm->task_size) || end >= READ_ONCE(mm->task_size)) return false;
+
+    uint64_t first_page = start & PAGE_MASK;
+    uint64_t last_page = end & PAGE_MASK;
+    if (first_page == last_page) return user_page_writable(mm, first_page);
+
+    if (!user_page_writable(mm, first_page)) return false;
+    for (uint64_t page = first_page + PAGE_SIZE; page < last_page; page += PAGE_SIZE)
+    {
+        if (!user_page_writable(mm, page)) return false;
+    }
+
+    return user_page_writable(mm, last_page);
 }
 
 // 根据 pid 获取 task_struct，调用方负责 put_task_struct。
