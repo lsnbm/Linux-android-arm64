@@ -810,7 +810,7 @@ __attribute__((no_sanitize("cfi"))) static int dptdbg_start_monitor(struct break
             status = -EFAULT;
             goto out_mmap;
         }
-        status = arm64_sync_code_range_all_cpus(trap_code, PAGE_SIZE);
+        status = arm64_sync_insn_fast(trap_code, g_dptdbg.pages[page_index].page_vaddr, PAGE_SIZE);
         if (status) goto out_mmap;
     }
     mmap_read_unlock(mm);

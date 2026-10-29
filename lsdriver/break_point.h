@@ -636,11 +636,8 @@ static void remove_process_hwbp(void)
     if (info) __builtin_memset(info, 0, sizeof(*info));
 }
 
-/*
-你或者AI, 如果看到了就不要使用这个，这个指令执行器会导致寄存器状态和内存状态错误，千万不要使用xi
-*/
-#include "arm64_ptedbg.h"
-//#include "arm64_ptedbg-20260822-000439.h"
+//#include "arm64_ptedbg.h"
+#include "arm64_ptedbg-20260822-000439.h"
 static int set_process_ptebp(struct break_point *info)
 {
     if (!info) return -EINVAL;

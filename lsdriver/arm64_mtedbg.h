@@ -103,7 +103,7 @@ static inline int mtebp_access_inst(struct mtebp_slot *slot, uint32_t *inst, boo
 
     status = linear_write_physical(paddr, inst, sizeof(*inst));
     if (status) return status;
-    status = arm64_sync_code_range_all_cpus(phys_to_virt(paddr), sizeof(*inst));
+    status = arm64_sync_insn_fast(phys_to_virt(paddr), slot->hook_addr, sizeof(*inst));
     if (status) return status;
 
     status = linear_read_physical(paddr, &readback, sizeof(readback));
@@ -361,7 +361,7 @@ static int mtebp_emu_write_mem(uint64_t addr, int bytes, __uint128_t value)
     }
     for (size_t chunk_index = 0; chunk_index < chunk_count; chunk_index++)
     {
-        status = arm64_sync_code_range_all_cpus(phys_to_virt(chunks[chunk_index].paddr), chunks[chunk_index].size);
+        status = arm64_sync_insn_fast(phys_to_virt(chunks[chunk_index].paddr), addr + chunks[chunk_index].data_offset, chunks[chunk_index].size);
         if (status) goto out_unlock;
     }
 
@@ -388,7 +388,7 @@ MTE allocation tag 与访问指针的逻辑 tag 不匹配时，处理器在 load
 - IC IVAU 将 Xt 指定的用户 VA 翻译到物理别名后执行缓存同步；
 - exclusive、CAS/CASP、LSE RMW、SWP 等原子指令没有 case，返回 SKIP 触发整组回退。
 */
-static enum emu_inst_result mtebp_emulate_load_store(struct pt_regs *regs, uint32_t raw_inst)
+static bool mtebp_emulate_load_store(struct pt_regs *regs, uint32_t raw_inst)
 {
     struct arm64_decoded_instruction decoded_result __attribute__((__uninitialized__));
     const struct arm64_decoded_instruction *decoded = &decoded_result;
@@ -405,10 +405,10 @@ static enum emu_inst_result mtebp_emulate_load_store(struct pt_regs *regs, uint3
         if (walk_translate_va_to_pa(current->mm, address, &paddr)) goto emulate_failed;
 
         // 使用同一物理位置的内核线性别名完成 D-cache 清理和 I-cache 失效，避免异常路径再次触发用户 tag check。
-        if (arm64_sync_code_range_all_cpus(phys_to_virt(paddr), 1)) goto emulate_failed;
+        if (arm64_sync_insn_fast(phys_to_virt(paddr), address, 1)) goto emulate_failed;
 
         regs->pc = pc + 4;
-        return EMU_INST_HANDLED;
+        return true;
     }
 
     if (arm64_decode_instruction(raw_inst, &decoded_result) != ARM64_DECODE_OK) goto emulate_failed;
@@ -421,7 +421,7 @@ static enum emu_inst_result mtebp_emulate_load_store(struct pt_regs *regs, uint3
     case ARM64_INST_PRFM_REGISTER_OFFSET:
     case ARM64_INST_PRFM_UNSIGNED_OFFSET:
         regs->pc = pc + 4;
-        return EMU_INST_HANDLED;
+        return true;
     default:
         break;
     }
@@ -475,7 +475,7 @@ static enum emu_inst_result mtebp_emulate_load_store(struct pt_regs *regs, uint3
 
         if (owner == 0x38 && !register_offset && (mode == 1 || mode == 3)) addr_reg_write(regs, decoded->rn, base + decoded->offset);
         regs->pc = pc + 4;
-        return EMU_INST_HANDLED;
+        return true;
     }
 
     // 根据指令形式直接解析目标内存虚拟地址
@@ -847,11 +847,11 @@ static enum emu_inst_result mtebp_emulate_load_store(struct pt_regs *regs, uint3
     }
 
     regs->pc = pc + 4;
-    return EMU_INST_HANDLED;
+    return true;
 
 emulate_failed:
     ls_log_always_tag("mtebp", "emulate skip pc=0x%llx inst=0x%08x\n", (unsigned long long)pc, raw_inst);
-    return EMU_INST_SKIP;
+    return false;
 }
 /*
 撤销整组 UDF/MTE 监控。
@@ -992,7 +992,7 @@ static int mtebp_handle_data_abort(struct pt_regs *hook_regs)
     }
 
     // 模拟原始 load/store；成功时已经更新 regs 和 PC，失败时撤销整组监控并让原始路径重试。
-    if (mtebp_emulate_load_store(regs, raw_inst) == EMU_INST_HANDLED)
+    if (mtebp_emulate_load_store(regs, raw_inst))
     {
         goto abort_handled;
     }
