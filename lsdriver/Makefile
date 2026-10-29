@@ -24,6 +24,14 @@ $(obj)/lsdriver_main.o: $(src)/lsdriver.c FORCE
 #O3优化:启用更积极的内联、循环变换、指令调度和常量传播。
 ccflags-y += -O3
 
+# 旧式 CFI 的 Linux ABI 随内核分支变化：5.10 使用 __cfi_slowpath，5.15 使用 __cfi_slowpath_diag；
+# 部分厂商 KMI 不导出 CFI 失败调用的 UBSAN abort handler，例如5.15的 __ubsan_handle_cfi_check_fail_abort。
+# 保留 cross-DSO CFI 和模块 __cfi_check，在模块内提供失败 handler，不改变正常 CFI 检查路径。
+# 6.1+ 的 CC_FLAGS_CFI 为 -fsanitize=kcfi，不匹配此条件。
+ifneq ($(filter -fsanitize=cfi,$(CC_FLAGS_CFI)),)
+ccflags-y += -DLSDRIVER_LEGACY_CFI
+endif
+
 # 不为每个函数和数据对象生成独立 ELF section，减少模块加载时为 section 属性分配的内核元数据。
 # 这条分配路径存在于各目标内核；6.6及以下版本内核，分配失败时仅跳过 section sysfs 属性，模块仍继续加载。
 # 6.12 及以上由 mod_sysfs_setup() 传播 -ENOMEM，同样的高阶连续页分配失败会直接使 init_module() 失败。
@@ -130,8 +138,7 @@ GCOV_PROFILE := n
 KCOV_INSTRUMENT := n
 
 # 保留 KCFI：启用 KCFI 的内核会间接调用模块回调，移除类型哈希会导致校验异常。
-
-
+# 禁止关闭整个模块的 CFI/KCFI：5.x 内核通过模块 __cfi_check 校验回调，6.1+ 内核通过 KCFI type id 校验回调；
 
 
 # 删除空指针检查：覆盖内核默认的保守语义，可能破坏依赖空指针检查的内核代码，禁止启用。

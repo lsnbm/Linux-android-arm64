@@ -48,7 +48,6 @@ __attribute__((no_sanitize("cfi", "kcfi"))) static inline unsigned long generic_
 static int (*fn_aarch64_insn_patch_text)(void *addrs[], uint32_t insts[], int cnt);
 
 /*
-
 旧版 CFI ( GKI 5.10 / 5.15):
         编译器编译时进行类型哈希计算，在间接调用前插入跳转，跳到一个集中的验证函数（就是 __cfi_slowpath）来运行时比对，
         校验失败直接panic
@@ -58,10 +57,7 @@ static int (*fn_aarch64_insn_patch_text)(void *addrs[], uint32_t insts[], int cn
         直接比较 hash 值。如果不对，直接触发 BRK 指令宕机。
 如果是 6.1+ 内核，不存在 __cfi_slowpath，
 
-所以有人提供了一个5系的解决代码给我，所以5系就不用下面纯汇编进行间接调用了
-感谢https://github.com/wangchuan2009(忘川)，bypass_cfi处理运行时5系的集中校验函数,patch为ret来过5系cfi
-
-======后续对代码进行了大逻辑优化和修复panic，具体看函数内部说明======
+======后续对代码进行了大逻辑优化,写法变更和修复panic技巧写法，具体看函数内部说明======
 
 2026/7/25 22:23 
 实机one plus 13 5.15发现部分内核有间接调用__cfi_slowpath_diag
@@ -78,7 +74,20 @@ stp x29, x30, [sp, #-...]! //不能直接patch为ret
 
 */
 
-__attribute__((no_sanitize("cfi"))) static inline int bypass_cfi(void)
+/*
+部分厂商huawei KMI 不导出 CFI 失败调用的 UBSAN abort handler，例如5.15的 __ubsan_handle_cfi_check_fail_abort。
+在模块内提供失败 handler，不改变正常 CFI 检查路径。
+*/
+#ifdef LSDRIVER_LEGACY_CFI
+__attribute__((no_sanitize("cfi", "kcfi"))) static inline void __ubsan_handle_cfi_check_fail_abort(void *data, void *ptr, void *vtable)
+{
+    (void)data;
+    (void)ptr;
+    (void)vtable;
+    BUG();
+}
+#endif
+__attribute__((no_sanitize("cfi", "kcfi"))) static inline int bypass_cfi(void)
 {
     int status = 0;
 
