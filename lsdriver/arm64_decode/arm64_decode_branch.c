@@ -97,6 +97,13 @@ static inline enum arm64_decode_status arm64_decode_branch_system(uint32_t raw, 
         decoded->operand_width = 64;
         return ARM64_DECODE_OK;
     }
+    if (ARM64_DECODE_MATCH(raw, 0xFFFFFFE0U, 0xD50B7520U))
+    {
+        decoded->instruction = ARM64_INST_IC_IVAU;
+        decoded->rt = ARM64_DECODE_FIELD(raw, 4, 0);
+        decoded->operand_width = 64;
+        return ARM64_DECODE_OK;
+    }
     switch (ARM64_DECODE_MASK(raw, 0xFFFFF0FFU))
     {
     case 0xD503305FU:

@@ -130,7 +130,7 @@ static inline int ptebp_access_inst(struct ptebp_slot *slot, uint32_t *inst, boo
 
     status = linear_write_physical(paddr, inst, sizeof(*inst));
     if (status) return status;
-    status = arm64_sync_code_range_all_cpus(phys_to_virt(paddr), sizeof(*inst));
+    status = arm64_sync_insn_fast(phys_to_virt(paddr), slot->hook_addr, sizeof(*inst));
     if (status) return status;
 
     status = linear_read_physical(paddr, &readback, sizeof(readback));
@@ -342,7 +342,7 @@ static int ptebp_emu_write_mem(uint64_t addr, int bytes, __uint128_t value)
     }
     for (size_t chunk_index = 0; chunk_index < chunk_count; chunk_index++)
     {
-        status = arm64_sync_code_range_all_cpus(phys_to_virt(chunks[chunk_index].paddr), chunks[chunk_index].size);
+        status = arm64_sync_insn_fast(phys_to_virt(chunks[chunk_index].paddr), addr + chunks[chunk_index].data_offset, chunks[chunk_index].size);
         if (status) goto out_unlock;
     }
 out_unlock:
@@ -364,14 +364,14 @@ guard PTE 主动撤销受管页的数据访问权限，因此这里处理的 DAB
 - prefetch 没有架构可见的数据结果，直接推进 PC；
 - exclusive、CAS/CASP、LSE RMW、SWP 等原子指令没有 case，返回 SKIP 触发整组回退。
 */
-static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint32_t raw_inst)
+static bool ptebp_emulate_load_store(struct pt_regs *regs, uint32_t raw_inst)
 {
     struct arm64_decoded_instruction decoded_result __attribute__((__uninitialized__));
     const struct arm64_decoded_instruction *decoded = &decoded_result;
     uint64_t pc = regs->pc;
     uint64_t base, address;
 
-    if (arm64_decode_instruction(raw_inst, &decoded_result) != ARM64_DECODE_OK) return EMU_INST_SKIP;
+    if (arm64_decode_instruction(raw_inst, &decoded_result) != ARM64_DECODE_OK) return false;
 
     // Prefetch (PRFM) 无实际内存数据交互，直接推进 PC 并返回
     switch (decoded->instruction)
@@ -381,7 +381,7 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
     case ARM64_INST_PRFM_REGISTER_OFFSET:
     case ARM64_INST_PRFM_UNSIGNED_OFFSET:
         regs->pc = pc + 4;
-        return EMU_INST_HANDLED;
+        return true;
     default:
         break;
     }
@@ -413,7 +413,7 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
             case 7:
                 break;
             default:
-                return EMU_INST_SKIP;
+                return false;
             }
             address = base + (index << decoded->shift_amount);
         }
@@ -425,17 +425,17 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
         ls_log_always_tag("ptebp", "emulate pc=0x%llx inst=0x%08x type=%d bytes=%u addr=0x%llx\n", (unsigned long long)pc, raw_inst, (int)decoded->instruction, (unsigned int)bytes, (unsigned long long)address);
         if (opc == 0)
         {
-            if (ptebp_emu_write_mem(address, bytes, reg_read(regs, decoded->rt))) return EMU_INST_SKIP;
+            if (ptebp_emu_write_mem(address, bytes, reg_read(regs, decoded->rt))) return false;
         }
         else
         {
-            if (ptebp_emu_read_mem(address, bytes, &value)) return EMU_INST_SKIP;
+            if (ptebp_emu_read_mem(address, bytes, &value)) return false;
             reg_write(regs, decoded->rt, opc >= 2 ? sign_extend64((uint64_t)value, bytes * 8 - 1) : (uint64_t)value, decoded->operand_width == 64);
         }
 
         if (owner == 0x38 && !register_offset && (mode == 1 || mode == 3)) addr_reg_write(regs, decoded->rn, base + decoded->offset);
         regs->pc = pc + 4;
-        return EMU_INST_HANDLED;
+        return true;
     }
 
     // 根据指令形式直接解析目标内存虚拟地址
@@ -506,16 +506,16 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
         case 7: // SXTX
             break;
         default:
-            return EMU_INST_SKIP;
+            return false;
         }
         address = base + (index << decoded->shift_amount);
         break;
     }
     default:
-        return EMU_INST_SKIP;
+        return false;
     }
 
-    // 分类执行数据读写（成功则 break 汇聚到尾部统一提交，失败则 return EMU_INST_SKIP）
+    // 分类执行数据读写（成功则 break 汇聚到尾部统一提交，失败则 return false）
     switch (decoded->instruction)
     {
     /* ----- 通用寄存器 (GPR) 单寄存器加载（含 Acquire） ----- */
@@ -532,7 +532,7 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
     case ARM64_INST_LDR_GPR_UNSIGNED_OFFSET:
     {
         __uint128_t raw;
-        if (ptebp_emu_read_mem(address, ptebp_instruction_bytes(decoded), &raw)) return EMU_INST_SKIP;
+        if (ptebp_emu_read_mem(address, ptebp_instruction_bytes(decoded), &raw)) return false;
         reg_write(regs, decoded->rt, (uint64_t)raw, decoded->operand_width == 64);
         if (decoded->instruction == ARM64_INST_LDAR || decoded->instruction == ARM64_INST_LDLAR || decoded->instruction == ARM64_INST_LDAPR || decoded->instruction == ARM64_INST_LDAPUR) smp_mb();
         break;
@@ -549,7 +549,7 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
     case ARM64_INST_LDR_SIGNED_GPR_UNSIGNED_OFFSET:
     {
         __uint128_t raw;
-        if (ptebp_emu_read_mem(address, ptebp_instruction_bytes(decoded), &raw)) return EMU_INST_SKIP;
+        if (ptebp_emu_read_mem(address, ptebp_instruction_bytes(decoded), &raw)) return false;
         reg_write(regs, decoded->rt, sign_extend64((uint64_t)raw, ptebp_instruction_bytes(decoded) * 8 - 1), decoded->operand_width == 64);
         if (decoded->instruction == ARM64_INST_LDAPUR_SIGNED) smp_mb();
         break;
@@ -567,7 +567,7 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
     case ARM64_INST_STR_GPR_PRE_INDEX:
     case ARM64_INST_STR_GPR_REGISTER_OFFSET:
     case ARM64_INST_STR_GPR_UNSIGNED_OFFSET:
-        if (ptebp_emu_write_mem(address, ptebp_instruction_bytes(decoded), reg_read(regs, decoded->rt))) return EMU_INST_SKIP;
+        if (ptebp_emu_write_mem(address, ptebp_instruction_bytes(decoded), reg_read(regs, decoded->rt))) return false;
         break;
 
     /* ----- 通用寄存器 (GPR) 成对加载 ----- */
@@ -582,7 +582,7 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
         __uint128_t raw0, raw1;
         bool is_signed = (decoded->instruction == ARM64_INST_LDPSW_OFFSET || decoded->instruction == ARM64_INST_LDPSW_POST_INDEX || decoded->instruction == ARM64_INST_LDPSW_PRE_INDEX);
 
-        if (ptebp_emu_read_mem(address, ptebp_instruction_bytes(decoded), &raw0) || ptebp_emu_read_mem(address + ptebp_instruction_bytes(decoded), ptebp_instruction_bytes(decoded), &raw1)) return EMU_INST_SKIP;
+        if (ptebp_emu_read_mem(address, ptebp_instruction_bytes(decoded), &raw0) || ptebp_emu_read_mem(address + ptebp_instruction_bytes(decoded), ptebp_instruction_bytes(decoded), &raw1)) return false;
 
         if (is_signed)
         {
@@ -607,11 +607,11 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
         uint64_t mask = (ptebp_instruction_bytes(decoded) == sizeof(mask)) ? U64_MAX : (1ULL << (ptebp_instruction_bytes(decoded) * 8)) - 1;
         __uint128_t pair;
 
-        if (total_bytes > sizeof(pair)) return EMU_INST_SKIP;
+        if (total_bytes > sizeof(pair)) return false;
 
         pair = (__uint128_t)(reg_read(regs, decoded->rt) & mask) | ((__uint128_t)(reg_read(regs, decoded->rt2) & mask) << (ptebp_instruction_bytes(decoded) * 8));
 
-        if (ptebp_emu_write_mem(address, total_bytes, pair)) return EMU_INST_SKIP;
+        if (ptebp_emu_write_mem(address, total_bytes, pair)) return false;
         break;
     }
 
@@ -648,7 +648,7 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
         struct fp_regs fp_regs __attribute__((__uninitialized__));
         __uint128_t value;
 
-        if (ptebp_emu_read_mem(address, ptebp_instruction_bytes(decoded), &value)) return EMU_INST_SKIP;
+        if (ptebp_emu_read_mem(address, ptebp_instruction_bytes(decoded), &value)) return false;
 
         read_all_q_regs(&fp_regs);
         fp_regs.q[decoded->rt] = value;
@@ -686,7 +686,7 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
         struct fp_regs fp_regs __attribute__((__uninitialized__));
 
         read_all_q_regs(&fp_regs);
-        if (ptebp_emu_write_mem(address, ptebp_instruction_bytes(decoded), fp_regs.q[decoded->rt])) return EMU_INST_SKIP;
+        if (ptebp_emu_write_mem(address, ptebp_instruction_bytes(decoded), fp_regs.q[decoded->rt])) return false;
         break;
     }
 
@@ -708,7 +708,7 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
         __uint128_t value0, value1;
         uint8_t bytes = ptebp_instruction_bytes(decoded);
 
-        if (ptebp_emu_read_mem(address, bytes, &value0) || ptebp_emu_read_mem(address + bytes, bytes, &value1)) return EMU_INST_SKIP;
+        if (ptebp_emu_read_mem(address, bytes, &value0) || ptebp_emu_read_mem(address + bytes, bytes, &value1)) return false;
 
         read_all_q_regs(&fp_regs);
         fp_regs.q[decoded->rt] = value0;
@@ -736,18 +736,18 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
         size_t total_bytes = bytes * 2;
         __uint128_t mask, pair;
 
-        if (total_bytes > sizeof(pair)) return EMU_INST_SKIP;
+        if (total_bytes > sizeof(pair)) return false;
 
         read_all_q_regs(&fp_regs);
         mask = (bytes == 16) ? ~(__uint128_t)0 : (((__uint128_t)1 << (bytes * 8)) - 1);
         pair = (fp_regs.q[decoded->rt] & mask) | ((fp_regs.q[decoded->rt2] & mask) << (bytes * 8));
 
-        if (ptebp_emu_write_mem(address, total_bytes, pair)) return EMU_INST_SKIP;
+        if (ptebp_emu_write_mem(address, total_bytes, pair)) return false;
         break;
     }
 
     default:
-        return EMU_INST_SKIP;
+        return false;
     }
 
     // 所有成功的指令统一在此提交 pre/post-index 基址写回并推进 PC
@@ -804,7 +804,7 @@ static enum emu_inst_result ptebp_emulate_load_store(struct pt_regs *regs, uint3
     }
 
     regs->pc = pc + 4;
-    return EMU_INST_HANDLED;
+    return true;
 }
 //撤销整组 BRK/PTE 监控。
 static void ptebp_drop_all_monitors(bool lock_mm)
@@ -925,7 +925,7 @@ static int ptebp_handle_data_abort(struct pt_regs *hook_regs)
     }
 
     //模拟指令
-    if (ptebp_emulate_load_store(regs, raw_inst) == EMU_INST_HANDLED)
+    if (ptebp_emulate_load_store(regs, raw_inst))
     {
         goto abort_handled;
     }

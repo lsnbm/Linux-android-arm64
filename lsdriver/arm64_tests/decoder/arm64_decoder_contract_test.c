@@ -136,6 +136,21 @@ static int check_barrier_options(void)
     return 0;
 }
 
+static int check_ic_ivau(void)
+{
+    for (uint32_t rt = 0; rt < 32; ++rt)
+    {
+        struct arm64_decoded_instruction decoded;
+        uint32_t raw = 0xD50B7520U | rt;
+
+        if (arm64_decode_instruction(raw, &decoded) == ARM64_DECODE_OK && decoded.instruction == ARM64_INST_IC_IVAU && decoded.operand_width == 64 && decoded.rt == rt) continue;
+        fprintf(stderr, "IC IVAU raw=%08x rt=%u\n", raw, rt);
+        return 1;
+    }
+    puts("IC IVAU encodings: PASS; cases=32");
+    return 0;
+}
+
 static int check_hints_and_branch_conditions(void)
 {
     const uint32_t hints[] = {0, 1, 2, 3, 4, 5, 0x19, 0x20, 0x22, 0x24, 0x26};
@@ -297,7 +312,7 @@ int main(void)
     failures |= check_logical_shift_types();
     failures |= check_movi_64bit_forms();
     failures |= check_hints_and_branch_conditions();
-    if (failures || check_failure(0x5A9F1BE9U, ARM64_DECODE_UNALLOCATED) || check_failure(0x52C00000U, ARM64_DECODE_UNALLOCATED) || check_failure(0x13808000U, ARM64_DECODE_UNALLOCATED) || check_failure(0x0B600000U, ARM64_DECODE_UNALLOCATED) || check_failure(0x08207C83U, ARM64_DECODE_UNALLOCATED) || check_failure(0x80800000U, ARM64_DECODE_UNSUPPORTED) || check_failure(0x2518E3E0U, ARM64_DECODE_UNSUPPORTED) || check_atomic() || check_rcpc_loads() || check_single_store_widths() || check_barrier_options() || check_family_contracts()) return 1;
+    if (failures || check_failure(0x5A9F1BE9U, ARM64_DECODE_UNALLOCATED) || check_failure(0x52C00000U, ARM64_DECODE_UNALLOCATED) || check_failure(0x13808000U, ARM64_DECODE_UNALLOCATED) || check_failure(0x0B600000U, ARM64_DECODE_UNALLOCATED) || check_failure(0x08207C83U, ARM64_DECODE_UNALLOCATED) || check_failure(0x80800000U, ARM64_DECODE_UNSUPPORTED) || check_failure(0x2518E3E0U, ARM64_DECODE_UNSUPPORTED) || check_atomic() || check_rcpc_loads() || check_single_store_widths() || check_barrier_options() || check_ic_ivau() || check_family_contracts()) return 1;
     puts("decoder contracts: PASS; CAS/CASP variants=24");
     return 0;
 }

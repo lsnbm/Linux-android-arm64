@@ -1,7 +1,6 @@
 # 忽略编译生成的中间文件
 *.o
 *.ko
-lsdriver/arm64_ptedbg.h
 *.mod
 *.mod.c
 *.order
@@ -45,6 +44,8 @@ lsdriver/arm64_tests/*
 !lsdriver/arm64_tests/encoder/*
 !lsdriver/arm64_tests/etmdbg/
 !lsdriver/arm64_tests/etmdbg/*
+
+
 
 # Local ARM64 executor outputs
 lsdriver/arm64_tests/executor/arm64_instruction_table.h

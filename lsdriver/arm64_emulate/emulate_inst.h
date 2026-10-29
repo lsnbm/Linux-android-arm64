@@ -8,12 +8,6 @@
 #include "../arm64_decode/arm64_decode.h"
 #include "arm64_emulate_hw_templates.h"
 
-enum emu_inst_result
-{
-    EMU_INST_HANDLED, // 模拟函数已完成指令语义，并自行更新现场和 PC
-    EMU_INST_SKIP,    // 不支持或无法执行，不能推进 PC
-};
-
 /* =========================================================================
   ARM64 指令执行器
 

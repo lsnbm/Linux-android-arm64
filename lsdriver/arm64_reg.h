@@ -122,10 +122,26 @@ static inline void disable_hardware_debug_on_cpu(void *unused)
     isb();
 }
 
-// 从 CTR_EL0.DminLine 读取当前 CPU 的最小数据缓存行大小并返回字节数。
+// 从 CTR_EL0.DminLine读取 CPU 的最小数据缓存行大小，单位为字节。
 static inline unsigned long arm64_dcache_line_size(void)
 {
-    return 4UL << ((read_sysreg(ctr_el0) >> 16) & 0xf);
+    static unsigned long d_size = 0;
+    if (unlikely(!d_size))
+    {
+        d_size = 4UL << ((read_sysreg(ctr_el0) >> 16) & 0xf);
+    }
+    return d_size;
+}
+
+// 从 CTR_EL0.IminLine读取 CPU 的最小指令缓存行大小，单位为字节。
+static inline unsigned long arm64_icache_line_size(void)
+{
+    static unsigned long i_size = 0;
+    if (unlikely(!i_size))
+    {
+        i_size = 4UL << (read_sysreg(ctr_el0) & 0xf);
+    }
+    return i_size;
 }
 
 // 读写调试寄存器

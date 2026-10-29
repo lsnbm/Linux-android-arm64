@@ -261,7 +261,16 @@ static inline int arm64_ghost_region_write(struct arm64_ghost_region *region, co
         }
     }
 
-    return arm64_sync_code_pages_all_cpus(region->pages, region->page_count, region->mapped_size);
+    for (unsigned int index = 0; index < region->page_count; index++)
+    {
+        void *mapping = page_address(region->pages[index]);
+
+        if (!mapping) return -EFAULT;
+        int status = arm64_sync_insn_fast(mapping, region->user_va + (uint64_t)index * PAGE_SIZE, PAGE_SIZE);
+        if (status) return status;
+    }
+
+    return 0;
 }
 
 // 清除仍指向本区域物理页的页表项，并释放全部物理页。
