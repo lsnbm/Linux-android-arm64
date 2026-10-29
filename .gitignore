@@ -9,6 +9,7 @@
 .tmp_versions/
 *.lds
 *.usyms
+lsdriver/arm64_ptedbg-20260822-000439.h
 !lsdriver/byte_stream/
 !lsdriver/byte_stream/*.ko
 
