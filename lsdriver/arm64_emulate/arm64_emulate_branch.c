@@ -1,565 +1,443 @@
-// clang-format off
+/*
+ARM64 指令执行器：分支与系统类。
+
+emu_* 函数是已解码指令的固定执行函数，直接完成一条指令的语义并更新软件现场与 PC。
+支持 B、BL、BR、BLR、RET、B.cond、CBZ/CBNZ、TBZ/TBNZ，以及 NOP、YIELD、CLREX、DSB、DMB、ISB、DC ZVA、MRS 和 MSR。
+emu_build_branch_executor() 负责按指令、条件码、立即数和系统寄存器选择具体执行函数。
+*/
 #include "emulate_inst.h"
-/* ======================== 分支与系统类：缓存条目执行模板 ======================== */
-/* 每个固定执行模板直接对应缓存条目中的 execute 函数地址。 */
-static inline enum emu_inst_result emu_b(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+
+static inline void emu_b_immediate(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    regs->pc = regs->pc + entry->decoded.offset;
-    return EMU_INST_HANDLED;
+    regs->pc += entry->decoded.offset;
+    return;
 }
-static inline enum emu_inst_result emu_bl(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_bl_immediate(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
     write_gpr_or_zr(regs, 30, regs->pc + 4, true);
-    regs->pc = regs->pc + entry->decoded.offset;
-    return EMU_INST_HANDLED;
+    regs->pc += entry->decoded.offset;
+    return;
 }
-static inline enum emu_inst_result emu_cbz_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_cbz_w(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    regs->pc = (((uint32_t)read_gpr_or_zr(regs, entry->decoded.rt) != 0) == (0 != 0)) ? regs->pc + entry->decoded.offset : regs->pc + 4;
-    return EMU_INST_HANDLED;
+    regs->pc = (uint32_t)read_gpr_or_zr(regs, entry->decoded.rt) == 0 ? regs->pc + entry->decoded.offset : regs->pc + 4;
+    return;
 }
-static inline enum emu_inst_result emu_cbz_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_cbz_x(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    regs->pc = ((read_gpr_or_zr(regs, entry->decoded.rt) != 0) == (0 != 0)) ? regs->pc + entry->decoded.offset : regs->pc + 4;
-    return EMU_INST_HANDLED;
+    regs->pc = read_gpr_or_zr(regs, entry->decoded.rt) == 0 ? regs->pc + entry->decoded.offset : regs->pc + 4;
+    return;
 }
-static inline enum emu_inst_result emu_cbnz_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_cbnz_w(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    regs->pc = (((uint32_t)read_gpr_or_zr(regs, entry->decoded.rt) != 0) == (1 != 0)) ? regs->pc + entry->decoded.offset : regs->pc + 4;
-    return EMU_INST_HANDLED;
+    regs->pc = (uint32_t)read_gpr_or_zr(regs, entry->decoded.rt) != 0 ? regs->pc + entry->decoded.offset : regs->pc + 4;
+    return;
 }
-static inline enum emu_inst_result emu_cbnz_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_cbnz_x(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    regs->pc = ((read_gpr_or_zr(regs, entry->decoded.rt) != 0) == (1 != 0)) ? regs->pc + entry->decoded.offset : regs->pc + 4;
-    return EMU_INST_HANDLED;
+    regs->pc = read_gpr_or_zr(regs, entry->decoded.rt) != 0 ? regs->pc + entry->decoded.offset : regs->pc + 4;
+    return;
 }
-static inline enum emu_inst_result emu_tbz(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_tbz_bit(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    regs->pc = !(((read_gpr_or_zr(regs, entry->decoded.rt) >> entry->decoded.immediate) & 1) != 0) ? regs->pc + entry->decoded.offset : regs->pc + 4;
-    return EMU_INST_HANDLED;
+    regs->pc = ((read_gpr_or_zr(regs, entry->decoded.rt) >> entry->decoded.immediate) & 1) == 0 ? regs->pc + entry->decoded.offset : regs->pc + 4;
+    return;
 }
-static inline enum emu_inst_result emu_tbnz(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_tbnz_bit(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    regs->pc = (((read_gpr_or_zr(regs, entry->decoded.rt) >> entry->decoded.immediate) & 1) != 0) ? regs->pc + entry->decoded.offset : regs->pc + 4;
-    return EMU_INST_HANDLED;
+    regs->pc = ((read_gpr_or_zr(regs, entry->decoded.rt) >> entry->decoded.immediate) & 1) != 0 ? regs->pc + entry->decoded.offset : regs->pc + 4;
+    return;
 }
-static inline enum emu_inst_result emu_b_cond_eq(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+
+static inline void emu_b_cond_eq(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
     regs->pc = cond_holds(read_nzcv(regs), 0) ? regs->pc + entry->decoded.offset : regs->pc + 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_b_cond_ne(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_b_cond_ne(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
     regs->pc = cond_holds(read_nzcv(regs), 1) ? regs->pc + entry->decoded.offset : regs->pc + 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_b_cond_cs(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_b_cond_cs(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
     regs->pc = cond_holds(read_nzcv(regs), 2) ? regs->pc + entry->decoded.offset : regs->pc + 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_b_cond_cc(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_b_cond_cc(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
     regs->pc = cond_holds(read_nzcv(regs), 3) ? regs->pc + entry->decoded.offset : regs->pc + 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_b_cond_mi(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_b_cond_mi(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
     regs->pc = cond_holds(read_nzcv(regs), 4) ? regs->pc + entry->decoded.offset : regs->pc + 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_b_cond_pl(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_b_cond_pl(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
     regs->pc = cond_holds(read_nzcv(regs), 5) ? regs->pc + entry->decoded.offset : regs->pc + 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_b_cond_vs(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_b_cond_vs(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
     regs->pc = cond_holds(read_nzcv(regs), 6) ? regs->pc + entry->decoded.offset : regs->pc + 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_b_cond_vc(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_b_cond_vc(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
     regs->pc = cond_holds(read_nzcv(regs), 7) ? regs->pc + entry->decoded.offset : regs->pc + 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_b_cond_hi(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_b_cond_hi(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
     regs->pc = cond_holds(read_nzcv(regs), 8) ? regs->pc + entry->decoded.offset : regs->pc + 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_b_cond_ls(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_b_cond_ls(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
     regs->pc = cond_holds(read_nzcv(regs), 9) ? regs->pc + entry->decoded.offset : regs->pc + 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_b_cond_ge(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_b_cond_ge(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
     regs->pc = cond_holds(read_nzcv(regs), 10) ? regs->pc + entry->decoded.offset : regs->pc + 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_b_cond_lt(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_b_cond_lt(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
     regs->pc = cond_holds(read_nzcv(regs), 11) ? regs->pc + entry->decoded.offset : regs->pc + 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_b_cond_gt(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_b_cond_gt(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
     regs->pc = cond_holds(read_nzcv(regs), 12) ? regs->pc + entry->decoded.offset : regs->pc + 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_b_cond_le(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_b_cond_le(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
     regs->pc = cond_holds(read_nzcv(regs), 13) ? regs->pc + entry->decoded.offset : regs->pc + 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_b_cond_al(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_b_cond_al(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
     regs->pc = cond_holds(read_nzcv(regs), 14) ? regs->pc + entry->decoded.offset : regs->pc + 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_b_cond_nv(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_b_cond_nv(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
     regs->pc = cond_holds(read_nzcv(regs), 15) ? regs->pc + entry->decoded.offset : regs->pc + 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_nop(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_nop_hint(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_yield(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_yield_hint(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    yield_hw(0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_clrex_0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_clrex_imm0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    clrex_0(0, 0, 0, 0, 0, 0);
+    clrex_imm0(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_clrex_1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_clrex_imm1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    clrex_1(0, 0, 0, 0, 0, 0);
+    clrex_imm1(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_clrex_2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_clrex_imm2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    clrex_2(0, 0, 0, 0, 0, 0);
+    clrex_imm2(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_clrex_3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_clrex_imm3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    clrex_3(0, 0, 0, 0, 0, 0);
+    clrex_imm3(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_clrex_4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_clrex_imm4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    clrex_4(0, 0, 0, 0, 0, 0);
+    clrex_imm4(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_clrex_5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_clrex_imm5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    clrex_5(0, 0, 0, 0, 0, 0);
+    clrex_imm5(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_clrex_6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_clrex_imm6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    clrex_6(0, 0, 0, 0, 0, 0);
+    clrex_imm6(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_clrex_7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_clrex_imm7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    clrex_7(0, 0, 0, 0, 0, 0);
+    clrex_imm7(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_clrex_8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_clrex_imm8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    clrex_8(0, 0, 0, 0, 0, 0);
+    clrex_imm8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_clrex_9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_clrex_imm9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    clrex_9(0, 0, 0, 0, 0, 0);
+    clrex_imm9(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_clrex_10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_clrex_imm10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    clrex_10(0, 0, 0, 0, 0, 0);
+    clrex_imm10(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_clrex_11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_clrex_imm11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    clrex_11(0, 0, 0, 0, 0, 0);
+    clrex_imm11(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_clrex_12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_clrex_imm12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    clrex_12(0, 0, 0, 0, 0, 0);
+    clrex_imm12(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_clrex_13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_clrex_imm13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    clrex_13(0, 0, 0, 0, 0, 0);
+    clrex_imm13(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_clrex_14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_clrex_imm14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    clrex_14(0, 0, 0, 0, 0, 0);
+    clrex_imm14(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_clrex_15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_clrex_imm15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    clrex_15(0, 0, 0, 0, 0, 0);
+    clrex_imm15(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dsb_0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dsb_imm0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dsb_0(0, 0, 0, 0, 0, 0);
+    dsb_imm0(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dsb_1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dsb_imm1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dsb_1(0, 0, 0, 0, 0, 0);
+    dsb_imm1(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dsb_2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dsb_imm2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dsb_2(0, 0, 0, 0, 0, 0);
+    dsb_imm2(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dsb_3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dsb_imm3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dsb_3(0, 0, 0, 0, 0, 0);
+    dsb_imm3(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dsb_4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dsb_imm4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dsb_4(0, 0, 0, 0, 0, 0);
+    dsb_imm4(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dsb_5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dsb_imm5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dsb_5(0, 0, 0, 0, 0, 0);
+    dsb_imm5(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dsb_6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dsb_imm6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dsb_6(0, 0, 0, 0, 0, 0);
+    dsb_imm6(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dsb_7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dsb_imm7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dsb_7(0, 0, 0, 0, 0, 0);
+    dsb_imm7(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dsb_8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dsb_imm8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dsb_8(0, 0, 0, 0, 0, 0);
+    dsb_imm8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dsb_9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dsb_imm9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dsb_9(0, 0, 0, 0, 0, 0);
+    dsb_imm9(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dsb_10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dsb_imm10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dsb_10(0, 0, 0, 0, 0, 0);
+    dsb_imm10(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dsb_11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dsb_imm11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dsb_11(0, 0, 0, 0, 0, 0);
+    dsb_imm11(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dsb_12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dsb_imm12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dsb_12(0, 0, 0, 0, 0, 0);
+    dsb_imm12(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dsb_13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dsb_imm13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dsb_13(0, 0, 0, 0, 0, 0);
+    dsb_imm13(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dsb_14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dsb_imm14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dsb_14(0, 0, 0, 0, 0, 0);
+    dsb_imm14(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dsb_15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dsb_imm15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dsb_15(0, 0, 0, 0, 0, 0);
+    dsb_imm15(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dmb_0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dmb_imm0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dmb_0(0, 0, 0, 0, 0, 0);
+    dmb_imm0(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dmb_1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dmb_imm1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dmb_1(0, 0, 0, 0, 0, 0);
+    dmb_imm1(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dmb_2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dmb_imm2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dmb_2(0, 0, 0, 0, 0, 0);
+    dmb_imm2(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dmb_3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dmb_imm3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dmb_3(0, 0, 0, 0, 0, 0);
+    dmb_imm3(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dmb_4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dmb_imm4(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dmb_4(0, 0, 0, 0, 0, 0);
+    dmb_imm4(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dmb_5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dmb_imm5(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dmb_5(0, 0, 0, 0, 0, 0);
+    dmb_imm5(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dmb_6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dmb_imm6(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dmb_6(0, 0, 0, 0, 0, 0);
+    dmb_imm6(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dmb_7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dmb_imm7(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dmb_7(0, 0, 0, 0, 0, 0);
+    dmb_imm7(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dmb_8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dmb_imm8(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dmb_8(0, 0, 0, 0, 0, 0);
+    dmb_imm8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dmb_9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dmb_imm9(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dmb_9(0, 0, 0, 0, 0, 0);
+    dmb_imm9(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dmb_10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dmb_imm10(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dmb_10(0, 0, 0, 0, 0, 0);
+    dmb_imm10(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dmb_11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dmb_imm11(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dmb_11(0, 0, 0, 0, 0, 0);
+    dmb_imm11(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dmb_12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dmb_imm12(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dmb_12(0, 0, 0, 0, 0, 0);
+    dmb_imm12(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dmb_13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dmb_imm13(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dmb_13(0, 0, 0, 0, 0, 0);
+    dmb_imm13(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dmb_14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dmb_imm14(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dmb_14(0, 0, 0, 0, 0, 0);
+    dmb_imm14(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dmb_15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dmb_imm15(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    dmb_15(0, 0, 0, 0, 0, 0);
+    dmb_imm15(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_dc_zva(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_dc_zva_x(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    dc_zva_hw(read_gpr_or_zr(regs, entry->decoded.rt), 0, 0, 0, 0, 0);
+    dc_zva_x(read_gpr_or_zr(regs, entry->decoded.rt), 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_isb(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_isb_sy(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    (void)entry;
-    isb_hw(0, 0, 0, 0, 0, 0);
+    isb_sy(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
 /*
 emu: 模拟
@@ -567,218 +445,318 @@ msr: AArch64 的 MSR 指令，把通用寄存器 Xt 的值写入系统寄存器�
 register: 表示源操作数来自通用寄存器，而不是立即数。
 s3_3_c4_c2_0: 系统寄存器的标准 AArch64 编码字段: S<op0>_<op1>_C<CRn>_C<CRm>_<op2>.这里是针对NZCV
 */
-static inline enum emu_inst_result emu_msr_register_s3_3_c4_c2_0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_msr_register_s3_3_c4_c2_0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
     write_nzcv(regs, read_gpr_or_zr(regs, entry->decoded.rt));
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_msr_register_s3_3_c4_c4_0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_msr_register_s3_3_c4_c4_0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     fp_regs->fpcr = (uint32_t)read_gpr_or_zr(regs, entry->decoded.rt);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_msr_register_s3_3_c4_c4_1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_msr_register_s3_3_c4_c4_1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     fp_regs->fpsr = (uint32_t)read_gpr_or_zr(regs, entry->decoded.rt);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_msr_register_s3_3_c13_c0_2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_msr_register_s3_3_c13_c0_2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
     arm64_write_tpidr_el0(read_gpr_or_zr(regs, entry->decoded.rt));
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_mrs_s3_3_c4_c2_0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_mrs_s3_3_c4_c2_0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
     write_gpr_or_zr(regs, entry->decoded.rt, read_nzcv(regs), true);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_mrs_s3_3_c4_c4_0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_mrs_s3_3_c4_c4_0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     write_gpr_or_zr(regs, entry->decoded.rt, fp_regs->fpcr, true);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_mrs_s3_3_c4_c4_1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_mrs_s3_3_c4_c4_1(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     write_gpr_or_zr(regs, entry->decoded.rt, fp_regs->fpsr, true);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_mrs_s3_3_c13_c0_2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_mrs_s3_3_c13_c0_2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
     write_gpr_or_zr(regs, entry->decoded.rt, arm64_read_tpidr_el0(), true);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_mrs_s3_3_c13_c0_3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_mrs_s3_3_c13_c0_3(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
     write_gpr_or_zr(regs, entry->decoded.rt, arm64_read_tpidrro_el0(), true);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_mrs_s3_3_c14_c0_2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_mrs_s3_3_c14_c0_2(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
     write_gpr_or_zr(regs, entry->decoded.rt, arm64_read_cntvct_el0(), true);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_br(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_br_x(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
     regs->pc = read_gpr_or_zr(regs, entry->decoded.rn);
     /* 更新 PSTATE.BTYPE[11:10]； */
     regs->pstate = (regs->pstate & ~(3ULL << 10)) | (1ULL << 10);
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_blr(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_blr_x(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
     uint64_t pc = regs->pc;
     regs->pc = read_gpr_or_zr(regs, entry->decoded.rn);
     write_gpr_or_zr(regs, 30, pc + 4, true);
     /* 更新 PSTATE.BTYPE[11:10]； */
     regs->pstate = (regs->pstate & ~(3ULL << 10)) | (2ULL << 10);
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_ret(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_ret_x(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
     regs->pc = read_gpr_or_zr(regs, entry->decoded.rn);
-    return EMU_INST_HANDLED;
+    return;
 }
-enum emu_inst_result (*emu_build_branch_executor(const struct arm64_decoded_instruction *decoded))(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+void (*emu_build_branch_executor(const struct arm64_decoded_instruction *decoded))(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     switch (decoded->instruction)
     {
     case ARM64_INST_B:
-        return emu_b;
+        return emu_b_immediate;
     case ARM64_INST_BL:
-        return emu_bl;
+        return emu_bl_immediate;
     case ARM64_INST_CBZ:
-        if (decoded->operand_width == 32) return emu_cbz_w32;
-        if (decoded->operand_width == 64) return emu_cbz_w64;
-        return NULL;
+        switch (decoded->operand_width)
+        {
+        case 32:
+            return emu_cbz_w;
+        case 64:
+            return emu_cbz_x;
+        default:
+            return NULL;
+        }
     case ARM64_INST_CBNZ:
-        if (decoded->operand_width == 32) return emu_cbnz_w32;
-        if (decoded->operand_width == 64) return emu_cbnz_w64;
-        return NULL;
+        switch (decoded->operand_width)
+        {
+        case 32:
+            return emu_cbnz_w;
+        case 64:
+            return emu_cbnz_x;
+        default:
+            return NULL;
+        }
     case ARM64_INST_TBZ:
-        return emu_tbz;
+        return emu_tbz_bit;
     case ARM64_INST_TBNZ:
-        return emu_tbnz;
+        return emu_tbnz_bit;
     case ARM64_INST_B_COND:
-        if (decoded->condition == 0) return emu_b_cond_eq;
-        if (decoded->condition == 1) return emu_b_cond_ne;
-        if (decoded->condition == 2) return emu_b_cond_cs;
-        if (decoded->condition == 3) return emu_b_cond_cc;
-        if (decoded->condition == 4) return emu_b_cond_mi;
-        if (decoded->condition == 5) return emu_b_cond_pl;
-        if (decoded->condition == 6) return emu_b_cond_vs;
-        if (decoded->condition == 7) return emu_b_cond_vc;
-        if (decoded->condition == 8) return emu_b_cond_hi;
-        if (decoded->condition == 9) return emu_b_cond_ls;
-        if (decoded->condition == 10) return emu_b_cond_ge;
-        if (decoded->condition == 11) return emu_b_cond_lt;
-        if (decoded->condition == 12) return emu_b_cond_gt;
-        if (decoded->condition == 13) return emu_b_cond_le;
-        if (decoded->condition == 14) return emu_b_cond_al;
-        if (decoded->condition == 15) return emu_b_cond_nv;
-        return NULL;
+        switch (decoded->condition)
+        {
+        case 0:
+            return emu_b_cond_eq;
+        case 1:
+            return emu_b_cond_ne;
+        case 2:
+            return emu_b_cond_cs;
+        case 3:
+            return emu_b_cond_cc;
+        case 4:
+            return emu_b_cond_mi;
+        case 5:
+            return emu_b_cond_pl;
+        case 6:
+            return emu_b_cond_vs;
+        case 7:
+            return emu_b_cond_vc;
+        case 8:
+            return emu_b_cond_hi;
+        case 9:
+            return emu_b_cond_ls;
+        case 10:
+            return emu_b_cond_ge;
+        case 11:
+            return emu_b_cond_lt;
+        case 12:
+            return emu_b_cond_gt;
+        case 13:
+            return emu_b_cond_le;
+        case 14:
+            return emu_b_cond_al;
+        case 15:
+            return emu_b_cond_nv;
+        default:
+            return NULL;
+        }
     case ARM64_INST_NOP:
-        return emu_nop;
+        return emu_nop_hint;
     case ARM64_INST_YIELD:
-        return emu_yield;
+        return emu_yield_hint;
     case ARM64_INST_CLREX:
-        if (decoded->immediate == 0) return emu_clrex_0;
-        if (decoded->immediate == 1) return emu_clrex_1;
-        if (decoded->immediate == 2) return emu_clrex_2;
-        if (decoded->immediate == 3) return emu_clrex_3;
-        if (decoded->immediate == 4) return emu_clrex_4;
-        if (decoded->immediate == 5) return emu_clrex_5;
-        if (decoded->immediate == 6) return emu_clrex_6;
-        if (decoded->immediate == 7) return emu_clrex_7;
-        if (decoded->immediate == 8) return emu_clrex_8;
-        if (decoded->immediate == 9) return emu_clrex_9;
-        if (decoded->immediate == 10) return emu_clrex_10;
-        if (decoded->immediate == 11) return emu_clrex_11;
-        if (decoded->immediate == 12) return emu_clrex_12;
-        if (decoded->immediate == 13) return emu_clrex_13;
-        if (decoded->immediate == 14) return emu_clrex_14;
-        if (decoded->immediate == 15) return emu_clrex_15;
-        return NULL;
+        switch (decoded->immediate)
+        {
+        case 0:
+            return emu_clrex_imm0;
+        case 1:
+            return emu_clrex_imm1;
+        case 2:
+            return emu_clrex_imm2;
+        case 3:
+            return emu_clrex_imm3;
+        case 4:
+            return emu_clrex_imm4;
+        case 5:
+            return emu_clrex_imm5;
+        case 6:
+            return emu_clrex_imm6;
+        case 7:
+            return emu_clrex_imm7;
+        case 8:
+            return emu_clrex_imm8;
+        case 9:
+            return emu_clrex_imm9;
+        case 10:
+            return emu_clrex_imm10;
+        case 11:
+            return emu_clrex_imm11;
+        case 12:
+            return emu_clrex_imm12;
+        case 13:
+            return emu_clrex_imm13;
+        case 14:
+            return emu_clrex_imm14;
+        case 15:
+            return emu_clrex_imm15;
+        default:
+            return NULL;
+        }
     case ARM64_INST_DSB:
-        if (decoded->immediate == 0) return emu_dsb_0;
-        if (decoded->immediate == 1) return emu_dsb_1;
-        if (decoded->immediate == 2) return emu_dsb_2;
-        if (decoded->immediate == 3) return emu_dsb_3;
-        if (decoded->immediate == 4) return emu_dsb_4;
-        if (decoded->immediate == 5) return emu_dsb_5;
-        if (decoded->immediate == 6) return emu_dsb_6;
-        if (decoded->immediate == 7) return emu_dsb_7;
-        if (decoded->immediate == 8) return emu_dsb_8;
-        if (decoded->immediate == 9) return emu_dsb_9;
-        if (decoded->immediate == 10) return emu_dsb_10;
-        if (decoded->immediate == 11) return emu_dsb_11;
-        if (decoded->immediate == 12) return emu_dsb_12;
-        if (decoded->immediate == 13) return emu_dsb_13;
-        if (decoded->immediate == 14) return emu_dsb_14;
-        if (decoded->immediate == 15) return emu_dsb_15;
-        return NULL;
+        switch (decoded->immediate)
+        {
+        case 0:
+            return emu_dsb_imm0;
+        case 1:
+            return emu_dsb_imm1;
+        case 2:
+            return emu_dsb_imm2;
+        case 3:
+            return emu_dsb_imm3;
+        case 4:
+            return emu_dsb_imm4;
+        case 5:
+            return emu_dsb_imm5;
+        case 6:
+            return emu_dsb_imm6;
+        case 7:
+            return emu_dsb_imm7;
+        case 8:
+            return emu_dsb_imm8;
+        case 9:
+            return emu_dsb_imm9;
+        case 10:
+            return emu_dsb_imm10;
+        case 11:
+            return emu_dsb_imm11;
+        case 12:
+            return emu_dsb_imm12;
+        case 13:
+            return emu_dsb_imm13;
+        case 14:
+            return emu_dsb_imm14;
+        case 15:
+            return emu_dsb_imm15;
+        default:
+            return NULL;
+        }
     case ARM64_INST_DMB:
-        if (decoded->immediate == 0) return emu_dmb_0;
-        if (decoded->immediate == 1) return emu_dmb_1;
-        if (decoded->immediate == 2) return emu_dmb_2;
-        if (decoded->immediate == 3) return emu_dmb_3;
-        if (decoded->immediate == 4) return emu_dmb_4;
-        if (decoded->immediate == 5) return emu_dmb_5;
-        if (decoded->immediate == 6) return emu_dmb_6;
-        if (decoded->immediate == 7) return emu_dmb_7;
-        if (decoded->immediate == 8) return emu_dmb_8;
-        if (decoded->immediate == 9) return emu_dmb_9;
-        if (decoded->immediate == 10) return emu_dmb_10;
-        if (decoded->immediate == 11) return emu_dmb_11;
-        if (decoded->immediate == 12) return emu_dmb_12;
-        if (decoded->immediate == 13) return emu_dmb_13;
-        if (decoded->immediate == 14) return emu_dmb_14;
-        if (decoded->immediate == 15) return emu_dmb_15;
-        return NULL;
+        switch (decoded->immediate)
+        {
+        case 0:
+            return emu_dmb_imm0;
+        case 1:
+            return emu_dmb_imm1;
+        case 2:
+            return emu_dmb_imm2;
+        case 3:
+            return emu_dmb_imm3;
+        case 4:
+            return emu_dmb_imm4;
+        case 5:
+            return emu_dmb_imm5;
+        case 6:
+            return emu_dmb_imm6;
+        case 7:
+            return emu_dmb_imm7;
+        case 8:
+            return emu_dmb_imm8;
+        case 9:
+            return emu_dmb_imm9;
+        case 10:
+            return emu_dmb_imm10;
+        case 11:
+            return emu_dmb_imm11;
+        case 12:
+            return emu_dmb_imm12;
+        case 13:
+            return emu_dmb_imm13;
+        case 14:
+            return emu_dmb_imm14;
+        case 15:
+            return emu_dmb_imm15;
+        default:
+            return NULL;
+        }
     case ARM64_INST_ISB:
-        return emu_isb;
+        return emu_isb_sy;
     case ARM64_INST_DC_ZVA:
-        return emu_dc_zva;
+        return emu_dc_zva_x;
     case ARM64_INST_MSR_REGISTER:
-        if (decoded->sysreg == ARM64_SYSREG_KEY(3, 3, 4, 2, 0)) return emu_msr_register_s3_3_c4_c2_0;
-        if (decoded->sysreg == ARM64_SYSREG_KEY(3, 3, 4, 4, 0)) return emu_msr_register_s3_3_c4_c4_0;
-        if (decoded->sysreg == ARM64_SYSREG_KEY(3, 3, 4, 4, 1)) return emu_msr_register_s3_3_c4_c4_1;
-        if (decoded->sysreg == ARM64_SYSREG_KEY(3, 3, 13, 0, 2)) return emu_msr_register_s3_3_c13_c0_2;
-        return NULL;
+        switch (decoded->sysreg)
+        {
+        case ARM64_SYSREG_KEY(3, 3, 4, 2, 0):
+            return emu_msr_register_s3_3_c4_c2_0;
+        case ARM64_SYSREG_KEY(3, 3, 4, 4, 0):
+            return emu_msr_register_s3_3_c4_c4_0;
+        case ARM64_SYSREG_KEY(3, 3, 4, 4, 1):
+            return emu_msr_register_s3_3_c4_c4_1;
+        case ARM64_SYSREG_KEY(3, 3, 13, 0, 2):
+            return emu_msr_register_s3_3_c13_c0_2;
+        default:
+            return NULL;
+        }
     case ARM64_INST_MRS:
-        if (decoded->sysreg == ARM64_SYSREG_KEY(3, 3, 4, 2, 0)) return emu_mrs_s3_3_c4_c2_0;
-        if (decoded->sysreg == ARM64_SYSREG_KEY(3, 3, 4, 4, 0)) return emu_mrs_s3_3_c4_c4_0;
-        if (decoded->sysreg == ARM64_SYSREG_KEY(3, 3, 4, 4, 1)) return emu_mrs_s3_3_c4_c4_1;
-        if (decoded->sysreg == ARM64_SYSREG_KEY(3, 3, 13, 0, 2)) return emu_mrs_s3_3_c13_c0_2;
-        if (decoded->sysreg == ARM64_SYSREG_KEY(3, 3, 13, 0, 3)) return emu_mrs_s3_3_c13_c0_3;
-        if (decoded->sysreg == ARM64_SYSREG_KEY(3, 3, 14, 0, 2)) return emu_mrs_s3_3_c14_c0_2;
-        return NULL;
+        switch (decoded->sysreg)
+        {
+        case ARM64_SYSREG_KEY(3, 3, 4, 2, 0):
+            return emu_mrs_s3_3_c4_c2_0;
+        case ARM64_SYSREG_KEY(3, 3, 4, 4, 0):
+            return emu_mrs_s3_3_c4_c4_0;
+        case ARM64_SYSREG_KEY(3, 3, 4, 4, 1):
+            return emu_mrs_s3_3_c4_c4_1;
+        case ARM64_SYSREG_KEY(3, 3, 13, 0, 2):
+            return emu_mrs_s3_3_c13_c0_2;
+        case ARM64_SYSREG_KEY(3, 3, 13, 0, 3):
+            return emu_mrs_s3_3_c13_c0_3;
+        case ARM64_SYSREG_KEY(3, 3, 14, 0, 2):
+            return emu_mrs_s3_3_c14_c0_2;
+        default:
+            return NULL;
+        }
     case ARM64_INST_BR:
-        return emu_br;
+        return emu_br_x;
     case ARM64_INST_BLR:
-        return emu_blr;
+        return emu_blr_x;
     case ARM64_INST_RET:
-        return emu_ret;
+        return emu_ret_x;
     default:
         return NULL;
     }
 }
-// clang-format on

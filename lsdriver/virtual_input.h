@@ -1,13 +1,8 @@
 #include <linux/kernel.h>
-#include <linux/module.h>
 #include <linux/input.h>
 #include <linux/input/mt.h>
 #include <linux/device.h>
-#include <linux/delay.h>
-#include <linux/slab.h>
-#include <linux/version.h>
-#include <linux/compiler.h>
-#include "lsdriver_log.h"
+#include "klog/lsdriver_log.h"
 
 /*
 在 Linux 输入子系统中，上报一个手指的事件不是通过一个结构体一次性发过去的，而是像下面这样流式（Stream）分步发送的：
@@ -237,7 +232,7 @@ static int match_touchscreen(struct device *dev, void *data)
     return 0;
 }
 
-static inline int v_touch_init(int request_virtual_slots, int *max_x, int *max_y)
+static int v_touch_init(int request_virtual_slots, int *max_x, int *max_y)
 {
     if (!max_x || !max_y) return -EINVAL;
 
@@ -262,7 +257,7 @@ static inline int v_touch_init(int request_virtual_slots, int *max_x, int *max_y
     struct class *input_class = (struct class *)generic_kallsyms_lookup_name("input_class");
     if (!input_class)
     {
-        ls_log_tag("vtouch", "input_class 查找失败\n");
+        ls_log_always_tag("vtouch", "input_class 查找失败\n");
         return -EFAULT;
     }
 
@@ -270,7 +265,7 @@ static inline int v_touch_init(int request_virtual_slots, int *max_x, int *max_y
     class_for_each_device(input_class, NULL, &found, match_touchscreen);
     if (!found)
     {
-        ls_log_tag("vtouch", "未找到触摸屏设备\n");
+        ls_log_always_tag("vtouch", "未找到触摸屏设备\n");
         return -ENODEV;
     }
 
@@ -280,7 +275,7 @@ static inline int v_touch_init(int request_virtual_slots, int *max_x, int *max_y
     ret = hijack_init_slots(found);
     if (ret)
     {
-        ls_log_tag("vtouch", "MT 劫持失败\n");
+        ls_log_always_tag("vtouch", "MT 劫持失败\n");
         put_device(&found->dev);
         vt.dev = NULL;
         return ret;
@@ -298,7 +293,7 @@ static inline int v_touch_init(int request_virtual_slots, int *max_x, int *max_y
     return 0;
 }
 
-static inline void v_touch_destroy(void)
+static void v_touch_destroy(void)
 {
     // 防止重复调用
     if (!vt.initialized) return;
@@ -340,7 +335,7 @@ static inline void v_touch_destroy(void)
     for (int i = 0; i < virtual_slots; i++) vt.tracking_ids[i] = -1;
 }
 
-static inline void v_touch_event(enum request_op op, int slot, int x, int y)
+static void v_touch_event(enum request_op op, int slot, int x, int y)
 {
     if (!vt.initialized) return;
 

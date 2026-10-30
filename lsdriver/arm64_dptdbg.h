@@ -2,17 +2,33 @@
 #define ARM64_DPTDBG_H
 
 /*
- * The process main thread runs with a private shadow PGD that maps trap copies
- * of the managed code pages. Every other thread keeps the normal page table.
- */
+DPTDBG 使用“普通页表 + 私有 shadow PGD + trap page”实现主线程执行断点：
+
+1. 启动时通过目标 tgid 获取 mm，遍历执行断点，读取用户 PTE，并把每个
+    受管代码页复制到独立的 trap page；每个受管页按断点槽位保存原始指令，
+    trap page 对应位置改写为 0（AArch64 UDF 指令）。
+2. 为目标 mm 分配独立 PGD，只复制受管代码页经过的页表路径。shadow 路径
+    最终把这些虚拟页映射到 trap page，普通页仍沿用目标 mm 的原始映射。
+3. 同步 hook 进入 EL0 异常时，先确认异常来自受管页和 UDF trap；主线程
+    执行命中回调并模拟原始指令，其他线程切换到 shadow view 后直接执行
+    原始映射，从而只拦截主线程。
+4. __switch_to hook 在任务切换时选择 normal/shadow TTBR0；不支持 TTBR0
+    PAN 的内核直接写当前 CPU 的 TTBR0，支持 TTBR0 PAN 的内核更新目标
+    task 保存的 ttbr0。修改页表或 TTBR0 后刷新目标 mm 的 TLB。
+5. MMU notifier 发现目标 mm 失效时先停止监控、恢复线程的 normal view，
+    再异步回收 trap page、shadow 页表和 mm 引用，避免继续使用陈旧映射。
+6. start、stop、异常回滚和 notifier 清理共用生命周期锁；异常 handler
+    只使用 RCU 和自旋锁，完成现场恢复后再由 workqueue 执行可睡眠清理。
+
+该文件只保存 DPTDBG 的运行状态和实现，不修改目标进程的普通页表。
+*/
+
 #include <linux/errno.h>
 #include <linux/kernel.h>
-#include <linux/list.h>
 #include <linux/mm.h>
 #include <linux/mmu_notifier.h>
 #include <linux/mutex.h>
 #include <linux/rcupdate.h>
-#include <linux/slab.h>
 #include <linux/sched.h>
 #include <linux/sched/signal.h>
 #include <linux/smp.h>
@@ -30,55 +46,47 @@
 #include "arm64_reg.h"
 #include "export_fun.h"
 #include "inline_hook_frame.h"
-#include "io_struct.h"
-
-#define DPTDBG_UDF_INST        0x00000000U
-#define DPTDBG_TTBR_BADDR_MASK GENMASK_ULL(47, 2)
-#if defined(PTE_ADDR_MASK)
-#define DPTDBG_PTE_ADDR_MASK   PTE_ADDR_MASK
-#elif defined(PHYS_TO_PTE_ADDR_MASK)
-#define DPTDBG_PTE_ADDR_MASK   PHYS_TO_PTE_ADDR_MASK
-#elif defined(PTE_ADDR_HIGH)
-#define DPTDBG_PTE_ADDR_MASK   (PTE_ADDR_LOW | PTE_ADDR_HIGH)
-#elif defined(PTE_ADDR_LOW)
-#define DPTDBG_PTE_ADDR_MASK   PTE_ADDR_LOW
-#else
-#error "Unsupported arm64 page-table address mask"
-#endif
-
-struct dptdbg_table_page
-{
-    struct list_head node;
-    struct page *page;
-};
+#include "io_version/io_struct.h"
 
 struct dptdbg_page
 {
-    pte_t original_mapping;
-    struct page *trap_page;
-    uint64_t page_vaddr;
+    pte_t original_mapping;                 // 启动时的原始 PTE，用于校验源物理页映射
+    struct page *trap_page;                 // 复制代码并在断点处写入 UDF 的替代执行页
+    uint64_t page_vaddr;                    // 受管虚拟页基址，用于按 PC 查页和计算页内偏移
+    uint32_t original_insts[BP_CONFIG_MAX]; // 该页断点的原始指令，索引对应 info->points 的全局槽位
 };
 
-static struct break_point *g_dptdbg_info;
-static struct mm_struct *g_dptdbg_mm;
-static struct dptdbg_page g_dptdbg_pages[BP_CONFIG_MAX];
-static uint32_t g_dptdbg_original_insts[BP_CONFIG_MAX];
-static struct page *g_dptdbg_shadow_pgd_page;
-static pgd_t *g_dptdbg_shadow_pgd;
-static LIST_HEAD(g_dptdbg_table_pages);
-static struct mmu_notifier g_dptdbg_mmu_notifier;
-static DEFINE_SPINLOCK(g_dptdbg_lock);
-static DEFINE_MUTEX(g_dptdbg_lifecycle_lock);
-static struct work_struct g_dptdbg_abort_work;
-static bool g_dptdbg_work_initialized;
-static bool g_dptdbg_notifier_registered;
-static bool g_dptdbg_stopping;
-static pid_t g_dptdbg_tgid;
+struct dptdbg_context
+{
+    struct break_point *info; // 已发布的断点配置和回调；为 NULL 时异常与切换 hook 不处理监控
+    struct mm_struct *mm;     // 持有引用的目标地址空间，用于线程匹配、读取原页表和刷新 TLB
+
+    struct dptdbg_page pages[BP_CONFIG_MAX]; // 按虚拟页去重的受管页列表，page_vaddr 为 0 表示空槽
+
+    struct page *shadow_pgd_page;                                    // 私有影子页表根页，切入断点视图时作为 TTBR0 的页表基址
+    struct page *table_pages[BP_CONFIG_MAX * CONFIG_PGTABLE_LEVELS]; // 自行分配的中间页表页，供回收使用；NULL 表示空槽
+
+    struct mmu_notifier mmu_notifier; // 目标映射失效或地址空间释放时通知停止监控
+
+    spinlock_t lock;               // 保护异常、线程切换和停止路径共享的运行状态，不允许持锁睡眠
+    struct mutex lifecycle_lock;   // 串行化启动、停止和异步资源回收，允许持锁睡眠
+    struct work_struct abort_work; // 将异常或映射失效触发的可睡眠清理交给工作队列
+
+    bool stopping; // 停止切入影子页表，但保留配置供尚未退出的 UDF 异常恢复原指令
+};
+
+static struct dptdbg_context g_dptdbg = {
+    .lock = __SPIN_LOCK_UNLOCKED(g_dptdbg.lock),
+    .lifecycle_lock = __MUTEX_INITIALIZER(g_dptdbg.lifecycle_lock),
+};
 
 static struct dptdbg_page *dptdbg_find_page(uint64_t page_vaddr)
 {
-    for (size_t index = 0; index < ARRAY_SIZE(g_dptdbg_pages); index++)
-        if (g_dptdbg_pages[index].page_vaddr == page_vaddr) return &g_dptdbg_pages[index];
+    for (size_t index = 0; index < ARRAY_SIZE(g_dptdbg.pages); index++)
+    {
+        if (!g_dptdbg.pages[index].page_vaddr) break;
+        if (g_dptdbg.pages[index].page_vaddr == page_vaddr) return &g_dptdbg.pages[index];
+    }
 
     return NULL;
 }
@@ -93,167 +101,37 @@ static bool dptdbg_get_inst_index(uint64_t page_vaddr, uint64_t hook_addr, size_
 
 static bool dptdbg_handler_enter(void)
 {
-    unsigned long flags;
-    bool admitted;
-
     rcu_read_lock();
-    spin_lock_irqsave(&g_dptdbg_lock, flags);
-    admitted = g_dptdbg_info != NULL;
-    spin_unlock_irqrestore(&g_dptdbg_lock, flags);
+    unsigned long flags;
+    spin_lock_irqsave(&g_dptdbg.lock, flags);
+    bool admitted = g_dptdbg.info != NULL;
+    spin_unlock_irqrestore(&g_dptdbg.lock, flags);
     if (!admitted) rcu_read_unlock();
     return admitted;
 }
 
-static inline void dptdbg_handler_leave(void)
-{
-    rcu_read_unlock();
-}
-
 static bool dptdbg_task_is_target_locked(const struct task_struct *task)
 {
-    return task && g_dptdbg_mm && g_dptdbg_tgid > 0 && task->mm == g_dptdbg_mm && READ_ONCE(task->tgid) == g_dptdbg_tgid;
+    return task && g_dptdbg.mm && g_dptdbg.info && task->mm == g_dptdbg.mm && READ_ONCE(task->tgid) == READ_ONCE(g_dptdbg.info->tgid);
 }
 
 static bool dptdbg_task_needs_clean_view_locked(struct task_struct *task)
 {
-    return !g_dptdbg_stopping && dptdbg_task_is_target_locked(task) && thread_group_leader(task);
-}
-
-static struct page *dptdbg_clone_table_page(void *source_table)
-{
-    struct dptdbg_table_page *table_page;
-    void *shadow_mapping;
-
-    if (!source_table) return ERR_PTR(-EINVAL);
-    source_table = (void *)((unsigned long)source_table & PAGE_MASK);
-    table_page = kmalloc(sizeof(*table_page), GFP_KERNEL);
-    if (!table_page) return ERR_PTR(-ENOMEM);
-    table_page->page = alloc_page(GFP_KERNEL | __GFP_ZERO);
-    if (!table_page->page)
-    {
-        kfree(table_page);
-        return ERR_PTR(-ENOMEM);
-    }
-    shadow_mapping = page_address(table_page->page);
-    if (!shadow_mapping)
-    {
-        __free_page(table_page->page);
-        kfree(table_page);
-        return ERR_PTR(-EFAULT);
-    }
-    __builtin_memcpy(shadow_mapping, source_table, PAGE_SIZE);
-    list_add_tail(&table_page->node, &g_dptdbg_table_pages);
-    return table_page->page;
-}
-
-static int dptdbg_build_shadow_path(struct dptdbg_page *managed_page)
-{
-    uint64_t addr = managed_page->page_vaddr;
-    pgd_t *source_pgd = pgd_offset(g_dptdbg_mm, addr);
-    pgd_t *shadow_pgd = g_dptdbg_shadow_pgd + pgd_index(addr);
-
-    if (pgd_none(*source_pgd) || pgd_bad(*source_pgd)) return -EFAULT;
-
-    p4d_t *source_p4d = p4d_offset(source_pgd, addr);
-    p4d_t *shadow_p4d = p4d_offset(shadow_pgd, addr);
-#if CONFIG_PGTABLE_LEVELS > 4
-    if (p4d_none(*source_p4d) || p4d_bad(*source_p4d)) return -EFAULT;
-    if (pgd_val(*shadow_pgd) == pgd_val(*source_pgd))
-    {
-        struct page *page = dptdbg_clone_table_page(source_p4d);
-
-        if (IS_ERR(page)) return PTR_ERR(page);
-        WRITE_ONCE(*shadow_pgd, __pgd((pgd_val(*source_pgd) & ~DPTDBG_PTE_ADDR_MASK) | __phys_to_pgd_val(page_to_phys(page))));
-        shadow_p4d = p4d_offset(shadow_pgd, addr);
-    }
-#endif
-
-    pud_t *source_pud = pud_offset(source_p4d, addr);
-    pud_t *shadow_pud = pud_offset(shadow_p4d, addr);
-#if CONFIG_PGTABLE_LEVELS > 3
-    if (pud_none(*source_pud) || pud_leaf(*source_pud) || pud_bad(*source_pud)) return -EOPNOTSUPP;
-    if (p4d_val(*shadow_p4d) == p4d_val(*source_p4d))
-    {
-        struct page *page = dptdbg_clone_table_page(source_pud);
-
-        if (IS_ERR(page)) return PTR_ERR(page);
-#if CONFIG_PGTABLE_LEVELS > 4
-        WRITE_ONCE(*shadow_p4d, __p4d((p4d_val(*source_p4d) & ~DPTDBG_PTE_ADDR_MASK) | __phys_to_p4d_val(page_to_phys(page))));
-#else
-        WRITE_ONCE(*shadow_pgd, __pgd((pgd_val(*source_pgd) & ~DPTDBG_PTE_ADDR_MASK) | __phys_to_pgd_val(page_to_phys(page))));
-#endif
-        shadow_pud = pud_offset(p4d_offset(shadow_pgd, addr), addr);
-    }
-#endif
-
-    pmd_t *source_pmd = pmd_offset(source_pud, addr);
-    pmd_t *shadow_pmd = pmd_offset(shadow_pud, addr);
-#if CONFIG_PGTABLE_LEVELS > 2
-    if (pmd_none(*source_pmd) || pmd_leaf(*source_pmd) || pmd_bad(*source_pmd)) return -EOPNOTSUPP;
-    if (pud_val(*shadow_pud) == pud_val(*source_pud))
-    {
-        struct page *page = dptdbg_clone_table_page(source_pmd);
-
-        if (IS_ERR(page)) return PTR_ERR(page);
-#if CONFIG_PGTABLE_LEVELS > 3
-        WRITE_ONCE(*shadow_pud, __pud((pud_val(*source_pud) & ~DPTDBG_PTE_ADDR_MASK) | __phys_to_pud_val(page_to_phys(page))));
-#else
-        WRITE_ONCE(*shadow_pgd, __pgd((pgd_val(*source_pgd) & ~DPTDBG_PTE_ADDR_MASK) | __phys_to_pgd_val(page_to_phys(page))));
-#endif
-        shadow_pmd = pmd_offset(pud_offset(p4d_offset(shadow_pgd, addr), addr), addr);
-    }
-#endif
-
-    pte_t *source_pte = pte_offset_kernel(source_pmd, addr);
-    if (pmd_val(*shadow_pmd) == pmd_val(*source_pmd))
-    {
-        struct page *page = dptdbg_clone_table_page(source_pte);
-
-        if (IS_ERR(page)) return PTR_ERR(page);
-#if CONFIG_PGTABLE_LEVELS > 2
-        WRITE_ONCE(*shadow_pmd, __pmd((pmd_val(*source_pmd) & ~DPTDBG_PTE_ADDR_MASK) | __phys_to_pmd_val(page_to_phys(page))));
-#else
-        WRITE_ONCE(*shadow_pgd, __pgd((pgd_val(*source_pgd) & ~DPTDBG_PTE_ADDR_MASK) | __phys_to_pgd_val(page_to_phys(page))));
-#endif
-    }
-    pte_t *shadow_pte = pte_offset_kernel(pmd_offset(pud_offset(p4d_offset(shadow_pgd, addr), addr), addr), addr);
-    pteval_t mapping_value;
-
-    if (!source_pte || !shadow_pte || !pte_present(*source_pte) || !pte_present(*shadow_pte)) return -EFAULT;
-    if ((pte_val(*source_pte) & (PTE_UXN | PTE_CONT)) || !pfn_valid(pte_pfn(*source_pte))) return -EOPNOTSUPP;
-    if (pte_pfn(*source_pte) != pte_pfn(managed_page->original_mapping) || pte_pfn(*shadow_pte) != pte_pfn(*source_pte)) return -ESTALE;
-
-    mapping_value = pte_val(*source_pte);
-    WRITE_ONCE(*shadow_pte, __pte((mapping_value & ~DPTDBG_PTE_ADDR_MASK) | (__phys_to_pte_val(page_to_phys(managed_page->trap_page)) & DPTDBG_PTE_ADDR_MASK)));
-    dsb(ishst);
-    return 0;
-}
-
-static void dptdbg_release_table_pages(void)
-{
-    struct dptdbg_table_page *table_page;
-    struct dptdbg_table_page *next_table_page;
-
-    list_for_each_entry_safe(table_page, next_table_page, &g_dptdbg_table_pages, node)
-    {
-        list_del(&table_page->node);
-        __free_page(table_page->page);
-        kfree(table_page);
-    }
+    return !g_dptdbg.stopping && dptdbg_task_is_target_locked(task) && thread_group_leader(task);
 }
 
 static void dptdbg_flush_view_translations(void)
 {
-    struct mm_struct *mm = READ_ONCE(g_dptdbg_mm);
+    struct mm_struct *mm = READ_ONCE(g_dptdbg.mm);
 
     if (!mm) return;
-    flush_tlb_mm(mm);
-    isb();
+    flush_tlb_all();
 }
 
 static uint64_t dptdbg_compose_ttbr0(uint64_t template, phys_addr_t pgd_pa, bool clean_view)
 {
-    uint64_t ttbr = (template & ~DPTDBG_TTBR_BADDR_MASK) | ((uint64_t)phys_to_ttbr(pgd_pa) & DPTDBG_TTBR_BADDR_MASK);
+    const uint64_t ttbr_baddr_mask = GENMASK_ULL(47, 2);
+    uint64_t ttbr = (template & ~ttbr_baddr_mask) | ((uint64_t)phys_to_ttbr(pgd_pa) & ttbr_baddr_mask);
 
     if (clean_view) ttbr &= ~TTBR_CNP_BIT;
     return ttbr;
@@ -261,12 +139,9 @@ static uint64_t dptdbg_compose_ttbr0(uint64_t template, phys_addr_t pgd_pa, bool
 
 static bool dptdbg_write_ttbr0_locked(phys_addr_t pgd_pa, bool clean_view)
 {
-    uint64_t current_ttbr;
-    uint64_t next_ttbr;
-
     if (!pgd_pa) return false;
-    current_ttbr = read_sysreg(ttbr0_el1);
-    next_ttbr = dptdbg_compose_ttbr0(current_ttbr, pgd_pa, clean_view);
+    uint64_t current_ttbr = read_sysreg(ttbr0_el1);
+    uint64_t next_ttbr = dptdbg_compose_ttbr0(current_ttbr, pgd_pa, clean_view);
     if (current_ttbr == next_ttbr) return false;
 
     write_sysreg(next_ttbr, ttbr0_el1);
@@ -276,10 +151,8 @@ static bool dptdbg_write_ttbr0_locked(phys_addr_t pgd_pa, bool clean_view)
 
 static bool dptdbg_write_task_view_locked(struct task_struct *task, bool clean_view)
 {
-    phys_addr_t pgd_pa;
-
-    if (!task || !g_dptdbg_mm || !g_dptdbg_shadow_pgd_page) return false;
-    pgd_pa = clean_view ? page_to_phys(g_dptdbg_shadow_pgd_page) : virt_to_phys(g_dptdbg_mm->pgd);
+    if (!task || !g_dptdbg.mm || !g_dptdbg.shadow_pgd_page) return false;
+    phys_addr_t pgd_pa = clean_view ? page_to_phys(g_dptdbg.shadow_pgd_page) : virt_to_phys(g_dptdbg.mm->pgd);
     if (system_uses_ttbr0_pan())
     {
         uint64_t current_ttbr = READ_ONCE(task_thread_info(task)->ttbr0);
@@ -294,70 +167,62 @@ static bool dptdbg_write_task_view_locked(struct task_struct *task, bool clean_v
 
 static int dptdbg_handle_switch(struct pt_regs *hook_regs)
 {
-    struct task_struct *next;
-    unsigned long flags;
-    bool flush_needed = false;
-
     if (!hook_regs || !dptdbg_handler_enter()) return 0;
-    next = (struct task_struct *)hook_regs->regs[1];
+    struct task_struct *next = (struct task_struct *)hook_regs->regs[1];
     if (!next)
     {
-        dptdbg_handler_leave();
+        rcu_read_unlock();
         return 0;
     }
 
-    spin_lock_irqsave(&g_dptdbg_lock, flags);
-    if (next->mm == g_dptdbg_mm)
-        flush_needed = dptdbg_write_task_view_locked(next, dptdbg_task_needs_clean_view_locked(next));
-    spin_unlock_irqrestore(&g_dptdbg_lock, flags);
+    unsigned long flags;
+    bool flush_needed = false;
+    spin_lock_irqsave(&g_dptdbg.lock, flags);
+    if (next->mm == g_dptdbg.mm) flush_needed = dptdbg_write_task_view_locked(next, dptdbg_task_needs_clean_view_locked(next));
+    spin_unlock_irqrestore(&g_dptdbg.lock, flags);
     if (flush_needed) dptdbg_flush_view_translations();
-    dptdbg_handler_leave();
+    rcu_read_unlock();
     return 0;
 }
 
 static void dptdbg_apply_current_thread_view(void *unused)
 {
-    struct mm_struct *mm;
+    (void)unused;
     unsigned long flags;
     bool flush_needed = false;
-
-    (void)unused;
-    spin_lock_irqsave(&g_dptdbg_lock, flags);
-    if (current->mm == g_dptdbg_mm)
-        flush_needed = dptdbg_write_task_view_locked(current, dptdbg_task_needs_clean_view_locked(current));
+    spin_lock_irqsave(&g_dptdbg.lock, flags);
+    if (current->mm == g_dptdbg.mm) flush_needed = dptdbg_write_task_view_locked(current, dptdbg_task_needs_clean_view_locked(current));
     else if (!system_uses_ttbr0_pan())
     {
-        mm = current->mm ? current->mm : current->active_mm;
+        struct mm_struct *mm = current->mm ? current->mm : current->active_mm;
         if (mm) flush_needed = dptdbg_write_ttbr0_locked(virt_to_phys(mm->pgd), false);
     }
-    spin_unlock_irqrestore(&g_dptdbg_lock, flags);
+    spin_unlock_irqrestore(&g_dptdbg.lock, flags);
     if (flush_needed) dptdbg_flush_view_translations();
 }
 
 static void dptdbg_restore_saved_thread_views(void)
 {
-    struct task_struct *process;
-    struct task_struct *task;
-    unsigned long flags;
-    struct mm_struct *target_mm;
-    pid_t target_tgid;
-
     if (!system_uses_ttbr0_pan()) return;
 
-    spin_lock_irqsave(&g_dptdbg_lock, flags);
-    target_mm = g_dptdbg_mm;
-    target_tgid = g_dptdbg_tgid;
-    spin_unlock_irqrestore(&g_dptdbg_lock, flags);
+    unsigned long flags;
+    spin_lock_irqsave(&g_dptdbg.lock, flags);
+    struct mm_struct *target_mm = g_dptdbg.mm;
+    struct break_point *info = g_dptdbg.info;
+    pid_t target_tgid = info ? READ_ONCE(info->tgid) : 0;
+    spin_unlock_irqrestore(&g_dptdbg.lock, flags);
 
     if (!target_mm || target_tgid <= 0) return;
 
+    struct task_struct *process;
+    struct task_struct *task;
     rcu_read_lock();
     for_each_process_thread(process, task)
     {
         if (READ_ONCE(task->tgid) != target_tgid || task->mm != target_mm) continue;
-        spin_lock_irqsave(&g_dptdbg_lock, flags);
-        if (g_dptdbg_mm == target_mm && g_dptdbg_tgid == target_tgid) (void)dptdbg_write_task_view_locked(task, false);
-        spin_unlock_irqrestore(&g_dptdbg_lock, flags);
+        spin_lock_irqsave(&g_dptdbg.lock, flags);
+        if (g_dptdbg.mm == target_mm && g_dptdbg.info == info && READ_ONCE(info->tgid) == target_tgid) (void)dptdbg_write_task_view_locked(task, false);
+        spin_unlock_irqrestore(&g_dptdbg.lock, flags);
     }
     rcu_read_unlock();
 }
@@ -367,70 +232,68 @@ static void dptdbg_abort_monitor(void)
     unsigned long flags;
     bool flush_needed = false;
     bool schedule_cleanup = false;
-
-    spin_lock_irqsave(&g_dptdbg_lock, flags);
-    if (!g_dptdbg_mm)
+    spin_lock_irqsave(&g_dptdbg.lock, flags);
+    if (!g_dptdbg.mm)
     {
-        spin_unlock_irqrestore(&g_dptdbg_lock, flags);
+        spin_unlock_irqrestore(&g_dptdbg.lock, flags);
         return;
     }
 
-    if (!g_dptdbg_stopping)
+    if (!g_dptdbg.stopping)
     {
-        g_dptdbg_stopping = true;
+        g_dptdbg.stopping = true;
         schedule_cleanup = true;
     }
-    if (current->mm == g_dptdbg_mm) flush_needed = dptdbg_write_task_view_locked(current, false);
-    spin_unlock_irqrestore(&g_dptdbg_lock, flags);
+    if (current->mm == g_dptdbg.mm) flush_needed = dptdbg_write_task_view_locked(current, false);
+    spin_unlock_irqrestore(&g_dptdbg.lock, flags);
 
     if (flush_needed || schedule_cleanup) dptdbg_flush_view_translations();
-    if (schedule_cleanup) schedule_work(&g_dptdbg_abort_work);
+    if (schedule_cleanup) schedule_work(&g_dptdbg.abort_work);
 }
 
 static void dptdbg_mmu_notifier_release(struct mmu_notifier *notifier, struct mm_struct *mm)
 {
-    unsigned long flags;
-    bool schedule_cleanup;
-
     (void)notifier;
-    spin_lock_irqsave(&g_dptdbg_lock, flags);
-    if (g_dptdbg_mm != mm)
+    unsigned long flags;
+    spin_lock_irqsave(&g_dptdbg.lock, flags);
+    if (g_dptdbg.mm != mm)
     {
-        spin_unlock_irqrestore(&g_dptdbg_lock, flags);
+        spin_unlock_irqrestore(&g_dptdbg.lock, flags);
         return;
     }
-    schedule_cleanup = !g_dptdbg_stopping;
-    g_dptdbg_stopping = true;
-    spin_unlock_irqrestore(&g_dptdbg_lock, flags);
+    bool schedule_cleanup = !g_dptdbg.stopping;
+    g_dptdbg.stopping = true;
+    spin_unlock_irqrestore(&g_dptdbg.lock, flags);
 
     dptdbg_restore_saved_thread_views();
     on_each_cpu(dptdbg_apply_current_thread_view, NULL, 1);
     dptdbg_flush_view_translations();
-    if (schedule_cleanup) schedule_work(&g_dptdbg_abort_work);
+    if (schedule_cleanup) schedule_work(&g_dptdbg.abort_work);
 }
 
 static int dptdbg_mmu_notifier_invalidate_range_start(struct mmu_notifier *notifier, const struct mmu_notifier_range *range)
 {
-    unsigned long flags;
-    bool active;
-
     (void)notifier;
     if (!mmu_notifier_range_blockable(range)) return -EAGAIN;
 
-    spin_lock_irqsave(&g_dptdbg_lock, flags);
-    active = g_dptdbg_mm == range->mm;
-    if (active) g_dptdbg_stopping = true;
-    spin_unlock_irqrestore(&g_dptdbg_lock, flags);
-    if (!active) return 0;
+    unsigned long flags;
+    spin_lock_irqsave(&g_dptdbg.lock, flags);
+    if (g_dptdbg.mm != range->mm || g_dptdbg.stopping)
+    {
+        spin_unlock_irqrestore(&g_dptdbg.lock, flags);
+        return 0;
+    }
+    g_dptdbg.stopping = true;
+    spin_unlock_irqrestore(&g_dptdbg.lock, flags);
 
     dptdbg_restore_saved_thread_views();
     on_each_cpu(dptdbg_apply_current_thread_view, NULL, 1);
     dptdbg_flush_view_translations();
-    schedule_work(&g_dptdbg_abort_work);
+    schedule_work(&g_dptdbg.abort_work);
     return 0;
 }
 
-static const struct mmu_notifier_ops g_dptdbg_mmu_notifier_ops = {
+static const struct mmu_notifier_ops dptdbg_mmu_notifier_ops = {
     .release = dptdbg_mmu_notifier_release,
     .invalidate_range_start = dptdbg_mmu_notifier_invalidate_range_start,
 };
@@ -438,75 +301,62 @@ static const struct mmu_notifier_ops g_dptdbg_mmu_notifier_ops = {
 static int dptdbg_handle_undef_sync(struct pt_regs *hook_regs)
 {
     struct fp_regs fp_regs __attribute__((__uninitialized__));
-    struct dptdbg_page *managed_page;
-    struct bp_point *hit_point = NULL;
-    struct pt_regs *regs;
-    void (*on_hit)(void *regs, void *fp_regs, void *hit_point) = NULL;
-    uint32_t original_inst = 0;
-    uint64_t pc;
-    uint32_t *trap_code;
     unsigned long flags;
-    size_t point_slot;
-    size_t inst_index;
-    bool target_main;
-    bool exiting;
-    bool stopping;
-    bool abort_for_fault = false;
-    unsigned int exception_class;
     int result = 0;
 
     if (!hook_regs || !dptdbg_handler_enter()) return 0;
-    exception_class = ESR_ELx_EC(read_sysreg(esr_el1));
+    unsigned int exception_class = ESR_ELx_EC(read_sysreg(esr_el1));
     if (exception_class != ESR_ELx_EC_UNKNOWN)
     {
         if ((exception_class == ESR_ELx_EC_IABT_LOW || exception_class == ESR_ELx_EC_DABT_LOW) && current->mm)
         {
-            spin_lock_irqsave(&g_dptdbg_lock, flags);
-            abort_for_fault = g_dptdbg_mm == current->mm;
-            spin_unlock_irqrestore(&g_dptdbg_lock, flags);
-            if (abort_for_fault) dptdbg_abort_monitor();
+            spin_lock_irqsave(&g_dptdbg.lock, flags);
+            bool target_mm = g_dptdbg.mm == current->mm;
+            spin_unlock_irqrestore(&g_dptdbg.lock, flags);
+            if (target_mm) dptdbg_abort_monitor();
         }
         goto out;
     }
-    regs = (struct pt_regs *)(uintptr_t)hook_regs->regs[0];
+    struct pt_regs *regs = (struct pt_regs *)(uintptr_t)hook_regs->regs[0];
     if (!regs || !current->mm || !user_mode(regs)) goto out;
 
-    pc = untagged_addr(regs->pc);
-    spin_lock_irqsave(&g_dptdbg_lock, flags);
-    if (g_dptdbg_mm != current->mm || !g_dptdbg_info)
+    uint64_t pc = untagged_addr(regs->pc);
+    spin_lock_irqsave(&g_dptdbg.lock, flags);
+    struct break_point *info = g_dptdbg.info;
+    if (g_dptdbg.mm != current->mm || !info)
     {
-        spin_unlock_irqrestore(&g_dptdbg_lock, flags);
+        spin_unlock_irqrestore(&g_dptdbg.lock, flags);
         goto out;
     }
-    hit_point = bp_info_find_point_by_pc(g_dptdbg_info, pc);
+    struct bp_point *hit_point = bp_info_find_point_by_pc(info, pc);
     if (!hit_point)
     {
-        spin_unlock_irqrestore(&g_dptdbg_lock, flags);
+        spin_unlock_irqrestore(&g_dptdbg.lock, flags);
         goto out;
     }
-    point_slot = hit_point - g_dptdbg_info->points;
-    managed_page = dptdbg_find_page(pc & PAGE_MASK);
+    struct dptdbg_page *managed_page = dptdbg_find_page(pc & PAGE_MASK);
     if (!managed_page || !managed_page->trap_page)
     {
-        spin_unlock_irqrestore(&g_dptdbg_lock, flags);
+        spin_unlock_irqrestore(&g_dptdbg.lock, flags);
         goto out;
     }
-    trap_code = page_address(managed_page->trap_page);
-    if (!trap_code || !dptdbg_get_inst_index(managed_page->page_vaddr, pc, &inst_index) || READ_ONCE(trap_code[inst_index]) != DPTDBG_UDF_INST)
+    uint32_t *trap_code = page_address(managed_page->trap_page);
+    size_t inst_index;
+    if (!trap_code || !dptdbg_get_inst_index(managed_page->page_vaddr, pc, &inst_index) || READ_ONCE(trap_code[inst_index]) != 0U)
     {
-        spin_unlock_irqrestore(&g_dptdbg_lock, flags);
+        spin_unlock_irqrestore(&g_dptdbg.lock, flags);
         goto out;
     }
-    original_inst = g_dptdbg_original_insts[point_slot];
+    uint32_t original_inst = managed_page->original_insts[hit_point - info->points];
 
-    stopping = g_dptdbg_stopping;
-    exiting = !!(READ_ONCE(current->flags) & PF_EXITING);
-    target_main = dptdbg_task_is_target_locked(current) && thread_group_leader(current);
+    bool stopping = g_dptdbg.stopping;
+    bool exiting = !!(READ_ONCE(current->flags) & PF_EXITING);
+    bool target_main = dptdbg_task_is_target_locked(current) && thread_group_leader(current);
     if (stopping || exiting)
     {
         bool emulated;
 
-        spin_unlock_irqrestore(&g_dptdbg_lock, flags);
+        spin_unlock_irqrestore(&g_dptdbg.lock, flags);
         read_all_q_regs(&fp_regs);
         emulated = regs->pc != pc || emulate_inst(regs, &fp_regs, original_inst);
         write_all_q_regs(&fp_regs);
@@ -518,12 +368,12 @@ static int dptdbg_handle_undef_sync(struct pt_regs *hook_regs)
         bool flush_needed = dptdbg_write_task_view_locked(current, true);
 
         result = 1;
-        spin_unlock_irqrestore(&g_dptdbg_lock, flags);
+        spin_unlock_irqrestore(&g_dptdbg.lock, flags);
         if (flush_needed) dptdbg_flush_view_translations();
         goto out;
     }
-    on_hit = READ_ONCE(hit_point->on_hit);
-    spin_unlock_irqrestore(&g_dptdbg_lock, flags);
+    void (*on_hit)(void *regs, void *fp_regs, void *hit_point) = READ_ONCE(hit_point->on_hit);
+    spin_unlock_irqrestore(&g_dptdbg.lock, flags);
 
     result = 1;
     read_all_q_regs(&fp_regs);
@@ -534,7 +384,7 @@ static int dptdbg_handle_undef_sync(struct pt_regs *hook_regs)
     }
     write_all_q_regs(&fp_regs);
 out:
-    dptdbg_handler_leave();
+    rcu_read_unlock();
     return result;
 }
 
@@ -547,128 +397,23 @@ static struct hook_entry g_dptdbg_switch_hook[] = {
     HOOK_ENTRY("__switch_to", dptdbg_handle_switch),
 };
 
-static void dptdbg_quiesce_hooks(void)
+__attribute__((no_sanitize("cfi"))) static void dptdbg_release_state(void)
 {
-    inline_hook_remove(g_dptdbg_switch_hook);
-    for (size_t index = 0; index < ARRAY_SIZE(g_dptdbg_sync_hooks); index++) inline_hook_remove(g_dptdbg_sync_hooks[index]);
-    synchronize_rcu();
-}
-
-static int dptdbg_install_point(struct break_point *info, struct bp_point *point)
-{
-    struct dptdbg_page *managed_page;
-    struct bp_point *duplicate_point;
-    struct vm_area_struct *vma;
-    struct page *source_page;
-    uint32_t *trap_code;
-    uint64_t hook_addr;
-    pte_t mapping;
-    pteval_t mapping_value;
-    vm_flags_t vm_flags;
-    void *source_mapping;
-    void *trap_mapping;
-    size_t point_slot;
-    size_t inst_index;
-    int status;
-
-    if (!point || (READ_ONCE(point->hit_addr) & 0x3ULL)) return -EINVAL;
-    point_slot = point - info->points;
-    hook_addr = untagged_addr(READ_ONCE(point->hit_addr));
-    if (!hook_addr || hook_addr >= g_dptdbg_mm->task_size || sizeof(uint32_t) > g_dptdbg_mm->task_size - hook_addr) return -EFAULT;
-
-    duplicate_point = bp_info_find_point_by_pc(info, hook_addr);
-    if (duplicate_point != point) return -EEXIST;
-
-    managed_page = dptdbg_find_page(hook_addr & PAGE_MASK);
-    if (!managed_page)
-    {
-        managed_page = NULL;
-        for (size_t index = 0; index < ARRAY_SIZE(g_dptdbg_pages); index++)
-        {
-            if (!g_dptdbg_pages[index].page_vaddr)
-            {
-                managed_page = &g_dptdbg_pages[index];
-                break;
-            }
-        }
-        if (!managed_page) return -ENOSPC;
-
-        if (!g_dptdbg_mm || (hook_addr & PAGE_MASK) > ULONG_MAX - PAGE_SIZE) return -EINVAL;
-        vma = find_vma(g_dptdbg_mm, hook_addr & PAGE_MASK);
-        if (!vma || vma->vm_start > (hook_addr & PAGE_MASK) || vma->vm_end < (hook_addr & PAGE_MASK) + PAGE_SIZE) return -EFAULT;
-        vm_flags = READ_ONCE(vma->vm_flags);
-        if (!(vm_flags & VM_EXEC) || !(vm_flags & VM_MAYWRITE)) return -EACCES;
-        if (vm_flags & (VM_WRITE | VM_SHARED | VM_MAYSHARE | VM_HUGETLB | VM_PFNMAP | VM_MIXEDMAP | VM_IO)) return -EOPNOTSUPP;
-
-        status = read_user_pte_value(g_dptdbg_mm, hook_addr & PAGE_MASK, &mapping_value);
-        if (status) return status;
-        mapping = __pte(mapping_value);
-        if (!pte_present(mapping) || !pfn_valid(pte_pfn(mapping))) return -EFAULT;
-        if (mapping_value & PTE_UXN) return -EACCES;
-
-        source_page = pfn_to_page(pte_pfn(mapping));
-        source_mapping = page_address(source_page);
-        if (!source_mapping) return -EFAULT;
-
-        managed_page->trap_page = alloc_page(GFP_KERNEL | __GFP_ZERO);
-        if (!managed_page->trap_page) return -ENOMEM;
-        trap_mapping = page_address(managed_page->trap_page);
-        if (!trap_mapping)
-        {
-            __free_page(managed_page->trap_page);
-            managed_page->trap_page = NULL;
-            return -EFAULT;
-        }
-
-        __builtin_memcpy(trap_mapping, source_mapping, PAGE_SIZE);
-        managed_page->original_mapping = mapping;
-        managed_page->page_vaddr = hook_addr & PAGE_MASK;
-    }
-
-    trap_code = page_address(managed_page->trap_page);
-    if (!trap_code) return -EFAULT;
-    if (!dptdbg_get_inst_index(managed_page->page_vaddr, hook_addr, &inst_index)) return -EFAULT;
-    if (trap_code[inst_index] == DPTDBG_UDF_INST) return -ESTALE;
-
-    g_dptdbg_original_insts[point_slot] = trap_code[inst_index];
-    WRITE_ONCE(trap_code[inst_index], DPTDBG_UDF_INST);
-    return 0;
-}
-
-static int dptdbg_sync_trap_pages(void)
-{
-    for (size_t page_index = 0; page_index < ARRAY_SIZE(g_dptdbg_pages); page_index++)
-    {
-        struct dptdbg_page *managed_page = &g_dptdbg_pages[page_index];
-
-        if (!managed_page->page_vaddr) continue;
-        void *trap_code = page_address(managed_page->trap_page);
-        if (!trap_code) return -EFAULT;
-        int status = arm64_sync_code_range_all_cpus(trap_code, PAGE_SIZE);
-        if (status) return status;
-    }
-    return 0;
-}
-
-static int dptdbg_release_state(void)
-{
-    struct page *trap_pages[BP_CONFIG_MAX] = {NULL};
-    struct page *shadow_pgd_page;
-    struct mm_struct *mm;
     unsigned long flags;
 
-    spin_lock_irqsave(&g_dptdbg_lock, flags);
-    if (!g_dptdbg_mm)
+    spin_lock_irqsave(&g_dptdbg.lock, flags);
+    if (!g_dptdbg.mm)
     {
-        g_dptdbg_info = NULL;
-        g_dptdbg_tgid = 0;
-        g_dptdbg_stopping = false;
-        spin_unlock_irqrestore(&g_dptdbg_lock, flags);
-        dptdbg_quiesce_hooks();
-        return 0;
+        g_dptdbg.info = NULL;
+        g_dptdbg.stopping = false;
+        spin_unlock_irqrestore(&g_dptdbg.lock, flags);
+        inline_hook_remove(g_dptdbg_switch_hook);
+        for (size_t index = 0; index < ARRAY_SIZE(g_dptdbg_sync_hooks); index++) inline_hook_remove(g_dptdbg_sync_hooks[index]);
+        synchronize_rcu();
+        return;
     }
-    g_dptdbg_stopping = true;
-    spin_unlock_irqrestore(&g_dptdbg_lock, flags);
+    g_dptdbg.stopping = true;
+    spin_unlock_irqrestore(&g_dptdbg.lock, flags);
 
     inline_hook_remove(g_dptdbg_switch_hook);
     synchronize_rcu();
@@ -676,244 +421,414 @@ static int dptdbg_release_state(void)
     on_each_cpu(dptdbg_apply_current_thread_view, NULL, 1);
     dptdbg_flush_view_translations();
 
-    if (g_dptdbg_notifier_registered)
+    if (g_dptdbg.mmu_notifier.ops)
     {
-        mmu_notifier_unregister(&g_dptdbg_mmu_notifier, g_dptdbg_mm);
-        g_dptdbg_notifier_registered = false;
+        void (*unregister_fn)(struct mmu_notifier *subscription, struct mm_struct *mm) = (void *)generic_kallsyms_lookup_name("mmu_notifier_unregister");
+        if (unregister_fn) unregister_fn(&g_dptdbg.mmu_notifier, g_dptdbg.mm);
+        g_dptdbg.mmu_notifier.ops = NULL;
     }
 
-    spin_lock_irqsave(&g_dptdbg_lock, flags);
-    g_dptdbg_info = NULL;
-    spin_unlock_irqrestore(&g_dptdbg_lock, flags);
+    spin_lock_irqsave(&g_dptdbg.lock, flags);
+    g_dptdbg.info = NULL;
+    spin_unlock_irqrestore(&g_dptdbg.lock, flags);
     for (size_t index = 0; index < ARRAY_SIZE(g_dptdbg_sync_hooks); index++) inline_hook_remove(g_dptdbg_sync_hooks[index]);
     synchronize_rcu();
 
-    spin_lock_irqsave(&g_dptdbg_lock, flags);
-    mm = g_dptdbg_mm;
-    for (size_t index = 0; index < ARRAY_SIZE(g_dptdbg_pages); index++)
+    struct page *trap_pages[BP_CONFIG_MAX] = {NULL};
+    spin_lock_irqsave(&g_dptdbg.lock, flags);
+    struct mm_struct *mm = g_dptdbg.mm;
+    for (size_t index = 0; index < ARRAY_SIZE(g_dptdbg.pages); index++)
     {
-        trap_pages[index] = g_dptdbg_pages[index].trap_page;
+        if (!g_dptdbg.pages[index].page_vaddr) break;
+        trap_pages[index] = g_dptdbg.pages[index].trap_page;
     }
 
-    shadow_pgd_page = g_dptdbg_shadow_pgd_page;
+    struct page *shadow_pgd_page = g_dptdbg.shadow_pgd_page;
 
-    g_dptdbg_mm = NULL;
-    g_dptdbg_tgid = 0;
-    __builtin_memset(g_dptdbg_pages, 0, sizeof(g_dptdbg_pages));
-    __builtin_memset(g_dptdbg_original_insts, 0, sizeof(g_dptdbg_original_insts));
-    g_dptdbg_shadow_pgd_page = NULL;
-    g_dptdbg_shadow_pgd = NULL;
-    g_dptdbg_stopping = false;
-    g_dptdbg_notifier_registered = false;
-    spin_unlock_irqrestore(&g_dptdbg_lock, flags);
+    g_dptdbg.mm = NULL;
+    __builtin_memset(g_dptdbg.pages, 0, sizeof(g_dptdbg.pages));
+    g_dptdbg.shadow_pgd_page = NULL;
+    g_dptdbg.stopping = false;
+    spin_unlock_irqrestore(&g_dptdbg.lock, flags);
 
     for (size_t index = 0; index < ARRAY_SIZE(trap_pages); index++)
         if (trap_pages[index]) __free_page(trap_pages[index]);
-    dptdbg_release_table_pages();
+    for (size_t index = ARRAY_SIZE(g_dptdbg.table_pages); index > 0; index--)
+    {
+        struct page *page = g_dptdbg.table_pages[index - 1];
+        g_dptdbg.table_pages[index - 1] = NULL;
+        if (page) __free_page(page);
+    }
     if (shadow_pgd_page) __free_page(shadow_pgd_page);
     mmput(mm);
-    return 0;
 }
 
 static void dptdbg_abort_workfn(struct work_struct *work)
 {
+    (void)work;
+    mutex_lock(&g_dptdbg.lifecycle_lock);
     unsigned long flags;
-    bool should_release;
-
-    mutex_lock(&g_dptdbg_lifecycle_lock);
-    spin_lock_irqsave(&g_dptdbg_lock, flags);
-    should_release = g_dptdbg_mm && g_dptdbg_stopping;
-    spin_unlock_irqrestore(&g_dptdbg_lock, flags);
-    if (should_release) (void)dptdbg_release_state();
-    mutex_unlock(&g_dptdbg_lifecycle_lock);
+    spin_lock_irqsave(&g_dptdbg.lock, flags);
+    bool should_release = g_dptdbg.mm && g_dptdbg.stopping;
+    spin_unlock_irqrestore(&g_dptdbg.lock, flags);
+    if (should_release) dptdbg_release_state();
+    mutex_unlock(&g_dptdbg.lifecycle_lock);
 }
 
 static inline void dptdbg_stop_monitor(void)
 {
-    mutex_lock(&g_dptdbg_lifecycle_lock);
-    (void)dptdbg_release_state();
-    mutex_unlock(&g_dptdbg_lifecycle_lock);
-    if (g_dptdbg_work_initialized) cancel_work_sync(&g_dptdbg_abort_work);
+    mutex_lock(&g_dptdbg.lifecycle_lock);
+    dptdbg_release_state();
+    mutex_unlock(&g_dptdbg.lifecycle_lock);
+    if (g_dptdbg.abort_work.func) cancel_work_sync(&g_dptdbg.abort_work);
 }
 
-static int dptdbg_start_monitor(struct break_point *info)
+static struct page *dptdbg_clone_table_page(void *source_table)
 {
-    /*
-     * 启动 DPTDBG 的顺序必须保持为：
-     *
-     *   1. 安装异常入口和任务切换入口，但先禁止 handler 进入；
-     *   2. 读取目标进程的执行页，并为断点页建立 trap page；
-      *   3. 注册目标 mm 的 MMU notifier，并为受管代码页建立私有 shadow 路径；
-     *   4. 在每个 trap page 中写入 UDF，并同步指令缓存；
-      *   5. 一次发布运行态，让目标主线程开始使用 shadow view。
-        *
-      * 构建期间 handler 始终被阻塞，不会接触未完成的页表或断点状态；
-      * 目标 mm 的任意页表失效都会冻结并撤销当前实例，避免继续使用陈旧
-      * 的 shadow 映射。任一阶段失败时，统一清理路径回收已创建的 trap page、
-      * shadow 路径页、mm 引用以及 inline hook。
-     */
-    struct mm_struct *mm;
-    unsigned long flags;
-    size_t next_slot = 0;
-    struct bp_point *point;
-    int status;
+    if (!source_table) return ERR_PTR(-EINVAL);
+    size_t slot = 0;
+    while (slot < ARRAY_SIZE(g_dptdbg.table_pages) && g_dptdbg.table_pages[slot]) slot++;
+    if (slot == ARRAY_SIZE(g_dptdbg.table_pages)) return ERR_PTR(-ENOSPC);
+    struct page *page = alloc_page(GFP_KERNEL);
+    if (!page) return ERR_PTR(-ENOMEM);
+    void *destination = page_address(page);
+    if (!destination)
+    {
+        __free_page(page);
+        return ERR_PTR(-EFAULT);
+    }
+    __builtin_memcpy(destination, (void *)((unsigned long)source_table & PAGE_MASK), PAGE_SIZE);
+    g_dptdbg.table_pages[slot] = page;
+    return page;
+}
 
-    /* next_slot 为空时只查询首个匹配项；在释放旧实例前完成无副作用校验。 */
+__attribute__((no_sanitize("cfi"))) static int dptdbg_start_monitor(struct break_point *info)
+{
     if (!bp_info_find_configured_type(info, BP_BREAKPOINT_X, NULL)) return -EINVAL;
 
-    /*
-     * start、stop 和异步 abort 共用同一把生命周期锁，避免清理线程在
-     * 启动过程的中间状态上再次释放资源。
-     */
-    mutex_lock(&g_dptdbg_lifecycle_lock);
-    if (!g_dptdbg_work_initialized)
-    {
-        /* abort 可能在异常 handler 中异步排队，因此 work 只初始化一次。 */
-        INIT_WORK(&g_dptdbg_abort_work, dptdbg_abort_workfn);
-        g_dptdbg_work_initialized = true;
-    }
-    /*
-     * 允许重复设置监控：先完整撤销旧实例，再从干净状态建立新实例。
-     * dptdbg_release_state() 内部还会等待正在运行的 handler 离开。
-     */
-    status = dptdbg_release_state();
-    if (status) goto out_unlock;
+    mutex_lock(&g_dptdbg.lifecycle_lock);
+    if (!g_dptdbg.abort_work.func) INIT_WORK(&g_dptdbg.abort_work, dptdbg_abort_workfn);
+    dptdbg_release_state();
 
-    /*
-    * 不同 Android 内核可能导出不同名字的 EL0 同步入口，按候选表尝试。
-    * switch hook 负责在线程切换时重新选择 normal/shadow 页表；它和同步
-    * hook 必须成对安装，否则异常可能进入但无法维持正确的线程 view。
-     */
-    status = -ENOENT;
-    for (int index = 0; index < ARRAY_SIZE(g_dptdbg_sync_hooks); index++)
+    int status = -ENOENT;
+    for (size_t index = 0; index < ARRAY_SIZE(g_dptdbg_sync_hooks); index++)
     {
         status = inline_hook_install(g_dptdbg_sync_hooks[index]);
         if (!status) break;
     }
-    if (!status)
-    {
-        status = inline_hook_install(g_dptdbg_switch_hook);
-        if (status) for (size_t index = 0; index < ARRAY_SIZE(g_dptdbg_sync_hooks); index++) inline_hook_remove(g_dptdbg_sync_hooks[index]);
-    }
     if (status) goto out_unlock;
+    status = inline_hook_install(g_dptdbg_switch_hook);
+    if (status) goto out_release;
 
-    mm = get_mm_by_pid(READ_ONCE(info->tgid));
-    /* get_mm_by_pid() 返回带引用的 mm，引用由 dptdbg_release_state() 释放。 */
+    struct mm_struct *mm = get_mm_by_pid(READ_ONCE(info->tgid));
     if (!mm)
     {
-        dptdbg_quiesce_hooks();
         status = -EINVAL;
-        goto out_unlock;
+        goto out_release;
     }
+    unsigned long flags;
+    spin_lock_irqsave(&g_dptdbg.lock, flags);
+    g_dptdbg.mm = mm;
+    spin_unlock_irqrestore(&g_dptdbg.lock, flags);
 
-    /*
-    * 先登记目标 mm 和配置，但 handler 仍被阻塞。此时这些全局字段只用于
-    * 构建阶段的辅助函数，不代表监控已经生效。
-     */
-    spin_lock_irqsave(&g_dptdbg_lock, flags);
-    g_dptdbg_mm = mm;
-    g_dptdbg_tgid = READ_ONCE(info->tgid);
-    g_dptdbg_stopping = false;
-    spin_unlock_irqrestore(&g_dptdbg_lock, flags);
-
-    g_dptdbg_mmu_notifier.ops = &g_dptdbg_mmu_notifier_ops;
-    g_dptdbg_notifier_registered = true;
-    status = mmu_notifier_register(&g_dptdbg_mmu_notifier, mm);
+    int (*register_fn)(struct mmu_notifier *subscription, struct mm_struct *mm) = (void *)generic_kallsyms_lookup_name("mmu_notifier_register");
+    if (!register_fn || !generic_kallsyms_lookup_name("mmu_notifier_unregister"))
+    {
+        status = -ENOENT;
+        goto out_release;
+    }
+    g_dptdbg.mmu_notifier.ops = &dptdbg_mmu_notifier_ops;
+    status = register_fn(&g_dptdbg.mmu_notifier, mm);
     if (status)
     {
-        g_dptdbg_notifier_registered = false;
-        (void)dptdbg_release_state();
-        goto out_unlock;
+        g_dptdbg.mmu_notifier.ops = NULL;
+        goto out_release;
     }
 
-    /*
-     * dptdbg_install_point() 需要稳定地读取 VMA 和用户 PTE，并复制原始
-     * 指令到独立的 trap page；整个批次建立期间持有 mmap 读锁。
-     */
     mmap_read_lock(mm);
-
-    /*
-     * 逐个收集所有执行断点。该阶段只保存原始指令和原始映射，还不会写
-     * UDF，因此即使中途失败，目标进程也不会看到半成品的断点页。
-     */
-    status = 0;
+    size_t next_slot = 0;
+    struct bp_point *point;
     while ((point = bp_info_find_configured_type(info, BP_BREAKPOINT_X, &next_slot)))
     {
-        status = dptdbg_install_point(info, point);
-        if (status) break;
+        uint64_t hook_addr = untagged_addr(READ_ONCE(point->hit_addr));
+        if (hook_addr & (sizeof(uint32_t) - 1U))
+        {
+            status = -EINVAL;
+            goto out_mmap;
+        }
+        uint64_t page_vaddr = hook_addr & PAGE_MASK;
+        if (!hook_addr || hook_addr >= mm->task_size || sizeof(uint32_t) > mm->task_size - hook_addr || page_vaddr > ULONG_MAX - PAGE_SIZE)
+        {
+            status = -EFAULT;
+            goto out_mmap;
+        }
+        if (bp_info_find_point_by_pc(info, hook_addr) != point)
+        {
+            status = -EEXIST;
+            goto out_mmap;
+        }
+
+        struct dptdbg_page *managed_page = dptdbg_find_page(page_vaddr);
+        if (!managed_page)
+        {
+            for (size_t page_index = 0; page_index < ARRAY_SIZE(g_dptdbg.pages); page_index++)
+            {
+                if (!g_dptdbg.pages[page_index].page_vaddr)
+                {
+                    managed_page = &g_dptdbg.pages[page_index];
+                    break;
+                }
+            }
+            if (!managed_page)
+            {
+                status = -ENOSPC;
+                goto out_mmap;
+            }
+            struct vm_area_struct *vma = find_vma(mm, page_vaddr);
+            if (!vma || vma->vm_start > page_vaddr || vma->vm_end < page_vaddr + PAGE_SIZE)
+            {
+                status = -EFAULT;
+                goto out_mmap;
+            }
+            vm_flags_t vm_flags = READ_ONCE(vma->vm_flags);
+            if ((vm_flags & (VM_EXEC | VM_MAYWRITE)) != (VM_EXEC | VM_MAYWRITE))
+            {
+                status = -EACCES;
+                goto out_mmap;
+            }
+            if (vm_flags & (VM_WRITE | VM_SHARED | VM_MAYSHARE | VM_HUGETLB | VM_PFNMAP | VM_MIXEDMAP | VM_IO))
+            {
+                status = -EOPNOTSUPP;
+                goto out_mmap;
+            }
+
+            pteval_t mapping_value;
+            status = read_user_pte_value(mm, page_vaddr, &mapping_value);
+            if (status) goto out_mmap;
+            pte_t mapping = __pte(mapping_value);
+            if (!pte_present(mapping) || !pfn_valid(pte_pfn(mapping)))
+            {
+                status = -EFAULT;
+                goto out_mmap;
+            }
+            if (mapping_value & PTE_UXN)
+            {
+                status = -EACCES;
+                goto out_mmap;
+            }
+
+            managed_page->trap_page = alloc_page(GFP_KERNEL);
+            if (!managed_page->trap_page)
+            {
+                status = -ENOMEM;
+                goto out_mmap;
+            }
+            void *trap_mapping = page_address(managed_page->trap_page);
+            void *source_mapping = page_address(pfn_to_page(pte_pfn(mapping)));
+            if (!trap_mapping || !source_mapping)
+            {
+                __free_page(managed_page->trap_page);
+                managed_page->trap_page = NULL;
+                status = -EFAULT;
+                goto out_mmap;
+            }
+            __builtin_memcpy(trap_mapping, source_mapping, PAGE_SIZE);
+            managed_page->original_mapping = mapping;
+            managed_page->page_vaddr = page_vaddr;
+        }
+
+        uint32_t *trap_code = page_address(managed_page->trap_page);
+        if (!trap_code)
+        {
+            status = -EFAULT;
+            goto out_mmap;
+        }
+        size_t inst_index;
+        if (!dptdbg_get_inst_index(managed_page->page_vaddr, hook_addr, &inst_index))
+        {
+            status = -EFAULT;
+            goto out_mmap;
+        }
+        if (trap_code[inst_index] == 0U)
+        {
+            status = -ESTALE;
+            goto out_mmap;
+        }
+        managed_page->original_insts[point - info->points] = trap_code[inst_index];
+        WRITE_ONCE(trap_code[inst_index], 0U);
     }
 
-    if (!status)
+    g_dptdbg.shadow_pgd_page = alloc_page(GFP_KERNEL | __GFP_ZERO);
+    if (!g_dptdbg.shadow_pgd_page)
     {
-        /*
-         * 为目标 mm 分配独立 PGD。shadow PGD 只复制受管代码页所需的页表
-         * 路径并替换 trap 映射；normal 页表本身不被修改。
-         */
-        g_dptdbg_shadow_pgd_page = alloc_page(GFP_KERNEL | __GFP_ZERO);
-        if (!g_dptdbg_shadow_pgd_page) status = -ENOMEM;
-        else
-        {
-            g_dptdbg_shadow_pgd = page_address(g_dptdbg_shadow_pgd_page);
-            if (!g_dptdbg_shadow_pgd)
-            {
-                __free_page(g_dptdbg_shadow_pgd_page);
-                g_dptdbg_shadow_pgd_page = NULL;
-                status = -EFAULT;
-            }
-            else
-            {
-                __builtin_memcpy(g_dptdbg_shadow_pgd, g_dptdbg_mm->pgd, PGD_SIZE);
-                /* 仅为受管代码页建立独立的页表路径。 */
-                for (size_t page_index = 0; page_index < ARRAY_SIZE(g_dptdbg_pages) && !status; page_index++)
-                {
-                    if (!g_dptdbg_pages[page_index].page_vaddr) continue;
-                    status = dptdbg_build_shadow_path(&g_dptdbg_pages[page_index]);
-                }
-                if (!status)
-                {
-                    dsb(ishst);
-                }
-                else
-                {
-                    /* 页表构造失败时，局部创建的页表页和 PGD 立即回收。 */
-                    dptdbg_release_table_pages();
-                    __free_page(g_dptdbg_shadow_pgd_page);
-                    g_dptdbg_shadow_pgd_page = NULL;
-                    g_dptdbg_shadow_pgd = NULL;
-                }
-            }
-        }
+        status = -ENOMEM;
+        goto out_mmap;
     }
-    if (!status) status = dptdbg_sync_trap_pages();
-    /* 此后不再读取受 mmap 锁保护的 VMA/PTE 信息。 */
+    pgd_t *shadow_root = page_address(g_dptdbg.shadow_pgd_page);
+    if (!shadow_root)
+    {
+        status = -EFAULT;
+        goto out_mmap;
+    }
+    __builtin_memcpy(shadow_root, mm->pgd, PGD_SIZE);
+#if defined(PTE_ADDR_MASK)
+    const pteval_t address_mask = PTE_ADDR_MASK;
+#elif defined(PHYS_TO_PTE_ADDR_MASK)
+    const pteval_t address_mask = PHYS_TO_PTE_ADDR_MASK;
+#elif defined(PTE_ADDR_HIGH)
+    const pteval_t address_mask = PTE_ADDR_LOW | PTE_ADDR_HIGH;
+#elif defined(PTE_ADDR_LOW)
+    const pteval_t address_mask = PTE_ADDR_LOW;
+#else
+#error "Unsupported arm64 page-table address mask"
+#endif
+    for (size_t page_index = 0; page_index < ARRAY_SIZE(g_dptdbg.pages); page_index++)
+    {
+        if (!g_dptdbg.pages[page_index].page_vaddr) break;
+        uint64_t addr = g_dptdbg.pages[page_index].page_vaddr;
+        pgd_t *source_pgd = pgd_offset(mm, addr);
+        pgd_t *shadow_pgd = shadow_root + pgd_index(addr);
+        if (pgd_none(*source_pgd) || pgd_bad(*source_pgd))
+        {
+            status = -EFAULT;
+            goto out_mmap;
+        }
+
+        p4d_t *source_p4d = p4d_offset(source_pgd, addr);
+        p4d_t *shadow_p4d = p4d_offset(shadow_pgd, addr);
+#if CONFIG_PGTABLE_LEVELS > 4
+        if (p4d_none(*source_p4d) || p4d_bad(*source_p4d))
+        {
+            status = -EFAULT;
+            goto out_mmap;
+        }
+        if (pgd_val(*shadow_pgd) == pgd_val(*source_pgd))
+        {
+            struct page *page = dptdbg_clone_table_page(source_p4d);
+            if (IS_ERR(page))
+            {
+                status = PTR_ERR(page);
+                goto out_mmap;
+            }
+            WRITE_ONCE(*shadow_pgd, __pgd((pgd_val(*source_pgd) & ~address_mask) | __phys_to_pgd_val(page_to_phys(page))));
+            shadow_p4d = p4d_offset(shadow_pgd, addr);
+        }
+#endif
+
+        pud_t *source_pud = pud_offset(source_p4d, addr);
+        pud_t *shadow_pud = pud_offset(shadow_p4d, addr);
+#if CONFIG_PGTABLE_LEVELS > 3
+        if (pud_none(*source_pud) || pud_leaf(*source_pud) || pud_bad(*source_pud))
+        {
+            status = -EOPNOTSUPP;
+            goto out_mmap;
+        }
+        if (p4d_val(*shadow_p4d) == p4d_val(*source_p4d))
+        {
+            struct page *page = dptdbg_clone_table_page(source_pud);
+            if (IS_ERR(page))
+            {
+                status = PTR_ERR(page);
+                goto out_mmap;
+            }
+#if CONFIG_PGTABLE_LEVELS > 4
+            WRITE_ONCE(*shadow_p4d, __p4d((p4d_val(*source_p4d) & ~address_mask) | __phys_to_p4d_val(page_to_phys(page))));
+#else
+            WRITE_ONCE(*shadow_pgd, __pgd((pgd_val(*source_pgd) & ~address_mask) | __phys_to_pgd_val(page_to_phys(page))));
+#endif
+            shadow_pud = pud_offset(p4d_offset(shadow_pgd, addr), addr);
+        }
+#endif
+
+        pmd_t *source_pmd = pmd_offset(source_pud, addr);
+        pmd_t *shadow_pmd = pmd_offset(shadow_pud, addr);
+#if CONFIG_PGTABLE_LEVELS > 2
+        if (pmd_none(*source_pmd) || pmd_leaf(*source_pmd) || pmd_bad(*source_pmd))
+        {
+            status = -EOPNOTSUPP;
+            goto out_mmap;
+        }
+        if (pud_val(*shadow_pud) == pud_val(*source_pud))
+        {
+            struct page *page = dptdbg_clone_table_page(source_pmd);
+            if (IS_ERR(page))
+            {
+                status = PTR_ERR(page);
+                goto out_mmap;
+            }
+#if CONFIG_PGTABLE_LEVELS > 3
+            WRITE_ONCE(*shadow_pud, __pud((pud_val(*source_pud) & ~address_mask) | __phys_to_pud_val(page_to_phys(page))));
+#else
+            WRITE_ONCE(*shadow_pgd, __pgd((pgd_val(*source_pgd) & ~address_mask) | __phys_to_pgd_val(page_to_phys(page))));
+#endif
+            shadow_pmd = pmd_offset(pud_offset(p4d_offset(shadow_pgd, addr), addr), addr);
+        }
+#endif
+
+        pte_t *source_pte = pte_offset_kernel(source_pmd, addr);
+        if (pmd_val(*shadow_pmd) == pmd_val(*source_pmd))
+        {
+            struct page *page = dptdbg_clone_table_page(source_pte);
+            if (IS_ERR(page))
+            {
+                status = PTR_ERR(page);
+                goto out_mmap;
+            }
+#if CONFIG_PGTABLE_LEVELS > 2
+            WRITE_ONCE(*shadow_pmd, __pmd((pmd_val(*source_pmd) & ~address_mask) | __phys_to_pmd_val(page_to_phys(page))));
+#else
+            WRITE_ONCE(*shadow_pgd, __pgd((pgd_val(*source_pgd) & ~address_mask) | __phys_to_pgd_val(page_to_phys(page))));
+#endif
+        }
+        pte_t *shadow_pte = pte_offset_kernel(pmd_offset(pud_offset(p4d_offset(shadow_pgd, addr), addr), addr), addr);
+        if (!source_pte || !shadow_pte || !pte_present(*source_pte) || !pte_present(*shadow_pte))
+        {
+            status = -EFAULT;
+            goto out_mmap;
+        }
+        if ((pte_val(*source_pte) & (PTE_UXN | PTE_CONT)) || !pfn_valid(pte_pfn(*source_pte)))
+        {
+            status = -EOPNOTSUPP;
+            goto out_mmap;
+        }
+        if (pte_pfn(*source_pte) != pte_pfn(g_dptdbg.pages[page_index].original_mapping) || pte_pfn(*shadow_pte) != pte_pfn(*source_pte))
+        {
+            status = -ESTALE;
+            goto out_mmap;
+        }
+
+        WRITE_ONCE(*shadow_pte, __pte((pte_val(*source_pte) & ~address_mask) | (__phys_to_pte_val(page_to_phys(g_dptdbg.pages[page_index].trap_page)) & address_mask)));
+    }
+    dsb(ishst);
+
+    for (size_t page_index = 0; page_index < ARRAY_SIZE(g_dptdbg.pages); page_index++)
+    {
+        if (!g_dptdbg.pages[page_index].page_vaddr) continue;
+        void *trap_code = page_address(g_dptdbg.pages[page_index].trap_page);
+        if (!trap_code)
+        {
+            status = -EFAULT;
+            goto out_mmap;
+        }
+        status = arm64_sync_insn_fast(trap_code, g_dptdbg.pages[page_index].page_vaddr, PAGE_SIZE);
+        if (status) goto out_mmap;
+    }
     mmap_read_unlock(mm);
 
-    if (status)
-    {
-        /*
-         * 统一回滚：release_state() 会先停止 handler、恢复 marker 和线程
-         * 页表，再释放 trap page、shadow page table、mm 引用及 inline hook。
-         */
-        (void)dptdbg_release_state();
-        goto out_unlock;
-    }
+    spin_lock_irqsave(&g_dptdbg.lock, flags);
+    if (g_dptdbg.stopping) status = -ESTALE;
+    else g_dptdbg.info = info;
+    spin_unlock_irqrestore(&g_dptdbg.lock, flags);
+    if (status) goto out_release;
 
-    /* 发布运行态前确认构建期间没有页表失效。 */
-    spin_lock_irqsave(&g_dptdbg_lock, flags);
-    if (g_dptdbg_stopping) status = -ESTALE;
-    else g_dptdbg_info = info;
-    spin_unlock_irqrestore(&g_dptdbg_lock, flags);
-    if (status)
-    {
-        (void)dptdbg_release_state();
-        goto out_unlock;
-    }
-
-    /* 发布后统一切换所有 CPU 的视图。 */
     on_each_cpu(dptdbg_apply_current_thread_view, NULL, 1);
+    goto out_unlock;
+out_mmap:
+    mmap_read_unlock(mm);
+out_release:
+    dptdbg_release_state();
 out_unlock:
-    /* 所有返回路径都必须释放生命周期锁。 */
-    mutex_unlock(&g_dptdbg_lifecycle_lock);
+    mutex_unlock(&g_dptdbg.lifecycle_lock);
     return status;
 }
 

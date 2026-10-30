@@ -39,7 +39,7 @@ runner_build_id="$({
 COMMON_FLAGS=(
     --target=aarch64-linux-android23
     --sysroot="$NDK_SYSROOT"
-    -std=gnu11 -Wall -Wextra -Werror -fno-emulated-tls
+    -std=gnu11 -Wall -Wextra -Wno-unused-parameter -Werror -fno-emulated-tls
     -I"$TEST_DIR" -I"$TEST_DIR/../.."
 )
 

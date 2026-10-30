@@ -20,14 +20,14 @@
 #include <asm/tlbflush.h>
 #include "arm64_encode/arm64_encode.h"
 #include "arm64_reg.h"
-#include "lsdriver_log.h"
+#include "klog/lsdriver_log.h"
 
 /*
 还有注意所有地方使用函数指针调用内核api，参数类型和返回值类型一定要与内核对齐，比如这里的 unsigned long就不能写为uint64_t, uint64_t定义为unsigned long long,虽然宽度一样，但是不能混合使用
 */
 
-// 屏蔽 CFI 检查，统一利用 kprobe 获取 kallsyms_lookup_name 地址
-__attribute__((no_sanitize("cfi"))) static unsigned long generic_kallsyms_lookup_name(const char *name)
+// 屏蔽 CFI KCFI检查，统一利用 kprobe 获取 kallsyms_lookup_name 地址
+__attribute__((no_sanitize("cfi", "kcfi"))) static inline unsigned long generic_kallsyms_lookup_name(const char *name)
 {
     unsigned long (*fn_kallsyms_lookup_name)(const char *name) = NULL;
     struct kprobe kp = {0};
@@ -44,10 +44,10 @@ __attribute__((no_sanitize("cfi"))) static unsigned long generic_kallsyms_lookup
 
     return fn_kallsyms_lookup_name(name);
 }
-int (*fn_aarch64_insn_patch_text)(void *addrs[], uint32_t insts[], int cnt);
+//不是热路径没必要加__attribute__((__section__(".data..read_mostly")));，收益等于0;
+static int (*fn_aarch64_insn_patch_text)(void *addrs[], uint32_t insts[], int cnt);
 
 /*
-
 旧版 CFI ( GKI 5.10 / 5.15):
         编译器编译时进行类型哈希计算，在间接调用前插入跳转，跳到一个集中的验证函数（就是 __cfi_slowpath）来运行时比对，
         校验失败直接panic
@@ -57,15 +57,13 @@ int (*fn_aarch64_insn_patch_text)(void *addrs[], uint32_t insts[], int cnt);
         直接比较 hash 值。如果不对，直接触发 BRK 指令宕机。
 如果是 6.1+ 内核，不存在 __cfi_slowpath，
 
-所以有人提供了一个5系的解决代码给我，所以5系就不用下面纯汇编进行间接调用了
-感谢https://github.com/wangchuan2009(忘川)，bypass_cfi处理运行时5系的集中校验函数,patch为ret来过5系cfi
+======后续对代码进行了大逻辑优化,写法变更和修复panic技巧写法，具体看函数内部说明======
 
-2026/7/25 22:23 !!!!!!
+2026/7/25 22:23 
 实机one plus 13 5.15发现部分内核有间接调用__cfi_slowpath_diag
 函数序言是
 bti  c   //直接patch为ret后cfi倒是过了，但是部分内核部分函数间接调用cfi检查函数下 BTI直接导致内核panic
 ...                 //所以在实际patch+4可以解决
-
 
 2026/8/9 17:01
 实机k60测试，部分5.10 __cfi_slowpath是pac认证
@@ -76,12 +74,22 @@ stp x29, x30, [sp, #-...]! //不能直接patch为ret
 
 */
 
-__attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
+/*
+部分厂商huawei KMI 不导出 CFI 失败调用的 UBSAN abort handler，例如5.15的 __ubsan_handle_cfi_check_fail_abort。
+在模块内提供失败 handler，不改变正常 CFI 检查路径。
+*/
+#ifdef LSDRIVER_LEGACY_CFI
+__attribute__((no_sanitize("cfi", "kcfi"))) static inline void __ubsan_handle_cfi_check_fail_abort(void *data, void *ptr, void *vtable)
 {
-    // 内部状态，记录是否已经热更新成功
-    static bool is_cfi_bypassed = false;
-
-    if (is_cfi_bypassed) return true;
+    (void)data;
+    (void)ptr;
+    (void)vtable;
+    BUG();
+}
+#endif
+__attribute__((no_sanitize("cfi", "kcfi"))) static inline int bypass_cfi(void)
+{
+    int status = 0;
 
     // 获取同步 patch 函数：内部使用 stop_machine，避免其他 CPU 执行到半补丁状态。
     /*
@@ -95,7 +103,11 @@ __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
         */
     fn_aarch64_insn_patch_text = (void *)generic_kallsyms_lookup_name("aarch64_insn_patch_text");
 
-    if (!fn_aarch64_insn_patch_text) return false;
+    if (!fn_aarch64_insn_patch_text)
+    {
+        status = -ENOENT;
+        return status;
+    }
 
     /*
     查找各个版本的 CFI slowpath 函数
@@ -123,8 +135,11 @@ __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
     uint32_t ret_inst;
     int patch_count = 0;
 
-    if (arm64_encode_bti_c(&bti_c_inst)) return false;
-    if (arm64_encode_ret(30, &ret_inst)) return false;
+    status = arm64_encode_bti_c(&bti_c_inst);
+    if (status < 0) return status;
+
+    status = arm64_encode_ret(30, &ret_inst);
+    if (status < 0) return status;
 
     for (int symbol_index = 0; symbol_index < ARRAY_SIZE(cfi_symbols); symbol_index++)
     {
@@ -138,11 +153,15 @@ __attribute__((no_sanitize("cfi"))) bool bypass_cfi(void)
         patch_insts[patch_count++] = ret_inst;                            // 补丁指令：RET X30；记录完成后 patch_count 加 1。
     }
 
-    if (!patch_count) return false;
-    if (fn_aarch64_insn_patch_text(patch_addrs, patch_insts, patch_count) != 0) return false;
+    if (!patch_count)
+    {
+        return status;
+    }
 
-    is_cfi_bypassed = true;
-    return true;
+    status = fn_aarch64_insn_patch_text(patch_addrs, patch_insts, patch_count);
+    if (status != 0) return status;
+
+    return status;
 }
 
 //------------------下面是通用，但未导出，未定义函数-----------------
@@ -214,62 +233,34 @@ static inline void flush_tlb_addr_all_asid_current_cpu(uint64_t addr)
                  : "memory");
 }
 
-// 内部原语：把一段连续虚拟地址对应的数据缓存行清理到统一点。
-static inline void __arm64_clean_dcache_range_to_pou(const void *address, size_t size)
+/*
+同步写入端的数据缓存，并失效 Inner Shareable 域内所有 CPU 的指令缓存。
+write_addr: 写入端虚拟地址，用于清理 D-cache；
+exec_addr : 执行端虚拟地址，仅用于校验调用范围，保留该参数以区分两个地址空间。
+
+IC IVAU 只保证当前 PE 的按地址失效，不能替代跨 CPU 的 I-cache 同步；这里使用
+IC IALLUIS 保留原有的全 CPU 语义，同时统一所有机器码写入路径。
+*/
+static inline int arm64_sync_insn_fast(const void *write_addr, unsigned long exec_addr, size_t size)
 {
-    unsigned long line_size = arm64_dcache_line_size();
-    unsigned long start = (unsigned long)address;
-    unsigned long end = start + size;
+    unsigned long start;
+    unsigned long end;
 
-    if (!size) return;
+    if (!write_addr || !size) return -EINVAL;
+    if (size > ULONG_MAX - (unsigned long)write_addr || size > ULONG_MAX - exec_addr) return -EOVERFLOW;
 
-    for (unsigned long line = start & ~(line_size - 1); line < end; line += line_size) asm volatile("dc cvau, %0" : : "r"(line) : "memory");
-}
+    start = (unsigned long)write_addr & ~(arm64_dcache_line_size() - 1);
+    end = (unsigned long)write_addr + size;
+    for (; start < end; start += arm64_dcache_line_size()) asm volatile("dc cvau, %0" : : "r"(start) : "memory");
 
-// 内部原语：等待数据缓存清理完成，失效内部共享域全部 CPU 的指令缓存，并同步当前 CPU 的取指流水线。
-static inline void __arm64_invalidate_icache_all_cpus(void)
-{
-    asm volatile("dsb ish\n\t"
-                 "ic ialluis\n\t"
+    asm volatile("dsb ish" : : : "memory");
+
+    asm volatile("ic ialluis\n\t"
                  "dsb ish\n\t"
                  "isb\n\t"
                  :
                  :
                  : "memory");
-}
-
-//同步一段连续地址中的新机器码：内部先用 DC CVAU 把数据缓存清理到 PoU，再失效内部共享域全部 CPU 的指令缓存
-static inline int arm64_sync_code_range_all_cpus(const void *address, size_t size)
-{
-    unsigned long start = (unsigned long)address;
-
-    if (!address || !size) return -EINVAL;
-    if (size > ULONG_MAX - start) return -EOVERFLOW;
-
-    __arm64_clean_dcache_range_to_pou(address, size);
-    __arm64_invalidate_icache_all_cpus();
-    return 0;
-}
-
-//同步一组物理页中的新机器码。物理页可以不连续；函数通过各页的内核线性映射逐页清理数据缓存，最后统一失效指令缓存。
-static inline int arm64_sync_code_pages_all_cpus(struct page **pages, unsigned int page_count, size_t code_size)
-{
-    size_t remaining = code_size;
-
-    if (!pages || !page_count || !code_size) return -EINVAL;
-    if (code_size > (size_t)page_count * PAGE_SIZE) return -E2BIG;
-
-    for (unsigned int index = 0; index < page_count && remaining; index++)
-    {
-        size_t bytes = min_t(size_t, remaining, PAGE_SIZE);
-
-        if (!pages[index]) return -EFAULT;
-
-        __arm64_clean_dcache_range_to_pou(page_address(pages[index]), bytes);
-        remaining -= bytes;
-    }
-
-    __arm64_invalidate_icache_all_cpus();
     return 0;
 }
 
@@ -286,28 +277,15 @@ static inline pte_t *get_kernel_pte(uint64_t vaddr)
 
     // PUD Level (可能遇到 1GB 大页)
     pud_t *pud = pud_offset(p4d, vaddr);
-    if (pud_none(*pud)) return NULL;
-
-    // 检查是否是 1G 大页
-    if (pud_leaf(*pud)) return NULL;
-
     if (pud_bad(*pud)) return NULL;
 
     // PMD Level (可能遇到 2MB 大页)
     pmd_t *pmd = pmd_offset(pud, vaddr);
-    if (pmd_none(*pmd)) return NULL;
-
-    // 检查是否是 2M 大页
-    if (pmd_leaf(*pmd)) return NULL;
-
     if (pmd_bad(*pmd)) return NULL;
 
     // PTE Level (普通的 4KB 页)
     // 较新内核中 __pte_offset_map 不导出，对于 64位 系统直接使用 pte_offset_kernel 即可
-    pte_t *ptep = pte_offset_kernel(pmd, vaddr);
-    if (!ptep) return NULL;
-
-    return ptep;
+    return pte_offset_kernel(pmd, vaddr);
 }
 
 // 获取用户态虚拟地址的pte
@@ -325,28 +303,47 @@ static inline pte_t *get_user_pte(struct mm_struct *mm, uint64_t vaddr)
 
     // PUD Level (可能遇到 1GB 大页)
     pud_t *pud = pud_offset(p4d, vaddr);
-    if (pud_none(*pud)) return NULL;
-
-    // 检查是否是 1G 大页
-    if (pud_leaf(*pud)) return NULL;
-
     if (pud_bad(*pud)) return NULL;
 
     // PMD Level (可能遇到 2MB 大页)
     pmd_t *pmd = pmd_offset(pud, vaddr);
-    if (pmd_none(*pmd)) return NULL;
-
-    // 检查是否是 2M 大页
-    if (pmd_leaf(*pmd)) return NULL;
-
     if (pmd_bad(*pmd)) return NULL;
 
     // PTE Level (普通的 4KB 页)
     // 较新内核中 __pte_offset_map 不导出，对于 64位 系统直接使用 pte_offset_kernel 即可
-    pte_t *ptep = pte_offset_kernel(pmd, vaddr);
-    if (!ptep) return NULL;
+    return pte_offset_kernel(pmd, vaddr);
+}
 
-    return ptep;
+// 检查指定地址空间中用户地址所在页是否已映射且允许写入。
+static inline bool user_page_writable(struct mm_struct *mm, uint64_t address)
+{
+    pte_t *ptep = get_user_pte(mm, address & PAGE_MASK);
+    if (!ptep) return false;
+
+    pte_t pte = READ_ONCE(*ptep);
+    return pte_present(pte) && pte_write(pte);
+}
+
+// 检查指定地址空间中用户地址范围覆盖的所有页是否已映射且允许写入。
+static inline bool user_range_writable(struct mm_struct *mm, uint64_t address, size_t size)
+{
+    if (!mm || !size || address > U64_MAX - (size - 1)) return false;
+
+    uint64_t start = untagged_addr(address);
+    uint64_t end = start + size - 1;
+    if (start >= READ_ONCE(mm->task_size) || end >= READ_ONCE(mm->task_size)) return false;
+
+    uint64_t first_page = start & PAGE_MASK;
+    uint64_t last_page = end & PAGE_MASK;
+    if (first_page == last_page) return user_page_writable(mm, first_page);
+
+    if (!user_page_writable(mm, first_page)) return false;
+    for (uint64_t page = first_page + PAGE_SIZE; page < last_page; page += PAGE_SIZE)
+    {
+        if (!user_page_writable(mm, page)) return false;
+    }
+
+    return user_page_writable(mm, last_page);
 }
 
 // 根据 pid 获取 task_struct，调用方负责 put_task_struct。
@@ -381,43 +378,42 @@ static inline pte_t *get_or_alloc_user_pte(struct mm_struct *mm, uint64_t vaddr)
     if (!mm) return NULL;
 
     pgd_t *pgd = pgd_offset(mm, vaddr);
-    if (pgd_bad(*pgd)) return NULL;
     if (pgd_none(*pgd))
     {
         p4d_t *new_p4d = p4d_alloc_one(mm, vaddr);
         if (!new_p4d) return NULL;
         pgd_populate(mm, pgd, new_p4d);
     }
+    else if (pgd_bad(*pgd)) return NULL;
 
     p4d_t *p4d = p4d_offset(pgd, vaddr);
-    if (p4d_bad(*p4d)) return NULL;
     if (p4d_none(*p4d))
     {
         pud_t *new_pud = pud_alloc_one(mm, vaddr);
         if (!new_pud) return NULL;
         p4d_populate(mm, p4d, new_pud);
     }
+    else if (p4d_bad(*p4d)) return NULL;
 
     pud_t *pud = pud_offset(p4d, vaddr);
-    if (pud_leaf(*pud) || pud_bad(*pud)) return NULL;
     if (pud_none(*pud))
     {
         pmd_t *new_pmd = pmd_alloc_one(mm, vaddr);
         if (!new_pmd) return NULL;
         pud_populate(mm, pud, new_pmd);
     }
+    else if (pud_bad(*pud)) return NULL;
 
     pmd_t *pmd = pmd_offset(pud, vaddr);
-    if (pmd_leaf(*pmd) || pmd_bad(*pmd)) return NULL;
     if (pmd_none(*pmd))
     {
         pgtable_t new_pte = pte_alloc_one(mm);
         if (!new_pte) return NULL;
         pmd_populate(mm, pmd, new_pte);
     }
+    else if (pmd_bad(*pmd)) return NULL;
 
-    pte_t *ptep = pte_offset_kernel(pmd, vaddr);
-    return ptep;
+    return pte_offset_kernel(pmd, vaddr);
 }
 
 // 检查一段用户 VA 范围是否没有 present PTE，调用方负责持有合适的 mmap 锁。
@@ -449,38 +445,6 @@ static inline int read_user_pte_value(struct mm_struct *mm, uint64_t addr, pteva
     return 0;
 }
 
-static inline int get_present_user_pages(struct mm_struct *mm, unsigned long start, int page_count, struct page **pages)
-{
-    if (!mm || !pages || page_count <= 0) return -EINVAL;
-
-    for (int page_index = 0; page_index < page_count; page_index++)
-    {
-        unsigned long page_addr = start + (unsigned long)page_index * PAGE_SIZE;
-        pte_t *ptep = get_user_pte(mm, page_addr);
-        struct page *page;
-
-        if (!ptep) return page_index;
-        pte_t pte = READ_ONCE(*ptep);
-        if (!pte_present(pte) || !pfn_valid(pte_pfn(pte))) return page_index;
-
-        page = pfn_to_page(pte_pfn(pte));
-        if (!try_get_page(page)) return page_index;
-        pages[page_index] = page;
-    }
-    return page_count;
-}
-
-static inline void put_present_user_pages(struct page **pages, int page_count)
-{
-    if (!pages || page_count <= 0) return;
-
-    for (int page_index = 0; page_index < page_count; page_index++)
-    {
-        if (pages[page_index]) page_ref_dec(compound_head(pages[page_index]));
-        pages[page_index] = NULL;
-    }
-}
-
 // 写入用户地址所在页的 PTE，并用汇编刷新该用户页 TLB。
 static inline int write_user_pte_value(struct mm_struct *mm, uint64_t addr, pteval_t new_pte)
 {
@@ -495,25 +459,6 @@ static inline int write_user_pte_value(struct mm_struct *mm, uint64_t addr, ptev
     set_pte(ptep, __pte(new_pte));
     flush_tlb_addr_all_asid_all_cpus(addr);
     return 0;
-}
-
-// 释放一批通过GUP获取的page *;避免使用 put_page() 把 page_pinner 拉进来。
-static void release_gup_pages(struct page **pages, int nr)
-{
-    typedef void (*release_pages_t)(struct page **pages, int nr);
-    static release_pages_t fn_release_pages;
-
-    if (!pages || nr <= 0) return;
-
-    if (!fn_release_pages) fn_release_pages = (release_pages_t)generic_kallsyms_lookup_name("release_pages");
-
-    if (!fn_release_pages)
-    {
-        ls_log_tag("export", "严重错误！无法找到 release_pages，跳过 %d 个页引用回收\n", nr);
-        return;
-    }
-
-    fn_release_pages(pages, nr);
 }
 
 // 分配页对齐的内核 RWX 内存；fixed_address 为 NULL 时随机分配，否则必须传入希望占用的页对齐虚拟地址。

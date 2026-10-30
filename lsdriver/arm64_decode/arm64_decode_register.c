@@ -1,3 +1,8 @@
+/*
+ARM64 指令解码器：数据处理寄存器类。
+
+解析移位/扩展寄存器运算、ADC/SBC、条件选择与条件比较、除法、可变移位、CRC、位计数/反转、最值、乘加和高位乘法。
+*/
 #include "arm64_decode.h"
 
 static inline enum arm64_decode_status arm64_decode_register_conditional_compare(uint32_t raw, struct arm64_decoded_instruction *decoded)
@@ -346,7 +351,7 @@ static inline enum arm64_decode_status arm64_decode_register_three_source(uint32
         instruction = subtract ? ARM64_INST_SMSUBL : ARM64_INST_SMADDL;
         break;
     case 2:
-        if (width != 64 || subtract || accumulator != 31) return ARM64_DECODE_UNALLOCATED;
+        if (width != 64 || subtract) return ARM64_DECODE_UNALLOCATED;
         instruction = ARM64_INST_SMULH;
         break;
     case 3:
@@ -356,7 +361,7 @@ static inline enum arm64_decode_status arm64_decode_register_three_source(uint32
         instruction = subtract ? ARM64_INST_UMSUBL : ARM64_INST_UMADDL;
         break;
     case 6:
-        if (width != 64 || subtract || accumulator != 31) return ARM64_DECODE_UNALLOCATED;
+        if (width != 64 || subtract) return ARM64_DECODE_UNALLOCATED;
         instruction = ARM64_INST_UMULH;
         break;
     default:
@@ -376,7 +381,7 @@ enum arm64_decode_status arm64_decode_data_processing_register(uint32_t raw, str
     struct arm64_decoded_instruction result = *decoded;
     struct arm64_decoded_instruction *candidate = &result;
     enum arm64_decode_status status;
-    switch (raw & 0x1F000000U)
+    switch (ARM64_DECODE_MASK(raw, 0x1F000000U))
     {
     case 0x0A000000U:
         status = arm64_decode_register_logical_shifted(raw, candidate);
@@ -385,7 +390,7 @@ enum arm64_decode_status arm64_decode_data_processing_register(uint32_t raw, str
         status = ARM64_DECODE_BIT(raw, 21) ? arm64_decode_register_add_sub_extended(raw, candidate) : arm64_decode_register_add_sub_shifted(raw, candidate);
         break;
     case 0x1A000000U:
-        switch (raw & 0x00E00000U)
+        switch (ARM64_DECODE_MASK(raw, 0x00E00000U))
         {
         case 0x00000000U:
             status = arm64_decode_register_carry(raw, candidate);

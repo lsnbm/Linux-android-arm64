@@ -80,7 +80,14 @@ _MAX_SAFE_INTEGER = (1 << 53) - 1
 
 
 def _mcp_response(response: BridgeResponse) -> dict[str, Any]:
-    return response.require_ok().to_dict()
+    response.require_ok()
+    payload: dict[str, Any] = {
+        "ok": response.ok,
+        "operation": response.operation,
+    }
+    if response.data is not None:
+        payload["data"] = response.data
+    return payload
 
 
 def _call_bridge_operation(operation: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -92,7 +99,7 @@ mcp = MCPServer(
     instructions=(
         "Pass addresses and register values as 0x-prefixed strings, never JSON numbers. "
         "Responses encode addresses and registers as hex strings. Counts, lengths and indexes "
-        "Counts, lengths and indexes remain numbers. "
+        "remain numbers. "
         "Scan and saved values remain strings in their requested data format."
     ),
 )

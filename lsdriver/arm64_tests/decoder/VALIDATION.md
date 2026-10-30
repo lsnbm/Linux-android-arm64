@@ -18,9 +18,11 @@ identity map 和字段检查覆盖；不得为了审计修改原始语料或补�
 make -C lsdriver/arm64_tests/decoder contract-test
 ```
 
-`arm64_decoder_contract_test.c` 验证非法编码拒绝、24 个 CAS/CASP 宽度与顺序组合，
-并以固定随机种子对七个族入口进行 700000 次调用：失败时调用方输出保持不变，
-成功时 instruction 不为 UNKNOWN。随机检查验证输出契约，不是编码合法性的独立 oracle。
+`arm64_decoder_contract_test.c` 验证非法编码拒绝、24 个 CAS/CASP 宽度与顺序组合、
+3 个 LDAPR/LDAPRB/LDAPRH RCpc 编码，
+并以固定随机种子对七个族入口进行 700000 次调用：族入口失败时不修改传入对象，
+成功时 instruction 不为 UNKNOWN。公共 `arm64_decode_instruction` 只有返回 `OK` 时结果有效；
+其他状态均返回整体清零的无效对象。随机检查验证输出契约，不是编码合法性的独立 oracle。
 
 2026-09-21 本轮验证结果：
 
@@ -44,6 +46,40 @@ load/store 和 SIMD 使用已有 `arm64_decoded_instruction` 类型的局部结�
 
 严格审计的行数校验按非空记录计数；物理行数包含空行。`instruction.txt` 不应为了计数
 而修改或补末尾换行。
+
+## LLVM 穷举审计
+
+`strict-test` 还会编译并运行 `arm64_llvm_exhaustive_audit.cpp`。它遍历
+branch、immediate、register 和 SIMD/FP 的主编码组控制字段，并用 LLVM MCDisassembler
+与生产 decoder 同时判断编码是否可达。
+
+- 生产 decoder 成功、LLVM 明确失败的未知编码会使测试失败；这是解码器误接受。
+- LLVM 成功、生产 decoder 拒绝的编码只作为覆盖报告；它们可能属于当前尚未实现的指令。
+- LLVM 17 明确不支持的 FAMAX/FAMIN/FSCALE 编码单独统计，不能据此删除 ARM 指令分支。
+
+该测试使用固定的四组寄存器字段组合覆盖控制字段空间，不声称穷举全部 $2^{32}$ 个 raw；
+寄存器字段和指令语义字段仍由固定语料 strict audit 及字段契约测试覆盖。
+
+2026-10-10 集成结果：
+
+```text
+total=8388608 local_accepted=3157770 llvm_accepted=3251934 unknown_local_only=0
+group=5 total=1048576 local_only=0 llvm_only=0
+group=7 total=1048576 local_only=1920 llvm_only=65128
+group=8 total=1048576 local_only=0 llvm_only=0
+group=9 total=1048576 local_only=0 llvm_only=0
+group=a total=1048576 local_only=0 llvm_only=12278
+group=b total=1048576 local_only=0 llvm_only=20
+group=d total=1048576 local_only=0 llvm_only=362
+group=f total=1048576 local_only=0 llvm_only=18296
+known_llvm17_gap instruction=256 count=640
+known_llvm17_gap instruction=335 count=640
+known_llvm17_gap instruction=340 count=640
+```
+
+其中 instruction 256/335/340 分别对应 `FAMAX_VECTOR`、`FAMIN_VECTOR`、
+`FSCALE_VECTOR`。LLVM 17 不识别这些较新的 SIMD 扩展，因此只统计为已知 gap，
+不把它们当作 decoder 误接受。
 
 ## 构建与运行
 

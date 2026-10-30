@@ -9,6 +9,9 @@
 .tmp_versions/
 *.lds
 *.usyms
+lsdriver/arm64_ptedbg-20260822-000439.h
+!lsdriver/byte_stream/
+!lsdriver/byte_stream/*.ko
 
 # 忽略 VS Code 配置
 .vscode/
@@ -38,6 +41,12 @@ lsdriver/arm64_tests/*
 !lsdriver/arm64_tests/decoder/*
 !lsdriver/arm64_tests/executor/
 !lsdriver/arm64_tests/executor/*
+!lsdriver/arm64_tests/encoder/
+!lsdriver/arm64_tests/encoder/*
+!lsdriver/arm64_tests/etmdbg/
+!lsdriver/arm64_tests/etmdbg/*
+
+
 
 # Local ARM64 executor outputs
 lsdriver/arm64_tests/executor/arm64_instruction_table.h

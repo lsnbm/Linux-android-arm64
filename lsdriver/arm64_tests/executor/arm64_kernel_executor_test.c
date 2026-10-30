@@ -6,7 +6,7 @@
 #include <linux/uaccess.h>
 #include <asm/neon.h>
 
-#include "../../lsdriver_log.h"
+#include "../../klog/lsdriver_log.h"
 #include "../../arm64_emulate/emulate_inst.h"
 #include "arm64_instruction_table.h"
 #include "executor_protocol.h"

@@ -1,35 +1,23 @@
 #ifndef VIRTUAL_MEMORY_ENUM_H
 #define VIRTUAL_MEMORY_ENUM_H
 
-#include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
-#include <linux/kthread.h>
-#include <linux/delay.h>
 #include <linux/mm.h>
 #include <linux/pagemap.h>
 #include <linux/slab.h>
-#include <linux/vmalloc.h>
-#include <linux/list.h>
-#include <linux/kobject.h>
-#include <linux/kallsyms.h>
 
-#include <linux/vmalloc.h>
-#include <linux/mm.h>
-#include <linux/slab.h>
 #include <linux/string.h>
 #include <asm/pgtable.h>
 #include <asm/pgtable-prot.h>
 #include <asm/memory.h>
 #include <asm/barrier.h>
-#include <linux/sched.h>
 #include <linux/sched/mm.h>
 #include <linux/sched/signal.h>
 #include <linux/pid.h>
-#include <linux/sort.h>
 
 #include "export_fun.h"
-#include "io_struct.h"
+#include "io_version/io_struct.h"
 /*
  maps 文件
 r--p (只读) 段:
@@ -135,7 +123,7 @@ static inline void add_seg(struct module_info *m, short type_tag, uint8_t prot, 
     m->seg_count++;
 }
 
-static inline int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
+static int virtual_memory_enum(pid_t pid, struct virtual_memory *info)
 {
     struct mm_struct *mm = NULL;
     struct vm_area_struct *vma, *prev = NULL;

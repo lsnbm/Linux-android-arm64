@@ -24,7 +24,7 @@
 #include <linux/uaccess.h>
 #include "export_fun.h"
 #include "inline_hook_frame.h"
-#include "lsdriver_log.h"
+#include "klog/lsdriver_log.h"
 
 /*
   Android Location Parcelable / Parcel:
@@ -210,7 +210,6 @@ static void vgnss_inspect_parcel(char __user *u_buf, size_t size, uint64_t lat_b
             {
                 if (vgnss_try_patch_location(stack_buf, probe_len, pos, u_buf, lat_bits, lon_bits))
                 {
-                    ls_log_tag("vgnss", "patched Location at offset=%zu size=%zu\n", pos, size);
                     return;
                 }
             }
@@ -289,14 +288,13 @@ static int vgnss_install_hook_locked(void)
         if (!inline_hook_install(vgnss_ioctl_hook_targets[i]))
         {
             vgps.hook_target = i;
-            ls_log_tag("vgnss", "hook %s ok\n", vgnss_ioctl_hook_targets[i][0].target_sym);
             return 0;
         }
     }
     return -ENOENT;
 }
 
-static inline int v_gnss_init(void)
+static int v_gnss_init(void)
 {
     mutex_lock(&vgnss_lock);
     smp_store_release(&vgps.has_fix, false);
@@ -305,7 +303,7 @@ static inline int v_gnss_init(void)
     return ret;
 }
 
-static inline int v_gnss_report(int latitude_e7, int longitude_e7)
+static int v_gnss_report(int latitude_e7, int longitude_e7)
 {
     if (latitude_e7 < -900000000 || latitude_e7 > 900000000) return -EINVAL;
     if (longitude_e7 < -1800000000 || longitude_e7 > 1800000000) return -EINVAL;
@@ -327,7 +325,7 @@ static inline int v_gnss_report(int latitude_e7, int longitude_e7)
     return 0;
 }
 
-static inline void v_gnss_destroy(void)
+static void v_gnss_destroy(void)
 {
     mutex_lock(&vgnss_lock);
     smp_store_release(&vgps.has_fix, false);

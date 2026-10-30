@@ -70,7 +70,7 @@ LOCAL_CPPFLAGS += -O3                                # [优化] 保持O3，避�
 # 可执行 `ndk-build LS_DEBUG_LOG=1`，或将下一行改为 `LS_DEBUG_LOG := 1`。
 LS_DEBUG_LOG ?= 1
 LOCAL_CFLAGS += -DLS_DEBUG_LOG=$(LS_DEBUG_LOG)
-LOCAL_CPPFLAGS += -DLS_DEBUG_LOG=$(LS_DEBUG_LOG) -include $(SHARED_JNI_ROOT)/include/logger.h
+LOCAL_CPPFLAGS += -DLS_DEBUG_LOG=$(LS_DEBUG_LOG) -include $(LOCAL_PATH)/logger/logger.h
 
 
 

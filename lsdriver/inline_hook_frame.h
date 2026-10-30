@@ -17,7 +17,7 @@
 #include "arm64_encode/arm64_encode.h"
 #include "arm64_reg.h"
 #include "export_fun.h"
-#include "lsdriver_log.h"
+#include "klog/lsdriver_log.h"
 
 /*
 inline hook框架
@@ -282,7 +282,7 @@ static inline void *hook_frame_metadata(struct pt_regs *regs)
     return regs ? (void *)((char *)regs - HOOK_METADATA_BYTES) : NULL;
 }
 
-// 生成模板跳板汇编代码
+// 生成模板跳板汇编代码，hook 栈帧保存的是原函数的通用寄存器和异常返回现场；被调用工作函数保存它自己在被调用期间必须保留的状态。被调用函数的栈帧由被调用函数自己建立和销毁。
 static void trampoline_build(uint32_t *buf, const uint32_t saved_inst[HOOK_STUB_WORDS], uint64_t work_fn, uint64_t return_addr)
 {
     static const uint32_t tramp_template[TRAMP_WORDS] = {

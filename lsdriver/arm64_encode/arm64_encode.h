@@ -10,6 +10,12 @@
 #include <stdint.h>
 #endif
 
+#define ARM64_ENCODE_FIELD_MASK(high, low)          ((uint32_t)((1ULL << ((high) - (low) + 1U)) - 1ULL))
+#define ARM64_ENCODE_FIELD(value, high, low, shift) ((((uint32_t)(value) >> (low)) & ARM64_ENCODE_FIELD_MASK((high), (low))) << (shift))
+#define ARM64_ENCODE_BIT(value, bit, shift)         ((((uint32_t)(value) >> (bit)) & 1U) << (shift))
+#define ARM64_ENCODE_IS_ALIGNED(value, alignment)   ((((uint64_t)(value)) & ((uint64_t)(alignment) - 1ULL)) == 0ULL)
+#define ARM64_ENCODE_ALIGN_DOWN(value, alignment)   ((uint64_t)(value) & ~((uint64_t)(alignment) - 1ULL))
+
 enum arm64_encode_shift
 {
     ARM64_ENCODE_SHIFT_LSL,
@@ -29,6 +35,7 @@ enum arm64_encode_load_store_kind
 
 int arm64_encode_nop(uint32_t *instruction);
 int arm64_encode_bti_c(uint32_t *instruction);
+int arm64_encode_udf(uint32_t immediate, uint32_t *instruction);
 int arm64_encode_brk(uint32_t immediate, uint32_t *instruction);
 int arm64_encode_b(uint64_t pc, uint64_t target, uint32_t *instruction);
 int arm64_encode_bl(uint64_t pc, uint64_t target, uint32_t *instruction);

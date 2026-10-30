@@ -1,5 +1,5 @@
 #pragma once
-#include "../include/logger.h"
+#include "../logger/logger.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <dirent.h>
@@ -20,6 +20,7 @@
 
 #define MAX_DEVICES 5
 #define MAX_FINGERS 10
+#define MAX_PENDING_TOUCH_EVENTS 2048
 
 // 全局状态变量
 static std::atomic<uint32_t> orientation{0};
@@ -65,6 +66,12 @@ static std::vector<DeviceConfig> devices;
 static std::vector<TouchInputEvent> pendingTouchEvents;
 static std::mutex touch_mutex; // 全局触摸数据锁
 
+static void enqueueTouchEvent(const TouchInputEvent &event)
+{
+    if (pendingTouchEvents.size() >= MAX_PENDING_TOUCH_EVENTS) pendingTouchEvents.clear();
+    pendingTouchEvents.push_back(event);
+}
+
 static bool testInputBit(int bit, const uint8_t *array)
 {
     return (array[bit / 8] & (1u << (bit % 8))) != 0;
@@ -76,14 +83,6 @@ inline void UpdateScreenData(int w, int h, uint32_t orientation_)
     screenWidth.store((float)w, std::memory_order_relaxed);
     screenHeight.store((float)h, std::memory_order_relaxed);
     orientation.store(orientation_, std::memory_order_relaxed);
-}
-
-static bool isMultiTouchDevice(int fd)
-{
-    uint8_t abs_bits[(ABS_MAX + 8) / 8] = {};
-    if (ioctl(fd, EVIOCGBIT(EV_ABS, sizeof(abs_bits)), abs_bits) < 0) return false;
-
-    return testInputBit(ABS_MT_SLOT, abs_bits) && testInputBit(ABS_MT_POSITION_X, abs_bits) && testInputBit(ABS_MT_POSITION_Y, abs_bits);
 }
 
 // 触摸事件处理线程。参数按值传入，避免 devices 扩容或清理后留下悬空指针。
@@ -140,10 +139,15 @@ static void deviceHandlerThread(int deviceIndex, int fd, int maxX, int maxY)
                 switch (ie.code)
                 {
                 case ABS_MT_SLOT:
+                    if (ie.value < 0 || ie.value >= MAX_FINGERS)
+                    {
+                        currentSlot = -1;
+                        break;
+                    }
                     currentSlot = ie.value;
-                    if (currentSlot >= MAX_FINGERS) currentSlot = MAX_FINGERS - 1;
                     break;
                 case ABS_MT_TRACKING_ID:
+                    if (currentSlot < 0) break;
                     if (ie.value == -1)
                     {
                         slot_active[currentSlot] = false;
@@ -156,9 +160,11 @@ static void deviceHandlerThread(int deviceIndex, int fd, int maxX, int maxY)
                     }
                     break;
                 case ABS_MT_POSITION_X:
+                    if (currentSlot < 0) break;
                     slot_raw_x[currentSlot] = ie.value;
                     break;
                 case ABS_MT_POSITION_Y:
+                    if (currentSlot < 0) break;
                     slot_raw_y[currentSlot] = ie.value;
                     break;
                 }
@@ -230,11 +236,11 @@ static void deviceHandlerThread(int deviceIndex, int fd, int maxX, int maxY)
 
                 if (isDown && (!wasDown || currentX != previousX || currentY != previousY))
                 {
-                    pendingTouchEvents.push_back({TouchInputEventType::Position, (float)currentX, (float)currentY, false});
+                    enqueueTouchEvent({TouchInputEventType::Position, (float)currentX, (float)currentY, false});
                 }
                 if (wasDown != isDown)
                 {
-                    pendingTouchEvents.push_back({TouchInputEventType::Button, 0.0f, 0.0f, isDown});
+                    enqueueTouchEvent({TouchInputEventType::Button, 0.0f, 0.0f, isDown});
                 }
                 // 注意：这里已经移除了 ImGui 的操作，交由主线程处理！
             }
@@ -299,7 +305,8 @@ bool Touch_Init()
             int fd = open(device_path, O_RDONLY | O_NONBLOCK);
             if (fd < 0) continue;
 
-            if (isMultiTouchDevice(fd))
+            uint8_t abs_bits[(ABS_MAX + 8) / 8] = {};
+            if (ioctl(fd, EVIOCGBIT(EV_ABS, sizeof(abs_bits)), abs_bits) >= 0 && testInputBit(ABS_MT_SLOT, abs_bits) && testInputBit(ABS_MT_POSITION_X, abs_bits) && testInputBit(ABS_MT_POSITION_Y, abs_bits))
             {
                 DeviceInfo info;
                 info.fd = fd;

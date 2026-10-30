@@ -1,0 +1,18 @@
+obj-m += arm64_etmdbg_test_module.o
+arm64_etmdbg_test_module-objs := arm64_etmdbg_test.o
+
+ccflags-y += -I$(src)/../..
+ccflags-y += -std=gnu11 -Wall -Wextra
+ccflags-y += -Wno-error -Wno-unused-parameter
+ccflags-y += -O3 -fno-vectorize -fno-slp-vectorize
+ccflags-y += -march=armv8.6-a+bf16+i8mm+fp16fml+fp16+lse+rcpc+crc
+ccflags-y += -fno-stack-protector -fomit-frame-pointer -foptimize-sibling-calls
+ccflags-y += -ftrivial-auto-var-init=uninitialized
+ccflags-y += -funroll-loops -fstrict-aliasing
+
+KASAN_SANITIZE := n
+UBSAN_SANITIZE := n
+KCSAN_SANITIZE := n
+KMSAN_SANITIZE := n
+GCOV_PROFILE := n
+KCOV_INSTRUMENT := n

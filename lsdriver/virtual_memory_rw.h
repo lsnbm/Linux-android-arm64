@@ -16,6 +16,7 @@
 #define VIRTUAL_MEMORY_RW_H
 #include <linux/vmalloc.h>
 #include <linux/mm.h>
+#include <linux/percpu.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <asm/pgtable.h>
@@ -23,205 +24,119 @@
 #include <asm/memory.h>
 #include <asm/barrier.h>
 #include <linux/sched.h>
-#include "lsdriver_log.h"
+#include "klog/lsdriver_log.h"
 #include <linux/sched/mm.h>
 #include <linux/sched/signal.h>
 #include <linux/pid.h>
 #include <linux/sort.h>
 #include "export_fun.h"
-#include "io_struct.h"
+#include "io_version/io_struct.h"
 
 //============方案1:PTE读写+MMU硬件翻译地址(翻译和读写可以混搭)============
 
 struct pte_physical_page_info
 {
     void *base_address;
-    size_t size;
     pte_t *pte_address;
+    struct page *placeholder_page;
 };
-static struct pte_physical_page_info pte_info;
 
-// 初始化
+// 每个 possible CPU 拥有独立的虚拟槽位
+static DEFINE_PER_CPU(struct pte_physical_page_info, pte_info);
+
+static inline void free_physical_page_info(void)
+{
+    int cpu;
+
+    for_each_possible_cpu(cpu)
+    {
+        struct pte_physical_page_info *info = per_cpu_ptr(&pte_info, cpu);
+
+        if (info->base_address) vunmap(info->base_address);
+        if (info->placeholder_page) __free_page(info->placeholder_page);
+        __builtin_memset(info, 0, sizeof(*info));
+    }
+}
+
+// 为每个 possible CPU 创建独立虚拟槽位，并记录该槽位对应的末级 PTE。
 static inline int allocate_physical_page_info(void)
 {
-    uint64_t vaddr;
-    pte_t *ptep;
+    int cpu;
+    int status = 0;
 
     if (in_atomic())
     {
-        ls_log_tag("vmem", "原子上下文禁止调用 vmalloc\n");
+        ls_log_always_tag("vmem", "原子上下文禁止调用 vmap\n");
         return -EPERM;
     }
 
-    __builtin_memset(&pte_info, 0, sizeof(pte_info));
-
-    // 分配内存
-    vaddr = (uint64_t)vmalloc(PAGE_SIZE);
-    if (!vaddr)
+    for_each_possible_cpu(cpu)
     {
-        ls_log_tag("vmem", "vmalloc 失败\n");
-        return -ENOMEM;
+        struct pte_physical_page_info *info = per_cpu_ptr(&pte_info, cpu);
+        info->placeholder_page = alloc_page(GFP_KERNEL | __GFP_ZERO);
+        if (!info->placeholder_page)
+        {
+            ls_log_always_tag("vmem", "占位页分配失败，cpu=%d\n", cpu);
+            status = -ENOMEM;
+            goto err_out;
+        }
+
+        uint64_t vaddr = (uint64_t)vmap(&info->placeholder_page, 1, VM_MAP, PAGE_KERNEL_RO);
+        pte_t *ptep;
+
+        if (!vaddr)
+        {
+            ls_log_always_tag("vmem", "vmap 失败，cpu=%d\n", cpu);
+            __free_page(info->placeholder_page);
+            info->placeholder_page = NULL;
+            status = -ENOMEM;
+            goto err_out;
+        }
+
+        ptep = get_kernel_pte(vaddr);
+        if (!ptep)
+        {
+            ls_log_always_tag("vmem", "获取 PTE 失败，cpu=%d\n", cpu);
+            vunmap((void *)vaddr);
+            __free_page(info->placeholder_page);
+            info->placeholder_page = NULL;
+            status = -EFAULT;
+            goto err_out;
+        }
+
+        info->base_address = (void *)vaddr;
+        info->pte_address = ptep;
     }
-
-    // 必须 memset 触发缺页，让内核填充 TTBR1 指向的页表
-    __builtin_memset((void *)vaddr, 0xAA, PAGE_SIZE);
-
-    // 获取内核地址对应的 PTE 指针
-    ptep = get_kernel_pte(vaddr);
-    if (!ptep)
-    {
-        ls_log_tag("vmem", "获取 PTE 失败\n");
-        goto err_out;
-    }
-
-    pte_info.base_address = (void *)vaddr;
-    pte_info.size = PAGE_SIZE;
-    pte_info.pte_address = ptep;
     return 0;
 
 err_out:
-    vfree((void *)vaddr);
-    __builtin_memset(&pte_info, 0, sizeof(pte_info));
-    return -EFAULT;
-}
-// 释放
-static inline void free_physical_page_info(void)
-{
-    if (pte_info.base_address)
-    {
-        // 释放之前通过 vmalloc 分配的虚拟内存
-        vfree(pte_info.base_address);
-        __builtin_memset(&pte_info, 0, sizeof(pte_info));
-    }
+    free_physical_page_info();
+    return status;
 }
 
-// 验证参数并直接操作PTE建立物理页映射
-static inline void *pte_map_page(phys_addr_t paddr, size_t size, const void *buffer)
+static inline void memory_copy(void *destination, const void *source, size_t size)
 {
-    // 普通内存页表配置
-    /*
-    我建议使用MT_NORMAL(有缓存)，RAM是口语化表达广泛含义表内存，DRAM是内存硬件具体的硬件存储介质
-    原因如下:
-        一块普通的DRAM物理地址同时被2个或以上的虚拟地址进行了不同属性的映射
-        类如:用户态虚拟地址映射这个物理页为有缓存,内核线性区映射这个物理页有缓存，这里却映射为无缓存
-        虽然说3种都能访问，但是会出现数据不一致的情况
-    1.映射为有缓存的用户态和线性:对地址写入很多时候还存在CPU cache(多级缓存中,常见的如L1~L3级缓存)
-                                这时候进行绕过缓存读DRAM中数据，肯定是错乱的，应为cpu未把缓存写回DRAM
-    2.映射为无缓存的内核态:你对这个物理页的读写都是直达DRAM,此时cpu拿缓存进行计算，修改DRMA不会实时反映到虚拟地址
-
-    这里使用无缓存读原因是：目标进程分配一个内存页，用dc civac直接清除这个内存页的缓存，
-                        随后把坐标指针重定向到这个内存页，内核读取了这个内存页用了缓存，那么下次这个页的读取就会变快，进行缓存检测
-    无缓存读会带来非常严重的性能下降和数据不一致情况
-    */
-    static const uint64_t FLAGS = PTE_TYPE_PAGE | PTE_VALID | PTE_AF | PTE_SHARED | PTE_PXN | PTE_UXN | PTE_ATTRINDX(MT_NORMAL_NC);
-    /*
-    Device memory 不允许普通 RAM 那种随意访问方式
-    代码使用__builtin_memcpy
-    但 mapped 如果被标成 MT_DEVICE_nGnRnE，编译器生成的访问序列可能是：
-    ldr/str 8 字节
-    ldp/stp 成对访问
-    更宽的块访问
-    非自然对齐访问
-    只要 mapped 地址不是对应宽度自然对齐，或者指令形式不适合 Device memory，就可能直接死
-    尤其这里返回的是return (uint8_t *)pte_info.base_address + (paddr & ~PAGE_MASK);
-    如果 paddr 页内偏移不是 4/8/16 对齐，而 memcpy 刚好生成宽访问，Device 就很容易炸。Normal_NC 映射下 CPU 可以处理很多非对齐访问；Device mapping 下不行。
-
-    // 硬件设备寄存器专用页表配置（不要使用硬件寄存器页表配置去读取普通物理页，原因不过多解释，太复杂了问AI去）
-     static const uint64_t FLAGS = PTE_TYPE_PAGE | PTE_VALID | PTE_AF |
-                                   PTE_SHARED | PTE_PXN | PTE_UXN |
-                                   PTE_ATTRINDX(MT_DEVICE_nGnRnE);
-    */
-
-    uint64_t pfn = __phys_to_pfn(paddr);
-
-    // 参数检查
-    if (!size || !buffer) return ERR_PTR(-EINVAL);
-    // PFN 有效性检查：确保物理页帧在系统内存管理范围内
-    if (!pfn_valid(pfn)) return ERR_PTR(-EFAULT);
-    // 跨页检查：读写可能跨越页边界，访问到未映射的下一页
-    if (((paddr & ~PAGE_MASK) + size) > PAGE_SIZE) return ERR_PTR(-EINVAL);
-
-    // 修改 PTE 指向目标物理页
-    set_pte(pte_info.pte_address, pfn_pte(pfn, __pgprot(FLAGS)));
-
-    // 可能跨 CPU 使用，广播刷新对应 VA 的 TLB。
-    flush_tlb_addr_all_asid_all_cpus((uint64_t)pte_info.base_address);
-
-    // 刷新该页的 TLB, 内部含：dsb(ish) + TLBI + dsb(ish)+isb(),手写刷新需取消dsbisb注释
-    // flush_tlb_kernel_range((uint64_t)pte_info.base_address, (uint64_t)pte_info.base_address + PAGE_SIZE);
-    // 刷新全部cpu核心TLB
-    // flush_tlb_all();
-
-    return (uint8_t *)pte_info.base_address + (paddr & ~PAGE_MASK);
-}
-
-// 读取
-static inline int pte_read_physical(phys_addr_t paddr, void *buffer, size_t size)
-{
-    void *mapped = pte_map_page(paddr, size, buffer);
-    if (IS_ERR(mapped))
-    {
-        return PTR_ERR(mapped);
-    }
-
-    // 极限性能且安全的内存拷贝 (防未对齐崩溃)
     switch (size)
     {
     case 1:
-        __builtin_memcpy(buffer, mapped, 1);
+        __builtin_memcpy(destination, source, 1);
         break;
     case 2:
-        __builtin_memcpy(buffer, mapped, 2);
+        __builtin_memcpy(destination, source, 2);
         break;
     case 4:
-        __builtin_memcpy(buffer, mapped, 4);
+        __builtin_memcpy(destination, source, 4);
         break;
     case 8:
-        __builtin_memcpy(buffer, mapped, 8);
+        __builtin_memcpy(destination, source, 8);
         break;
     case 16:
-        __builtin_memcpy(buffer, mapped, 16);
+        __builtin_memcpy(destination, source, 16);
         break;
     default:
-        __builtin_memcpy(buffer, mapped, size);
+        __builtin_memcpy(destination, source, size);
         break;
     }
-
-    return 0;
-}
-
-// 写入
-static inline int pte_write_physical(phys_addr_t paddr, const void *buffer, size_t size)
-{
-    void *mapped = pte_map_page(paddr, size, (void *)buffer);
-    if (IS_ERR(mapped))
-    {
-        return PTR_ERR(mapped);
-    }
-
-    switch (size)
-    {
-    case 1:
-        __builtin_memcpy(mapped, buffer, 1);
-        break;
-    case 2:
-        __builtin_memcpy(mapped, buffer, 2);
-        break;
-    case 4:
-        __builtin_memcpy(mapped, buffer, 4);
-        break;
-    case 8:
-        __builtin_memcpy(mapped, buffer, 8);
-        break;
-    case 16:
-        __builtin_memcpy(mapped, buffer, 16);
-        break;
-    default:
-        __builtin_memcpy(mapped, buffer, size);
-        break;
-    }
-
-    return 0;
 }
 
 /*
@@ -342,7 +257,163 @@ static inline int mmu_translate_va_to_pa(struct mm_struct *mm, uint64_t va, phys
     return ret;
 }
 
+/*
+验证参数并直接操作当前 CPU 槽位的 PTE 建立物理页映射。
+调用方必须在修改 PTE、刷新 TLB 和访问映射的整个期间禁止抢占，
+防止其他任务复用同一个 CPU 槽位并改写其 PTE。
+*/
+static inline void *pte_map_page(phys_addr_t paddr, size_t size, const void *buffer)
+{
+    struct pte_physical_page_info *info = this_cpu_ptr(&pte_info);
+
+    // 普通内存页表配置
+    /*
+    我建议使用MT_NORMAL(有缓存)，RAM是口语化表达广泛含义表内存，DRAM是内存硬件具体的硬件存储介质
+    原因如下:
+        一块普通的DRAM物理地址同时被2个或以上的虚拟地址进行了不同属性的映射
+        类如:用户态虚拟地址映射这个物理页为有缓存,内核线性区映射这个物理页有缓存，这里却映射为无缓存
+        虽然说3种都能访问，但是会出现数据不一致的情况
+    1.映射为有缓存的用户态和线性:对地址写入很多时候还存在CPU cache(多级缓存中,常见的如L1~L3级缓存)
+                                这时候进行绕过缓存读DRAM中数据，肯定是错乱的，应为cpu未把缓存写回DRAM
+    2.映射为无缓存的内核态:你对这个物理页的读写都是直达DRAM,此时cpu拿缓存进行计算，修改DRMA不会实时反映到虚拟地址
+
+    这里使用无缓存读原因是：目标进程分配一个内存页，用dc civac直接清除这个内存页的缓存，
+                        随后把坐标指针重定向到这个内存页，内核读取了这个内存页用了缓存，那么下次这个页的读取就会变快，进行缓存检测
+    无缓存读会带来非常严重的性能下降和数据不一致情况
+    */
+    static const uint64_t FLAGS = PTE_TYPE_PAGE | PTE_VALID | PTE_AF | PTE_SHARED | PTE_PXN | PTE_UXN | PTE_ATTRINDX(MT_NORMAL_NC);
+    /*
+    Device memory 不允许普通 RAM 那种随意访问方式
+    代码使用__builtin_memcpy
+    但 mapped 如果被标成 MT_DEVICE_nGnRnE，编译器生成的访问序列可能是：
+    ldr/str 8 字节
+    ldp/stp 成对访问
+    更宽的块访问
+    非自然对齐访问
+    只要 mapped 地址不是对应宽度自然对齐，或者指令形式不适合 Device memory，就可能直接死
+    尤其这里返回的是return (uint8_t *)info->base_address + (paddr & ~PAGE_MASK);
+    如果 paddr 页内偏移不是 4/8/16 对齐，而 memcpy 刚好生成宽访问，Device 就很容易炸。Normal_NC 映射下 CPU 可以处理很多非对齐访问；Device mapping 下不行。
+
+    // 硬件设备寄存器专用页表配置（不要使用硬件寄存器页表配置去读取普通物理页，原因不过多解释，太复杂了问AI去）
+     static const uint64_t FLAGS = PTE_TYPE_PAGE | PTE_VALID | PTE_AF |
+                                   PTE_SHARED | PTE_PXN | PTE_UXN |
+                                   PTE_ATTRINDX(MT_DEVICE_nGnRnE);
+    */
+
+    uint64_t pfn = __phys_to_pfn(paddr);
+
+    // 参数检查
+    if (!size || !buffer) return ERR_PTR(-EINVAL);
+    if (!info->base_address || !info->pte_address) return ERR_PTR(-ENODEV);
+    // PFN 有效性检查：确保物理页帧在系统内存管理范围内
+    if (!pfn_valid(pfn)) return ERR_PTR(-EFAULT);
+    // 跨页检查：读写可能跨越页边界，访问到未映射的下一页
+    if (((paddr & ~PAGE_MASK) + size) > PAGE_SIZE) return ERR_PTR(-EINVAL);
+
+    // 修改 PTE 指向目标物理页
+    set_pte(info->pte_address, pfn_pte(pfn, __pgprot(FLAGS)));
+
+    // 当前槽位只由当前 CPU 使用，因此只刷新当前 CPU 的该 VA TLB 项。
+    flush_tlb_addr_all_asid_current_cpu((uint64_t)info->base_address);
+
+    return (uint8_t *)info->base_address + (paddr & ~PAGE_MASK);
+}
+
+// 读取
+static inline int pte_read_physical(phys_addr_t paddr, void *buffer, size_t size)
+{
+    void *mapped;
+    int status = 0;
+
+    // 禁止抢占，主要防task迁移cpu，防止当前槽位在映射修改后，被迁移到其他 CPU 上，导致使用了其他cpu 上的pte映射
+    preempt_disable();
+    mapped = pte_map_page(paddr, size, buffer);
+    if (IS_ERR(mapped)) status = PTR_ERR(mapped);
+    else memory_copy(buffer, mapped, size);
+    preempt_enable();
+
+    return status;
+}
+
+// 写入
+static inline int pte_write_physical(phys_addr_t paddr, const void *buffer, size_t size)
+{
+    void *mapped;
+    int status = 0;
+
+    preempt_disable();
+    mapped = pte_map_page(paddr, size, (void *)buffer);
+    if (IS_ERR(mapped)) status = PTR_ERR(mapped);
+    else memory_copy(mapped, buffer, size);
+    preempt_enable();
+
+    return status;
+}
+
 //============方案2:内核已经映射的线性地址读写+手动走页表翻译地址(翻译和读写可以混搭)============
+
+// 手动走页表翻译，遇到PUD:1G大页/PMD:2MB大页，可以直接返回物理地址了
+static inline int walk_translate_va_to_pa(struct mm_struct *mm, uint64_t vaddr, phys_addr_t *paddr)
+{
+    if (!mm || !paddr) return -EINVAL;
+
+    // PGD Level
+    pgd_t *pgd = pgd_offset(mm, vaddr);
+    if (pgd_none(*pgd) || pgd_bad(*pgd)) return -EFAULT;
+
+    // P4D Level
+    p4d_t *p4d = p4d_offset(pgd, vaddr);
+    if (p4d_none(*p4d) || p4d_bad(*p4d)) return -EFAULT;
+
+    // PUD Level (可能遇到 1GB 大页)
+    pud_t *pud = pud_offset(p4d, vaddr);
+    unsigned long pfn;
+    uint64_t page_mask;
+
+    // 检查是否是 1G 大页
+    if (pud_leaf(*pud))
+    {
+        pfn = pud_pfn(*pud);
+        page_mask = PUD_MASK;
+    }
+    else
+    {
+        if (pud_bad(*pud)) return -EFAULT;
+
+        //  PMD Level (可能遇到 2MB 大页)
+        pmd_t *pmd = pmd_offset(pud, vaddr);
+
+        // 检查是否是 2M 大页
+        if (pmd_leaf(*pmd))
+        {
+            pfn = pmd_pfn(*pmd);
+            page_mask = PMD_MASK;
+        }
+        else
+        {
+            if (pmd_bad(*pmd)) return -EFAULT;
+
+            //  PTE Level (普通的 4KB 页)
+            // 较新内核中 __pte_offset_map 不导出，对于 64位 系统直接使用 pte_offset_kernel 即可
+            pte_t *ptep = pte_offset_kernel(pmd, vaddr);
+            if (!ptep) return -EFAULT;
+
+            pte_t pte = __pte(READ_ONCE(pte_val(*ptep)));
+
+            // 必须检查 pte_present，因为页可能被换出到 Swap 分区
+            // 如果 present 为 false，pfn 字段是无效的（存的是 swap offset）
+            if (!pte_present(pte)) return -EFAULT;
+
+            pfn = pte_pfn(pte);
+            page_mask = PAGE_MASK;
+        }
+    }
+
+    if (!pfn_valid(pfn)) return -EFAULT;
+    *paddr = ((phys_addr_t)pfn << PAGE_SHIFT) + (vaddr & ~page_mask);
+    return 0;
+}
+
 // 读取
 static inline int linear_read_physical(phys_addr_t paddr, void *buffer, size_t size)
 {
@@ -384,28 +455,7 @@ phys_to_virt()它算出的 VA 不在线性映射区。解引用这个未映射�
     //if (!virt_addr_valid(kernel_vaddr)) return -EFAULT;
     if (!__is_lm_address(kernel_vaddr)) return -EFAULT;
 
-    // 极限性能且安全的内存拷贝 (防未对齐崩溃)
-    switch (size)
-    {
-    case 1:
-        __builtin_memcpy(buffer, kernel_vaddr, 1);
-        break;
-    case 2:
-        __builtin_memcpy(buffer, kernel_vaddr, 2);
-        break;
-    case 4:
-        __builtin_memcpy(buffer, kernel_vaddr, 4);
-        break;
-    case 8:
-        __builtin_memcpy(buffer, kernel_vaddr, 8);
-        break;
-    case 16:
-        __builtin_memcpy(buffer, kernel_vaddr, 16);
-        break;
-    default:
-        __builtin_memcpy(buffer, kernel_vaddr, size);
-        break;
-    }
+    memory_copy(buffer, kernel_vaddr, size);
 
     return 0;
 }
@@ -419,212 +469,89 @@ static inline int linear_write_physical(phys_addr_t paddr, const void *buffer, s
     if ((paddr & ~PAGE_MASK) + size > PAGE_SIZE) return -EINVAL;
     if (!__is_lm_address(kernel_vaddr)) return -EFAULT;
 
-    switch (size)
-    {
-    case 1:
-        __builtin_memcpy(kernel_vaddr, buffer, 1);
-        break;
-    case 2:
-        __builtin_memcpy(kernel_vaddr, buffer, 2);
-        break;
-    case 4:
-        __builtin_memcpy(kernel_vaddr, buffer, 4);
-        break;
-    case 8:
-        __builtin_memcpy(kernel_vaddr, buffer, 8);
-        break;
-    case 16:
-        __builtin_memcpy(kernel_vaddr, buffer, 16);
-        break;
-    default:
-        __builtin_memcpy(kernel_vaddr, buffer, size);
-        break;
-    }
+    memory_copy(kernel_vaddr, buffer, size);
 
     return 0;
 }
 
-// 手动走页表翻译，遇到PUD:1G大页/PMD:2MB大页，可以直接返回物理地址了
-static inline int walk_translate_va_to_pa(struct mm_struct *mm, uint64_t vaddr, phys_addr_t *paddr)
-{
-    if (!mm || !paddr) return -EINVAL;
-
-    // PGD Level
-    pgd_t *pgd = pgd_offset(mm, vaddr);
-    if (pgd_none(*pgd) || pgd_bad(*pgd)) return -EFAULT;
-
-    // P4D Level
-    p4d_t *p4d = p4d_offset(pgd, vaddr);
-    if (p4d_none(*p4d) || p4d_bad(*p4d)) return -EFAULT;
-
-    // PUD Level (可能遇到 1GB 大页)
-    pud_t *pud = pud_offset(p4d, vaddr);
-    if (pud_none(*pud)) return -EFAULT;
-
-    // 检查是否是 1G 大页
-    if (pud_leaf(*pud))
-    {
-        // 检查pfn
-        unsigned long pfn = pud_pfn(*pud);
-        if (!pfn_valid(pfn)) return -EFAULT;
-
-        *paddr = (pud_pfn(*pud) << PAGE_SHIFT) + (vaddr & ~PUD_MASK);
-        return 0;
-    }
-    if (pud_bad(*pud)) return -EFAULT;
-
-    //  PMD Level (可能遇到 2MB 大页)
-    pmd_t *pmd = pmd_offset(pud, vaddr);
-    if (pmd_none(*pmd)) return -EFAULT;
-
-    // 检查是否是 2M 大页
-    if (pmd_leaf(*pmd))
-    {
-        // 检查pfn
-        unsigned long pfn = pmd_pfn(*pmd);
-        if (!pfn_valid(pfn)) return -EFAULT;
-
-        *paddr = (pmd_pfn(*pmd) << PAGE_SHIFT) + (vaddr & ~PMD_MASK);
-        return 0;
-    }
-    if (pmd_bad(*pmd)) return -EFAULT;
-
-    //  PTE Level (普通的 4KB 页)
-    // 较新内核中 __pte_offset_map 不导出，对于 64位 系统直接使用 pte_offset_kernel 即可
-    pte_t *ptep = pte_offset_kernel(pmd, vaddr);
-    if (!ptep) return -EFAULT;
-
-    pte_t pte = *ptep;
-
-    // 必须检查 pte_present，因为页可能被换出到 Swap 分区
-    // 如果 present 为 false，pfn 字段是无效的（存的是 swap offset）
-    if (pte_present(pte))
-    {
-        // 检查pfn
-        unsigned long pfn = pte_pfn(pte);
-        if (!pfn_valid(pfn)) return -EFAULT;
-
-        *paddr = (pte_pfn(pte) << PAGE_SHIFT) + (vaddr & ~PAGE_MASK);
-        return 0;
-    }
-
-    return -EFAULT;
-}
-
 // 进程读写
-static inline int virtual_memory_rw(enum request_op op, pid_t pid, uint64_t vaddr, void *buffer, size_t size)
+static int virtual_memory_rw(enum request_op op, pid_t pid, uint64_t vaddr, void *buffer, size_t size)
 {
-    static pid_t s_last_pid = 0;
-    static struct mm_struct *s_last_mm = NULL;
-    static uint64_t s_last_vpage_base = -1ULL;
-    static phys_addr_t s_last_ppage_base = 0;
+    static pid_t cached_pid = 0;
+    static struct mm_struct *cached_mm = NULL;
 
-    phys_addr_t paddr_of_page = 0;
     uint64_t current_vaddr = untagged_addr(vaddr);
-    size_t bytes_remaining = size;
-    size_t bytes_copied = 0;
+    size_t bytes_processed = 0;
     size_t bytes_done = 0;
     int status = 0;
 
+    //主动资源清理释放缓存mm引用
+    if (pid == 0)
+    {
+        if (cached_mm) mmput(cached_mm);
+        cached_mm = NULL;
+        cached_pid = 0;
+        return 0;
+    }
+    //参数检查往后移
     if (!buffer || size == 0) return -EINVAL;
 
-    /* ---------- mm_struct 缓存 ---------- */
-    if (pid != s_last_pid || s_last_mm == NULL)
+    //缓存mm,提升函数整体一半以上的效率
+    if (!cached_mm || pid != cached_pid)
     {
-        // 目标进程切换清缓存
-        s_last_mm = 0;
-        s_last_mm = get_mm_by_pid(pid); // 引用计数+1
-        // 这里不长期持有mm引用计数,靠后面的判断稳住mm释放时也不崩溃
-        if (s_last_mm)
-        {
-            mmput(s_last_mm); // 引用计数-1
-        }
-        else
-        {
-            return -EINVAL;
-        }
+        struct mm_struct *new_mm = get_mm_by_pid(pid);
+        if (!new_mm) return -EINVAL;
 
-        s_last_pid = pid;
-        s_last_vpage_base = -1ULL;
+        //释放旧mm引用计数
+        if (cached_mm) mmput(cached_mm);
+        //缓存新mm
+        cached_mm = new_mm;
+        cached_pid = pid;
     }
 
+    struct mm_struct *mm = cached_mm;
+
     /* ---------- 逐页循环 ---------- */
-    while (bytes_remaining > 0)
+    while (bytes_processed < size)
     {
-        size_t page_offset = current_vaddr & (PAGE_SIZE - 1);
-        size_t bytes_this_page = PAGE_SIZE - page_offset;
-        uint64_t current_vpn = current_vaddr & PAGE_MASK;
+        size_t bytes_this_page = PAGE_SIZE - (current_vaddr & (PAGE_SIZE - 1));
 
-        if (bytes_this_page > bytes_remaining) bytes_this_page = bytes_remaining;
+        if (bytes_this_page > size - bytes_processed) bytes_this_page = size - bytes_processed;
 
-        /* 软件 TLB 缓存 */
-        if (current_vpn == s_last_vpage_base)
-        {
-            paddr_of_page = s_last_ppage_base;
-        }
-        else
-        {
-
-            /*
-            防止有人才传入一个看起来正常的虚拟地址，但是根本不存在的虚拟地址打崩硬件翻译，
-            部分设备体质不行，伪造虚拟地址mmu翻译时引发同步外部中止（Synchronous External Abort，简称 SEA） 是一种非常严重的硬件级保护和故障中断。
-            总线,内存控制器外部错误
-            因为传入的虚拟地址（va）是编造的，它并不在目标进程的合法地址空间内。
-            其对应的页表项物理内存里可能残留着未初始化的脏数据（垃圾值）。MMU 读取到了这个非零的垃圾值，误认为它是一个“合法的下一级页表物理基地址”。
-            并通过 AXI/AHB 系统总线发送读请求，试图去读取这个所谓的“下一级描述符”。
-            垃圾物理地址指向了一个物理上不存在的芯片空洞或者是总线控制器在限定周期内等不到硬件响应，触发总线超时
-            物理地址指向了高通联发科芯片中受保护的区域（例如 TrustZone 运行的物理 SRAM/DRAM 区域、敏感数据区）
-            抛出最高优先级的 Synchronous External Abort，
-            */
-            uint64_t task_size = READ_ONCE(s_last_mm->task_size);
-            if (current_vaddr >= task_size || bytes_this_page > task_size - current_vaddr)
-            {
-                status = -EFAULT;
-                s_last_vpage_base = -1ULL;
-                if (op == request_op_vmem_read && size > 8) __builtin_memset((uint8_t *)buffer + bytes_copied, 0, bytes_this_page);
-                goto next_chunk;
-            }
-
-            // 翻译地址
-            //status = mmu_translate_va_to_pa(s_last_mm, current_vpn, &paddr_of_page);
-            status = walk_translate_va_to_pa(s_last_mm, current_vpn, &paddr_of_page);
-
-            if (status != 0)
-            {
-                s_last_vpage_base = -1ULL;
-                if (op == request_op_vmem_read && size > 8) __builtin_memset((uint8_t *)buffer + bytes_copied, 0, bytes_this_page);
-                goto next_chunk;
-            }
-            s_last_vpage_base = current_vpn;
-            s_last_ppage_base = paddr_of_page;
-        }
+        phys_addr_t paddr;
+        // 翻译地址
+        //status = mmu_translate_va_to_pa(mm, current_vaddr, &paddr);
+        status = walk_translate_va_to_pa(mm, current_vaddr, &paddr);
 
         /* 执行读/写 */
-        if (op == request_op_vmem_read)
+        if (status == 0)
         {
+            if (op == request_op_vmem_read)
+            {
+                //status = pte_read_physical(paddr, (uint8_t *)buffer + bytes_processed, bytes_this_page);
+                status = linear_read_physical(paddr, (uint8_t *)buffer + bytes_processed, bytes_this_page);
+            }
+            else
+            {
+                //status = pte_write_physical(paddr, (const uint8_t *)buffer + bytes_processed, bytes_this_page);
+                status = linear_write_physical(paddr, (uint8_t *)buffer + bytes_processed, bytes_this_page);
+            }
+        }
 
-            //status = pte_read_physical(paddr_of_page + page_offset, (uint8_t *)buffer + bytes_copied, bytes_this_page);
-            status = linear_read_physical(paddr_of_page + page_offset, (uint8_t *)buffer + bytes_copied, bytes_this_page);
+        if (status == 0)
+        {
+            bytes_done += bytes_this_page;
+        }
+        else if (op == request_op_vmem_read && size < 8)
+        {
+            __builtin_memset(buffer, 0, size); //失败时清空对应字节残留，8字节指针是最不应该保留的
         }
         else
         {
-
-            //status = pte_write_physical(paddr_of_page + page_offset, (const uint8_t *)buffer + bytes_copied, bytes_this_page);
-            status = linear_write_physical(paddr_of_page + page_offset, (uint8_t *)buffer + bytes_copied, bytes_this_page);
+            __builtin_memset((uint8_t *)buffer + bytes_processed, 0, bytes_this_page); //大拷贝只清空失败的数据
         }
 
-        if (status != 0)
-        {
-            s_last_vpage_base = -1ULL;
-            if (op == request_op_vmem_read && size > 8) __builtin_memset((uint8_t *)buffer + bytes_copied, 0, bytes_this_page);
-            goto next_chunk;
-        }
-
-        bytes_done += bytes_this_page;
-
-    next_chunk:
-        bytes_remaining -= bytes_this_page;
-        bytes_copied += bytes_this_page;
+        bytes_processed += bytes_this_page;
         current_vaddr += bytes_this_page;
     }
 

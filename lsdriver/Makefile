@@ -24,8 +24,20 @@ $(obj)/lsdriver_main.o: $(src)/lsdriver.c FORCE
 #O3优化:启用更积极的内联、循环变换、指令调度和常量传播。
 ccflags-y += -O3
 
-# Full LTO：让主驱动与 decoder/encoder 在统一模块视图中进行跨文件内联和常量传播。
-ccflags-y += -flto
+# 旧式 CFI 的 Linux ABI 随内核分支变化：5.10 使用 __cfi_slowpath，5.15 使用 __cfi_slowpath_diag；
+# 部分厂商 KMI 不导出 CFI 失败调用的 UBSAN abort handler，例如5.15的 __ubsan_handle_cfi_check_fail_abort。
+# 保留 cross-DSO CFI 和模块 __cfi_check，在模块内提供失败 handler，不改变正常 CFI 检查路径。
+# 6.1+ 的 CC_FLAGS_CFI 为 -fsanitize=kcfi，不匹配此条件。
+ifneq ($(filter -fsanitize=cfi,$(CC_FLAGS_CFI)),)
+ccflags-y += -DLSDRIVER_LEGACY_CFI
+endif
+
+# 不为每个函数和数据对象生成独立 ELF section，减少模块加载时为 section 属性分配的内核元数据。
+# 这条分配路径存在于各目标内核；6.6及以下版本内核，分配失败时仅跳过 section sysfs 属性，模块仍继续加载。
+# 6.12 及以上由 mod_sysfs_setup() 传播 -ENOMEM，同样的高阶连续页分配失败会直接使 init_module() 失败。
+# 外部模块由目标内核 Kbuild 编译，会继承 KBUILD_CFLAGS、Kconfig 派生选项和 module.lds；这里的kbuild只补充模块专属参数。
+# 所以不在外部模块中强制启用 -flto；LTO 应由目标内核 Kconfig 决定，CONFIG_LTO_NONE 下单独启用会放大 split section 且与内核构建配置不一致。
+ccflags-y += -fno-function-sections -fno-data-sections
 
 
 # 开启 debug 输出；需要 pr_debug 时手动启用。
@@ -64,6 +76,7 @@ CFLAGS_arm64_emulate/arm64_emulate_register.o += -mno-implicit-float
 
 # 将所有警告降级，不再视为错误。
 ccflags-y += -Wno-error
+ccflags-y += -Wno-unused-parameter
 
 # 驱动源码使用 C99 使用点声明与 for 初始化子句变量；旧内核默认 GNU89，需显式启用现代 GNU C 方言。
 ccflags-y += -std=gnu11
@@ -77,14 +90,24 @@ ccflags-y += -fomit-frame-pointer
 # 尾调用优化：将函数末尾的 call + ret 合并为直接跳转，减少一次返回地址保存与恢复。
 ccflags-y += -foptimize-sibling-calls
 
-# 关闭 BTI 和返回地址指针认证：移除间接分支目标处的 BTI、函数入口 PACIASP 与返回前 AUTIASP。
+# 关闭 BTI ：移除间接分支目标处的 BTI、。
 # 这个不要进行关闭，讲一下原因
 # 真正的 C 函数 init_module;sub sp, sp, #0xd0;也就是驱动的c入口正常，没有BTI/PAC
 # 由于目标内核启用了 CFI/LTO，模块的 init 指针被规范化到 CFI jump table：init_module.cfi_jt: b init_module;
 # 由于编译配置显式使用 -mbranch-protection=none 关闭了 ARM64 BTI/PAC 保护，
 # 生成的 init_module.cfi_jt 跳板入口只有 b init_module 而缺少内核间接调用要求的 bti c
 # 导致内核通过 BLR 加载驱动时触发同步终止异常(BTI) 并最终 kernel panic。
-#ccflags-y += -mbranch-protection=none
+# -mbranch-protection=bti       PAC 关闭，BTI 开启
+# -mbranch-protection=pac-ret   PAC 开启，BTI 关闭
+# -mbranch-protection=standard  PAC 和 BTI 都开启
+# -mbranch-protection=none      PAC 和 BTI 都关闭
+
+# 仅关闭返回地址 PAC，保留 BTI；覆盖 Kbuild 继承的 pac-ret 分支保护模式。
+# 原因是部分设备如oppo find x9 pro使用漏洞解锁root权限
+# 不知道是那个函数的返回地址、栈指针或栈内容被漏洞修改
+# 然后autiasp 验证失败，LR 会变成无效地址，随后 ret 跳转异常，导致 kernel panic, panic原因变成普通的空指针访问
+ccflags-y += -mbranch-protection=bti
+
 
 # 关闭自动局部变量清零：避免编译器在函数入口为未初始化栈对象插入 memset/零存储。
 # 代码必须自行保证所有局部变量在首次读取前已完成初始化，否则会暴露真实的未初始化读取。
@@ -115,8 +138,7 @@ GCOV_PROFILE := n
 KCOV_INSTRUMENT := n
 
 # 保留 KCFI：启用 KCFI 的内核会间接调用模块回调，移除类型哈希会导致校验异常。
-
-
+# 禁止关闭整个模块的 CFI/KCFI：5.x 内核通过模块 __cfi_check 校验回调，6.1+ 内核通过 KCFI type id 校验回调；
 
 
 # 删除空指针检查：覆盖内核默认的保守语义，可能破坏依赖空指针检查的内核代码，禁止启用。

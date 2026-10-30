@@ -1,15 +1,10 @@
-#include <linux/module.h>
 #include <linux/bitops.h>
 #include <linux/kernel.h>
-#include <linux/kallsyms.h>
-#include <linux/memory.h>
 #include <linux/percpu.h>
 #include <linux/perf_event.h>
 #include <linux/cpu.h>
 #include <linux/rcupdate.h>
 #include <linux/smp.h>
-#include <linux/stop_machine.h>
-#include <linux/version.h>
 #include <linux/sched.h>
 #include <asm/cacheflush.h>
 #include <asm/debug-monitors.h>
@@ -20,8 +15,8 @@
 #include "export_fun.h"
 #include "arm64_reg.h"
 #include "inline_hook_frame.h"
-#include "lsdriver_log.h"
-#include "io_struct.h"
+#include "klog/lsdriver_log.h"
+#include "io_version/io_struct.h"
 #include "arm64_emulate/emulate_inst.h"
 
 /*
@@ -36,11 +31,13 @@ DBGWCRn_EL1：第 n 个数据观察点控制寄存器
 既然使用全局指针传递上下文，那么<统一>使用传递的全局上下文，不在使用附带参数
 内核很多子系统的做法也一样
 */
-struct break_point *g_bp_info;
-int num_brps, num_wrps; // 硬件执行和访问槽位总数
-static struct perf_event * __percpu * bp_on_reg;
-static struct perf_event * __percpu * wp_on_reg;
-static void (*fn_perf_bp_event)(struct perf_event *event, void *data);
+struct break_point *g_bp_info __attribute__((__section__(".data..read_mostly")));
+int num_brps, num_wrps __attribute__((__section__(".data..read_mostly"))); // 硬件执行和访问槽位总数
+static struct perf_event * __percpu * bp_on_reg __attribute__((__section__(".data..read_mostly")));
+static struct perf_event * __percpu * wp_on_reg __attribute__((__section__(".data..read_mostly")));
+static void (*fn_perf_bp_event)(struct perf_event *event, void *data) __attribute__((__section__(".data..read_mostly")));
+static void (*fn_perf_event_output_forward)(struct perf_event *, struct perf_sample_data *, struct pt_regs *) __attribute__((__section__(".data..read_mostly")));
+static void (*fn_perf_event_output_backward)(struct perf_event *, struct perf_sample_data *, struct pt_regs *) __attribute__((__section__(".data..read_mostly")));
 
 /*
 把外部断点参数转换成ARM架构内部格式，并完成基础检测/修正。
@@ -193,18 +190,9 @@ static bool watchpoint_access_matches(struct arch_hw_breakpoint *info, uint64_t 
 // 默认回调表示异常处理后仍需执行被断住的原指令；trigger 只记录命中地址，不能作为单步标志。
 static bool perf_breakpoint_requires_step(struct perf_event *event)
 {
-    static void (*default_forward)(struct perf_event *, struct perf_sample_data *, struct pt_regs *) __attribute__((__section__(".data..read_mostly")));
-    static void (*default_backward)(struct perf_event *, struct perf_sample_data *, struct pt_regs *) __attribute__((__section__(".data..read_mostly")));
-
     if (!event) return false;
 
-    if (!default_forward || !default_backward)
-    {
-        default_forward = (void *)generic_kallsyms_lookup_name("perf_event_output_forward");
-        default_backward = (void *)generic_kallsyms_lookup_name("perf_event_output_backward");
-    }
-
-    return (default_forward && event->overflow_handler == default_forward) || (default_backward && event->overflow_handler == default_backward);
+    return (fn_perf_event_output_forward && event->overflow_handler == fn_perf_event_output_forward) || (fn_perf_event_output_backward && event->overflow_handler == fn_perf_event_output_backward);
 }
 
 // 执行断异常处理跳板工作函数
@@ -419,7 +407,8 @@ static void install_hwbp_regs_on_cpu(struct break_point *bp_info)
     size_t point_slot = 0;
     struct bp_point *point;
 
-    //这里输出的话，必须目标进程有调度才会输出一直运行的话，可能就输出一次，实际测试发现目标在断点检测下会疯狂调用ptrace让task进调度安装硬件断点
+    //目标进程有调度才会输出一直运行的话，也是符合常理perf task断点也是调度安装不是安装到所有cpu，调度时输出当前cpu的即可
+    //实际测试发现目标在断点检测下会疯狂调用ptrace让task进调度安装硬件断点
     //dump_perf_breakpoint_slots();
 
     while ((point = bp_info_find_active_point(bp_info, &point_slot)))
@@ -537,7 +526,57 @@ static int work_trampoline_finish_task_switch(struct pt_regs *hook_regs)
     return 0;
 }
 
-// 硬件调试异常和调度返回 hook 统一安装、回滚与卸载。
+/*
+硬件调试异常和调度返回 hook 统一安装、回滚与卸载。
+安装位置约束：本实现必须 hook breakpoint_handler/watchpoint_handler，不能移到
+el0t_64_sync_handler/el0_sync_handler 顶层 C 入口并在处理后直接返回。
+原因是 ptrace 在断点 handler 完成后的异常退出路径还有额外处理，回调执行完并不代表处理结束。
+
+以下以 Android 14/Linux 6.1 中 EL0 命中 ptrace 注册的硬件断点为例，区分两个阶段：
+
+1. 断点回调给被跟踪线程登记待处理信号，还没有暂停线程或通知调试器。
+   ptrace 注册时把 ptrace_hbptriggered 绑定为该 perf_event 的 overflow_handler。
+   breakpoint_handler/watchpoint_handler 本身不直接发送这个信号，而是调用：
+   perf_bp_event -> perf 内部事件分发 -> ptrace_hbptriggered
+       -> arm64_force_sig_fault(SIGTRAP, TRAP_HWBKPT, ...) -> force_sig_fault。
+   这里的 SIGTRAP 登记给当前被跟踪线程，不是发给调试器，也不是再次触发 CPU 异常。
+   不是所有 perf 回调都产生 SIGTRAP；普通默认输出回调通常只记录样本。
+
+2. 正常异常退出路径取出该信号，暂停被跟踪线程并通知调试器。
+   exit_to_user_mode -> do_notify_resume -> do_signal -> get_signal
+       -> ptrace_signal -> ptrace_stop。
+   get_signal 取出 SIGTRAP 并检查 current->ptrace；跟踪关系仍有效且没有致命信号等
+   例外时，ptrace_stop 将线程设为 TASK_TRACED，保存停止原因和 siginfo，
+   通过 do_notify_parent_cldstop 通知调试器并唤醒等待者，再调用 schedule 暂停线程。
+   调试器用 waitpid/waitid 得到“目标因 SIGTRAP 停止”的状态，必要时用
+   PTRACE_GETSIGINFO 读取详情。不是退出路径再向调试器发送一次 SIGTRAP。
+
+所谓 ptrace 停止，就是目标线程等待调试器下达后续请求；
+调试器可检查/修改寄存器和断点，再用 PTRACE_CONT 继续或 PTRACE_SINGLESTEP 请求单步，其他后续处理都交给ptrace由内核执行请求
+
+hook 具体 handler 时，跳过其本体后仍返回 do_debug_exception，保留后续异常退出路径；ptrace完整处理流程跑通
+hook 顶层 C 入口并 return 1 则直接返回汇编 ret_to_user，没有任何断点信号给ptrace，ptrace完整处理流程不能跑通，就直接被其他调试器察觉了
+
+因此保留当前安装位置，让登记信号之后的暂停、通知和等待调试器等处理正常完成。
+
+但是我主动忽略ptrace的断点干扰，把异常接管直接安排到顶层c入口多设备测了一下，
+实际结果效率还是不如pte异常快
+不知道为何同样顶层c入口吞异常，为何硬件断点效率没有pte异常快
+
+我猜大概率是硬件异常在不同的硬件单元导致：
+
+mmu硬件单元是绝对的核心硬件单元
+CPU 每一个周期都在疯狂取指，每一个load/store时都要工作，
+TLB 命中缓存，TLB完成权限检查，如果权限不符，直接最前端的单周期电路中。硬件以最高优先级、最短电路直接产生 Fault 标记。芯片厂商也会对 MMU硬件单元晶体管电路设计优化
+TLB Miss, 由核心硬件页表遍历器（PTW）权限检查，同样的也是最前，最快，最短电路产生异常
+
+硬件调试逻辑是外围辅助单元：
+硬件断点寄存器（DBGBVRn_EL1 / DBGBCRn_EL1）属于 CoreSight / CPU Debug 子系统。因此，调试比较器通常挂在旁路甚至与取指主通路存在缓冲解耦，它的电路设计优先级远低于 MMU。
+
+并且MMU 通常可以从 TLB 缓存中取得翻译和权限信息，加上mmu权限检查时在没有取指时就可以提前触发异常，硬件断点者需要把指令带进cpu流水线，并且触发同步精确异常时会直接清空流水线，
+虽然mmu同步异常也会清空流水线，但是好处是根本不会进流水线，就不会有回滚投机状态。
+
+*/
 static struct hook_entry g_hwbp_hooks[] = {
     HOOK_ENTRY("breakpoint_handler", work_trampoline_breakpoint),
     HOOK_ENTRY("watchpoint_handler", work_trampoline_watchpoint),
@@ -634,7 +673,7 @@ static int start_task_run_monitor(struct break_point *bp_info)
 
     if (!bp_info || !bp_info_find_active_point(bp_info, NULL))
     {
-        ls_log_tag("hwbp", "breakpoint info error\n");
+        ls_log_always_tag("hwbp", "breakpoint info error\n");
         return -EINVAL;
     }
 
@@ -647,16 +686,18 @@ static int start_task_run_monitor(struct break_point *bp_info)
     if (g_bp_info)
     {
         g_bp_info = bp_info;
-        ls_log_tag("hwbp", "monitor config updated\n");
         return 0;
     }
 
     bp_on_reg = (struct perf_event * __percpu *)generic_kallsyms_lookup_name("bp_on_reg");
     wp_on_reg = (struct perf_event * __percpu *)generic_kallsyms_lookup_name("wp_on_reg");
     fn_perf_bp_event = (void (*)(struct perf_event *, void *))generic_kallsyms_lookup_name("perf_bp_event");
-    if (!bp_on_reg || !wp_on_reg || !fn_perf_bp_event)
+    // 符号查找会注册 kprobe 并可能睡眠，必须在发布上下文和安装异常 hook 前完成。
+    fn_perf_event_output_forward = (void *)generic_kallsyms_lookup_name("perf_event_output_forward");
+    fn_perf_event_output_backward = (void *)generic_kallsyms_lookup_name("perf_event_output_backward");
+    if (!bp_on_reg || !wp_on_reg || !fn_perf_bp_event || !fn_perf_event_output_forward || !fn_perf_event_output_backward)
     {
-        ls_log_tag("hwbp", "lookup bp_on_reg/wp_on_reg/perf_bp_event failed\n");
+        ls_log_always_tag("hwbp", "lookup bp_on_reg/wp_on_reg/perf_bp_event/perf_event_output_forward/perf_event_output_backward failed\n");
         return -ENOENT;
     }
 
@@ -667,13 +708,11 @@ static int start_task_run_monitor(struct break_point *bp_info)
     ret = inline_hook_install(g_hwbp_hooks);
     if (ret)
     {
-        ls_log_tag("hwbp", "inline_hook_install hwbp hooks failed: %d\n", ret);
+        ls_log_always_tag("hwbp", "inline_hook_install hwbp hooks failed: %d\n", ret);
         g_bp_info = NULL;
         return ret;
     }
 
-    ls_log_tag("hwbp", "hwbp hooks installed\n");
-    ls_log_tag("hwbp", "monitor start\n");
     return 0;
 }
 
@@ -688,5 +727,4 @@ static void stop_task_run_monitor(void)
 
     inline_hook_remove(g_hwbp_hooks);
     WRITE_ONCE(g_bp_info, NULL);
-    ls_log_tag("hwbp", "monitor stop\n");
 }

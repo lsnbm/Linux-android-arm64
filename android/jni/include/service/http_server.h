@@ -1,11 +1,15 @@
 ﻿#pragma once
 #include <ifaddrs.h>
+#include <arpa/inet.h>
 #include <net/if.h>
 #include <nlohmann/json.hpp>
+#include <variant>
 #include <sched.h>
 #include <sys/mount.h>
-#include "BS_thread_pool.hpp"
-#include "memory_tool.h"
+#include "../../thread-pool/include/BS_thread_pool.hpp"
+#include "../base/system_log.h"
+#include "../application/runtime.h"
+#include "../memory/signature_scanner.h"
 
 // ============================================================================
 // HTTP 服务器模块
@@ -28,13 +32,6 @@ namespace
     constexpr std::string_view kCloudflaredPath = "/data/akernel/.cloudflared";
     constexpr std::string_view kCloudflaredTempPath = "/data/akernel/.cloudflared.tmp";
     std::mutex gRequestMutex;
-
-    // 延迟创建，避免 daemonize() 的 fork() 丢弃线程池工作线程后留下不可用的任务队列。
-    BS::thread_pool<> &ClientThreadPool()
-    {
-        static BS::thread_pool<> pool{std::max(16u, std::thread::hardware_concurrency() * 4)};
-        return pool;
-    }
 
     // 打印系统错误信息
     void printErrno(std::string_view action)
@@ -204,15 +201,6 @@ namespace
         LS_LOGI_TAG_FMT("HTTP", "cloudflared Tunnel 已启动，PID={}，公网地址将写入 /sdcard/log.txt", pid);
     }
 
-    // 去除字符串末尾换行符
-    void trimLineEnding(std::string &text)
-    {
-        while (!text.empty() && (text.back() == '\n' || text.back() == '\r'))
-        {
-            text.pop_back();
-        }
-    }
-
     // 清理文本中的换行字符
     std::string sanitizeLine(std::string text)
     {
@@ -248,73 +236,9 @@ namespace
         return static_cast<int>(*value);
     }
 
-    // 解析浮点数参数
-    std::optional<double> parseDouble(std::string_view text)
-    {
-        return parseNumber<double>(text, [](const char *s, char **end) { return std::strtod(s, end); });
-    }
-
     std::optional<std::int64_t> parseInt64(std::string_view text)
     {
         return parseNumber<std::int64_t>(text, [](const char *s, char **end) { return std::strtoll(s, end, 0); });
-    }
-
-    template <typename T> std::optional<T> readScalarValue(std::uint64_t address)
-    {
-        T value{};
-        if (dr->Read(address, &value, sizeof(T)) != static_cast<int>(sizeof(T))) return std::nullopt;
-        return value;
-    }
-
-    std::uint64_t readHwbp64(Driver::bp_record &record, int reg)
-    {
-        return static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(record, reg));
-    }
-
-    std::uint32_t readHwbp32(Driver::bp_record &record, int reg)
-    {
-        return static_cast<std::uint32_t>(MemUtils::HwbpReadRegisterValue(record, reg));
-    }
-
-    int clampHwbpRecordCount(int count)
-    {
-        if (count < 0) return 0;
-        if (count > BP_RECORD_MAX) return BP_RECORD_MAX;
-        return count;
-    }
-
-    Driver::bp_record *findHwbpRecordByFlatIndex(Driver::break_point &info, int index, int *pointIndex = nullptr, int *pointRecordIndex = nullptr)
-    {
-        if (index < 0) return nullptr;
-
-        int flatIndex = 0;
-        int currentPointIndex = 0;
-        for (auto &point : info.points)
-        {
-            const int recordCount = clampHwbpRecordCount(point.record_count);
-            if (index < flatIndex + recordCount)
-            {
-                const int localIndex = index - flatIndex;
-                if (pointIndex) *pointIndex = currentPointIndex;
-                if (pointRecordIndex) *pointRecordIndex = localIndex;
-                return &point.records[localIndex];
-            }
-
-            flatIndex += recordCount;
-            ++currentPointIndex;
-        }
-
-        return nullptr;
-    }
-
-    int getHwbpTotalRecordCount(const Driver::break_point &info)
-    {
-        int total = 0;
-        for (const auto &point : info.points)
-        {
-            total += clampHwbpRecordCount(point.record_count);
-        }
-        return total;
     }
 
     // 将字符串转换为小写ASCII
@@ -571,11 +495,13 @@ namespace
     // 将字节数组编码为十六进制字符串
     std::string bytesToHex(const std::uint8_t *bytes, std::size_t count)
     {
+        constexpr char digits[] = "0123456789ABCDEF";
         std::string output;
-        output.reserve(count * 2);
+        output.resize(count * 2);
         for (std::size_t i = 0; i < count; ++i)
         {
-            std::format_to(std::back_inserter(output), "{:02X}", bytes[i]);
+            output[i * 2] = digits[bytes[i] >> 4];
+            output[i * 2 + 1] = digits[bytes[i] & 0x0F];
         }
         return output;
     }
@@ -583,42 +509,22 @@ namespace
     // 解析十六进制字节流
     std::optional<std::vector<std::uint8_t>> parseHexBytes(std::string_view text)
     {
-        std::string compact;
-        compact.reserve(text.size());
-
-        for (char ch : text)
-        {
-            if (std::isxdigit(static_cast<unsigned char>(ch)) != 0)
-            {
-                compact.push_back(ch);
-            }
-            else if (std::isspace(static_cast<unsigned char>(ch)) == 0)
-            {
-                return std::nullopt;
-            }
-        }
-
-        if (compact.empty() || (compact.size() % 2) != 0)
-        {
-            return std::nullopt;
-        }
-
         std::vector<std::uint8_t> bytes;
-        bytes.reserve(compact.size() / 2);
-
-        for (std::size_t i = 0; i < compact.size(); i += 2)
+        bytes.reserve(text.size() / 2);
+        int high = -1;
+        for (const unsigned char ch : text)
         {
-            const std::string hexPair = compact.substr(i, 2);
-            char *end = nullptr;
-            errno = 0;
-            const unsigned long value = std::strtoul(hexPair.c_str(), &end, 16);
-            if (errno != 0 || end == hexPair.c_str() || *end != '\0' || value > 0xFF)
+            if (std::isspace(ch) != 0) continue;
+            if (std::isxdigit(ch) == 0) return std::nullopt;
+            const int digit = ch >= '0' && ch <= '9' ? ch - '0' : ch >= 'a' && ch <= 'f' ? ch - 'a' + 10 : ch - 'A' + 10;
+            if (high < 0) high = digit;
+            else
             {
-                return std::nullopt;
+                bytes.push_back(static_cast<std::uint8_t>((high << 4) | digit));
+                high = -1;
             }
-            bytes.push_back(static_cast<std::uint8_t>(value));
         }
-
+        if (high >= 0 || bytes.empty()) return std::nullopt;
         return bytes;
     }
 
@@ -632,25 +538,8 @@ namespace
     json buildMemoryInfoJson(int status, const auto &info)
     {
         json root;
-        int moduleCount = info.module_count;
-        if (moduleCount < 0)
-        {
-            moduleCount = 0;
-        }
-        else if (moduleCount > MAX_MODULES)
-        {
-            moduleCount = MAX_MODULES;
-        }
-
-        int regionCount = info.region_count;
-        if (regionCount < 0)
-        {
-            regionCount = 0;
-        }
-        else if (regionCount > MAX_SCAN_REGIONS)
-        {
-            regionCount = MAX_SCAN_REGIONS;
-        }
+        const int moduleCount = std::clamp(info.module_count, 0, MAX_MODULES);
+        const int regionCount = std::clamp(info.region_count, 0, MAX_SCAN_REGIONS);
 
         root["status"] = status;
         root["module_count"] = moduleCount;
@@ -661,15 +550,7 @@ namespace
         for (int i = 0; i < moduleCount; ++i)
         {
             const auto &mod = info.modules[i];
-            int segCount = mod.seg_count;
-            if (segCount < 0)
-            {
-                segCount = 0;
-            }
-            else if (segCount > MAX_SEGS_PER_MODULE)
-            {
-                segCount = MAX_SEGS_PER_MODULE;
-            }
+            const int segCount = std::clamp(mod.seg_count, 0, MAX_SEGS_PER_MODULE);
 
             json moduleItem;
             moduleItem["name"] = std::string(mod.name);
@@ -687,7 +568,7 @@ namespace
                 });
             }
 
-            root["modules"].push_back(moduleItem);
+            root["modules"].push_back(std::move(moduleItem));
         }
 
         for (int i = 0; i < regionCount; ++i)
@@ -727,7 +608,7 @@ namespace
                 item["valid"] = line.valid;
                 item["address"] = std::format("0x{:X}", line.address);
                 item["size"] = line.size;
-                item["bytes_hex"] = bytesToHex(line.bytes, line.size);
+                item["bytes_hex"] = bytesToHex(line.bytes, std::min(line.size, sizeof(line.bytes)));
                 item["mnemonic"] = sanitizeLine(line.mnemonic);
                 item["op_str"] = sanitizeLine(line.op_str);
                 root["disasm"].push_back(std::move(item));
@@ -738,22 +619,22 @@ namespace
         return root;
     }
 
-    json buildBreakpointDataJson(const auto &info)
+    json buildBreakpointDataJson(auto &info)
     {
         json data = {{"num_brps", info.num_brps}, {"num_wrps", info.num_wrps}, {"points", json::array()}};
 
-        for (const auto &point : info.points)
+        for (auto &point : info.points)
         {
-            const int pointRecordCount = clampHwbpRecordCount(point.record_count);
+            const int pointRecordCount = std::clamp(point.record_count, 0, BP_RECORD_MAX);
             json pointItem = {{"bt", static_cast<int>(point.bt)}, {"bl", static_cast<int>(point.bl)}, {"bs", static_cast<int>(point.bs)}, {"hit_addr", std::format("0x{:X}", point.hit_addr)}, {"record_count", pointRecordCount}, {"records", json::array()}};
 
             for (int i = 0; i < pointRecordCount; ++i)
             {
-                auto &rec = const_cast<Driver::bp_record &>(point.records[i]);
+                auto &rec = point.records[i];
                 MemUtils::HwbpRequestAll(rec);
-                json item = {{"mask", json::array()}, {"hit_count", readHwbp64(rec, Driver::IDX_HIT_COUNT)}, {"pc", std::format("0x{:X}", readHwbp64(rec, Driver::IDX_PC))}, {"lr", std::format("0x{:X}", readHwbp64(rec, Driver::IDX_LR))}, {"sp", std::format("0x{:X}", readHwbp64(rec, Driver::IDX_SP))}, {"orig_x0", std::format("0x{:X}", readHwbp64(rec, Driver::IDX_ORIG_X0))}, {"syscallno", std::format("0x{:X}", readHwbp32(rec, Driver::IDX_SYSCALLNO))}, {"pstate", std::format("0x{:X}", readHwbp64(rec, Driver::IDX_PSTATE))}, {"fpsr", std::format("0x{:X}", readHwbp32(rec, Driver::IDX_FPSR))}, {"fpcr", std::format("0x{:X}", readHwbp32(rec, Driver::IDX_FPCR))}};
+                json item = {{"mask", json::array()}, {"hit_count", static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_HIT_COUNT))}, {"pc", std::format("0x{:X}", static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_PC)))}, {"lr", std::format("0x{:X}", static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_LR)))}, {"sp", std::format("0x{:X}", static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_SP)))}, {"orig_x0", std::format("0x{:X}", static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_ORIG_X0)))}, {"syscallno", std::format("0x{:X}", static_cast<std::uint32_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_SYSCALLNO)))}, {"pstate", std::format("0x{:X}", static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_PSTATE)))}, {"fpsr", std::format("0x{:X}", static_cast<std::uint32_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_FPSR)))}, {"fpcr", std::format("0x{:X}", static_cast<std::uint32_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_FPCR)))}};
                 for (int m = 0; m < 18; ++m) item["mask"].push_back(std::format("0x{:X}", rec.mask[m]));
-                for (int reg = 0; reg < 30; ++reg) item[std::format("x{}", reg)] = std::format("0x{:X}", readHwbp64(rec, Driver::IDX_X0 + reg));
+                for (int reg = 0; reg < 30; ++reg) item[std::format("x{}", reg)] = std::format("0x{:X}", static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_X0 + reg)));
                 for (int reg = 0; reg < 32; ++reg)
                 {
                     const auto qreg = MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_Q0 + reg);
@@ -764,12 +645,6 @@ namespace
             data["points"].push_back(std::move(pointItem));
         }
         return data;
-    }
-
-    // 构建硬件断点信息JSON
-    json buildHwbpInfoJson(const auto &info)
-    {
-        return {{"mode", MemoryTool::HwbpMode()}, {"bp_info", buildBreakpointDataJson(info)}};
     }
 
     // 构建特征码扫描结果JSON
@@ -937,10 +812,6 @@ namespace
         return true;
     }
 
-    // 内部文本命令派发
-
-    // 将文本协议响应包装为统一 JSON 响应。
-
     json makeProtocolError(std::string_view message)
     {
         return json{
@@ -970,18 +841,9 @@ namespace
         return std::nullopt;
     }
 
-    std::optional<std::string> getOptionalStringParam(const json &params, std::string_view key)
+    json dispatchStructuredOperationDirect(ApplicationRuntime &application, std::string_view operation, const json &params)
     {
-        const auto it = params.find(std::string(key));
-        if (it == params.end() || it->is_null())
-        {
-            return std::nullopt;
-        }
-        return getRequiredStringParam(params, key);
-    }
-
-    json dispatchStructuredOperationDirect(std::string_view operation, const json &params)
-    {
+        auto &runtime = application.resources();
         const std::string op(operation);
 
         auto finalize = [&](json out) -> json
@@ -1072,13 +934,12 @@ namespace
                 point.bs = *bpScope;
                 points.push_back(point);
             }
-            if (points.empty()) return BreakpointPointsResult{std::in_place_index<1>, fail("points 为空")};
             return BreakpointPointsResult{std::in_place_index<0>, std::move(points)};
         };
 
         auto breakpointSetResult = [&](int status, std::string_view mode, const std::vector<Driver::bp_point> &points) -> json
         {
-            MemoryTool::HwbpMode() = mode;
+            runtime.hwbpMode = mode;
 
             json outPoints = json::array();
             for (std::size_t index = 0; index < points.size(); ++index)
@@ -1097,7 +958,7 @@ namespace
 
         auto optionalString = [&](std::string_view key) -> std::string
         {
-            const auto value = getOptionalStringParam(params, key);
+            const auto value = getRequiredStringParam(params, key);
             return value.has_value() ? *value : "";
         };
 
@@ -1118,7 +979,7 @@ namespace
 
         auto scannerStateJson = [&]() -> json
         {
-            const auto state = MemoryTool::Scanner().state();
+            const auto state = runtime.scanner.state();
             return {
                 {"scanning", state.scanning}, {"progress", state.progress}, {"count", state.count}, {"string_scan", state.stringScan}, {"value_type", state.stringScan ? "string" : state.dataType.has_value() ? Types::Labels::TYPE[static_cast<size_t>(*state.dataType)] : ""}, {"mode", fuzzyModeToken(state.mode)}, {"value_format", state.mode == Types::FuzzyMode::Pointer ? "hex_address" : state.mode == Types::FuzzyMode::String ? "text" : "number"},
             };
@@ -1126,7 +987,7 @@ namespace
 
         auto pointerStateJson = [&]() -> json
         {
-            const auto state = MemoryTool::Pointer().state();
+            const auto state = runtime.pointer.state();
             return {
                 {"busy", state.operation != PointerManager::Operation::Idle}, {"scanning", state.operation == PointerManager::Operation::Scanning}, {"operation", PointerManager::OperationName(state.operation)}, {"last_operation", PointerManager::OperationName(state.lastOperation)}, {"progress", state.progress}, {"count", state.count}, {"completed", state.completed}, {"success", state.success}, {"error", state.error},
             };
@@ -1135,7 +996,7 @@ namespace
         auto savedStatesJson = [&]() -> json
         {
             json items = json::array();
-            for (const auto &state : MemoryTool::Saved().snapshotStates())
+            for (const auto &state : runtime.saved.snapshotStates())
             {
                 items.push_back({
                     {"address", std::format("0x{:X}", state.item.address)},
@@ -1170,7 +1031,7 @@ namespace
             const auto pid = requiredInt("pid", "pid");
             if (std::holds_alternative<json>(pid)) return std::get<json>(pid);
             if (std::get<int>(pid) <= 0) return fail("pid 参数无效");
-            if (!MemoryTool::SelectTarget(std::get<int>(pid))) return fail("扫描任务运行中或旧监听停止失败，无法切换 PID");
+            if (!runtime.selectTarget(std::get<int>(pid))) return fail("扫描任务运行中或旧监听停止失败，无法切换 PID");
             return okData({{"pid", dr->GetGlobalPid()}});
         }
 
@@ -1180,7 +1041,7 @@ namespace
         {
             const int pid = dr->GetGlobalPid();
             if (pid <= 0) return fail("全局PID未设置，请先执行 target.select 或 target.attach");
-            const int status = op == "syscall.start" ? MemoryTool::StartSyscallMonitor() : MemoryTool::StopSyscallMonitor();
+            const int status = op == "syscall.start" ? runtime.startSyscallMonitor() : runtime.stopSyscallMonitor();
             if (status != 0) return fail(std::format("系统调用监听请求失败，状态={}", status));
             return okData({{"pid", pid}, {"active", op == "syscall.start"}, {"status", status}});
         }
@@ -1195,7 +1056,7 @@ namespace
         {
             const int pid = dr->GetGlobalPid();
             if (pid <= 0) return fail("全局PID未设置，请先执行 target.select 或 target.attach");
-            const int status = op == "cntvct.start" ? MemoryTool::StartCntvctMonitor() : MemoryTool::StopCntvctMonitor();
+            const int status = op == "cntvct.start" ? runtime.startCntvctMonitor() : runtime.stopCntvctMonitor();
             if (status != 0) return fail(std::format("CNTVCT 监听请求失败，状态={}", status));
             return okData({{"pid", pid}, {"active", op == "cntvct.start"}, {"status", status}});
         }
@@ -1212,7 +1073,7 @@ namespace
             if (std::holds_alternative<json>(package)) return std::get<json>(package);
             const int pid = dr->GetPid(std::get<std::string>(package));
             if (pid <= 0) return fail("未找到进程");
-            if (!MemoryTool::SelectTarget(pid)) return fail("扫描任务运行中或旧监听停止失败，无法切换 PID");
+            if (!runtime.selectTarget(pid)) return fail("扫描任务运行中或旧监听停止失败，无法切换 PID");
             return okData({{"pid", pid}});
         }
 
@@ -1223,8 +1084,8 @@ namespace
             const int pid = dr->GetGlobalPid();
             if (pid <= 0) return fail("全局PID未设置，请先执行 target.select 或 target.attach");
 
-            if (!dr->GetEnvParams(threadName)) return fail("获取环境参数失败");
-            const auto &info = dr->GetEnvParamsRef();
+            const auto info = dr->GetEnvParams(threadName);
+            if (info.tls_status != 0 && info.pacga_status != 0) return fail("获取环境参数失败");
 
             return okData({
                 {"pid", pid},
@@ -1239,8 +1100,8 @@ namespace
 
         if (op == "memory.map")
         {
-            const auto &info = dr->GetMemoryInfoRef();
-            return okData(buildMemoryInfoJson(0, info));
+            const std::unique_ptr<Driver::virtual_memory> info(new Driver::virtual_memory(dr->GetMemoryInfo()));
+            return okData(buildMemoryInfoJson(0, *info));
         }
 
         if (op == "module.resolve")
@@ -1253,12 +1114,10 @@ namespace
             if (std::holds_alternative<json>(which)) return std::get<json>(which);
 
             const std::string whichValue = toLowerAscii(std::get<std::string>(which));
-            const bool isStart = (whichValue == "start");
-            const bool isEnd = (whichValue == "end");
-            if (!isStart && !isEnd) return fail("which 必须是 start 或 end");
+            if (whichValue != "start" && whichValue != "end") return fail("which 必须是 start 或 end");
 
             std::uint64_t address = 0;
-            if (!dr->GetModuleAddress(std::get<std::string>(moduleName), static_cast<short>(std::get<int>(segmentIndex)), &address, isStart)) return fail("未找到目标模块或段");
+            if (!dr->GetModuleAddress(std::get<std::string>(moduleName), static_cast<short>(std::get<int>(segmentIndex)), &address, whichValue == "start")) return fail("未找到目标模块或段");
             return okData({{"address", std::format("0x{:X}", address)}});
         }
 
@@ -1288,7 +1147,7 @@ namespace
             if (*fuzzyMode == Types::FuzzyMode::String)
             {
                 if (valueToken.empty()) return fail("string 模式需要 value 参数");
-                if (!MemoryTool::Scanner().startStringAsync(pid, valueToken, isFirst)) return fail("扫描请求被拒绝，请检查任务状态和结果类型");
+                if (!runtime.scanner.startStringAsync(pid, valueToken, isFirst)) return fail("扫描请求被拒绝，请检查任务状态和结果类型");
                 return okData(scannerStateJson());
             }
 
@@ -1304,7 +1163,7 @@ namespace
                 const auto parsed = MemUtils::ParseUInt64(valueToken, 16);
                 if (!parsed) return fail("value 参数不是有效的十六进制地址");
                 const auto target = static_cast<int64_t>(MemUtils::Normalize(static_cast<uintptr_t>(*parsed)));
-                if (!MemoryTool::Scanner().startAsync<int64_t>(pid, target, Types::DataType::I64, *fuzzyMode, isFirst)) return fail("扫描请求被拒绝，请检查任务状态、数据类型和扫描模式");
+                if (!runtime.scanner.startAsync<int64_t>(pid, target, Types::DataType::I64, *fuzzyMode, isFirst)) return fail("扫描请求被拒绝，请检查任务状态、数据类型和扫描模式");
                 return okData(scannerStateJson());
             }
 
@@ -1316,15 +1175,9 @@ namespace
             return MemUtils::DispatchType(*dataType,
                                           [&]<typename T>() -> json
                                           {
-                                              if (*fuzzyMode == Types::FuzzyMode::Unknown)
+                                              if (*fuzzyMode == Types::FuzzyMode::Unknown || (*fuzzyMode >= Types::FuzzyMode::Increased && *fuzzyMode <= Types::FuzzyMode::Unchanged))
                                               {
-                                                  if (!MemoryTool::Scanner().startAsync<T>(pid, T{}, *dataType, *fuzzyMode, isFirst)) return fail("扫描请求被拒绝，请检查任务状态、数据类型和扫描模式");
-                                                  return okData(scannerStateJson());
-                                              }
-
-                                              if (*fuzzyMode == Types::FuzzyMode::Increased || *fuzzyMode == Types::FuzzyMode::Decreased || *fuzzyMode == Types::FuzzyMode::Changed || *fuzzyMode == Types::FuzzyMode::Unchanged)
-                                              {
-                                                  if (!MemoryTool::Scanner().startAsync<T>(pid, T{}, *dataType, *fuzzyMode, isFirst)) return fail("扫描请求被拒绝，请检查任务状态、数据类型和扫描模式");
+                                                  if (!runtime.scanner.startAsync<T>(pid, T{}, *dataType, *fuzzyMode, isFirst)) return fail("扫描请求被拒绝，请检查任务状态、数据类型和扫描模式");
                                                   return okData(scannerStateJson());
                                               }
 
@@ -1339,7 +1192,7 @@ namespace
                                                   rangeMax = *parsedRange;
                                               }
 
-                                              if (!MemoryTool::Scanner().startAsync<T>(pid, *target, *dataType, *fuzzyMode, isFirst, rangeMax)) return fail("扫描请求被拒绝，请检查任务状态、数据类型和扫描模式");
+                                              if (!runtime.scanner.startAsync<T>(pid, *target, *dataType, *fuzzyMode, isFirst, rangeMax)) return fail("扫描请求被拒绝，请检查任务状态、数据类型和扫描模式");
                                               return okData(scannerStateJson());
                                           });
         }
@@ -1348,8 +1201,8 @@ namespace
 
         if (op == "scan.clear")
         {
-            if (MemoryTool::Scanner().isScanning()) return fail("内存扫描运行中，无法清空结果");
-            MemoryTool::Scanner().clear();
+            if (runtime.scanner.isScanning()) return fail("内存扫描运行中，无法清空结果");
+            runtime.scanner.clear();
             return okData(scannerStateJson());
         }
 
@@ -1366,7 +1219,7 @@ namespace
             const std::string typeToken = toLowerAscii(std::get<std::string>(type));
             const bool stringType = (typeToken == "str" || typeToken == "string" || typeToken == "text");
             const auto dataType = parseDataTypeToken(std::get<std::string>(type));
-            const auto pageState = MemoryTool::Scanner().pageState(static_cast<size_t>(std::get<std::uint64_t>(start)), static_cast<size_t>(std::get<std::uint64_t>(count)));
+            const auto pageState = runtime.scanner.pageState(static_cast<size_t>(std::get<std::uint64_t>(start)), static_cast<size_t>(std::get<std::uint64_t>(count)));
             const auto &scannerState = pageState.state;
             if (scannerState.scanning) return fail("内存扫描运行中，请完成后获取结果");
             if (!stringType && !dataType.has_value()) return fail("value_type 参数无效");
@@ -1406,18 +1259,18 @@ namespace
                 format = parseViewFormatToken(viewFormat);
                 if (!format.has_value()) return fail("view_format 无效，支持: hexadecimal/hex/i8/i16/i32/i64/f32/f64/disasm");
             }
-            MemoryTool::Viewer().open(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), format);
-            if (MemoryTool::Viewer().format() == Types::ViewFormat::Disasm) MemoryTool::Viewer().waitDisasm();
-            return okData(buildViewerSnapshotJson(MemoryTool::Viewer()));
+            runtime.viewer.open(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), format);
+            if (runtime.viewer.format() == Types::ViewFormat::Disasm) runtime.viewer.waitDisasm();
+            return okData(buildViewerSnapshotJson(runtime.viewer));
         }
 
         if (op == "viewer.seek")
         {
             const auto offset = requiredString("offset", "offset");
             if (std::holds_alternative<json>(offset)) return std::get<json>(offset);
-            if (!MemoryTool::Viewer().applyOffset(std::get<std::string>(offset))) return fail("offset 参数无效");
-            if (MemoryTool::Viewer().format() == Types::ViewFormat::Disasm) MemoryTool::Viewer().waitDisasm();
-            return okData(buildViewerSnapshotJson(MemoryTool::Viewer()));
+            if (!runtime.viewer.applyOffset(std::get<std::string>(offset))) return fail("offset 参数无效");
+            if (runtime.viewer.format() == Types::ViewFormat::Disasm) runtime.viewer.waitDisasm();
+            return okData(buildViewerSnapshotJson(runtime.viewer));
         }
 
         if (op == "viewer.format")
@@ -1426,16 +1279,16 @@ namespace
             if (std::holds_alternative<json>(viewFormat)) return std::get<json>(viewFormat);
             const auto format = parseViewFormatToken(std::get<std::string>(viewFormat));
             if (!format.has_value()) return fail("view_format 无效，支持: hexadecimal/hex/i8/i16/i32/i64/f32/f64/disasm");
-            MemoryTool::Viewer().setFormat(*format);
-            if (MemoryTool::Viewer().format() == Types::ViewFormat::Disasm) MemoryTool::Viewer().waitDisasm();
-            return okData(buildViewerSnapshotJson(MemoryTool::Viewer()));
+            runtime.viewer.setFormat(*format);
+            if (runtime.viewer.format() == Types::ViewFormat::Disasm) runtime.viewer.waitDisasm();
+            return okData(buildViewerSnapshotJson(runtime.viewer));
         }
 
         if (op == "viewer.refresh")
         {
-            MemoryTool::Viewer().refresh();
-            if (MemoryTool::Viewer().format() == Types::ViewFormat::Disasm) MemoryTool::Viewer().waitDisasm();
-            return okData(buildViewerSnapshotJson(MemoryTool::Viewer()));
+            runtime.viewer.refresh();
+            if (runtime.viewer.format() == Types::ViewFormat::Disasm) runtime.viewer.waitDisasm();
+            return okData(buildViewerSnapshotJson(runtime.viewer));
         }
 
         if (op == "pointer.get") return okData(pointerStateJson());
@@ -1481,29 +1334,29 @@ namespace
 
             const int pid = dr->GetGlobalPid();
             if (pid <= 0) return fail("全局PID未设置，请先执行 target.select 或 target.attach");
-            if (MemoryTool::Pointer().isBusy()) return fail("当前已有指针操作在运行");
+            if (runtime.pointer.isBusy()) return fail("当前已有指针操作在运行");
 
             const std::string moduleFilter = optionalString("module_filter");
-            if (!MemoryTool::Pointer().startAsync(pid, static_cast<uintptr_t>(std::get<std::uint64_t>(target)), std::get<int>(depth), std::get<int>(maxOffset), useManual, static_cast<uintptr_t>(manualBase), useArray, static_cast<uintptr_t>(arrayBase), arrayCount, moduleFilter)) return fail("指针扫描请求被拒绝，请检查目标、参数和当前操作状态");
+            if (!runtime.pointer.startAsync(pid, static_cast<uintptr_t>(std::get<std::uint64_t>(target)), std::get<int>(depth), std::get<int>(maxOffset), useManual, static_cast<uintptr_t>(manualBase), useArray, static_cast<uintptr_t>(arrayBase), arrayCount, moduleFilter)) return fail("指针扫描请求被拒绝，请检查目标、参数和当前操作状态");
             return okData(pointerStateJson());
         }
 
         if (op == "pointer.merge")
         {
-            if (!MemoryTool::Pointer().MergeBins()) return fail("当前已有指针操作在运行，无法合并结果");
+            if (!runtime.pointer.MergeBins()) return fail("当前已有指针操作在运行，无法合并结果");
             return okData(pointerStateJson());
         }
 
         if (op == "pointer.export")
         {
-            if (!MemoryTool::Pointer().ExportToTxt()) return fail("当前已有指针操作在运行，无法导出结果");
+            if (!runtime.pointer.ExportToTxt()) return fail("当前已有指针操作在运行，无法导出结果");
             return okData(pointerStateJson());
         }
 
         if (op == "breakpoint.get")
         {
-            const auto &info = dr->GetHwbpInfoRef();
-            return okData(buildHwbpInfoJson(info));
+            auto &info = dr->GetBreakpointInfo();
+            return okData({{"mode", runtime.hwbpMode}, {"bp_info", buildBreakpointDataJson(info)}});
         }
 
         if (op == "breakpoint.set")
@@ -1512,7 +1365,7 @@ namespace
             if (std::holds_alternative<json>(mode)) return std::get<json>(mode);
             const std::string modeName = toLowerAscii(std::get<std::string>(mode));
             if (modeName != "hwbp" && modeName != "ptebp" && modeName != "stepbp") return fail("mode 无效，支持: hwbp/ptebp/stepbp");
-            if (!MemoryTool::HwbpMode().empty()) return fail(std::format("{} 设置前请先移除当前断点", modeName));
+            if (!runtime.hwbpMode.empty()) return fail(std::format("{} 设置前请先移除当前断点", modeName));
 
             const int pid = dr->GetGlobalPid();
             if (pid <= 0) return fail("全局PID未设置，请先执行 target.select 或 target.attach");
@@ -1529,7 +1382,7 @@ namespace
 
         if (op == "breakpoint.clear")
         {
-            auto &activeMode = MemoryTool::HwbpMode();
+            auto &activeMode = runtime.hwbpMode;
             if (activeMode.empty()) return okData({{"mode", ""}, {"cleared", false}});
 
             if (activeMode == "hwbp") dr->RemoveProcessHwbpRef();
@@ -1549,15 +1402,22 @@ namespace
             if (std::holds_alternative<json>(valueText)) return std::get<json>(valueText);
             const auto value = MemUtils::ParseUInt128(std::get<std::string>(valueText));
             if (!value.has_value()) return fail(std::format("operation={} 参数 value 无效", op));
-            auto &info = const_cast<Driver::break_point &>(dr->GetHwbpInfoRef());
-            int pointIndex = -1;
-            int pointRecordIndex = -1;
-            auto *record = findHwbpRecordByFlatIndex(info, std::get<int>(index), &pointIndex, &pointRecordIndex);
-            if (!record) return fail("index 越界");
-            auto copy = *record;
-            if (!MemUtils::AssignHwbpRecordField(copy, std::get<std::string>(field), *value)) return fail("field 无效");
-            *record = copy;
-            return okData({{"index", std::get<int>(index)}, {"point_index", pointIndex}, {"point_record_index", pointRecordIndex}, {"field", std::get<std::string>(field)}, {"value_hex", MemUtils::FormatUInt128Hex(*value)}});
+            const int recordIndex = std::get<int>(index);
+            if (recordIndex < 0) return fail("index 越界");
+            auto &info = dr->GetBreakpointInfo();
+            int pointRecordIndex = recordIndex;
+            for (int pointIndex = 0; pointIndex < BP_CONFIG_MAX; ++pointIndex)
+            {
+                auto &point = info.points[pointIndex];
+                const int recordCount = std::clamp(point.record_count, 0, BP_RECORD_MAX);
+                if (pointRecordIndex < recordCount)
+                {
+                    if (!MemUtils::AssignHwbpRecordField(point.records[pointRecordIndex], std::get<std::string>(field), *value)) return fail("field 无效");
+                    return okData({{"index", recordIndex}, {"point_index", pointIndex}, {"point_record_index", pointRecordIndex}, {"field", std::get<std::string>(field)}, {"value_hex", MemUtils::FormatUInt128Hex(*value)}});
+                }
+                pointRecordIndex -= recordCount;
+            }
+            return fail("index 越界");
         }
 
         if (op == "signature.create")
@@ -1627,7 +1487,7 @@ namespace
                 textLength = static_cast<size_t>(*parsed);
             }
 
-            auto &saved = MemoryTool::Saved();
+            auto &saved = runtime.saved;
             const uintptr_t savedAddress = static_cast<uintptr_t>(std::get<std::uint64_t>(address));
             const bool created = saved.add(savedAddress, *dataType, *kind, textLength);
             if (!created && !saved.contains(savedAddress)) return fail("保存地址失败");
@@ -1641,7 +1501,7 @@ namespace
         {
             const auto address = requiredUInt64("address", "address");
             if (std::holds_alternative<json>(address)) return std::get<json>(address);
-            const bool removed = MemoryTool::Saved().remove(static_cast<uintptr_t>(std::get<std::uint64_t>(address)));
+            const bool removed = runtime.saved.remove(static_cast<uintptr_t>(std::get<std::uint64_t>(address)));
             json data = savedStatesJson();
             data["removed"] = removed;
             return okData(std::move(data));
@@ -1653,7 +1513,7 @@ namespace
             const auto value = requiredString("value", "value");
             if (std::holds_alternative<json>(address)) return std::get<json>(address);
             if (std::holds_alternative<json>(value)) return std::get<json>(value);
-            if (!MemoryTool::Saved().write(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), std::get<std::string>(value))) return fail("写入保存地址失败");
+            if (!runtime.saved.write(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), std::get<std::string>(value))) return fail("写入保存地址失败");
             return okData(savedStatesJson());
         }
 
@@ -1661,7 +1521,7 @@ namespace
         {
             const auto address = requiredUInt64("address", "address");
             if (std::holds_alternative<json>(address)) return std::get<json>(address);
-            if (!MemoryTool::Saved().setNote(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), optionalString("note"))) return fail("保存地址不存在");
+            if (!runtime.saved.setNote(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), optionalString("note"))) return fail("保存地址不存在");
             return okData(savedStatesJson());
         }
 
@@ -1673,7 +1533,7 @@ namespace
             if (std::holds_alternative<json>(lockedText)) return std::get<json>(lockedText);
             const auto locked = parseBoolToken(std::get<std::string>(lockedText));
             if (!locked.has_value()) return fail("locked 无效");
-            if (!MemoryTool::Saved().setLocked(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), *locked, optionalString("value"))) return fail(*locked ? "锁定保存地址失败" : "保存地址不存在");
+            if (!runtime.saved.setLocked(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), *locked, optionalString("value"))) return fail(*locked ? "锁定保存地址失败" : "保存地址不存在");
             return okData(savedStatesJson());
         }
 
@@ -1683,13 +1543,13 @@ namespace
             if (std::holds_alternative<json>(offsetText)) return std::get<json>(offsetText);
             const auto offset = MemUtils::ParseHexOffset(std::get<std::string>(offsetText));
             if (!offset.has_value()) return fail("offset 无效");
-            MemoryTool::Saved().applyOffset(offset->offset, offset->negative);
+            runtime.saved.applyOffset(offset->offset, offset->negative);
             return okData(savedStatesJson());
         }
 
         if (op == "saved.clear")
         {
-            MemoryTool::Saved().clearSaved();
+            runtime.saved.clear();
             return okData(savedStatesJson());
         }
 
@@ -1740,7 +1600,7 @@ namespace
     }
 
     // 统一命令派发入口：网络层仅接受 JSON 请求并返回 JSON 响应。
-    std::string DispatchCommandUnified(const std::string &request)
+    std::string DispatchCommandUnified(ApplicationRuntime &application, const std::string &request)
     {
         const auto parsedReq = json::parse(request, nullptr, false);
         if (parsedReq.is_discarded())
@@ -1753,33 +1613,32 @@ namespace
             return json({{"ok", false}, {"error", "请求必须是 JSON 对象"}}).dump();
         }
 
-        if (parsedReq.contains("operation"))
+        if (const auto operation = parsedReq.find("operation"); operation != parsedReq.end())
         {
-            if (!parsedReq["operation"].is_string())
+            if (!operation->is_string())
             {
                 return makeProtocolError("operation 字段必须是字符串").dump();
             }
 
-            const std::string operationName = parsedReq["operation"].get<std::string>();
-            json params = json::object();
-            if (parsedReq.contains("params"))
+            const auto &operationName = operation->get_ref<const std::string &>();
+            if (const auto params = parsedReq.find("params"); params != parsedReq.end())
             {
-                if (!parsedReq["params"].is_object())
+                if (!params->is_object())
                 {
                     json error = makeProtocolError("params 字段必须是对象");
                     error["operation"] = operationName;
                     return error.dump();
                 }
-                params = parsedReq["params"];
+                return dispatchStructuredOperationDirect(application, operationName, *params).dump();
             }
 
-            return dispatchStructuredOperationDirect(operationName, params).dump();
+            return dispatchStructuredOperationDirect(application, operationName, json::object()).dump();
         }
 
         return makeProtocolError("请求缺少 operation 字段").dump();
     }
 
-    void HandleClientConnection(int clientFd, sockaddr_in clientAddr)
+    void HandleClientConnection(ApplicationRuntime &application, int clientFd, sockaddr_in clientAddr)
     {
         char clientIp[INET_ADDRSTRLEN]{};
         if (inet_ntop(AF_INET, &clientAddr.sin_addr, clientIp, sizeof(clientIp)) == nullptr)
@@ -1813,7 +1672,7 @@ namespace
         }
         else if (method == "POST" && path == "/api/rpc")
         {
-            const std::string response = DispatchCommandUnified(body);
+            const std::string response = DispatchCommandUnified(application, body);
             if (!sendHttpResponse(clientFd, 200, "OK", response)) printErrno("发送 HTTP 回复失败");
         }
         else if (method != "GET" && method != "POST")
@@ -1829,7 +1688,7 @@ namespace
 } // namespace
 
 // 程序入口：初始化 HTTP 服务并处理客户端请求。
-int http_server()
+int http_server(ApplicationRuntime &application)
 {
     const int serverFd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (serverFd < 0)
@@ -1880,6 +1739,6 @@ int http_server()
             continue;
         }
 
-        ClientThreadPool().detach_task([clientFd, clientAddr] { HandleClientConnection(clientFd, clientAddr); });
+        Config::ActiveThreadPools().client().detach_task([&application, clientFd, clientAddr] { HandleClientConnection(application, clientFd, clientAddr); });
     }
 }

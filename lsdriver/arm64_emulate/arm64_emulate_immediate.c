@@ -1,462 +1,545 @@
-// clang-format off
+/*
+ARM64 指令执行器：数据处理立即数类。
+
+emu_* 函数直接调用对应硬件语义模板，完成 ADR/ADRP、EXTR、加减立即数、逻辑立即数、宽立即数移动和位域操作。
+其中带 S 后缀的指令同时提交 NZCV；带 w32/w64 后缀的函数分别实现 32 位和 64 位操作数宽度。
+emu_build_immediate_executor() 负责按指令和操作数宽度选择具体执行函数。
+*/
 #include "emulate_inst.h"
 
-static inline enum emu_inst_result emu_adr(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_adr_x(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    if (entry->decoded.rd != 31) regs->regs[entry->decoded.rd] = regs->pc + entry->decoded.offset;
+    write_gpr_or_zr(regs, entry->decoded.rd, regs->pc + entry->decoded.offset, true);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_adrp(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_adrp_x(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    if (entry->decoded.rd != 31) regs->regs[entry->decoded.rd] = (regs->pc & ~0xFFFULL) + entry->decoded.offset;
+    write_gpr_or_zr(regs, entry->decoded.rd, (regs->pc & ~0xFFFULL) + entry->decoded.offset, true);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_extr_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_extr_w(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    extract_w32(read_gpr_or_zr(regs, entry->decoded.rn), read_gpr_or_zr(regs, entry->decoded.rm), entry->decoded.shift_amount, 0, 0, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, false);
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    extr_w(read_gpr_or_zr(regs, entry->decoded.rn), read_gpr_or_zr(regs, entry->decoded.rm), entry->decoded.shift_amount, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_extr_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_extr_x(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    extract_w64(read_gpr_or_zr(regs, entry->decoded.rn), read_gpr_or_zr(regs, entry->decoded.rm), entry->decoded.shift_amount, 0, 0, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, true);
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    extr_x(read_gpr_or_zr(regs, entry->decoded.rn), read_gpr_or_zr(regs, entry->decoded.rm), entry->decoded.shift_amount, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_add_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_extr_w_imm0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    add_w32(read_gpr_or_sp(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, &output);
-    write_gpr_or_sp(regs, entry->decoded.rd, output.value0);
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    extr_w_imm0(read_gpr_or_zr(regs, entry->decoded.rn), read_gpr_or_zr(regs, entry->decoded.rm), 0, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_add_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_extr_x_imm0(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    add_w64(read_gpr_or_sp(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, &output);
-    write_gpr_or_sp(regs, entry->decoded.rd, output.value0);
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    extr_x_imm0(read_gpr_or_zr(regs, entry->decoded.rn), read_gpr_or_zr(regs, entry->decoded.rm), 0, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_adds_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_add_immediate_w(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    adds_w32(read_gpr_or_sp(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, &output);
-    write_nzcv(regs, output.value1);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, false);
+    uint64_t *output = gpr_output_or_sp(regs, entry->decoded.rd);
+    add_w(read_gpr_or_sp(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_adds_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_add_immediate_x(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    adds_w64(read_gpr_or_sp(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, &output);
-    write_nzcv(regs, output.value1);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, true);
+    uint64_t *output = gpr_output_or_sp(regs, entry->decoded.rd);
+    add_x(read_gpr_or_sp(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_sub_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_adds_immediate_w(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    sub_w32(read_gpr_or_sp(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, &output);
-    write_gpr_or_sp(regs, entry->decoded.rd, output.value0);
+    uint64_t template_output1 __attribute__((__uninitialized__));
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    adds_w(read_gpr_or_sp(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, output, &template_output1, 0, 0, 0);
+    write_nzcv(regs, template_output1);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_sub_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_adds_immediate_x(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    sub_w64(read_gpr_or_sp(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, &output);
-    write_gpr_or_sp(regs, entry->decoded.rd, output.value0);
+    uint64_t template_output1 __attribute__((__uninitialized__));
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    adds_x(read_gpr_or_sp(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, output, &template_output1, 0, 0, 0);
+    write_nzcv(regs, template_output1);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_subs_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_sub_immediate_w(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    subs_w32(read_gpr_or_sp(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, &output);
-    write_nzcv(regs, output.value1);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, false);
+    uint64_t *output = gpr_output_or_sp(regs, entry->decoded.rd);
+    sub_w(read_gpr_or_sp(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_subs_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_sub_immediate_x(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    subs_w64(read_gpr_or_sp(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, &output);
-    write_nzcv(regs, output.value1);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, true);
+    uint64_t *output = gpr_output_or_sp(regs, entry->decoded.rd);
+    sub_x(read_gpr_or_sp(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_smax_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_subs_immediate_w(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    struct arm64_hw_template_output immediate_output __attribute__((__uninitialized__));
-    sxtb_shift(entry->decoded.immediate, 0, 0, 0, 0, &immediate_output);
-    smax_w32(read_gpr_or_zr(regs, entry->decoded.rn) & 0xFFFFFFFFULL, immediate_output.value0, 0, 0, 0, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, false);
+    uint64_t template_output1 __attribute__((__uninitialized__));
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    subs_w(read_gpr_or_sp(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, output, &template_output1, 0, 0, 0);
+    write_nzcv(regs, template_output1);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_smax_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_subs_immediate_x(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    struct arm64_hw_template_output immediate_output __attribute__((__uninitialized__));
-    sxtb_shift(entry->decoded.immediate, 0, 0, 0, 0, &immediate_output);
-    smax_w64(read_gpr_or_zr(regs, entry->decoded.rn), immediate_output.value0, 0, 0, 0, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, true);
+    uint64_t template_output1 __attribute__((__uninitialized__));
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    subs_x(read_gpr_or_sp(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, output, &template_output1, 0, 0, 0);
+    write_nzcv(regs, template_output1);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_umax_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_smax_immediate_w(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    umax_w32(read_gpr_or_zr(regs, entry->decoded.rn) & 0xFFFFFFFFULL, entry->decoded.immediate, 0, 0, 0, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, false);
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    smax_w(read_gpr_or_zr(regs, entry->decoded.rn) & 0xFFFFFFFFULL, entry->decoded.immediate, 0, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_umax_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_smax_immediate_x(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    umax_w64(read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, true);
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    smax_x(read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_smin_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_umax_immediate_w(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    struct arm64_hw_template_output immediate_output __attribute__((__uninitialized__));
-    sxtb_shift(entry->decoded.immediate, 0, 0, 0, 0, &immediate_output);
-    smin_w32(read_gpr_or_zr(regs, entry->decoded.rn) & 0xFFFFFFFFULL, immediate_output.value0, 0, 0, 0, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, false);
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    umax_w(read_gpr_or_zr(regs, entry->decoded.rn) & 0xFFFFFFFFULL, entry->decoded.immediate, 0, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_smin_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_umax_immediate_x(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    struct arm64_hw_template_output immediate_output __attribute__((__uninitialized__));
-    sxtb_shift(entry->decoded.immediate, 0, 0, 0, 0, &immediate_output);
-    smin_w64(read_gpr_or_zr(regs, entry->decoded.rn), immediate_output.value0, 0, 0, 0, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, true);
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    umax_x(read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_umin_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_smin_immediate_w(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    umin_w32(read_gpr_or_zr(regs, entry->decoded.rn) & 0xFFFFFFFFULL, entry->decoded.immediate, 0, 0, 0, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, false);
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    smin_w(read_gpr_or_zr(regs, entry->decoded.rn) & 0xFFFFFFFFULL, entry->decoded.immediate, 0, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_umin_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_smin_immediate_x(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    umin_w64(read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, true);
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    smin_x(read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_and_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_umin_immediate_w(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    and_w32(read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, false);
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    umin_w(read_gpr_or_zr(regs, entry->decoded.rn) & 0xFFFFFFFFULL, entry->decoded.immediate, 0, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_and_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_umin_immediate_x(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    and_w64(read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, true);
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    umin_x(read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_orr_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_and_immediate_w(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    orr_w32(read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, false);
+    uint64_t *output = gpr_output_or_sp(regs, entry->decoded.rd);
+    and_w(read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_orr_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_and_immediate_x(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    orr_w64(read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, true);
+    uint64_t *output = gpr_output_or_sp(regs, entry->decoded.rd);
+    and_x(read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_eor_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_orr_immediate_w(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    eor_w32(read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, false);
+    uint64_t *output = gpr_output_or_sp(regs, entry->decoded.rd);
+    orr_w(read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_eor_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_orr_immediate_x(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    eor_w64(read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, true);
+    uint64_t *output = gpr_output_or_sp(regs, entry->decoded.rd);
+    orr_x(read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_ands_immediate_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_eor_immediate_w(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    ands_w32(read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, &output);
-    write_nzcv(regs, output.value1);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, false);
+    uint64_t *output = gpr_output_or_sp(regs, entry->decoded.rd);
+    eor_w(read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_ands_immediate_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_eor_immediate_x(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    ands_w64(read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, &output);
-    write_nzcv(regs, output.value1);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, true);
+    uint64_t *output = gpr_output_or_sp(regs, entry->decoded.rd);
+    eor_x(read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_movn_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_ands_immediate_w(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    movn_w32(read_gpr_or_zr(regs, entry->decoded.rd), entry->decoded.immediate, entry->decoded.shift_amount, 0, 0, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, false);
+    uint64_t template_output1 __attribute__((__uninitialized__));
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    ands_w(read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, output, &template_output1, 0, 0, 0);
+    write_nzcv(regs, template_output1);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_movn_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_ands_immediate_x(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    movn_w64(read_gpr_or_zr(regs, entry->decoded.rd), entry->decoded.immediate, entry->decoded.shift_amount, 0, 0, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, true);
+    uint64_t template_output1 __attribute__((__uninitialized__));
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    ands_x(read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.immediate, 0, 0, 0, output, &template_output1, 0, 0, 0);
+    write_nzcv(regs, template_output1);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_movz_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_movn_w(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    movz_w32(read_gpr_or_zr(regs, entry->decoded.rd), entry->decoded.immediate, entry->decoded.shift_amount, 0, 0, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, false);
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    movn_w(0, entry->decoded.immediate, entry->decoded.shift_amount, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_movz_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_movn_x(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    movz_w64(read_gpr_or_zr(regs, entry->decoded.rd), entry->decoded.immediate, entry->decoded.shift_amount, 0, 0, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, true);
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    movn_x(0, entry->decoded.immediate, entry->decoded.shift_amount, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_movk_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_movz_w(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    movk_w32(read_gpr_or_zr(regs, entry->decoded.rd), entry->decoded.immediate, entry->decoded.shift_amount, 0, 0, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, false);
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    movz_w(0, entry->decoded.immediate, entry->decoded.shift_amount, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_movk_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_movz_x(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    movk_w64(read_gpr_or_zr(regs, entry->decoded.rd), entry->decoded.immediate, entry->decoded.shift_amount, 0, 0, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, true);
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    movz_x(0, entry->decoded.immediate, entry->decoded.shift_amount, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_sbfm_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_movk_w(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    sbfm_dynamic_w32(read_gpr_or_zr(regs, entry->decoded.rn) & 0xFFFFFFFFULL, entry->decoded.bitfield_wmask, entry->decoded.bitfield_tmask, entry->decoded.immr, entry->decoded.imms, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, false);
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    movk_w(read_gpr_or_zr(regs, entry->decoded.rd), entry->decoded.immediate, entry->decoded.shift_amount, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_sbfm_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_movk_x(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    sbfm_dynamic_w64(read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.bitfield_wmask, entry->decoded.bitfield_tmask, entry->decoded.immr, entry->decoded.imms, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, true);
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    movk_x(read_gpr_or_zr(regs, entry->decoded.rd), entry->decoded.immediate, entry->decoded.shift_amount, 0, 0, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_bfm_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_sbfm_w(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    bfm_dynamic_w32(read_gpr_or_zr(regs, entry->decoded.rd) & 0xFFFFFFFFULL, read_gpr_or_zr(regs, entry->decoded.rn) & 0xFFFFFFFFULL, entry->decoded.bitfield_wmask, entry->decoded.bitfield_tmask, entry->decoded.immr, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, false);
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    sbfm_dynamic_w(read_gpr_or_zr(regs, entry->decoded.rn) & 0xFFFFFFFFULL, entry->decoded.bitfield_wmask, entry->decoded.bitfield_tmask, entry->decoded.immr, entry->decoded.imms, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_bfm_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_sbfm_x(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    bfm_dynamic_w64(read_gpr_or_zr(regs, entry->decoded.rd), read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.bitfield_wmask, entry->decoded.bitfield_tmask, entry->decoded.immr, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, true);
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    sbfm_dynamic_x(read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.bitfield_wmask, entry->decoded.bitfield_tmask, entry->decoded.immr, entry->decoded.imms, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_ubfm_w32(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_bfm_w(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    ubfm_dynamic_w32(read_gpr_or_zr(regs, entry->decoded.rn) & 0xFFFFFFFFULL, entry->decoded.bitfield_wmask, entry->decoded.bitfield_tmask, entry->decoded.immr, 0, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, false);
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    bfm_dynamic_w(read_gpr_or_zr(regs, entry->decoded.rd) & 0xFFFFFFFFULL, read_gpr_or_zr(regs, entry->decoded.rn) & 0xFFFFFFFFULL, entry->decoded.bitfield_wmask, entry->decoded.bitfield_tmask, entry->decoded.immr, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-static inline enum emu_inst_result emu_ubfm_w64(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_bfm_x(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
-    (void)fp_regs;
-    struct arm64_hw_template_output output __attribute__((__uninitialized__));
-    ubfm_dynamic_w64(read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.bitfield_wmask, entry->decoded.bitfield_tmask, entry->decoded.immr, 0, &output);
-    write_gpr_or_zr(regs, entry->decoded.rd, output.value0, true);
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    bfm_dynamic_x(read_gpr_or_zr(regs, entry->decoded.rd), read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.bitfield_wmask, entry->decoded.bitfield_tmask, entry->decoded.immr, output, 0, 0, 0, 0);
     regs->pc += 4;
-    return EMU_INST_HANDLED;
+    return;
 }
-enum emu_inst_result (*emu_build_immediate_executor(const struct arm64_decoded_instruction *decoded))(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+static inline void emu_ubfm_w(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+{
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    ubfm_dynamic_w(read_gpr_or_zr(regs, entry->decoded.rn) & 0xFFFFFFFFULL, entry->decoded.bitfield_wmask, entry->decoded.bitfield_tmask, entry->decoded.immr, 0, output, 0, 0, 0, 0);
+    regs->pc += 4;
+    return;
+}
+static inline void emu_ubfm_x(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
+{
+    uint64_t discard;
+    uint64_t *output = gpr_output_or_discard(regs, entry->decoded.rd, &discard);
+    ubfm_dynamic_x(read_gpr_or_zr(regs, entry->decoded.rn), entry->decoded.bitfield_wmask, entry->decoded.bitfield_tmask, entry->decoded.immr, 0, output, 0, 0, 0, 0);
+    regs->pc += 4;
+    return;
+}
+void (*emu_build_immediate_executor(const struct arm64_decoded_instruction *decoded))(struct pt_regs *regs, struct fp_regs *fp_regs, const struct arm64_executor_entry *entry)
 {
     switch (decoded->instruction)
     {
     case ARM64_INST_ADR:
-        return emu_adr;
+        return emu_adr_x;
     case ARM64_INST_ADRP:
-        return emu_adrp;
+        return emu_adrp_x;
     case ARM64_INST_EXTR:
-        if (decoded->operand_width == 32) return emu_extr_w32;
-        if (decoded->operand_width == 64) return emu_extr_w64;
-        return NULL;
+        switch (decoded->operand_width)
+        {
+        case 32:
+            return decoded->shift_amount == 0 ? emu_extr_w_imm0 : emu_extr_w;
+        case 64:
+            return decoded->shift_amount == 0 ? emu_extr_x_imm0 : emu_extr_x;
+        default:
+            return NULL;
+        }
     case ARM64_INST_ADD_IMMEDIATE:
-        if (decoded->operand_width == 32) return emu_add_immediate_w32;
-        if (decoded->operand_width == 64) return emu_add_immediate_w64;
-        return NULL;
+        switch (decoded->operand_width)
+        {
+        case 32:
+            return emu_add_immediate_w;
+        case 64:
+            return emu_add_immediate_x;
+        default:
+            return NULL;
+        }
     case ARM64_INST_ADDS_IMMEDIATE:
-        if (decoded->operand_width == 32) return emu_adds_immediate_w32;
-        if (decoded->operand_width == 64) return emu_adds_immediate_w64;
-        return NULL;
+        switch (decoded->operand_width)
+        {
+        case 32:
+            return emu_adds_immediate_w;
+        case 64:
+            return emu_adds_immediate_x;
+        default:
+            return NULL;
+        }
     case ARM64_INST_SUB_IMMEDIATE:
-        if (decoded->operand_width == 32) return emu_sub_immediate_w32;
-        if (decoded->operand_width == 64) return emu_sub_immediate_w64;
-        return NULL;
+        switch (decoded->operand_width)
+        {
+        case 32:
+            return emu_sub_immediate_w;
+        case 64:
+            return emu_sub_immediate_x;
+        default:
+            return NULL;
+        }
     case ARM64_INST_SUBS_IMMEDIATE:
-        if (decoded->operand_width == 32) return emu_subs_immediate_w32;
-        if (decoded->operand_width == 64) return emu_subs_immediate_w64;
-        return NULL;
+        switch (decoded->operand_width)
+        {
+        case 32:
+            return emu_subs_immediate_w;
+        case 64:
+            return emu_subs_immediate_x;
+        default:
+            return NULL;
+        }
     case ARM64_INST_SMAX_IMMEDIATE:
-        if (decoded->operand_width == 32) return emu_smax_immediate_w32;
-        if (decoded->operand_width == 64) return emu_smax_immediate_w64;
-        return NULL;
+        switch (decoded->operand_width)
+        {
+        case 32:
+            return emu_smax_immediate_w;
+        case 64:
+            return emu_smax_immediate_x;
+        default:
+            return NULL;
+        }
     case ARM64_INST_UMAX_IMMEDIATE:
-        if (decoded->operand_width == 32) return emu_umax_immediate_w32;
-        if (decoded->operand_width == 64) return emu_umax_immediate_w64;
-        return NULL;
+        switch (decoded->operand_width)
+        {
+        case 32:
+            return emu_umax_immediate_w;
+        case 64:
+            return emu_umax_immediate_x;
+        default:
+            return NULL;
+        }
     case ARM64_INST_SMIN_IMMEDIATE:
-        if (decoded->operand_width == 32) return emu_smin_immediate_w32;
-        if (decoded->operand_width == 64) return emu_smin_immediate_w64;
-        return NULL;
+        switch (decoded->operand_width)
+        {
+        case 32:
+            return emu_smin_immediate_w;
+        case 64:
+            return emu_smin_immediate_x;
+        default:
+            return NULL;
+        }
     case ARM64_INST_UMIN_IMMEDIATE:
-        if (decoded->operand_width == 32) return emu_umin_immediate_w32;
-        if (decoded->operand_width == 64) return emu_umin_immediate_w64;
-        return NULL;
+        switch (decoded->operand_width)
+        {
+        case 32:
+            return emu_umin_immediate_w;
+        case 64:
+            return emu_umin_immediate_x;
+        default:
+            return NULL;
+        }
     case ARM64_INST_AND_IMMEDIATE:
-        if (decoded->operand_width == 32) return emu_and_immediate_w32;
-        if (decoded->operand_width == 64) return emu_and_immediate_w64;
-        return NULL;
+        switch (decoded->operand_width)
+        {
+        case 32:
+            return emu_and_immediate_w;
+        case 64:
+            return emu_and_immediate_x;
+        default:
+            return NULL;
+        }
     case ARM64_INST_ORR_IMMEDIATE:
-        if (decoded->operand_width == 32) return emu_orr_immediate_w32;
-        if (decoded->operand_width == 64) return emu_orr_immediate_w64;
-        return NULL;
+        switch (decoded->operand_width)
+        {
+        case 32:
+            return emu_orr_immediate_w;
+        case 64:
+            return emu_orr_immediate_x;
+        default:
+            return NULL;
+        }
     case ARM64_INST_EOR_IMMEDIATE:
-        if (decoded->operand_width == 32) return emu_eor_immediate_w32;
-        if (decoded->operand_width == 64) return emu_eor_immediate_w64;
-        return NULL;
+        switch (decoded->operand_width)
+        {
+        case 32:
+            return emu_eor_immediate_w;
+        case 64:
+            return emu_eor_immediate_x;
+        default:
+            return NULL;
+        }
     case ARM64_INST_ANDS_IMMEDIATE:
-        if (decoded->operand_width == 32) return emu_ands_immediate_w32;
-        if (decoded->operand_width == 64) return emu_ands_immediate_w64;
-        return NULL;
+        switch (decoded->operand_width)
+        {
+        case 32:
+            return emu_ands_immediate_w;
+        case 64:
+            return emu_ands_immediate_x;
+        default:
+            return NULL;
+        }
     case ARM64_INST_MOVN:
-        if (decoded->operand_width == 32) return emu_movn_w32;
-        if (decoded->operand_width == 64) return emu_movn_w64;
-        return NULL;
+        switch (decoded->operand_width)
+        {
+        case 32:
+            return emu_movn_w;
+        case 64:
+            return emu_movn_x;
+        default:
+            return NULL;
+        }
     case ARM64_INST_MOVZ:
-        if (decoded->operand_width == 32) return emu_movz_w32;
-        if (decoded->operand_width == 64) return emu_movz_w64;
-        return NULL;
+        switch (decoded->operand_width)
+        {
+        case 32:
+            return emu_movz_w;
+        case 64:
+            return emu_movz_x;
+        default:
+            return NULL;
+        }
     case ARM64_INST_MOVK:
-        if (decoded->operand_width == 32) return emu_movk_w32;
-        if (decoded->operand_width == 64) return emu_movk_w64;
-        return NULL;
+        switch (decoded->operand_width)
+        {
+        case 32:
+            return emu_movk_w;
+        case 64:
+            return emu_movk_x;
+        default:
+            return NULL;
+        }
     case ARM64_INST_SBFM:
-        if (decoded->operand_width == 32) return emu_sbfm_w32;
-        if (decoded->operand_width == 64) return emu_sbfm_w64;
-        return NULL;
+        switch (decoded->operand_width)
+        {
+        case 32:
+            return emu_sbfm_w;
+        case 64:
+            return emu_sbfm_x;
+        default:
+            return NULL;
+        }
     case ARM64_INST_BFM:
-        if (decoded->operand_width == 32) return emu_bfm_w32;
-        if (decoded->operand_width == 64) return emu_bfm_w64;
-        return NULL;
+        switch (decoded->operand_width)
+        {
+        case 32:
+            return emu_bfm_w;
+        case 64:
+            return emu_bfm_x;
+        default:
+            return NULL;
+        }
     case ARM64_INST_UBFM:
-        if (decoded->operand_width == 32) return emu_ubfm_w32;
-        if (decoded->operand_width == 64) return emu_ubfm_w64;
-        return NULL;
+        switch (decoded->operand_width)
+        {
+        case 32:
+            return emu_ubfm_w;
+        case 64:
+            return emu_ubfm_x;
+        default:
+            return NULL;
+        }
     default:
         return NULL;
     }
 }
-// clang-format on

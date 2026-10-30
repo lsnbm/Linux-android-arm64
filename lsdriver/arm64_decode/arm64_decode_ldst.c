@@ -1,3 +1,9 @@
+/*
+ARM64 指令解码器：加载与存储类。
+
+解析 GPR、FP/SIMD、字面量、单寄存器、成对、偏移、前后索引、寄存器偏移、非特权、独占、带序、预取和 LSE 原子访问编码。
+统一计算访问宽度、元素宽度、寻址模式、扩展类型、偏移量及寄存器字段，并识别 CAS/CASP 等比较交换指令。
+*/
 #include "arm64_decode.h"
 
 static void arm64_decode_ldst_rt_rn(uint32_t raw, struct arm64_decoded_instruction *decoded)
@@ -36,7 +42,7 @@ static inline uint32_t arm64_decode_ldst_simd_access_bytes(uint32_t raw)
     uint32_t size = arm64_decode_ldst_size(raw);
     uint32_t opc = arm64_decode_ldst_opc(raw);
 
-    if (size == 0 && (opc & 2)) return 16;
+    if (size == 0 && ARM64_DECODE_BIT(opc, 1)) return 16;
     return ARM64_DECODE_SCALE(1U, size);
 }
 
@@ -48,7 +54,7 @@ static inline uint32_t arm64_decode_ldst_gpr_width(uint32_t size, uint32_t opc)
 
 static inline uint32_t arm64_decode_ldst_operand_width(int is_fp_simd, uint32_t access_bytes, uint32_t size, uint32_t opc)
 {
-    if (is_fp_simd) return access_bytes * 8;
+    if (is_fp_simd) return ARM64_DECODE_SCALE(access_bytes, 3U);
     return arm64_decode_ldst_gpr_width(size, opc);
 }
 
@@ -450,15 +456,15 @@ static inline uint32_t arm64_decode_ldst_ld1_element_width(uint32_t opcode, uint
 {
     if (opcode == 0) return 8;
     if (opcode == 2) return 16;
-    return 32U << (size & 1);
+    return ARM64_DECODE_SCALE(32U, ARM64_DECODE_BIT(size, 0));
 }
 
 static inline uint32_t arm64_decode_ldst_ld1_lane(uint32_t opcode, uint32_t size, uint32_t q, uint32_t s)
 {
-    if (opcode == 0) return (q << 3) | (s << 2) | size;
-    if (opcode == 2) return (q << 2) | (s << 1) | (size >> 1);
-    if (size != 3) return (q << 1) | s;
-    return q;
+    if (opcode == 0) return ARM64_DECODE_CONCAT(ARM64_DECODE_CONCAT(q, s, 1U), size, 2U);
+    if (opcode == 2) return ARM64_DECODE_CONCAT(ARM64_DECODE_CONCAT(q, s, 1U), ARM64_DECODE_BIT(size, 1), 1U);
+    if (size == 1) return q;
+    return ARM64_DECODE_CONCAT(q, s, 1U);
 }
 
 static inline uint32_t arm64_decode_ldst_atomic_width(uint32_t access_bytes)
@@ -474,7 +480,7 @@ static inline uint32_t arm64_decode_ldst_atomic_width(uint32_t access_bytes)
 
 static inline uint32_t arm64_decode_ldst_pair_access_bytes(uint32_t opc, int is_fp_simd)
 {
-    if (is_fp_simd) return 4U << opc;
+    if (is_fp_simd) return ARM64_DECODE_SCALE(4U, opc);
     if (opc == 2) return 8;
     return 4;
 }
@@ -1172,20 +1178,85 @@ static inline enum arm64_decode_status arm64_decode_ldst_single_gpr_instruction(
         switch (address_mode)
         {
         case 1:
-            *instruction = ARM64_INST_STUR_GPR;
-            return ARM64_DECODE_OK;
+            switch (size)
+            {
+            case 0:
+                *instruction = ARM64_INST_STURB_GPR;
+                return ARM64_DECODE_OK;
+            case 1:
+                *instruction = ARM64_INST_STURH_GPR;
+                return ARM64_DECODE_OK;
+            case 2:
+            case 3:
+                *instruction = ARM64_INST_STUR_GPR;
+                return ARM64_DECODE_OK;
+            default:
+                return ARM64_DECODE_UNSUPPORTED;
+            }
         case 5:
-            *instruction = ARM64_INST_STTR_GPR;
-            return ARM64_DECODE_OK;
+            switch (size)
+            {
+            case 0:
+                *instruction = ARM64_INST_STTRB_GPR;
+                return ARM64_DECODE_OK;
+            case 1:
+                *instruction = ARM64_INST_STTRH_GPR;
+                return ARM64_DECODE_OK;
+            case 2:
+            case 3:
+                *instruction = ARM64_INST_STTR_GPR;
+                return ARM64_DECODE_OK;
+            default:
+                return ARM64_DECODE_UNSUPPORTED;
+            }
         case 3:
-            *instruction = ARM64_INST_STR_GPR_POST_INDEX;
-            return ARM64_DECODE_OK;
+            switch (size)
+            {
+            case 0:
+                *instruction = ARM64_INST_STRB_GPR_POST_INDEX;
+                return ARM64_DECODE_OK;
+            case 1:
+                *instruction = ARM64_INST_STRH_GPR_POST_INDEX;
+                return ARM64_DECODE_OK;
+            case 2:
+            case 3:
+                *instruction = ARM64_INST_STR_GPR_POST_INDEX;
+                return ARM64_DECODE_OK;
+            default:
+                return ARM64_DECODE_UNSUPPORTED;
+            }
         case 4:
-            *instruction = ARM64_INST_STR_GPR_PRE_INDEX;
-            return ARM64_DECODE_OK;
+            switch (size)
+            {
+            case 0:
+                *instruction = ARM64_INST_STRB_GPR_PRE_INDEX;
+                return ARM64_DECODE_OK;
+            case 1:
+                *instruction = ARM64_INST_STRH_GPR_PRE_INDEX;
+                return ARM64_DECODE_OK;
+            case 2:
+            case 3:
+                *instruction = ARM64_INST_STR_GPR_PRE_INDEX;
+                return ARM64_DECODE_OK;
+            default:
+                return ARM64_DECODE_UNSUPPORTED;
+            }
         case 6:
-            *instruction = ARM64_INST_STR_GPR_REGISTER_OFFSET;
-            return ARM64_DECODE_OK;
+            switch (size)
+            {
+            case 0:
+                *instruction = ARM64_INST_STRB_GPR_REGISTER_OFFSET;
+                return ARM64_DECODE_OK;
+            case 1:
+                *instruction = ARM64_INST_STRH_GPR_REGISTER_OFFSET;
+                return ARM64_DECODE_OK;
+            case 2:
+            case 3:
+                *instruction = ARM64_INST_STR_GPR_REGISTER_OFFSET;
+                return ARM64_DECODE_OK;
+            default:
+                return ARM64_DECODE_UNSUPPORTED;
+            }
         case 7:
             switch (size)
             {
@@ -1450,12 +1521,12 @@ static inline enum arm64_decode_status arm64_decode_ldst_single_instruction(uint
 
     if (is_fp_simd)
     {
-        return arm64_decode_ldst_single_simd_instruction(address_mode, arm64_decode_ldst_opc(raw) & 1, instruction);
+        return arm64_decode_ldst_single_simd_instruction(address_mode, ARM64_DECODE_BIT(arm64_decode_ldst_opc(raw), 0), instruction);
     }
     return arm64_decode_ldst_single_gpr_instruction(arm64_decode_ldst_size(raw), arm64_decode_ldst_opc(raw), address_mode, instruction);
 }
 
-static inline enum arm64_decode_status arm64_decode_ldst_pair_insn(int is_fp_simd, uint8_t address_mode, uint32_t load, uint32_t opc, enum arm64_instruction *instruction)
+static inline enum arm64_decode_status arm64_decode_ldst_pair_instruction(int is_fp_simd, uint8_t address_mode, uint32_t load, uint32_t opc, enum arm64_instruction *instruction)
 {
     if (is_fp_simd)
     {
@@ -1578,31 +1649,31 @@ static inline enum arm64_decode_status arm64_decode_ldst_atomic(uint32_t raw, st
     case 8:
         break;
     case 9:
-        if (!(raw & 0x80000000U)) return ARM64_DECODE_UNSUPPORTED;
-        if ((raw & 0xC0DF0000U) == 0xC01F0000U)
+        if (!ARM64_DECODE_BIT(raw, 31)) return ARM64_DECODE_UNSUPPORTED;
+        if (ARM64_DECODE_MASK(raw, 0xC0DF0000U) == 0xC01F0000U)
         {
-            if ((raw & 0x1F) >= 24 || (raw & 1)) return ARM64_DECODE_UNALLOCATED;
+            if (ARM64_DECODE_FIELD(raw, 4, 0) >= 24 || ARM64_DECODE_BIT(raw, 0)) return ARM64_DECODE_UNALLOCATED;
             return ARM64_DECODE_UNSUPPORTED;
         }
         return ARM64_DECODE_UNALLOCATED;
     case 10:
-        if (!(raw & 0x80000000U)) return ARM64_DECODE_UNSUPPORTED;
-        if ((raw & 0xC0C00000U) == 0xC0000000U)
+        if (!ARM64_DECODE_BIT(raw, 31)) return ARM64_DECODE_UNSUPPORTED;
+        if (ARM64_DECODE_MASK(raw, 0xC0C00000U) == 0xC0000000U)
         {
-            if ((raw & 0x1F) >= 24 || (raw & 1)) return ARM64_DECODE_UNALLOCATED;
+            if (ARM64_DECODE_FIELD(raw, 4, 0) >= 24 || ARM64_DECODE_BIT(raw, 0)) return ARM64_DECODE_UNALLOCATED;
             return ARM64_DECODE_UNSUPPORTED;
         }
         return ARM64_DECODE_UNALLOCATED;
     case 11:
-        if (!(raw & 0x80000000U)) return ARM64_DECODE_UNSUPPORTED;
-        if ((raw & 0xC0C00000U) == 0xC0000000U)
+        if (!ARM64_DECODE_BIT(raw, 31)) return ARM64_DECODE_UNSUPPORTED;
+        if (ARM64_DECODE_MASK(raw, 0xC0C00000U) == 0xC0000000U)
         {
-            if ((raw & 0x1F) >= 24 || (raw & 1)) return ARM64_DECODE_UNALLOCATED;
+            if (ARM64_DECODE_FIELD(raw, 4, 0) >= 24 || ARM64_DECODE_BIT(raw, 0)) return ARM64_DECODE_UNALLOCATED;
             return ARM64_DECODE_UNSUPPORTED;
         }
         return ARM64_DECODE_UNALLOCATED;
     case 12:
-        if ((raw & 0x00DF0000U) != 0x009F0000U) return ARM64_DECODE_UNALLOCATED;
+        if (ARM64_DECODE_MASK(raw, 0x00DF0000U) != 0x009F0000U) return ARM64_DECODE_UNALLOCATED;
         arm64_decode_ldst_rt_rn(raw, candidate);
         candidate->operand_width = arm64_decode_ldst_atomic_width(access_bytes);
         enum arm64_instruction instruction;
@@ -1612,9 +1683,9 @@ static inline enum arm64_decode_status arm64_decode_ldst_atomic(uint32_t raw, st
         *decoded = result;
         return ARM64_DECODE_OK;
     case 13:
-        if ((raw & 0xC0DF0000U) == 0xC01F0000U)
+        if (ARM64_DECODE_MASK(raw, 0xC0DF0000U) == 0xC01F0000U)
         {
-            if ((raw & 0x1F) >= 24 || (raw & 1)) return ARM64_DECODE_UNALLOCATED;
+            if (ARM64_DECODE_FIELD(raw, 4, 0) >= 24 || ARM64_DECODE_BIT(raw, 0)) return ARM64_DECODE_UNALLOCATED;
             return ARM64_DECODE_UNSUPPORTED;
         }
         return ARM64_DECODE_UNALLOCATED;
@@ -1677,7 +1748,7 @@ static inline enum arm64_decode_status arm64_decode_ldst_literal(uint32_t raw, s
     else candidate->immediate = ARM64_DECODE_FIELD(raw, 4, 0);
     candidate->offset = ARM64_DECODE_SIGNED_FIELD(raw, 23, 5, 2);
     if (prefetch) candidate->operand_width = 0;
-    else if (is_fp_simd) candidate->operand_width = access_bytes * 8;
+    else if (is_fp_simd) candidate->operand_width = ARM64_DECODE_SCALE(access_bytes, 3U);
     else candidate->operand_width = arm64_decode_ldst_literal_gpr_width(size);
     if (is_fp_simd && !access_bytes) return ARM64_DECODE_UNALLOCATED;
     enum arm64_instruction instruction;
@@ -1707,7 +1778,7 @@ static inline enum arm64_decode_status arm64_decode_ldst_pair(uint32_t raw, stru
     {
         if (opc == 3) return ARM64_DECODE_UNALLOCATED;
         access_bytes = arm64_decode_ldst_pair_access_bytes(opc, 1);
-        candidate->operand_width = access_bytes * 8;
+        candidate->operand_width = ARM64_DECODE_SCALE(access_bytes, 3U);
     }
     else
     {
@@ -1720,7 +1791,7 @@ static inline enum arm64_decode_status arm64_decode_ldst_pair(uint32_t raw, stru
     if (load && candidate->rt == candidate->rt2) return ARM64_DECODE_UNPREDICTABLE;
     candidate->offset = ARM64_DECODE_SIGN_EXTEND(ARM64_DECODE_FIELD(raw, 21, 15), 7) * access_bytes;
     enum arm64_instruction instruction;
-    enum arm64_decode_status mapping_status = arm64_decode_ldst_pair_insn(is_fp_simd, address_mode, load, opc, &instruction);
+    enum arm64_decode_status mapping_status = arm64_decode_ldst_pair_instruction(is_fp_simd, address_mode, load, opc, &instruction);
     if (mapping_status != ARM64_DECODE_OK) return mapping_status;
     candidate->instruction = instruction;
     *decoded = result;
@@ -1758,7 +1829,7 @@ static inline enum arm64_decode_status arm64_decode_ldst_unscaled(uint32_t raw, 
     uint32_t mode;
     int prefetch;
 
-    if (!(raw & 0x00200000U))
+    if (!ARM64_DECODE_BIT(raw, 21))
     {
         enum arm64_decode_status status = arm64_decode_ldst_single(raw, candidate, is_fp_simd);
 
@@ -1799,13 +1870,13 @@ static inline enum arm64_decode_status arm64_decode_ldst_unscaled(uint32_t raw, 
 
         if (status != ARM64_DECODE_OK) return status;
         prefetch = candidate->operand_width == 0;
-        if (prefetch && (raw & 0x18U) == 0x18U) return ARM64_DECODE_UNSUPPORTED;
+        if (prefetch && ARM64_DECODE_FIELD(raw, 4, 3) == 3) return ARM64_DECODE_UNSUPPORTED;
         address_mode = 6;
         candidate->rm = ARM64_DECODE_FIELD(raw, 20, 16);
         candidate->extend_type = ARM64_DECODE_FIELD(raw, 15, 13);
         if (candidate->extend_type != 2 && candidate->extend_type != 3 && candidate->extend_type != 6 && candidate->extend_type != 7) return ARM64_DECODE_UNALLOCATED;
         candidate->shift_amount = 0;
-        if (raw & 0x1000U)
+        if (ARM64_DECODE_BIT(raw, 12))
         {
             candidate->shift_amount = prefetch ? 3 : (uint8_t)__builtin_ctz(access_bytes);
         }
@@ -1817,7 +1888,7 @@ static inline enum arm64_decode_status arm64_decode_ldst_unscaled(uint32_t raw, 
         candidate->instruction = instruction;
     }
 
-    if (!is_fp_simd && (address_mode == 4 || address_mode == 3) && candidate->rn != 31 && candidate->rn == candidate->rt) return ARM64_DECODE_UNPREDICTABLE;
+    if (!is_fp_simd && (address_mode == 5 || address_mode == 4 || address_mode == 3) && candidate->rn != 31 && candidate->rn == candidate->rt) return ARM64_DECODE_UNPREDICTABLE;
     *decoded = result;
     return ARM64_DECODE_OK;
 }
@@ -1837,7 +1908,7 @@ static inline enum arm64_decode_status arm64_decode_ldst_casp(uint32_t raw, stru
     uint32_t rt = ARM64_DECODE_FIELD(raw, 4, 0);
     enum arm64_instruction instruction;
 
-    if (size >= 2 || ARM64_DECODE_FIELD(raw, 14, 10) != 31 || ((rs | rt) & 1)) return ARM64_DECODE_UNALLOCATED;
+    if (size >= 2 || ARM64_DECODE_FIELD(raw, 14, 10) != 31 || ARM64_DECODE_BIT(rs, 0) || ARM64_DECODE_BIT(rt, 0)) return ARM64_DECODE_UNALLOCATED;
     switch (ARM64_DECODE_BIT_PAIR(raw, 22, 15))
     {
     case 0:
@@ -1947,6 +2018,7 @@ static inline enum arm64_decode_status arm64_decode_ldst_exclusive(uint32_t raw,
         return ARM64_DECODE_UNALLOCATED;
     }
     arm64_decode_ldst_rt_rn(raw, candidate);
+    if (ordered && candidate->rn != 31 && candidate->rn == candidate->rt) return ARM64_DECODE_UNPREDICTABLE;
     if (pair) candidate->rt2 = rt2;
     if (!ordered && !load) candidate->rs = rs;
     candidate->operand_width = arm64_decode_ldst_atomic_width(ARM64_DECODE_SCALE(1U, size));
@@ -1968,9 +2040,10 @@ static inline enum arm64_decode_status arm64_decode_ldst_structure_lane(uint32_t
     uint32_t q = ARM64_DECODE_BIT(raw, 30);
     uint32_t s = ARM64_DECODE_BIT(raw, 12);
 
-    if ((raw & 0x00800000U) || (raw & 0x001F0000U)) return ARM64_DECODE_UNSUPPORTED;
+    if (ARM64_DECODE_BIT(raw, 31) || ARM64_DECODE_BIT(raw, 23) || ARM64_DECODE_FIELD(raw, 20, 16)) return ARM64_DECODE_UNSUPPORTED;
     if (opcode != 0 && opcode != 2 && opcode != 4) return ARM64_DECODE_UNSUPPORTED;
-    if ((opcode == 2 && (size & 1)) || (opcode == 4 && size > 1)) return ARM64_DECODE_UNALLOCATED;
+    if ((opcode == 2 && ARM64_DECODE_BIT(size, 0)) || (opcode == 4 && size > 1)) return ARM64_DECODE_UNALLOCATED;
+    if (opcode == 4 && size == 1 && s) return ARM64_DECODE_UNALLOCATED;
     enum arm64_instruction instruction = ARM64_DECODE_BIT(raw, 22) ? ARM64_INST_LD1 : ARM64_INST_ST1;
 
     arm64_decode_ldst_rt_rn(raw, candidate);
@@ -1988,19 +2061,19 @@ static inline enum arm64_decode_status arm64_decode_ldst_ordered_unscaled(uint32
     struct arm64_decoded_instruction *candidate = &result;
 
     if (!ARM64_DECODE_MATCH(raw, 0x3F000000U, 0x19000000U)) return ARM64_DECODE_UNSUPPORTED;
-    switch (raw & 0x8020FC00U)
+    switch (ARM64_DECODE_MASK(raw, 0x8020FC00U))
     {
     case 0x00200800U:
         return ARM64_DECODE_UNSUPPORTED;
     case 0x00200C00U:
-        if ((((raw >> 16) & 0x1F) | (raw & 0x1F)) & 1) return ARM64_DECODE_UNALLOCATED;
+        if ((ARM64_DECODE_BIT(raw, 16) | ARM64_DECODE_BIT(raw, 0)) != 0) return ARM64_DECODE_UNALLOCATED;
         return ARM64_DECODE_UNSUPPORTED;
     case 0x00209000U:
     case 0x0020A000U:
     case 0x0020B000U:
     {
-        uint32_t rt = raw & 0x1F;
-        uint32_t rt2 = (raw >> 16) & 0x1F;
+        uint32_t rt = ARM64_DECODE_FIELD(raw, 4, 0);
+        uint32_t rt2 = ARM64_DECODE_FIELD(raw, 20, 16);
 
         if (rt == 31 || rt2 == 31) return ARM64_DECODE_UNALLOCATED;
         if (rt == rt2) return ARM64_DECODE_UNPREDICTABLE;
@@ -2010,7 +2083,7 @@ static inline enum arm64_decode_status arm64_decode_ldst_ordered_unscaled(uint32
         break;
     }
 
-    if ((raw & 0x00200C00U) == 0)
+    if (ARM64_DECODE_MASK(raw, 0x00200C00U) == 0)
     {
         uint32_t size = ARM64_DECODE_FIELD(raw, 31, 30);
         uint32_t opc = ARM64_DECODE_FIELD(raw, 23, 22);
@@ -2038,7 +2111,7 @@ enum arm64_decode_status arm64_decode_load_store(uint32_t raw, struct arm64_deco
     switch (ARM64_DECODE_FIELD(raw, 29, 24))
     {
     case 0x08:
-        switch (raw & 0x00A07C00U)
+        switch (ARM64_DECODE_MASK(raw, 0x00A07C00U))
         {
         case 0x00207C00U:
         {
