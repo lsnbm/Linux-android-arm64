@@ -74,6 +74,13 @@ captures/
 .DS_Store
 Thumbs.db
 
+# GitHub cloud build work directories
+.kernels/
+artifacts/
+logs/
+downloaded/
+release/
+
 # android root-level binaries
 android/*.a
 android/*.so
