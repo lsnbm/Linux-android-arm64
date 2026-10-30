@@ -1,38 +1,140 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
-# ==============================================================
-#  Android 内核驱动 (lsdriver.ko) 多版本批量编译脚本
-#  修复版：不会自删、安全清理
-# ==============================================================
+# Build lsdriver against the prepared kernel trees supplied by the Android DDK.
+#
+# The DDK calls its targets android16-6.12, while the public installer and
+# build_all.sh use 6.12-Android16. This script accepts both spellings and
+# always writes canonical 6.12-Android16.ko style names.
 
-# -------------------------- 核心配置 --------------------------
 BUILD_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-CLANG_ROOT="/opt/ddk/clang"
-KERNELS_ROOT="/opt/ddk/kdir"
-DRIVER_SRC="/mnt/c/home/wen/Linux-android-arm64/lsdriver"
-NO_STRIP_VERSIONS=("android16-6.12" "android15-6.6")
+CLANG_ROOT="${CLANG_ROOT:-/opt/ddk/clang}"
+KERNELS_ROOT="${KERNELS_ROOT:-/opt/ddk/kdir}"
+DRIVER_SRC="${DRIVER_SRC:-$BUILD_ROOT/lsdriver}"
+JOBS="${JOBS:-$(nproc)}"
 
-# -------------------------- 颜色定义 --------------------------
+if [[ ! "$JOBS" =~ ^[1-9][0-9]*$ ]]; then
+    printf 'JOBS must be a positive integer (got %s)\n' "$JOBS" >&2
+    exit 2
+fi
+
 GREEN='\e[32m'
 RED='\e[31m'
 YELLOW='\e[33m'
 BLUE='\e[34m'
 NC='\e[0m'
 
-# -------------------------- 全局变量 --------------------------
 declare -a BUILD_RESULTS=()
-STRIP_CHOICE="n"
+declare -a REQUESTED_VERSIONS=()
+REQUESTED_VERSIONS_COUNT=0
+STRIP_CHOICE="${STRIP_CHOICE:-n}"
 
-# -------------------------- 日志函数 --------------------------
+# Canonical names are the names consumed by packer.sh and install_driver.sh.
+ALL_VERSIONS=(
+    '6.12-Android16'
+    '6.6-Android15'
+    '6.1-Android14'
+    '5.15-Android13'
+    '5.10-Android13'
+    '5.10-Android12'
+)
+
+declare -A KMI_FOR_VERSION=(
+    ['6.12-Android16']='android16-6.12'
+    ['6.6-Android15']='android15-6.6'
+    ['6.1-Android14']='android14-6.1'
+    ['5.15-Android13']='android13-5.15'
+    ['5.10-Android13']='android13-5.10'
+    ['5.10-Android12']='android12-5.10'
+)
+
+declare -A CLANG_FOR_VERSION=(
+    ['6.12-Android16']='clang-r536225'
+    ['6.6-Android15']='clang-r510928'
+    ['6.1-Android14']='clang-r487747c'
+    ['5.15-Android13']='clang-r450784e'
+    ['5.10-Android13']='clang-r450784e'
+    ['5.10-Android12']='clang-r416183b'
+)
+
+# The newest DDK targets must retain their symbol/debug sections. The default
+# is already no-strip; this list also protects an explicit STRIP_CHOICE=y.
+NO_STRIP_VERSIONS=('6.12-Android16' '6.6-Android15')
+
 log_info()  { echo -e "${GREEN}$*${NC}"; }
 log_warn()  { echo -e "${YELLOW}$*${NC}"; }
-log_error() { echo -e "${RED}$*${NC}"; }
+log_error() { echo -e "${RED}$*${NC}" >&2; }
 log_title() { echo -e "${BLUE}====================================================${NC}"; }
 
-# -------------------------- 清理编译缓存（修复版！不会删脚本） --------------------------
+contains_version() {
+    local version="$1"
+    shift
+    local item
+    for item in "$@"; do
+        [[ "$version" == "$item" ]] && return 0
+    done
+    return 1
+}
 
-# 清理 Kbuild 中间文件，保留源码、构建脚本和所有 .ko
+normalize_version() {
+    case "$1" in
+        6.12-Android16|android16-6.12) echo '6.12-Android16' ;;
+        6.6-Android15|android15-6.6)   echo '6.6-Android15' ;;
+        6.1-Android14|android14-6.1)   echo '6.1-Android14' ;;
+        5.15-Android13|android13-5.15) echo '5.15-Android13' ;;
+        5.10-Android13|android13-5.10) echo '5.10-Android13' ;;
+        5.10-Android12|android12-5.10) echo '5.10-Android12' ;;
+        *)
+            log_error "不支持的 DDK 目标: $1"
+            return 2
+            ;;
+    esac
+}
+
+resolve_kernel_dir() {
+    local version="$1"
+    local kmi="${KMI_FOR_VERSION[$version]}"
+
+    # DDK images expose KERNEL_SRC for a single selected target. Do not reuse
+    # it for a multi-target invocation unless DDK_TARGET names that same KMI.
+    if [[ -n "${KERNEL_SRC:-}" && -d "$KERNEL_SRC" &&
+          ( "$REQUESTED_VERSIONS_COUNT" -eq 1 || "${DDK_TARGET:-}" == "$kmi" ) ]]; then
+        printf '%s\n' "$KERNEL_SRC"
+        return 0
+    fi
+
+    if [[ -d "$KERNELS_ROOT/$kmi" ]]; then
+        printf '%s\n' "$KERNELS_ROOT/$kmi"
+        return 0
+    fi
+    if [[ -d "$KERNELS_ROOT/$version" ]]; then
+        printf '%s\n' "$KERNELS_ROOT/$version"
+        return 0
+    fi
+    return 1
+}
+
+resolve_clang_bin() {
+    local version="$1"
+    local kernel_dir="$2"
+    local clang_name="${CLANG_FOR_VERSION[$version]}"
+    local candidate
+
+    for candidate in \
+        "$CLANG_ROOT/$clang_name/bin" \
+        "$kernel_dir/prebuilts/clang/host/linux-x86/$clang_name/bin" \
+        "$kernel_dir/prebuilts-master/clang/host/linux-x86/$clang_name/bin"; do
+        if [[ -x "$candidate/clang" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+
+    # DDK images normally put the matching clang on PATH. An empty result is
+    # intentional; make will then use the image's hermetic toolchain.
+    printf '%s\n' ''
+}
+
 clean_driver_build() {
     if [[ ! -d "$DRIVER_SRC" ]]; then
         log_error "driver source directory not found: $DRIVER_SRC"
@@ -49,123 +151,226 @@ clean_driver_build() {
         -name '*.cmd' -o \
         -name '*.usyms' \
     \) -delete
-
     find "$DRIVER_SRC" -type d -name '.tmp_versions' -prune -exec rm -rf -- {} +
 }
 
 cleanup_driver_build_on_exit() {
     local status=$?
-
     trap - EXIT
     clean_driver_build || true
     exit "$status"
 }
 
-# -------------------------- 处理编译产物 --------------------------
+fix_empty_ext_modversions() {
+    local mod_c="$DRIVER_SRC/lsdriver.mod.c"
+    [[ -f "$mod_c" ]] || return 1
+
+    # CONFIG_EXTENDED_MODVERSIONS=n on some 6.12 trees leaves an empty
+    # __version_ext_names initializer. Turn it into a valid empty string and
+    # retry only the final module link, matching build_all.sh.
+    if grep -q '__section("__version_ext_names")' "$mod_c" && \
+       grep -q '^[[:space:]]*;[[:space:]]*$' "$mod_c"; then
+        perl -0pi -e 's/(__used __section\("__version_ext_names"\)\s*=\s*)\n\s*;/$1"";/s' "$mod_c"
+        return 0
+    fi
+    return 1
+}
+
+verify_module() {
+    local ko="$1"
+    local readelf_cmd=""
+    if command -v llvm-readelf >/dev/null 2>&1; then
+        readelf_cmd="$(command -v llvm-readelf)"
+    elif command -v readelf >/dev/null 2>&1; then
+        readelf_cmd="$(command -v readelf)"
+    fi
+
+    [[ -s "$ko" ]] || { log_error "模块为空: $ko"; return 1; }
+    if [[ -n "$readelf_cmd" ]]; then
+        "$readelf_cmd" -h "$ko" | grep -Eqi 'Machine:.*AArch64|AArch64.*relocatable' || {
+            log_error "模块不是 AArch64 ELF: $ko"
+            return 1
+        }
+    fi
+}
+
+find_strip_cmd() {
+    local clang_bin="${1:-}"
+    if [[ -n "$clang_bin" && -x "$clang_bin/llvm-strip" ]]; then
+        printf '%s\n' "$clang_bin/llvm-strip"
+    elif command -v llvm-strip >/dev/null 2>&1; then
+        command -v llvm-strip
+    else
+        printf '%s\n' ''
+    fi
+}
+
 handle_output() {
     local version="$1"
+    local clang_bin="${2:-}"
     local source_ko="$DRIVER_SRC/lsdriver.ko"
-    local target_ko="$DRIVER_SRC/${version}lsdriver.ko"
-    if [[ ! -f "$source_ko" ]]; then
-        log_error "❌ $version 编译失败（未生成 .ko 文件）"
-        BUILD_RESULTS+=("$version: ❌ 编译失败")
+    local target_ko="$DRIVER_SRC/${version}.ko"
+    local strip_cmd
+
+    [[ -f "$source_ko" ]] || {
+        log_error "$version 未生成 lsdriver.ko"
+        BUILD_RESULTS+=("$version: FAIL (no .ko)")
         return 1
-    fi
+    }
 
-    local force_no_strip=false
-    for v in "${NO_STRIP_VERSIONS[@]}"; do
-        [[ "$version" == "$v" ]] && force_no_strip=true && break
-    done
-
-    if [[ "$force_no_strip" == "true" ]]; then
-        log_warn "⚠️ $version 强制保留符号（剥离后无法加载）"
-        cp "$source_ko" "$target_ko"
-    elif [[ "$STRIP_CHOICE" == "y" || "$STRIP_CHOICE" == "Y" ]]; then
-        if command -v llvm-strip &>/dev/null; then
-            log_info "🔧 剥离 $version 符号..."
-            llvm-strip --strip-debug -o "$target_ko" "$source_ko"
+    if contains_version "$version" "${NO_STRIP_VERSIONS[@]}"; then
+        log_warn "$version 保留完整符号和调试段"
+        cp -f "$source_ko" "$target_ko"
+    elif [[ "$STRIP_CHOICE" =~ ^[yY]$ ]]; then
+        strip_cmd="$(find_strip_cmd "$clang_bin")"
+        if [[ -n "$strip_cmd" ]]; then
+            "$strip_cmd" --strip-debug -o "$target_ko" "$source_ko"
         else
-            log_warn "⚠️ 未找到 llvm-strip，直接复制"
-            cp "$source_ko" "$target_ko"
+            log_warn "找不到 llvm-strip，保留未剥离模块"
+            cp -f "$source_ko" "$target_ko"
         fi
     else
-        cp "$source_ko" "$target_ko"
+        cp -f "$source_ko" "$target_ko"
     fi
 
-    BUILD_RESULTS+=("$version: ✅ 编译成功")
-    log_info "✅ 生成产物：$target_ko"
+    verify_module "$target_ko"
+    BUILD_RESULTS+=("$version: OK")
+    log_info "生成: $target_ko"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$target_ko"
+    fi
 }
 
-# -------------------------- 核心编译函数 --------------------------
 build_kernel() {
     local version="$1"
-    local clang_path="$2"
-    local cross_compile="$3"
+    local kernel_dir="$2"
+    local clang_bin="$3"
+    local symvers_file="$kernel_dir/Module.symvers"
+    local symvers_backup=""
+    local make_status=0
+    local env_path="$PATH"
 
-    local kernel_dir="$KERNELS_ROOT/$version"
     log_title
-    log_warn "开始编译：$version"
+    log_warn "开始 DDK 编译: $version"
+    log_info "KDIR=$kernel_dir"
+    [[ -n "$clang_bin" ]] && env_path="$clang_bin:$env_path"
 
-    if [[ ! -d "$kernel_dir" ]]; then
-        log_error "❌ 内核目录不存在：$kernel_dir"
-        BUILD_RESULTS+=("$version: ❌ 目录不存在")
+    [[ -f "$kernel_dir/.config" ]] || {
+        log_error "$version 缺少已准备好的 .config: $kernel_dir"
+        BUILD_RESULTS+=("$version: FAIL (KDIR not prepared)")
         return 1
-    fi
+    }
 
     clean_driver_build
+    rm -f -- "$DRIVER_SRC/lsdriver.ko" "$DRIVER_SRC/${version}.ko"
 
-    # 临时禁用 BTF
-    if [[ -f "$kernel_dir/.config" ]]; then
-        sed -i 's/CONFIG_DEBUG_INFO_BTF=y/CONFIG_DEBUG_INFO_BTF=n/g' "$kernel_dir/.config"
+    # Match the official script's no-CRC module contract. Keep the DDK's
+    # CFI/LTO/BTI/PAC configuration untouched; only module BTF is disabled.
+    if [[ -f "$symvers_file" ]]; then
+        symvers_backup="$symvers_file.no_crc_bak.$$"
+        mv -- "$symvers_file" "$symvers_backup"
     fi
 
-    log_info "🚀 执行编译命令..."
-    export PATH="$clang_path:$PATH"
-    make -C "$kernel_dir" \
-        M="$DRIVER_SRC" \
-        ARCH=arm64 \
-        CROSS_COMPILE="$cross_compile" \
-        LLVM=1 \
-        LLVM_IAS=1 \
-        PATH="$PATH" \
-        CONFIG_DEBUG_INFO_BTF=n \
-        modules -j"$(nproc)"
+    local -a make_args=(
+        -C "$kernel_dir"
+        M="$DRIVER_SRC"
+        ARCH=arm64
+        CROSS_COMPILE="${CROSS_COMPILE:-aarch64-linux-gnu-}"
+        LLVM=1
+        LLVM_IAS=1
+        CONFIG_DEBUG_INFO_BTF=n
+        CONFIG_DEBUG_INFO_BTF_MODULES=
+        CONFIG_EXTENDED_MODVERSIONS=n
+        KBUILD_MODPOST_WARN=1
+        modules
+        "-j$JOBS"
+    )
 
-    local output_status=0
-    handle_output "$version" || output_status=$?
+    set +e
+    env PATH="$env_path" make "${make_args[@]}"
+    make_status=$?
+    if [[ "$make_status" -ne 0 ]] && fix_empty_ext_modversions; then
+        log_warn "$version 修复空 __version_ext_names 后重试链接"
+        env PATH="$env_path" make "${make_args[@]}"
+        make_status=$?
+    fi
+    set -e
+
+    if [[ -n "$symvers_backup" ]]; then
+        mv -- "$symvers_backup" "$symvers_file"
+    fi
+
+    if [[ "$make_status" -ne 0 ]]; then
+        BUILD_RESULTS+=("$version: FAIL (make=$make_status)")
+        clean_driver_build
+        return "$make_status"
+    fi
+
+    handle_output "$version" "$clang_bin"
     clean_driver_build
-    return "$output_status"
 }
 
-# -------------------------- 主函数 --------------------------
-main() {
-    trap cleanup_driver_build_on_exit EXIT
+usage() {
+    cat <<'EOF'
+用法: bash ddk_build_all.sh [all|版本...]
 
-    log_warn "是否剥离符号？(y=剥离/减小体积，n=保留/调试用)"
-    read -rp "请输入 (y/n，默认 n): " input
-    [[ "$input" =~ ^[Yy]$ ]] && STRIP_CHOICE="y" || STRIP_CHOICE="n"
+版本可使用官方名称（6.12-Android16）或 DDK KMI 名称（android16-6.12）。
+环境变量: KERNELS_ROOT、KERNEL_SRC、CLANG_ROOT、DRIVER_SRC、JOBS、STRIP_CHOICE。
+DDK 镜像中通常只选择一个目标，并由 DDK_TARGET/KERNEL_SRC 提供对应内核目录。
+EOF
+}
+
+main() {
+    local raw version
+    local -a input=("$@")
+
+    if [[ "${input[0]:-}" == '-h' || "${input[0]:-}" == '--help' ]]; then
+        usage
+        return 0
+    fi
+    if [[ ${#input[@]} -eq 0 || "${input[0]:-}" == 'all' ]]; then
+        REQUESTED_VERSIONS=("${ALL_VERSIONS[@]}")
+    else
+        for raw in "${input[@]}"; do
+            version="$(normalize_version "$raw")" || return
+            REQUESTED_VERSIONS+=("$version")
+        done
+    fi
+    REQUESTED_VERSIONS_COUNT=${#REQUESTED_VERSIONS[@]}
+
+    if [[ ! "$STRIP_CHOICE" =~ ^[yYnN]$ ]]; then
+        STRIP_CHOICE=n
+    fi
+    if [[ -t 0 && -z "${STRIP_CHOICE_FROM_ENV:-}" ]]; then
+        read -r -p '是否剥离调试符号 (y/n，默认 n): ' raw || true
+        [[ "$raw" =~ ^[yY]$ ]] && STRIP_CHOICE=y || STRIP_CHOICE=n
+    fi
     readonly STRIP_CHOICE
 
-    build_kernel "android16-6.12" "$CLANG_ROOT/clang-r536225/bin" "aarch64-linux-gnu-"
-    build_kernel "android15-6.6" "$CLANG_ROOT/clang-r510928/bin" "aarch64-linux-gnu-"
-    build_kernel "android14-6.1" "$CLANG_ROOT/clang-r487747c/bin" "aarch64-linux-gnu-"
-    build_kernel "android13-5.15" "$CLANG_ROOT/clang-r450784e/bin" "aarch64-linux-gnu-"
-    build_kernel "android13-5.10" "$CLANG_ROOT/clang-r450784e/bin" "aarch64-linux-gnu-"
-    build_kernel "android12-5.10" "$CLANG_ROOT/clang-r416183b/bin" "aarch64-linux-gnu-"
-
-    log_title
-    echo -e "\n${BLUE}📊 编译结果汇总:${NC}"
-    echo "----------------------------------------------------"
-    for result in "${BUILD_RESULTS[@]}"; do
-        echo -e "  $result"
+    trap cleanup_driver_build_on_exit EXIT
+    local failures=0
+    for version in "${REQUESTED_VERSIONS[@]}"; do
+        local kernel_dir clang_bin
+        if ! kernel_dir="$(resolve_kernel_dir "$version")"; then
+            log_error "找不到 $version 对应的 DDK KDIR（尝试 ${KMI_FOR_VERSION[$version]} 和 $version）"
+            BUILD_RESULTS+=("$version: FAIL (KDIR missing)")
+            failures=$((failures + 1))
+            continue
+        fi
+        clang_bin="$(resolve_clang_bin "$version" "$kernel_dir")"
+        if ! build_kernel "$version" "$kernel_dir" "$clang_bin"; then
+            failures=$((failures + 1))
+        fi
     done
-    echo "----------------------------------------------------"
-
-    echo -e "\n${BLUE}📦 生成的产物列表:${NC}"
-    ls -lh "$DRIVER_SRC"/android*.ko 2>/dev/null || log_error "❌ 未找到任何 .ko 产物"
 
     log_title
-    log_info "🎉 批量编译脚本执行完成！"
+    printf '%s\n' 'DDK 编译结果:'
+    printf '  %s\n' "${BUILD_RESULTS[@]}"
+    log_title
+    if (( failures > 0 )); then
+        return 1
+    fi
+    log_info 'DDK 模块编译完成。请用对应版本的 .ko 做 SHA256 和设备 dmesg/帧率 A/B。'
 }
 
 main "$@"
