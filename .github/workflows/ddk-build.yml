@@ -1,0 +1,122 @@
+name: Build Android ARM64 drivers (DDK)
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel:
+        description: DDK KMI to build
+        type: choice
+        default: all
+        options:
+          - all
+          - 6.12-Android16
+          - 6.6-Android15
+          - 6.1-Android14
+          - 5.15-Android13
+          - 5.10-Android13
+          - 5.10-Android12
+      strip:
+        description: Strip debug sections (6.6 and 6.12 remain unstripped)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Select DDK targets
+        id: matrix
+        env:
+          SELECTED_KERNEL: ${{ inputs.kernel || 'all' }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          targets = [
+              {'version': '6.12-Android16', 'kmi': 'android16-6.12'},
+              {'version': '6.6-Android15', 'kmi': 'android15-6.6'},
+              {'version': '6.1-Android14', 'kmi': 'android14-6.1'},
+              {'version': '5.15-Android13', 'kmi': 'android13-5.15'},
+              {'version': '5.10-Android13', 'kmi': 'android13-5.10'},
+              {'version': '5.10-Android12', 'kmi': 'android12-5.10'},
+          ]
+          selected = os.environ['SELECTED_KERNEL']
+          if selected != 'all':
+              targets = [item for item in targets if item['version'] == selected]
+          if not targets:
+              raise SystemExit(f'Unsupported DDK target: {selected}')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write('matrix=' + json.dumps({'include': targets}) + '\n')
+          PY
+
+  build:
+    name: ${{ matrix.version }}
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    env:
+      DDK_RELEASE: '20260313'
+      STRIP_CHOICE: ${{ inputs.strip && 'y' || 'n' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build module in the matching DDK image
+        run: |
+          set -euo pipefail
+          mkdir -p "artifacts/${{ matrix.version }}"
+          cat > "$RUNNER_TEMP/ddk-build-inside.sh" <<'CONTAINER_SCRIPT'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          bash ddk_build_all.sh "$DDK_VERSION"
+          test -s "lsdriver/$DDK_VERSION.ko"
+          cp "lsdriver/$DDK_VERSION.ko" "artifacts/$DDK_VERSION/"
+          {
+            printf 'driver_commit=%s\n' "$DRIVER_COMMIT"
+            printf 'ddk_target=%s\n' "$DDK_TARGET"
+            printf 'ddk_release=%s\n' "$DDK_RELEASE"
+            printf 'kernel_src=%s\n' "${KERNEL_SRC:-unknown}"
+            if [[ -n "${KERNEL_SRC:-}" && -f "$KERNEL_SRC/.config" ]]; then
+              cp "$KERNEL_SRC/.config" "artifacts/$DDK_VERSION/kernel.config"
+              sha256sum "$KERNEL_SRC/.config"
+              grep -E '^(CONFIG_(CFI_CLANG|LTO_CLANG|LTO_CLANG_THIN|ARM64_BTI|MODVERSIONS|EXTENDED_MODVERSIONS|PREEMPT|HZ))=' "$KERNEL_SRC/.config" || true
+            fi
+            if command -v clang >/dev/null 2>&1; then
+              clang --version | head -n 1
+            fi
+            sha256sum "artifacts/$DDK_VERSION/$DDK_VERSION.ko"
+          } > "artifacts/$DDK_VERSION/build-info.txt"
+          if command -v llvm-readelf >/dev/null 2>&1; then
+            llvm-readelf -h "lsdriver/$DDK_VERSION.ko"
+            llvm-readelf -p .modinfo "lsdriver/$DDK_VERSION.ko" || true
+          fi
+          sha256sum "artifacts/$DDK_VERSION/$DDK_VERSION.ko"
+          CONTAINER_SCRIPT
+          chmod +x "$RUNNER_TEMP/ddk-build-inside.sh"
+          docker run --rm --platform linux/amd64 \
+            -e DDK_TARGET='${{ matrix.kmi }}' \
+            -e DDK_VERSION='${{ matrix.version }}' \
+            -e DDK_RELEASE="$DDK_RELEASE" \
+            -e DRIVER_COMMIT="$GITHUB_SHA" \
+            -e STRIP_CHOICE="$STRIP_CHOICE" \
+            -e KERNELS_ROOT=/opt/ddk/kdir \
+            -e CLANG_ROOT=/opt/ddk/clang \
+            -e DRIVER_SRC=/work/lsdriver \
+            -v "$GITHUB_WORKSPACE:/work" \
+            -v "$RUNNER_TEMP/ddk-build-inside.sh:/tmp/ddk-build-inside.sh:ro" \
+            -w /work \
+            "ghcr.io/ylarod/ddk:${{ matrix.kmi }}-${DDK_RELEASE}" \
+            bash /tmp/ddk-build-inside.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ddk-${{ matrix.version }}
+          path: artifacts/${{ matrix.version }}/
+          if-no-files-found: error
+          retention-days: 30
