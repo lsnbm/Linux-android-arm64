@@ -23,6 +23,9 @@
 #include <unistd.h>
 #include <utility>
 #include <vector>
+#include <arpa/inet.h>
+
+#include "pkt_io.h"
 
 #define PAGE_SIZE 4096
 class Driver
@@ -358,6 +361,10 @@ public: // 共有结构体和锁
 
         request_op_env_get_params, // 获取指定task环境参数
 
+        request_op_net_filter_set,
+        request_op_net_filter_get,
+        request_op_net_capture_get,
+
         request_op_kernel_exit, // 内核线程退出
     };
 
@@ -407,6 +414,12 @@ public: // 共有结构体和锁
         struct break_point bp_info;
         // 环境参数信息
         struct env_params env_info;
+
+        // 网络过滤规则
+        struct net_filter_info  net_filter;
+
+        // 网络抓包结果
+        struct net_capture_info net_capture;
     };
 
 public: // 外部初始化
@@ -874,6 +887,84 @@ public:
     env_params GetEnvParams(std::string_view threadName)
     {
         return HandleEnvGetParams(threadName);
+    }
+
+public: // 网络抓包 / 过滤
+    // 下发过滤规则；0 = 成功
+    int SetNetFilter(const net_filter_info &filter)
+    {
+        std::scoped_lock<SpinLock> lock(request_lock);
+        req->net_filter = filter;
+        StoreRequestOp(request_op_net_filter_set);
+        IoCommitAndWait();
+        return LoadRequestStatus();
+    }
+
+    // 读回当前过滤规则；0 = 成功
+    int GetNetFilter(net_filter_info &filter)
+    {
+        std::scoped_lock<SpinLock> lock(request_lock);
+        StoreRequestOp(request_op_net_filter_get);
+        IoCommitAndWait();
+        int status = LoadRequestStatus();
+        if (status == 0) filter = req->net_filter;
+        return status;
+    }
+
+    /*
+     * 探测内核是否支持 net_* 请求。
+     * 旧驱动的枚举里没有这三个 op，request_op_net_filter_set 会被当成
+     * request_op_kernel_exit 处理，直接退出 dispatch 线程。
+     * 这里用 get（旧驱动里是 enum 末尾之外的值，走 default，安全）探测：
+     * 先写入 magic，内核如果支持会用 pkt_filter_get 把它 memset 掉。
+     */
+    int ProbeNetOps(bool &supported)
+    {
+        std::scoped_lock<SpinLock> lock(request_lock);
+        req->net_filter.enable = 0xA5A5A5A5u;
+        StoreRequestOp(request_op_net_filter_get);
+        IoCommitAndWait();
+        int status = LoadRequestStatus();
+        supported = (req->net_filter.enable != 0xA5A5A5A5u);
+        return status;
+    }
+
+    // 取抓包记录；max_records = 0 表示按 64KB 缓冲上限取（每条 1680 字节，最多 39 条）
+    int GetCapturedPackets(net_capture_info &capture, uint32_t max_records = 0)
+    {
+        std::scoped_lock<SpinLock> lock(request_lock);
+        req->net_capture.max_records = max_records;
+        StoreRequestOp(request_op_net_capture_get);
+        IoCommitAndWait();
+        int status = LoadRequestStatus();
+        if (status == 0) capture = req->net_capture;
+        return status;
+    }
+
+    // 关闭过滤（抓包/丢弃都停止）
+    int DisableNetFilter()
+    {
+        net_filter_info filter{};
+        filter.enable = 0;
+        return SetNetFilter(filter);
+    }
+
+    // 只观察某个 IPv4 对端，不拦截；port_host = 0 表示不限端口
+    int WatchIpv4Peer(uint32_t ip_be, uint16_t port_host = 0,
+                      uint32_t proto_mask = 0)
+    {
+        net_filter_info filter{};
+        filter.enable = 1;
+        filter.action = PKT_ACTION_PASS;
+        filter.capture = 1;
+        filter.proto_mask = proto_mask;
+        filter.match_flags = PKT_MATCH_PEER;
+        filter.daddr[0] = ip_be;
+        if (port_host) {
+            filter.match_flags |= PKT_MATCH_PEER_PORT;
+            filter.dport = htons(port_host);
+        }
+        return SetNetFilter(filter);
     }
 
 private: // 私有实现，外部无需关系

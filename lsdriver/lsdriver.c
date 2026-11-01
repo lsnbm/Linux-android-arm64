@@ -35,8 +35,19 @@
 #include "virtual_memory_enum.h"
 #include "break_point.h"
 #include "network/ipv4_ping.h"
+#include "IUP/pkt_filter.h"
+#include "IUP/pkt_capture.h"
+#include "IUP/pkt_work.h"
 
 static struct request_obj *req = NULL;
+
+/*
+ * 调试参数：把每个解析过的包打到 dmesg，默认关闭。
+ * 只输出日志，不改变转发/丢弃行为；高吞吐场景不要开启。
+ */
+extern bool pkt_trace_all;
+module_param_named(pkt_trace_all, pkt_trace_all, bool, 0644);
+MODULE_PARM_DESC(pkt_trace_all, "log every parsed packet to dmesg (debug)");
 
 /*
 volatile 约束，这三个指针的每次读写都按易变访问处理，
@@ -148,7 +159,18 @@ static int DispatchThreadFunction(void *data)
                 case request_op_env_get_params:
                     __atomic_store_n(&req->status, get_env_params(req->tgid, req->env_info.thread_name, &req->env_info.tpidr_el0, &req->env_info.pacga_lo, &req->env_info.pacga_hi, &req->env_info.tls_status, &req->env_info.pacga_status), __ATOMIC_RELAXED);
                     break;
+                case request_op_net_filter_set:
+                    __atomic_store_n(&req->status, pkt_filter_set(&req->net_filter), __ATOMIC_RELAXED);
+                    break;
+                case request_op_net_filter_get:
+                    __atomic_store_n(&req->status, pkt_filter_get(&req->net_filter), __ATOMIC_RELAXED);
+                    break;
+                case request_op_net_capture_get:
+                    __atomic_store_n(&req->status, pkt_capture_get(&req->net_capture), __ATOMIC_RELAXED);
+                    break;
                 case request_op_kernel_exit:
+                    pkt_filter_disable();
+                    pkt_capture_reset();
                     hide_task_remove(connect_thread_task->pid);
                     hide_task_remove(dispatch_thread_task->pid);
                     connect_thread_task = NULL;  // 标记连接线程退出
@@ -558,6 +580,8 @@ static int taskstats_exit_hook_work(struct pt_regs *regs)
         syscall_monitor_remove_all();     // 清理全部系统调用监控目标
         cntvct_monitor_remove_all();      // 清理全部 CNTVCT_EL0 读取监控
         virtual_memory_rw(0, 0, 0, 0, 0); // 清理缓存 mm 引用
+        pkt_filter_disable();             // 清除规则，避免 LS 退出后继续抓包/丢包
+        pkt_capture_reset();              // 丢弃尚未读取的抓包记录
         ls_process_task = NULL;           // 标记用户进程已断开
         if (!connect_thread_task && !dispatch_thread_task)
         {
@@ -566,6 +590,20 @@ static int taskstats_exit_hook_work(struct pt_regs *regs)
     }
     return 0;
 }
+
+/*
+ * 网络抓包/拦截 hook。
+ * 数组必须和现有 HOOK_ENTRY 放在同一个编译单元：
+ * inline_hook_frame.h 的槽位表是 static，跨 .c 会各有一份。
+ */
+static struct hook_entry pkt_v4_ingress_hooks[] = {
+    HOOK_ENTRY("ip_rcv", pkt_ip_rcv_work),
+};
+static struct hook_entry pkt_v6_ingress_hooks[] = {
+    /* 6.1 上正常 IPv6 收包路径是 ip6_input，ip6_rcv 只覆盖部分入口 */
+    HOOK_ENTRY("ip6_input", pkt_ip6_rcv_work),
+};
+
 
 static int do_exit_init(void)
 {
@@ -757,6 +795,36 @@ static int __init lsdriver_init(void)
     {
         ls_log_always_tag("core", "注册 taskstats_exit 清理 hook 失败，错误码: %d\n", status);
         return status;
+    }
+
+    /*
+     * 网络抓包/过滤 hook。
+     */
+    {
+        int net_status;
+
+        net_status = pkt_capture_init();
+        if (net_status < 0)
+            ls_log_always_tag("net", "初始化抓包缓冲失败，错误码: %d，抓包关闭\n", net_status);
+
+        net_status = inline_hook_install(pkt_v4_ingress_hooks);
+        ls_log_always_tag("net", "ip_rcv hook %s (%d)\n",
+                          net_status ? "FAIL" : "OK", net_status);
+
+        net_status = inline_hook_install(pkt_v6_ingress_hooks);
+        if (net_status < 0)
+        {
+            ls_log_always_tag("net", "ip6_input hook 失败(%d)，尝试 ip6_rcv\n",
+                              net_status);
+            pkt_v6_ingress_hooks[0].target_sym = "ip6_rcv";
+            pkt_v6_ingress_hooks[0].target_addr = 0;
+            pkt_v6_ingress_hooks[0].installed = false;
+            pkt_v6_ingress_hooks[0].slot_index = -1;
+            pkt_v6_ingress_hooks[0].trampoline = NULL;
+            net_status = inline_hook_install(pkt_v6_ingress_hooks);
+        }
+        ls_log_always_tag("net", "ip6 hook %s (%d)\n",
+                          net_status ? "FAIL" : "OK", net_status);
     }
 
     // 隐藏内核线程
