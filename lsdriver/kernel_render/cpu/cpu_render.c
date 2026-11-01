@@ -4,83 +4,82 @@
 
 #include "../../klog/lsdriver_log.h"
 #include "cpu_render.h"
-#include "cpu_render_platform.h"
 
-static const struct cpu_render_ops *active_ops;
-static enum cpu_render_platform active_platform = CPU_RENDER_PLATFORM_UNKNOWN;
+static bool cpu_render_active;
 static DEFINE_MUTEX(cpu_render_control_lock);
 
 int cpu_render_init(void)
 {
-    enum cpu_render_platform platform = cpu_render_platform_detect();
-    const struct cpu_render_ops *ops;
     int ret;
 
     mutex_lock(&cpu_render_control_lock);
-    if (READ_ONCE(active_ops)) {
+    if (cpu_render_active)
+    {
+        ls_log_always_tag("cpu_render", "control init rejected: renderer already active, ret=%d\n", -EBUSY);
         mutex_unlock(&cpu_render_control_lock);
         return -EBUSY;
     }
-    if (platform == CPU_RENDER_PLATFORM_UNKNOWN) {
-        ls_log_always_tag("cpu_render",
-                          "CPU renderer platform signature is ambiguous or missing\n");
-        mutex_unlock(&cpu_render_control_lock);
-        return 0;
-    }
-
-    ops = platform == CPU_RENDER_PLATFORM_MSM ? msm_cpu_render_get_ops() :
-                                                mtk_cpu_render_get_ops();
-    if (!ops || !ops->init) {
-        mutex_unlock(&cpu_render_control_lock);
-        return -ENODEV;
-    }
-    ret = ops->init();
-    if (ret) {
+    ret = drm_cpu_render_init();
+    if (ret)
+    {
+        ls_log_always_tag("cpu_render", "backend init failed, ret=%d\n", ret);
         mutex_unlock(&cpu_render_control_lock);
         return ret;
     }
-    WRITE_ONCE(active_ops, ops);
-    WRITE_ONCE(active_platform, platform);
-    ls_log_always_tag("cpu_render", "selected platform: %s\n", ops->name);
+    WRITE_ONCE(cpu_render_active, true);
     mutex_unlock(&cpu_render_control_lock);
     return 0;
 }
 
-void cpu_render_exit(void)
+int cpu_render_exit(void)
 {
-    const struct cpu_render_ops *ops;
+    int ret = 0;
 
     mutex_lock(&cpu_render_control_lock);
-    ops = READ_ONCE(active_ops);
-    if (ops && ops->exit)
-        ops->exit();
-    WRITE_ONCE(active_ops, NULL);
-    WRITE_ONCE(active_platform, CPU_RENDER_PLATFORM_UNKNOWN);
+    if (cpu_render_active)
+        ret = drm_cpu_render_exit();
+    if (ret)
+    {
+        mutex_unlock(&cpu_render_control_lock);
+        return ret;
+    }
+    WRITE_ONCE(cpu_render_active, false);
     mutex_unlock(&cpu_render_control_lock);
+    return 0;
 }
 
-enum cpu_render_platform cpu_render_platform(void)
+int cpu_render_clear(u32 color)
 {
-    return READ_ONCE(active_platform);
+    return READ_ONCE(cpu_render_active) ? drm_cpu_render_clear(color) :
+                                           -ENODEV;
 }
 
-#define CPU_RENDER_FORWARD(name, args, call) \
-int cpu_render_##name args \
-{ \
-    const struct cpu_render_ops *ops = READ_ONCE(active_ops); \
-    return ops && ops->name ? ops->name call : -ENODEV; \
+int cpu_render_line(int x0, int y0, int x1, int y1, u32 color,
+                    u32 thickness)
+{
+    return READ_ONCE(cpu_render_active) ?
+            drm_cpu_render_line(x0, y0, x1, y1, color, thickness) : -ENODEV;
 }
 
-CPU_RENDER_FORWARD(clear, (u32 color), (color));
-CPU_RENDER_FORWARD(line, (int x0, int y0, int x1, int y1, u32 color,
-                          u32 thickness), (x0, y0, x1, y1, color, thickness));
-CPU_RENDER_FORWARD(rect, (int left, int top, int right, int bottom, u32 color,
-                          u32 thickness, bool filled),
-                   (left, top, right, bottom, color, thickness, filled));
-CPU_RENDER_FORWARD(circle, (int center_x, int center_y, int radius, u32 color,
-                            u32 thickness, bool filled),
-                   (center_x, center_y, radius, color, thickness, filled));
-CPU_RENDER_FORWARD(text, (int left, int top, const char *text, u32 scale,
-                          u32 color), (left, top, text, scale, color));
+int cpu_render_rect(int left, int top, int right, int bottom, u32 color,
+                    u32 thickness, bool filled)
+{
+    return READ_ONCE(cpu_render_active) ?
+            drm_cpu_render_rect(left, top, right, bottom, color, thickness,
+                                filled) : -ENODEV;
+}
 
-#undef CPU_RENDER_FORWARD
+int cpu_render_circle(int center_x, int center_y, int radius, u32 color,
+                      u32 thickness, bool filled)
+{
+    return READ_ONCE(cpu_render_active) ?
+            drm_cpu_render_circle(center_x, center_y, radius, color,
+                                  thickness, filled) : -ENODEV;
+}
+
+int cpu_render_text(int left, int top, const char *text, u32 scale,
+                    u32 color)
+{
+    return READ_ONCE(cpu_render_active) ?
+            drm_cpu_render_text(left, top, text, scale, color) : -ENODEV;
+}
