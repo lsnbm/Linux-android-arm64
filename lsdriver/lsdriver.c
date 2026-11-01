@@ -35,6 +35,7 @@
 #include "virtual_memory_enum.h"
 #include "break_point.h"
 #include "network/ipv4_ping.h"
+#include "kernel_render/cpu/cpu_render.h"
 
 static struct request_obj *req = NULL;
 
@@ -561,6 +562,7 @@ static int taskstats_exit_hook_work(struct pt_regs *regs)
         ls_process_task = NULL;           // 标记用户进程已断开
         if (!connect_thread_task && !dispatch_thread_task)
         {
+            //cpu_render_exit();
             inline_hook_remove_all(); // 内核退出才清理所有hook
         }
     }
@@ -772,6 +774,13 @@ static int __init lsdriver_init(void)
         ls_log_always_tag("core", "隐藏调度线程失败，错误码: %d\n", status);
         return status;
     }
+
+    // status = cpu_render_init();
+    // if (status < 0)
+    // {
+    //     ls_log_always_tag("core", "初始化 Qualcomm/MediaTek CPU 渲染统一抽象失败，错误码: %d\n", status);
+    //     return status;
+    // }
 
     /*
     隐藏内核模块本身必须放在所有初始化完成后运行。

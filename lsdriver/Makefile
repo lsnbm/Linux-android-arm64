@@ -2,6 +2,12 @@
 
 obj-m += lsdriver.o
 lsdriver-y := lsdriver_main.o \
+		      kernel_render/cpu/cpu_render.o \
+		      kernel_render/cpu/cpu_render_platform.o \
+		      kernel_render/cpu/mediatek/mtk_cpu_render.o \
+		      kernel_render/cpu/msm/msm_cpu_raster.o \
+		      kernel_render/cpu/msm/msm_cpu_symbols.o \
+		      kernel_render/cpu/msm/msm_cpu_render.o \
 			  arm64_encode/arm64_encode.o \
 			  arm64_decode/arm64_decode.o \
 			  arm64_decode/arm64_decode_immediate.o \
