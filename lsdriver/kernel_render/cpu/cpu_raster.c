@@ -174,12 +174,25 @@ void cpu_raster_text(void *pixels, u32 width, u32 height, u32 pitch, int left, i
     }
 }
 
-void cpu_raster_demo(void *pixels, u32 width, u32 height, u32 pitch)
+void cpu_raster_blend(void *pixels, u32 width, u32 height, u32 pitch,
+                      const void *overlay, u32 overlay_width,
+                      u32 overlay_height, u32 overlay_pitch,
+                      int left, int top)
 {
-    cpu_raster_clear(pixels, width, height, pitch, 0xff101820U);
-    cpu_raster_rect(pixels, width, height, pitch, 20, 20, width - 21, height - 21, 0xff30d5c8U, 4, false);
-    cpu_raster_line(pixels, width, height, pitch, 40, 100, width - 40, height - 100, 0xffff453aU, 6);
-    cpu_raster_rect(pixels, width, height, pitch, 70, 150, width - 70, height - 150, 0xffffd60aU, 4, false);
-    cpu_raster_circle(pixels, width, height, pitch, width / 2, height / 2, min(width, height) / 5, 0xff64d2ffU, 6, false);
-    cpu_raster_text(pixels, width, height, pitch, 48, height - 80, "LSDRIVER", 4, 0xffffffffU);
+    for (u32 y = 0; y < overlay_height; y++)
+    {
+        const u32 *source = (const u32 *)((const u8 *)overlay + (u64)y * overlay_pitch);
+        int target_y = top + (int)y;
+
+        if (target_y < 0 || target_y >= height) continue;
+        for (u32 x = 0; x < overlay_width; x++)
+        {
+            int target_x = left + (int)x;
+            u32 *target;
+
+            if (target_x < 0 || target_x >= width || !(source[x] >> 24)) continue;
+            target = pixel_at(pixels, width, height, pitch, target_x, target_y);
+            if (target) *target = blend_pixel(*target, source[x]);
+        }
+    }
 }

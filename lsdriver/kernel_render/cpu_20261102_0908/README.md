@@ -1,5 +1,14 @@
 # CPU DRM 渲染实现说明
 
+## 不可行
+自己创建 DRM client、dumb framebuffer 并调用 drm_client_modeset_commit()。这条路径要求当前 DRM client 能够提交 modeset 或 atomic state，但 Android 启动后 DRM master 通常已经由 SurfaceFlinger/HWC 持有，因此旧实现常见的结果是：
+
+drm_client_modeset_commit()
+     -> DRM master 检查
+     -> -EBUSY
+
+所以必须hook,最好的位置性能最优的就是现在活动文件夹代码的逻辑
+
 ## 1. 目标
 
 CPU renderer 的目标是在内核态直接绘制 framebuffer，并通过 Linux DRM/KMS 将绘制结果提交到 Android 显示管线。

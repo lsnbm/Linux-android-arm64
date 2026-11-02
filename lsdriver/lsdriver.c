@@ -841,7 +841,7 @@ static int __init lsdriver_init(void)
             status = PTR_ERR(cpu_render_test_thread_task);
             cpu_render_test_thread_task = NULL;
             ls_log_always_tag("core", "创建 CPU 渲染测试线程失败，错误码: %d\n", status);
-            goto fail;
+            status = 0;
         }
     }
 
