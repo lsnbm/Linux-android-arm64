@@ -649,7 +649,7 @@ static int set_process_ptebp(struct break_point *info)
 
 static void remove_process_ptebp(void)
 {
-    struct break_point *info = g_ptebp_info;
+    struct break_point *info = g_ptebp_current.info;
 
     stop_ptebp_monitor();
     if (info) __builtin_memset(info, 0, sizeof(*info));
