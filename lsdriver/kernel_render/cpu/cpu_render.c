@@ -33,11 +33,10 @@ int cpu_render_init(void)
 
 int cpu_render_exit(void)
 {
-    int ret = 0;
+    int ret;
 
     mutex_lock(&cpu_render_control_lock);
-    if (cpu_render_active)
-        ret = drm_cpu_render_exit();
+    ret = drm_cpu_render_exit();
     if (ret)
     {
         mutex_unlock(&cpu_render_control_lock);

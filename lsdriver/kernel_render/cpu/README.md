@@ -1,172 +1,84 @@
-# CPU DRM 渲染实现说明
+# CPU DRM Framebuffer Renderer
 
 ## 1. 目标
 
-CPU renderer 的目标是在内核态直接绘制 framebuffer，并通过 Linux DRM/KMS 将绘制结果提交到 Android 显示管线。
+renderer 使用 CPU 绘制一张透明 overlay 画布，并在 Android 的 DRM atomic 提交进入厂商驱动前，将画布直接 alpha 混合到本次提交使用的线性 primary framebuffer。它不创建独立 DRM framebuffer、plane 或用户态 Surface，也不申请 DRM master。
 
-当前实现面向 Qualcomm 和 MediaTek 等使用 Linux DRM 的平台，使用 DRM 通用接口，不直接调用 Qualcomm `msm_*` 或 MediaTek `mtk_*` 私有 GEM、CRTC、plane 接口。
+当前 backend 使用 Qualcomm MSM/SDE 的 GEM 映射接口。MediaTek 和其他 DRM 驱动不能直接复用该 buffer ABI。
 
-
-
-## 2. 总体架构
+## 2. 显示路径
 
 ```text
-CPU 绘制请求
-    |
-    v
-cpu_render.c
-    |  全局初始化、退出、操作转发和控制锁
-    v
- drm_cpu_render.c
-    |  DRM client、framebuffer、CPU 映射和 modeset
-    v
-Linux DRM Core
-    |
-    +-- Qualcomm msm DRM driver
-    |
-    +-- MediaTek mediatek DRM driver
-    |
-    +-- 其他厂商 DRM driver
-    |
-    v
-显示控制器、合成器和面板
+CPU raster
+    -> 内核虚拟 overlay 画布
+    -> atomic_commit 回调
+    -> 本次提交的 primary framebuffer GEM 映射
+    -> alpha 混合写入已有显示缓存
+    -> 原 Qualcomm MSM/SDE atomic_commit
+    -> DSI 面板
 ```
 
-`cpu_raster.c` 只负责对线性像素内存进行 CPU 光栅化，不知道底层 GPU、DPU、显示控制器或厂商驱动的实现。
+SurfaceFlinger/HWC 仍然拥有 DRM master。renderer 不抢占显示管线，只在原厂商提交前修改当前 primary framebuffer 的像素内容。
 
-## 3. 为什么可以跨 Qualcomm 和 MediaTek
+## 3. 初始化流程
 
-Linux DRM 将显示硬件分成通用核心和厂商驱动两层。
+`drm_cpu_render_init()` 只完成以下步骤：
 
-厂商驱动负责硬件细节，例如：
+1. 动态解析 DRM minor 和 MSM GEM 映射接口；
+2. 获取 DRM primary minor，并确认驱动名为 `msm` 或 `msm_drm`；
+3. 分配一张内核虚拟透明 overlay 画布；
+4. 绘制初始图像；
+5. 复制 `drm_mode_config_funcs`，只替换 `atomic_commit`；
+6. 固定当前模块引用，防止回调执行期间代码被卸载。
 
-- 显示控制器寄存器和提交队列；
-- CRTC、plane、connector 和 panel；
-- GEM/dumb buffer 的分配和映射；
-- 具体的 atomic 或 legacy modeset 提交。
+renderer 不调用 `drm_client_modeset_commit()`，不创建 GEM scanout 对象，也不创建 DRM framebuffer。
 
-DRM Core 对上层提供统一的 `drm_device`、DRM client、framebuffer 和 modeset 接口。CPU renderer 只使用这些公共接口，因此不需要知道 Qualcomm 或 MediaTek 的私有对象布局。
+## 4. 提交路径
 
-实际提交过程由底层厂商 DRM driver 的回调完成：
+每次目标 DRM 设备执行 atomic commit 时：
 
 ```text
-统一 drm_client_modeset_commit()
-    -> DRM Core
-        -> 厂商 DRM atomic/legacy 提交
-            -> 显示控制器
-                -> 面板
+HWC atomic state
+    -> drm_cpu_render_atomic_commit()
+    -> 遍历本次提交的 primary plane
+    -> 检查 ARGB/XRGB8888、linear modifier 和 stride
+    -> 映射 fb->obj[0]
+    -> 将 overlay 画布混合到 framebuffer
+    -> wmb()
+    -> 调用原始 atomic_commit()
 ```
 
-因此，厂商差异被限制在 DRM driver 内部
+当前实现只处理满足以下条件的 framebuffer：
 
-## 4. 直接初始化和 KMI 兼容
+- plane 类型为 `DRM_PLANE_TYPE_PRIMARY`；
+- 格式为 `ARGB8888` 或 `XRGB8888`；
+- modifier 为 linear；
+- 具有可访问的 `fb->obj[0]`；
+- `msm_gem_get_vaddr()` 成功。
 
-当前只有一个 CPU renderer backend，因此 `cpu_render_init()` 直接选择 DRM client ops，DRM client 的符号解析、DRM minor 获取、模式探测和 framebuffer 创建都由 backend 初始化完成；任一步骤失败就返回错误。
+如果当前 buffer 是 UBWC、tile、protected 或其他不可 CPU 访问布局，renderer 会跳过本次提交，不修改 Android 图像。
 
-当前实现固定获取 DRM primary minor `0`。在单显示设备的 Android 手机上通常对应主显示设备；多 GPU 或多个 DRM card 的设备若要更通用，需要进一步枚举并选择目标 DRM device。
+## 5. 绘制和同步
 
-`drm_cpu_render_api.h` 集中定义 DRM API 函数指针表。`drm_cpu_render.c` 在
-renderer 初始化阶段统一填充 `drm_cpu_render_api`，后续获取设备、创建资源、
-绘制和退出路径只调用 `drm_cpu_render_api.*` 表项。
+CPU 绘制操作只修改内核虚拟 overlay 画布。每次绘制完成后执行 `wmb()`。atomic commit 回调持有 `draw_lock`，直到原始厂商提交返回，避免退出路径释放 hook 时仍有并发绘制或提交。
 
-处理规则如下：
+overlay 画布使用预乘 alpha 语义。透明区域保留下方 Android 内容，非透明像素通过 CPU alpha 混合写入当前 primary framebuffer。
 
-1. 所有 DRM 和 minor 符号统一通过 `generic_kallsyms_lookup_name()` 动态获取地址；
-2. 目标内核源码中存在但没有纳入实际设备 KMI 的符号也能通过同一路径尝试获取；
-3. 任一必需函数解析失败，renderer 初始化失败，不创建不完整的 DRM client。
+## 6. 代码职责
 
-这样可以避免旧内核因为缺少非 KMI DRM client 导出而在模块加载时出现 `Unknown symbol`，同时保持同一套上层逻辑。
-
-## 5. DRM client 初始化和 framebuffer 创建
-
-绑定输出的流程位于 `drm_cpu_render_init()`，初始化成功返回时已经完成：
-
-1. 通过 `drm_minor_acquire` 获取 DRM minor 和 `drm_device`；
-2. 调用 `drm_client_init` 创建未注册的 DRM client；
-3. 调用 `drm_client_modeset_probe` 探测可用输出和显示模式；
-4. 从第一个可用 modeset 获取 framebuffer 宽度和高度；
-5. 调用 `drm_client_framebuffer_create` 创建 dumb framebuffer；
-6. 调用 `drm_client_buffer_vmap` 获取 CPU 可访问地址；
-7. 将 client buffer 的 framebuffer 设置到每个 client modeset 的 `mode_set->fb`；
-8. 绘制初始画面并调用 `drm_client_framebuffer_flush`；
-9. 调用 `drm_client_modeset_commit` 提交显示。
-
-创建 framebuffer 使用 `DRM_FORMAT_ARGB8888`。pitch 使用 DRM 返回值，CPU raster 不假设每行没有填充。
-
-当前不调用 `drm_client_register`，因此 client 不加入 DRM device 的 client list，也不会依赖 device unregister callback 自动清理。renderer 自己管理 client 的创建、buffer、映射和释放顺序。
-
-## 6. CPU raster 绘制
-
-`cpu_raster.c` 对 DRM client 映射出的线性像素内存进行绘制，支持：
-
-- 清屏；
-- 带厚度的线段；
-- 填充或描边矩形；
-- 填充或描边圆形；
-- 基于内置 5x7 字模的数字、英文字母和少量标点文字；
-- 初始 demo 画面。
-
-光栅层只接收以下信息：
-
-```text
-pixels + width + height + pitch + 绘制参数
-```
-
-它不访问 `drm_device`、GEM object、CRTC、plane 或厂商私有结构，因此可以独立复用。
-
-## 7. 跨内核版本的 buffer 映射 ABI
-
-不同 Android 内核版本的 `drm_client_buffer_vmap` 签名不同，差异被限制在 backend 内部：
-
-| 内核版本 | 映射形式 |
+| 文件 | 职责 |
 | --- | --- |
-| 5.10 | 返回 `void *` |
-| 5.15 | 使用 `struct dma_buf_map` |
-| 6.1 及以后 | 使用 `struct iosys_map` |
+| `cpu_render.c` | 公共生命周期、控制锁和绘制接口转发 |
+| `drm_cpu_render.c` | 当前 framebuffer 映射、动态 DRM/MSM API、atomic commit hook 和资源释放 |
+| `cpu_raster.c` | CPU 光栅绘制和 framebuffer alpha 混合 |
+| `cpu_raster.h` | 光栅函数声明 |
 
-上层绘制逻辑统一使用 `void *pixels`。这样 CPU raster 不需要包含版本判断，也不需要知道不同内核的 map 结构。
+## 7. 限制
 
-## 8. 绘制同步
-
-绘制操作由 `draw_lock` 串行化。每次绘制完成后：
-
-1. 执行写内存屏障；
-2. 调用 `drm_client_framebuffer_flush(buffer, NULL)` 通知 framebuffer dirty 路径；
-3. 释放绘制锁。
-
-初始 demo 在 modeset commit 前也执行 flush。flush 由底层 framebuffer dirty 回调负责处理可能存在的缓存或 DMA 同步需求。
-
-## 9. 生命周期和失败处理
-
-全局生命周期由 `cpu_render.c` 的 `cpu_render_control_lock` 保护，backend 自身使用 `initialized`、`attached`、`client_initialized` 和 `mapped` 状态。
-
-`acquire_output()` 负责获取和创建显示资源，`release_output()` 是幂等的统一
-释放入口。初始化失败和正常退出都按逆序释放已创建资源：
-
-```text
-drm_client_buffer_vunmap
-    -> drm_client_framebuffer_delete
-        -> drm_client_release
-            -> drm_minor_release
-```
-
-退出流程为：
-
-1. 阻止新的绘制操作；
-2. 调用 `drm_client_modeset_dpms(..., DRM_MODE_DPMS_OFF)`；
-3. 解除 buffer 映射并删除 framebuffer；
-4. 释放 DRM client 和 minor 引用。
-
-如果关闭 modeset 或其他清理步骤失败，不会提前清除初始化状态，后续可以重试退出，避免丢失仍然有效的 DRM 资源引用。
-
-
-## 10. 相关文件
-
-| 文件 | 作用 |
-| --- | --- |
-| `cpu_render.c` | 全局 renderer 管理、操作转发和控制锁 |
-| `cpu_render.h` | 公共 CPU renderer 接口 |
-| `drm_cpu_render_api.h` | 统一的跨版本 DRM API 函数指针表 |
-| `drm_cpu_render.c` | DRM client backend、buffer 生命周期和 modeset |
-| `cpu_raster.c` | 与平台无关的 CPU 光栅绘制 |
-| `cpu_raster.h` | CPU raster 函数声明 |
+- 当前只实现 Qualcomm MSM/SDE；
+- 只支持 linear ARGB8888/XRGB8888 primary framebuffer；
+- 不支持 UBWC、tile、protected 或无法 CPU 映射的 framebuffer；
+- 画面会进入 Android 当前 framebuffer，因此可能出现在截图或录屏中；
+- HWC 下一次提交可能覆盖之前的混合结果，renderer 会在下一次 atomic commit 再次处理；
+- hook 安装期间模块代码和回调表不能被卸载，退出必须先恢复原回调表，再释放 overlay 画布和 DRM minor 引用；
+- 如果原子提交尚未等待 GPU producer fence，CPU 写入可能与 GPU 生产者发生竞争，真机上必须验证目标 MSM/HWC 的 fence 时序。
