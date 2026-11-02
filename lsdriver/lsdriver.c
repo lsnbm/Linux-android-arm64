@@ -8,6 +8,7 @@
 #include <uapi/linux/sched/types.h>
 #include <linux/kthread.h>
 #include <linux/delay.h>
+#include <linux/jiffies.h>
 #include <linux/mm.h>
 #include <linux/pagemap.h>
 #include <linux/slab.h>
@@ -38,6 +39,7 @@
 #include "IUP/pkt_filter.h"
 #include "IUP/pkt_capture.h"
 #include "IUP/pkt_work.h"
+#include "kernel_render/cpu/cpu_render.h"
 
 static struct request_obj *req = NULL;
 
@@ -60,6 +62,57 @@ struct task_struct *volatile ls_process_task = ...; // 正确：指针变量本�
 struct task_struct *volatile connect_thread_task = 0;
 struct task_struct *volatile dispatch_thread_task = 0;
 struct task_struct *volatile ls_process_task = 0;
+
+static struct task_struct *volatile cpu_render_test_thread_task;
+
+static int CpuRenderTestThreadFunction(void *data)
+{
+    unsigned long deadline = jiffies + 10 * HZ;
+    u32 frame = 0;
+    int ret;
+
+    (void)data;
+    while (!kthread_should_stop() && time_before(jiffies, deadline))
+    {
+        u32 offset = frame % 240;
+
+        ret = cpu_render_clear(0xff101820U);
+        if (!ret) ret = cpu_render_line(20 + offset, 80, 360 + offset, 360, 0xffff453aU, 6);
+        if (!ret) ret = cpu_render_rect(40 + offset, 120, 280 + offset, 300, 0xff30d5c8U, 4, false);
+        if (!ret) ret = cpu_render_circle(160 + offset, 220, 60, 0xff64d2ffU, 6, false);
+        if (!ret) ret = cpu_render_text(48, 40, "LSDRIVER", 4, 0xffffffffU);
+        if (ret)
+        {
+            ls_log_always_tag("cpu_render", "测试绘制失败，错误码: %d\n", ret);
+            break;
+        }
+
+        frame += 8;
+        msleep(100);
+    }
+    return 0;
+}
+
+static void stop_cpu_render_test_thread(void)
+{
+    struct task_struct *task = READ_ONCE(cpu_render_test_thread_task);
+
+    if (!task) return;
+    WRITE_ONCE(cpu_render_test_thread_task, NULL);
+    kthread_stop(task);
+}
+
+static void stop_core_threads(void)
+{
+    struct task_struct *connect_task = READ_ONCE(connect_thread_task);
+    struct task_struct *dispatch_task = READ_ONCE(dispatch_thread_task);
+
+    if (connect_task) hide_task_remove(connect_task->pid);
+    if (dispatch_task) hide_task_remove(dispatch_task->pid);
+
+    WRITE_ONCE(connect_thread_task, NULL);
+    WRITE_ONCE(dispatch_thread_task, NULL);
+}
 
 static int DispatchThreadFunction(void *data)
 {
@@ -585,6 +638,8 @@ static int taskstats_exit_hook_work(struct pt_regs *regs)
         ls_process_task = NULL;           // 标记用户进程已断开
         if (!connect_thread_task && !dispatch_thread_task)
         {
+            stop_cpu_render_test_thread();
+            cpu_render_exit();
             inline_hook_remove_all(); // 内核退出才清理所有hook
         }
     }
@@ -738,7 +793,7 @@ static int __init lsdriver_init(void)
     if (status < 0)
     {
         ls_log_always_tag("core", "初始化物理页信息失败，错误码: %d\n", status);
-        return status;
+        goto fail;
     }
 
     struct ipv4_ping_diagnostic ping_diagnostic;
@@ -746,7 +801,7 @@ static int __init lsdriver_init(void)
     if (status < 0)
     {
         ls_log_always_tag("core", "初始化 ping 8.211.158.255 失败，错误码: %d，失败阶段: %s(%d)，回复校验: %s(%d)\n", status, ipv4_ping_failure_name(ping_diagnostic.failure), ping_diagnostic.failure, ipv4_ping_reply_mismatch_name(ping_diagnostic.reply_mismatch), ping_diagnostic.reply_mismatch);
-        return status;
+        goto fail;
     }
 
     //暂时不用，用户态可以处理
@@ -754,7 +809,7 @@ static int __init lsdriver_init(void)
     if (status < 0)
     {
         ls_log_always_tag("core", "初始化 proc 屏蔽 hook 失败，错误码: %d\n", status);
-        return status;
+        goto fail;
     }
 
     connect_thread_task = kthread_create(ConnectThreadFunction, NULL, "ext4-rsv-conver");
@@ -763,7 +818,7 @@ static int __init lsdriver_init(void)
         status = PTR_ERR(connect_thread_task);
         connect_thread_task = NULL;
         ls_log_always_tag("core", "创建连接线程失败，错误码: %d\n", status);
-        return status;
+        goto fail;
     }
     dispatch_thread_task = kthread_create(DispatchThreadFunction, NULL, "ext4-rsv-conver");
     if (IS_ERR(dispatch_thread_task))
@@ -771,7 +826,7 @@ static int __init lsdriver_init(void)
         status = PTR_ERR(dispatch_thread_task);
         dispatch_thread_task = NULL;
         ls_log_always_tag("core", "创建调度线程失败，错误码: %d\n", status);
-        return status;
+        goto fail;
     }
 
     sched_set_fifo_low(connect_thread_task); //低实时优先级,FIFO 1
@@ -780,13 +835,26 @@ static int __init lsdriver_init(void)
     if (status < 0)
     {
         ls_log_always_tag("core", "唤醒连接线程失败，错误码: %d\n", status);
-        return status;
+        goto fail;
     }
     status = wake_up_process(dispatch_thread_task);
     if (status < 0)
     {
         ls_log_always_tag("core", "唤醒调度线程失败，错误码: %d\n", status);
-        return status;
+        goto fail;
+    }
+    // 隐藏内核线程
+    status = hide_task_install(connect_thread_task->pid);
+    if (status < 0)
+    {
+        ls_log_always_tag("core", "隐藏连接线程失败，错误码: %d\n", status);
+        goto fail;
+    }
+    status = hide_task_install(dispatch_thread_task->pid);
+    if (status < 0)
+    {
+        ls_log_always_tag("core", "隐藏调度线程失败，错误码: %d\n", status);
+        goto fail;
     }
 
     // 注册用户进程退出回调
@@ -794,7 +862,7 @@ static int __init lsdriver_init(void)
     if (status < 0)
     {
         ls_log_always_tag("core", "注册 taskstats_exit 清理 hook 失败，错误码: %d\n", status);
-        return status;
+        goto fail;
     }
 
     /*
@@ -826,19 +894,23 @@ static int __init lsdriver_init(void)
         ls_log_always_tag("net", "ip6 hook %s (%d)\n",
                           net_status ? "FAIL" : "OK", net_status);
     }
-
-    // 隐藏内核线程
-    status = hide_task_install(connect_thread_task->pid);
+    //初始化cpu渲染相关资源
+    status = cpu_render_init();
     if (status < 0)
     {
-        ls_log_always_tag("core", "隐藏连接线程失败，错误码: %d\n", status);
-        return status;
+        ls_log_always_tag("core", "初始化 Qualcomm/MediaTek CPU 渲染统一抽象失败，错误码: %d\n", status);
+        status = 0;
     }
-    status = hide_task_install(dispatch_thread_task->pid);
-    if (status < 0)
+    else
     {
-        ls_log_always_tag("core", "隐藏调度线程失败，错误码: %d\n", status);
-        return status;
+        cpu_render_test_thread_task = kthread_run(CpuRenderTestThreadFunction, NULL, "ls-cpu-render");
+        if (IS_ERR(cpu_render_test_thread_task))
+        {
+            status = PTR_ERR(cpu_render_test_thread_task);
+            cpu_render_test_thread_task = NULL;
+            ls_log_always_tag("core", "创建 CPU 渲染测试线程失败，错误码: %d\n", status);
+            goto fail;
+        }
     }
 
     /*
@@ -856,10 +928,18 @@ static int __init lsdriver_init(void)
     hide_myself();
 
     return status;
+
+fail:
+    stop_cpu_render_test_thread();
+    stop_core_threads();
+    cpu_render_exit();
+    inline_hook_remove_all();//这个作用也不大,模块初始化失败内核会直接回收ko所有内存(.text回收)，这里就算hook卸载了，但是控制流在中途的hook work代码段被回收了要panic
+    free_physical_page_info();
+    return status;
 }
 static void __exit lsdriver_exit(void)
 {
-    // 模块已隐藏，此函数不会被调用
+    //模块已隐藏，此函数不会被调用
 }
 
 module_init(lsdriver_init);
