@@ -34,25 +34,9 @@ windows/__pycache__/
 # VS Code settings in subdirectories
 **/.vscode/
 
-# Local ARM64 test sources and inputs
-lsdriver/arm64_tests/*
-!lsdriver/arm64_tests/instruction.txt
-!lsdriver/arm64_tests/decoder/
-!lsdriver/arm64_tests/decoder/*
-!lsdriver/arm64_tests/executor/
-!lsdriver/arm64_tests/executor/*
-!lsdriver/arm64_tests/encoder/
-!lsdriver/arm64_tests/encoder/*
-!lsdriver/arm64_tests/etmdbg/
-!lsdriver/arm64_tests/etmdbg/*
-
-
-
-# Local ARM64 executor outputs
-lsdriver/arm64_tests/executor/arm64_instruction_table.h
-lsdriver/arm64_tests/executor/arm64_kernel_executor_test_module.ko
-lsdriver/arm64_tests/executor/executor_test_runner_android
-lsdriver/arm64_tests/executor/real-device-executor-test.log
+# Keep the complete ARM64 test tree, including generated test artifacts
+!lsdriver/arm64_tests/
+!lsdriver/arm64_tests/**
 
 # Android Studio / Gradle / NDK outputs
 .gradle/

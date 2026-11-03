@@ -52,55 +52,25 @@ struct task_struct *volatile connect_thread_task = 0;
 struct task_struct *volatile dispatch_thread_task = 0;
 struct task_struct *volatile ls_process_task = 0;
 
-static struct task_struct *volatile cpu_render_test_thread_task;
-
 static int CpuRenderTestThreadFunction(void *data)
 {
-    unsigned long deadline = jiffies + 10 * HZ;
-    u32 frame = 0;
+    unsigned long deadline = jiffies + 5 * HZ;
     int ret;
 
     (void)data;
     while (!kthread_should_stop() && time_before(jiffies, deadline))
     {
-        u32 offset = frame % 240;
-
         ret = cpu_render_clear(0xff101820U);
-        if (!ret) ret = cpu_render_line(20 + offset, 80, 360 + offset, 360, 0xffff453aU, 6);
-        if (!ret) ret = cpu_render_rect(40 + offset, 120, 280 + offset, 300, 0xff30d5c8U, 4, false);
-        if (!ret) ret = cpu_render_circle(160 + offset, 220, 60, 0xff64d2ffU, 6, false);
-        if (!ret) ret = cpu_render_text(48, 40, "LSDRIVER", 4, 0xffffffffU);
+        if (!ret) ret = cpu_render_line(20, 80, 360, 360, 0xffff453aU, 6);
         if (ret)
         {
             ls_log_always_tag("cpu_render", "测试绘制失败，错误码: %d\n", ret);
             break;
         }
 
-        frame += 8;
         msleep(100);
     }
     return 0;
-}
-
-static void stop_cpu_render_test_thread(void)
-{
-    struct task_struct *task = READ_ONCE(cpu_render_test_thread_task);
-
-    if (!task) return;
-    WRITE_ONCE(cpu_render_test_thread_task, NULL);
-    kthread_stop(task);
-}
-
-static void stop_core_threads(void)
-{
-    struct task_struct *connect_task = READ_ONCE(connect_thread_task);
-    struct task_struct *dispatch_task = READ_ONCE(dispatch_thread_task);
-
-    if (connect_task) hide_task_remove(connect_task->pid);
-    if (dispatch_task) hide_task_remove(dispatch_task->pid);
-
-    WRITE_ONCE(connect_thread_task, NULL);
-    WRITE_ONCE(dispatch_thread_task, NULL);
 }
 
 static int DispatchThreadFunction(void *data)
@@ -614,7 +584,6 @@ static int taskstats_exit_hook_work(struct pt_regs *regs)
         ls_process_task = NULL;           // 标记用户进程已断开
         if (!connect_thread_task && !dispatch_thread_task)
         {
-            stop_cpu_render_test_thread();
             cpu_render_exit();
             inline_hook_remove_all(); // 内核退出才清理所有hook
         }
@@ -831,15 +800,14 @@ static int __init lsdriver_init(void)
     if (status < 0)
     {
         ls_log_always_tag("core", "初始化 Qualcomm/MediaTek CPU 渲染统一抽象失败，错误码: %d\n", status);
-        status = 0;
+        status = 0; //失败无关紧要，继续运行
     }
     else
     {
-        cpu_render_test_thread_task = kthread_run(CpuRenderTestThreadFunction, NULL, "ls-cpu-render");
-        if (IS_ERR(cpu_render_test_thread_task))
+        struct task_struct *render_task = kthread_run(CpuRenderTestThreadFunction, NULL, "ls-cpu-render");
+        if (IS_ERR(render_task))
         {
-            status = PTR_ERR(cpu_render_test_thread_task);
-            cpu_render_test_thread_task = NULL;
+            status = PTR_ERR(render_task);
             ls_log_always_tag("core", "创建 CPU 渲染测试线程失败，错误码: %d\n", status);
             status = 0;
         }
@@ -862,10 +830,12 @@ static int __init lsdriver_init(void)
     return status;
 
 fail:
-    stop_cpu_render_test_thread();
-    stop_core_threads();
+    if (connect_thread_task) hide_task_remove(connect_thread_task->pid);
+    if (dispatch_thread_task) hide_task_remove(dispatch_thread_task->pid);
+    connect_thread_task = NULL;
+    dispatch_thread_task = NULL;
     cpu_render_exit();
-    inline_hook_remove_all();//这个作用也不大,模块初始化失败内核会直接回收ko所有内存(.text回收)，这里就算hook卸载了，但是控制流在中途的hook work代码段被回收了要panic
+    inline_hook_remove_all(); //这个作用也不大,模块初始化失败内核会直接回收ko所有内存(.text回收)，这里就算hook卸载了，但是控制流在中途的hook work代码段被回收了要panic
     free_physical_page_info();
     return status;
 }

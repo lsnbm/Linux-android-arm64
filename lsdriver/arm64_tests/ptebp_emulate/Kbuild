@@ -1,0 +1,27 @@
+obj-m += ptebp_emulate_test_module.o
+
+ccflags-y += -I$(src)/../..
+ccflags-y += -I$(src)/../../klog
+ccflags-y += -std=gnu11 -Wall -Wextra
+ccflags-y += -Wno-error
+ccflags-y += -Wno-unused-parameter
+ccflags-y += -march=armv8.6-a+bf16+i8mm+fp16fml+fp16+lse+rcpc+crc
+ccflags-y += -fno-vectorize -fno-slp-vectorize
+ccflags-y += -fno-stack-protector
+ccflags-y += -fomit-frame-pointer
+ccflags-y += -mbranch-protection=bti
+ccflags-y += -ftrivial-auto-var-init=uninitialized
+
+CFLAGS_REMOVE_ptebp_emulate_test.o += -mgeneral-regs-only
+CFLAGS_ptebp_emulate_test.o += -mno-implicit-float
+
+ptebp_emulate_test_module-objs := ptebp_emulate_test.o \
+	../../arm64_encode/arm64_encode.o \
+	../../arm64_decode/arm64_decode.o \
+	../../arm64_decode/arm64_decode_immediate.o \
+	../../arm64_decode/arm64_decode_register.o \
+	../../arm64_decode/arm64_decode_ldst.o \
+	../../arm64_decode/arm64_decode_branch.o \
+	../../arm64_decode/arm64_decode_simd.o \
+	../../arm64_decode/arm64_decode_sve.o \
+	../../arm64_decode/arm64_decode_sme.o

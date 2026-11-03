@@ -91,14 +91,17 @@ void cpu_raster_line(void *pixels, u32 width, u32 height, u32 pitch, int x0, int
 
     for (;;)
     {
+        int twice_error;
+
         draw_disc(pixels, width, height, pitch, x0, y0, radius, color);
         if (x0 == x1 && y0 == y1) break;
-        if (2 * error >= dy)
+        twice_error = 2 * error;
+        if (twice_error >= dy)
         {
             error += dy;
             x0 += sx;
         }
-        if (2 * error <= dx)
+        if (twice_error <= dx)
         {
             error += dx;
             y0 += sy;
