@@ -18,7 +18,6 @@ static inline u32 *pixel_at(void *pixels, u32 width, u32 height, u32 pitch, int 
     if (x < 0 || y < 0 || x >= width || y >= height) return NULL;
     return (u32 *)((u8 *)pixels + (u64)y * pitch) + x;
 }
-
 static inline u32 blend_pixel(u32 dst, u32 src)
 {
     u32 alpha = src >> 24;
@@ -37,35 +36,6 @@ static inline void put_pixel(void *pixels, u32 width, u32 height, u32 pitch, int
     if (pixel) *pixel = blend_pixel(*pixel, color);
 }
 
-static void draw_disc(void *pixels, u32 width, u32 height, u32 pitch, int center_x, int center_y, int radius, u32 color)
-{
-    int y;
-
-    for (y = -radius; y <= radius; y++)
-    {
-        int x;
-
-        for (x = -radius; x <= radius; x++)
-            if (x * x + y * y <= radius * radius) put_pixel(pixels, width, height, pitch, center_x + x, center_y + y, color);
-    }
-}
-
-static const u8 *glyph_for(char character)
-{
-    static const u8 question[7] = {0x0e, 0x11, 0x01, 0x06, 0x04, 0x00, 0x04};
-    static const u8 colon[7] = {0x00, 0x04, 0x04, 0x00, 0x04, 0x04, 0x00};
-    static const u8 dash[7] = {0x00, 0x00, 0x00, 0x1f, 0x00, 0x00, 0x00};
-    static const u8 dot[7] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x06};
-
-    if (character >= '0' && character <= '9') return font_digits[character - '0'];
-    if (character >= 'a' && character <= 'z') character -= 'a' - 'A';
-    if (character >= 'A' && character <= 'Z') return font_upper[character - 'A'];
-    if (character == ':') return colon;
-    if (character == '-') return dash;
-    if (character == '.') return dot;
-    return question;
-}
-
 void cpu_raster_clear(void *pixels, u32 width, u32 height, u32 pitch, u32 color)
 {
     u32 y;
@@ -79,7 +49,6 @@ void cpu_raster_clear(void *pixels, u32 width, u32 height, u32 pitch, u32 color)
         if (pitch > width * sizeof(u32)) memset((u8 *)row + width * sizeof(u32), 0, pitch - width * sizeof(u32));
     }
 }
-
 void cpu_raster_line(void *pixels, u32 width, u32 height, u32 pitch, int x0, int y0, int x1, int y1, u32 color, u32 thickness)
 {
     int dx = abs(x1 - x0);
@@ -91,9 +60,17 @@ void cpu_raster_line(void *pixels, u32 width, u32 height, u32 pitch, int x0, int
 
     for (;;)
     {
+        int y;
         int twice_error;
 
-        draw_disc(pixels, width, height, pitch, x0, y0, radius, color);
+        for (y = -radius; y <= radius; y++)
+        {
+            int x;
+
+            for (x = -radius; x <= radius; x++)
+                if (x * x + y * y <= radius * radius)
+                    put_pixel(pixels, width, height, pitch, x0 + x, y0 + y, color);
+        }
         if (x0 == x1 && y0 == y1) break;
         twice_error = 2 * error;
         if (twice_error >= dy)
@@ -108,7 +85,6 @@ void cpu_raster_line(void *pixels, u32 width, u32 height, u32 pitch, int x0, int
         }
     }
 }
-
 void cpu_raster_rect(void *pixels, u32 width, u32 height, u32 pitch, int left, int top, int right, int bottom, u32 color, u32 thickness, bool filled)
 {
     int x;
@@ -128,11 +104,15 @@ void cpu_raster_rect(void *pixels, u32 width, u32 height, u32 pitch, int left, i
 
 void cpu_raster_circle(void *pixels, u32 width, u32 height, u32 pitch, int center_x, int center_y, int radius, u32 color, u32 thickness, bool filled)
 {
-    int outer = radius + max_t(u32, thickness, 1) / 2;
-    int inner = radius - max_t(u32, thickness, 1) / 2;
+    int half_thickness;
+    int outer;
+    int inner;
     int y;
 
     if (radius <= 0) return;
+    half_thickness = max_t(u32, thickness, 1) / 2;
+    outer = radius + half_thickness;
+    inner = radius - half_thickness;
     for (y = -outer; y <= outer; y++)
     {
         int x;
@@ -148,13 +128,29 @@ void cpu_raster_circle(void *pixels, u32 width, u32 height, u32 pitch, int cente
 
 void cpu_raster_text(void *pixels, u32 width, u32 height, u32 pitch, int left, int top, const char *text, u32 scale, u32 color)
 {
+    static const u8 question[7] = {0x0e, 0x11, 0x01, 0x06, 0x04, 0x00, 0x04};
+    static const u8 colon[7] = {0x00, 0x04, 0x04, 0x00, 0x04, 0x04, 0x00};
+    static const u8 dash[7] = {0x00, 0x00, 0x00, 0x1f, 0x00, 0x00, 0x00};
+    static const u8 dot[7] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x06};
     int cursor_x = left;
 
     scale = max_t(u32, scale, 1);
     while (*text)
     {
-        const u8 *glyph = glyph_for(*text++);
+        char character = *text++;
+        const u8 *glyph;
         int row;
+
+        if (character >= '0' && character <= '9') glyph = font_digits[character - '0'];
+        else
+        {
+            if (character >= 'a' && character <= 'z') character -= 'a' - 'A';
+            if (character >= 'A' && character <= 'Z') glyph = font_upper[character - 'A'];
+            else if (character == ':') glyph = colon;
+            else if (character == '-') glyph = dash;
+            else if (character == '.') glyph = dot;
+            else glyph = question;
+        }
 
         for (row = 0; row < 7; row++)
         {
@@ -177,10 +173,17 @@ void cpu_raster_text(void *pixels, u32 width, u32 height, u32 pitch, int left, i
     }
 }
 
-void cpu_raster_blend(void *pixels, u32 width, u32 height, u32 pitch,
-                      const void *overlay, u32 overlay_width,
-                      u32 overlay_height, u32 overlay_pitch,
-                      int left, int top)
+static inline u32 swap_rb_color(u32 color)
+{
+    return (color & 0xff00ff00U) |
+           ((color & 0x00ff0000U) >> 16) |
+           ((color & 0x000000ffU) << 16);
+}
+
+void cpu_raster_blend_format(void *pixels, u32 width, u32 height, u32 pitch,
+                             const void *overlay, u32 overlay_width,
+                             u32 overlay_height, u32 overlay_pitch,
+                             int left, int top, bool swap_channels)
 {
     for (u32 y = 0; y < overlay_height; y++)
     {
@@ -195,7 +198,10 @@ void cpu_raster_blend(void *pixels, u32 width, u32 height, u32 pitch,
 
             if (target_x < 0 || target_x >= width || !(source[x] >> 24)) continue;
             target = pixel_at(pixels, width, height, pitch, target_x, target_y);
-            if (target) *target = blend_pixel(*target, source[x]);
+            u32 destination = swap_channels ? swap_rb_color(*target) : *target;
+            u32 blended = blend_pixel(destination, source[x]);
+
+            *target = swap_channels ? swap_rb_color(blended) : blended;
         }
     }
 }
