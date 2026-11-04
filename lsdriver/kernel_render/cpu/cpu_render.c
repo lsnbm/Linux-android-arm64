@@ -4,6 +4,7 @@
 
 #include "../../klog/lsdriver_log.h"
 #include "cpu_render.h"
+#include "drm_cpu_render.h"
 
 static bool cpu_render_active;
 static DEFINE_MUTEX(cpu_render_control_lock);
@@ -45,6 +46,18 @@ int cpu_render_exit(void)
     WRITE_ONCE(cpu_render_active, false);
     mutex_unlock(&cpu_render_control_lock);
     return 0;
+}
+
+int cpu_render_begin_frame(void)
+{
+    return READ_ONCE(cpu_render_active) ? drm_cpu_render_begin_frame() :
+                                           -ENODEV;
+}
+
+int cpu_render_end_frame(void)
+{
+    return READ_ONCE(cpu_render_active) ? drm_cpu_render_end_frame() :
+                                           -ENODEV;
 }
 
 int cpu_render_clear(u32 color)
