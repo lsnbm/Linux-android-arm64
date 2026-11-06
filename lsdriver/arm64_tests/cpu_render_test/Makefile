@@ -5,6 +5,7 @@ ccflags-y += -std=gnu11
 ccflags-y += -O2
 ccflags-y += -Wno-unused-parameter
 ccflags-y += -fno-stack-protector
+CFLAGS_cpu_render_test_main.o += -Wno-unused-function
 
 cpu_render_test_main.o: $(src)/cpu_render_test_main.c FORCE
 	$(call if_changed_dep,cc_o_c)

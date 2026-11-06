@@ -64,7 +64,7 @@ if [[ "${QEMU_STATUS}" -ne 0 ]]; then
     echo "CPU_RENDER_TEST_EXIT status=${QEMU_STATUS}" >&2
     exit "${QEMU_STATUS}"
 fi
-grep -q '^CPU_RENDER_TEST_PASS$' "${LOG_FILE}"
+grep -Eq '^CPU_RENDER_TEST_PASS[[:space:]]*$' "${LOG_FILE}"
 if grep -Eq 'Kernel panic|Internal error:|BUG:|Oops:|CPU_RENDER_.*FAIL' "${LOG_FILE}"; then
     echo "CPU_RENDER_TEST_GUEST_FAILED" >&2
     exit 1

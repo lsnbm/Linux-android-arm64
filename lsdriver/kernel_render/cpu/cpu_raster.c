@@ -172,36 +172,3 @@ void cpu_raster_text(void *pixels, u32 width, u32 height, u32 pitch, int left, i
         cursor_x += 6 * scale;
     }
 }
-
-static inline u32 swap_rb_color(u32 color)
-{
-    return (color & 0xff00ff00U) |
-           ((color & 0x00ff0000U) >> 16) |
-           ((color & 0x000000ffU) << 16);
-}
-
-void cpu_raster_blend_format(void *pixels, u32 width, u32 height, u32 pitch,
-                             const void *overlay, u32 overlay_width,
-                             u32 overlay_height, u32 overlay_pitch,
-                             int left, int top, bool swap_channels)
-{
-    for (u32 y = 0; y < overlay_height; y++)
-    {
-        const u32 *source = (const u32 *)((const u8 *)overlay + (u64)y * overlay_pitch);
-        int target_y = top + (int)y;
-
-        if (target_y < 0 || target_y >= height) continue;
-        for (u32 x = 0; x < overlay_width; x++)
-        {
-            int target_x = left + (int)x;
-            u32 *target;
-
-            if (target_x < 0 || target_x >= width || !(source[x] >> 24)) continue;
-            target = pixel_at(pixels, width, height, pitch, target_x, target_y);
-            u32 destination = swap_channels ? swap_rb_color(*target) : *target;
-            u32 blended = blend_pixel(destination, source[x]);
-
-            *target = swap_channels ? swap_rb_color(blended) : blended;
-        }
-    }
-}
