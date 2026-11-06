@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <linux/errno.h>
+#include <linux/delay.h>
+#include <linux/jiffies.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/vmalloc.h>
 
@@ -14,6 +17,10 @@
 #define TEST_ITERATIONS 3U
 #define TEST_GUARD_BYTE 0xa5U
 
+static bool hardware;
+module_param(hardware, bool, 0400);
+MODULE_PARM_DESC(hardware, "Submit a five-second overlay on the active DSI display");
+
 struct test_buffer
 {
     u8 *allocation;
@@ -21,79 +28,272 @@ struct test_buffer
     size_t allocation_size;
 };
 
-static struct test_buffer *active_buffer;
-static bool frame_active;
-
-/* Use the production raster and public wrapper with an isolated memory backend. */
 #include "../../kernel_render/cpu/cpu_raster.c"
-
-int drm_cpu_render_init(void)
-{
-    return 0;
-}
-
-int drm_cpu_render_exit(void)
-{
-    return 0;
-}
-
-int drm_cpu_render_begin_frame(void)
-{
-    if (!active_buffer) return -ENODEV;
-    if (frame_active) return -EBUSY;
-    frame_active = true;
-    return 0;
-}
-
-int drm_cpu_render_end_frame(void)
-{
-    if (!frame_active) return -EINVAL;
-    frame_active = false;
-    return 0;
-}
-
-int drm_cpu_render_clear(u32 color)
-{
-    if (!active_buffer || !frame_active) return -EINVAL;
-    cpu_raster_clear(active_buffer->pixels, TEST_WIDTH, TEST_HEIGHT, TEST_PITCH, color);
-    return 0;
-}
-
-int drm_cpu_render_line(int x0, int y0, int x1, int y1, u32 color, u32 thickness)
-{
-    if (!active_buffer || !frame_active) return -EINVAL;
-    cpu_raster_line(active_buffer->pixels, TEST_WIDTH, TEST_HEIGHT, TEST_PITCH,
-                    x0, y0, x1, y1, color, thickness);
-    return 0;
-}
-
-int drm_cpu_render_rect(int left, int top, int right, int bottom,
-                        u32 color, u32 thickness, bool filled)
-{
-    if (!active_buffer || !frame_active) return -EINVAL;
-    cpu_raster_rect(active_buffer->pixels, TEST_WIDTH, TEST_HEIGHT, TEST_PITCH,
-                    left, top, right, bottom, color, thickness, filled);
-    return 0;
-}
-
-int drm_cpu_render_circle(int center_x, int center_y, int radius,
-                          u32 color, u32 thickness, bool filled)
-{
-    if (!active_buffer || !frame_active) return -EINVAL;
-    cpu_raster_circle(active_buffer->pixels, TEST_WIDTH, TEST_HEIGHT, TEST_PITCH,
-                      center_x, center_y, radius, color, thickness, filled);
-    return 0;
-}
-
-int drm_cpu_render_text(int left, int top, const char *text, u32 scale, u32 color)
-{
-    if (!active_buffer || !frame_active) return -EINVAL;
-    cpu_raster_text(active_buffer->pixels, TEST_WIDTH, TEST_HEIGHT, TEST_PITCH,
-                    left, top, text, scale, color);
-    return 0;
-}
-
+#include "../../kernel_render/cpu/drm_cpu_render.c"
 #include "../../kernel_render/cpu/cpu_render.c"
+
+static struct
+{
+    struct drm_device dev;
+    struct drm_connector connector;
+    struct drm_connector_state connector_state;
+    struct drm_crtc crtc;
+    struct drm_crtc_state crtc_state;
+    struct drm_plane planes[3];
+    struct drm_plane_state plane_states[3];
+    struct drm_object_properties properties[3];
+    struct drm_property zpos;
+    struct drm_property alpha;
+    struct drm_property blend;
+    struct drm_property multirect;
+    struct drm_property_enum premultiplied;
+    uint64_t zpos_range[2];
+    uint64_t alpha_range[2];
+    struct drm_client_buffer buffers[2];
+    struct drm_framebuffer framebuffers[3];
+    uint32_t format;
+    unsigned int allocated;
+    unsigned int freed;
+    unsigned int checked;
+    unsigned int committed;
+    unsigned int deleted;
+    unsigned int released;
+    unsigned int backed_off;
+    int flush_error;
+    int commit_error;
+    bool deadlock;
+    bool locked;
+    bool invalid;
+} fixture;
+
+struct test_atomic_state
+{
+    struct drm_atomic_state base;
+    struct drm_plane_state pending;
+    uint64_t blend_value;
+    bool crtc_added;
+    bool checked;
+};
+
+static struct drm_atomic_state *test_state_alloc(struct drm_device *dev)
+{
+    struct test_atomic_state *state = kzalloc(sizeof(*state), GFP_KERNEL);
+    if (!state) return NULL;
+    state->base.dev = dev;
+    kref_init(&state->base.ref);
+    fixture.allocated++;
+    return &state->base;
+}
+
+static void test_state_clear(struct drm_atomic_state *base)
+{
+    struct test_atomic_state *state = container_of(base, struct test_atomic_state, base);
+    memset(&state->pending, 0, sizeof(state->pending));
+    state->blend_value = 0;
+    state->crtc_added = false;
+    state->checked = false;
+}
+
+static void test_state_free(struct kref *ref)
+{
+    fixture.freed++;
+    kfree(container_of(ref, struct test_atomic_state, base.ref));
+}
+
+static void test_acquire_init(struct drm_modeset_acquire_ctx *ctx, uint32_t flags)
+{
+    memset(ctx, 0, sizeof(*ctx));
+}
+
+static void test_acquire_fini(struct drm_modeset_acquire_ctx *ctx)
+{
+    if (fixture.locked) fixture.invalid = true;
+}
+
+static int test_lock_all(struct drm_device *dev, struct drm_modeset_acquire_ctx *ctx)
+{
+    if (fixture.deadlock)
+    {
+        fixture.deadlock = false;
+        return -EDEADLK;
+    }
+    fixture.locked = true;
+    return 0;
+}
+
+static void test_drop_locks(struct drm_modeset_acquire_ctx *ctx)
+{
+    fixture.locked = false;
+}
+
+static int test_backoff(struct drm_modeset_acquire_ctx *ctx)
+{
+    fixture.backed_off++;
+    fixture.locked = false;
+    return 0;
+}
+
+static struct drm_crtc_state *test_get_crtc(struct drm_atomic_state *base, struct drm_crtc *crtc)
+{
+    struct test_atomic_state *state = container_of(base, struct test_atomic_state, base);
+    state->crtc_added = true;
+    return &fixture.crtc_state;
+}
+
+static struct drm_plane_state *test_get_plane(struct drm_atomic_state *base, struct drm_plane *plane)
+{
+    struct test_atomic_state *state = container_of(base, struct test_atomic_state, base);
+    state->pending = *plane->state;
+    return &state->pending;
+}
+
+static int test_set_crtc(struct drm_plane_state *state, struct drm_crtc *crtc)
+{
+    state->crtc = crtc;
+    return 0;
+}
+
+static void test_set_fb(struct drm_plane_state *state, struct drm_framebuffer *fb)
+{
+    state->fb = fb;
+}
+
+static int test_get_property(struct drm_mode_object *obj, struct drm_property *prop, uint64_t *value)
+{
+    *value = 5;
+    return 0;
+}
+
+static int test_set_property(struct drm_atomic_state *base, struct drm_file *file,
+                              struct drm_mode_object *obj, struct drm_property *prop, uint64_t value)
+{
+    struct test_atomic_state *state = container_of(base, struct test_atomic_state, base);
+    if (prop == &fixture.blend)
+    {
+        state->blend_value = value;
+        return 0;
+    }
+    if (value > prop->values[1]) return -ERANGE;
+    if (prop == &fixture.zpos) state->pending.zpos = value;
+    else if (prop == &fixture.alpha) state->pending.alpha = value;
+    else return -EINVAL;
+    return 0;
+}
+
+static int test_check_only(struct drm_atomic_state *base)
+{
+    struct test_atomic_state *state = container_of(base, struct test_atomic_state, base);
+    if (!fixture.locked || !state->crtc_added || base->allow_modeset) fixture.invalid = true;
+    fixture.checked++;
+    state->checked = true;
+    if (state->pending.plane == &fixture.planes[1]) return -ENOSPC;
+    return 0;
+}
+
+static int test_commit(struct drm_atomic_state *base)
+{
+    struct test_atomic_state *state = container_of(base, struct test_atomic_state, base);
+    if (!fixture.locked || !state->crtc_added || state->checked || base->allow_modeset)
+        fixture.invalid = true;
+    if (state->pending.fb && state->blend_value != 2) fixture.invalid = true;
+    fixture.committed++;
+    if (fixture.commit_error) return fixture.commit_error;
+    *state->pending.plane->state = state->pending;
+    return 0;
+}
+
+static int test_flush(struct drm_client_buffer *buffer, struct drm_rect *rect)
+{
+    for (unsigned int index = 0; index < ARRAY_SIZE(fixture.planes); index++)
+        if (fixture.plane_states[index].fb == buffer->fb) fixture.invalid = true;
+    return fixture.flush_error;
+}
+
+static void test_delete(struct drm_client_buffer *buffer)
+{
+    for (unsigned int index = 0; index < ARRAY_SIZE(fixture.planes); index++)
+        if (fixture.plane_states[index].fb == buffer->fb) fixture.invalid = true;
+    fixture.deleted++;
+}
+
+static void test_release(struct drm_client_dev *client)
+{
+    fixture.released++;
+}
+
+static const struct drm_plane_funcs test_plane_funcs;
+
+static void setup_fixture(struct test_buffer *buffers)
+{
+    memset(&fixture, 0, sizeof(fixture));
+    memset(&drm_cpu_render, 0, sizeof(drm_cpu_render));
+    drm_cpu_api = (typeof(drm_cpu_api)){
+        .state_alloc = test_state_alloc, .state_clear = test_state_clear, .state_free = test_state_free,
+        .acquire_init = test_acquire_init, .acquire_fini = test_acquire_fini,
+        .lock_all = test_lock_all, .drop_locks = test_drop_locks, .backoff = test_backoff,
+        .get_crtc_state = test_get_crtc, .get_plane_state = test_get_plane,
+        .set_crtc = test_set_crtc, .set_fb = test_set_fb,
+        .get_property = test_get_property, .set_property = test_set_property,
+        .check_only = test_check_only, .commit = test_commit,
+        .framebuffer_flush = test_flush, .framebuffer_delete = test_delete, .client_release = test_release,
+    };
+    INIT_LIST_HEAD(&fixture.dev.mode_config.connector_list);
+    INIT_LIST_HEAD(&fixture.dev.mode_config.plane_list);
+    fixture.connector.connector_type = DRM_MODE_CONNECTOR_DSI;
+    fixture.connector.state = &fixture.connector_state;
+    fixture.connector_state.crtc = &fixture.crtc;
+    list_add_tail(&fixture.connector.head, &fixture.dev.mode_config.connector_list);
+    fixture.crtc.state = &fixture.crtc_state;
+    fixture.crtc_state.active = true;
+    fixture.crtc_state.mode.hdisplay = 1264;
+    fixture.crtc_state.mode.vdisplay = 2780;
+    strcpy(fixture.zpos.name, "zpos");
+    fixture.zpos.flags = DRM_MODE_PROP_RANGE;
+    fixture.zpos.num_values = 2;
+    fixture.zpos_range[1] = 7;
+    fixture.zpos.values = fixture.zpos_range;
+    strcpy(fixture.alpha.name, "alpha");
+    fixture.alpha.flags = DRM_MODE_PROP_RANGE;
+    fixture.alpha.num_values = 2;
+    fixture.alpha_range[1] = 255;
+    fixture.alpha.values = fixture.alpha_range;
+    strcpy(fixture.blend.name, "blend_op");
+    fixture.blend.flags = DRM_MODE_PROP_ENUM;
+    INIT_LIST_HEAD(&fixture.blend.enum_list);
+    strcpy(fixture.premultiplied.name, "premultiplied");
+    fixture.premultiplied.value = 2;
+    list_add_tail(&fixture.premultiplied.head, &fixture.blend.enum_list);
+    strcpy(fixture.multirect.name, "multirect_mode");
+    fixture.format = DRM_FORMAT_ARGB8888;
+    for (unsigned int index = 0; index < ARRAY_SIZE(fixture.planes); index++)
+    {
+        fixture.planes[index].type = index == 1 ? DRM_PLANE_TYPE_OVERLAY : DRM_PLANE_TYPE_PRIMARY;
+        fixture.planes[index].possible_crtcs = 1;
+        fixture.planes[index].state = &fixture.plane_states[index];
+        fixture.planes[index].funcs = &test_plane_funcs;
+        fixture.planes[index].format_count = 1;
+        fixture.planes[index].format_types = &fixture.format;
+        fixture.planes[index].base.properties = &fixture.properties[index];
+        fixture.properties[index].count = 3;
+        fixture.properties[index].properties[0] = &fixture.zpos;
+        fixture.properties[index].properties[1] = &fixture.alpha;
+        fixture.properties[index].properties[2] = &fixture.blend;
+        fixture.plane_states[index].plane = &fixture.planes[index];
+        list_add_tail(&fixture.planes[index].head, &fixture.dev.mode_config.plane_list);
+    }
+    fixture.plane_states[0].crtc = &fixture.crtc;
+    fixture.plane_states[0].fb = &fixture.framebuffers[2];
+    for (unsigned int index = 0; index < ARRAY_SIZE(fixture.buffers); index++)
+    {
+        fixture.buffers[index].fb = &fixture.framebuffers[index];
+        fixture.buffers[index].pitch = TEST_PITCH;
+        drm_cpu_render.buffers[index] = &fixture.buffers[index];
+        drm_cpu_render.pixels[index] = buffers[index].pixels;
+    }
+    drm_cpu_render.client.dev = &fixture.dev;
+    drm_cpu_render.initialized = true;
+    cpu_render_active = true;
+}
 
 static bool guard_is_intact(const struct test_buffer *buffer)
 {
@@ -128,13 +328,14 @@ static bool buffer_has_color(const struct test_buffer *buffer, u32 color)
     return false;
 }
 
-static int test_all_primitives(struct test_buffer *buffer)
+static int test_all_primitives(struct test_buffer *buffers)
 {
     u32 iteration;
     int ret;
 
     for (iteration = 0; iteration < TEST_ITERATIONS; iteration++)
     {
+        struct test_buffer *buffer = &buffers[drm_cpu_render.back];
         ret = cpu_render_begin_frame();
         if (ret) return -EIO;
 
@@ -178,25 +379,123 @@ frame_fail:
     return 0;
 }
 
+#define REQUIRE(condition) \
+    do { if (!(condition)) { pr_emerg("cpu_render_test: FAIL line=%d %s\n", __LINE__, #condition); return -EINVAL; } } while (0)
+
+static int test_transactions(struct test_buffer *buffers)
+{
+    REQUIRE(!fixture.invalid && fixture.checked == 2 && fixture.committed == TEST_ITERATIONS);
+    REQUIRE(fixture.plane_states[2].crtc_x == 312 && fixture.plane_states[2].crtc_y == 1070);
+    REQUIRE(fixture.plane_states[2].src_w == 640U << 16 && fixture.plane_states[2].src_h == 640U << 16);
+    REQUIRE(fixture.plane_states[2].zpos == 6 && fixture.plane_states[2].alpha == 255);
+    REQUIRE(cpu_render_end_frame() == -EINVAL && cpu_render_clear(0) == -EINVAL);
+    REQUIRE(cpu_render_begin_frame() == 0);
+    REQUIRE(cpu_render_begin_frame() == -EBUSY && cpu_render_exit() == -EBUSY);
+    REQUIRE(cpu_render_end_frame() == 0);
+
+    unsigned int back = drm_cpu_render.back;
+    unsigned int commits = fixture.committed;
+    fixture.flush_error = -EIO;
+    REQUIRE(cpu_render_begin_frame() == 0 && cpu_render_end_frame() == -EIO);
+    REQUIRE(drm_cpu_render.back == back && fixture.committed == commits);
+    fixture.flush_error = 0;
+    fixture.commit_error = -EIO;
+    REQUIRE(cpu_render_begin_frame() == 0 && cpu_render_end_frame() == -EIO);
+    REQUIRE(drm_cpu_render.back == back && fixture.committed == commits + 1);
+    REQUIRE(cpu_render_exit() == -EIO && !fixture.deleted && cpu_render_active);
+    fixture.commit_error = 0;
+    fixture.deadlock = true;
+    REQUIRE(cpu_render_begin_frame() == 0 && cpu_render_end_frame() == 0);
+    REQUIRE(fixture.backed_off == 1 && drm_cpu_render.back != back);
+
+    fixture.crtc_state.active = false;
+    REQUIRE(cpu_render_begin_frame() == 0 && cpu_render_end_frame() == -ENODEV);
+    fixture.crtc_state.active = true;
+    fixture.crtc_state.mode.vdisplay = 320;
+    REQUIRE(cpu_render_begin_frame() == 0 && cpu_render_end_frame() == -ERANGE);
+    fixture.crtc_state.mode.vdisplay = 2780;
+    REQUIRE(cpu_render_exit() == 0);
+    REQUIRE(!fixture.plane_states[2].fb && !fixture.plane_states[2].crtc);
+    REQUIRE(fixture.deleted == 2 && fixture.released == 1 && fixture.allocated == fixture.freed);
+    REQUIRE(!fixture.invalid && cpu_render_begin_frame() == -ENODEV);
+
+    setup_fixture(buffers);
+    fixture.plane_states[1].crtc = &fixture.crtc;
+    fixture.plane_states[1].fb = &fixture.framebuffers[2];
+    fixture.plane_states[2].crtc = &fixture.crtc;
+    fixture.plane_states[2].fb = &fixture.framebuffers[2];
+    REQUIRE(cpu_render_begin_frame() == 0 && cpu_render_end_frame() == -ENOSPC);
+    REQUIRE(!fixture.committed && !drm_cpu_render.back);
+    fixture.plane_states[2].fb = NULL;
+    fixture.plane_states[2].crtc = NULL;
+    fixture.plane_states[1].fb = NULL;
+    fixture.plane_states[1].crtc = NULL;
+    fixture.properties[1].properties[3] = &fixture.multirect;
+    fixture.properties[1].count = 4;
+    REQUIRE(cpu_render_begin_frame() == 0 && cpu_render_end_frame() == 0);
+    REQUIRE(fixture.checked == 1 && drm_cpu_render.plane == &fixture.planes[2]);
+    fixture.plane_states[2].fb = &fixture.framebuffers[2];
+    commits = fixture.committed;
+    REQUIRE(cpu_render_begin_frame() == 0 && cpu_render_end_frame() == -EBUSY);
+    REQUIRE(cpu_render_exit() == 0 && fixture.committed == commits);
+    REQUIRE(fixture.plane_states[2].fb == &fixture.framebuffers[2]);
+    REQUIRE(fixture.deleted == 2 && fixture.released == 1 && fixture.allocated == fixture.freed);
+    REQUIRE(!fixture.invalid && !fixture.locked);
+    return 0;
+}
+
 static int __init cpu_render_test_init(void)
 {
-    struct test_buffer buffer;
-    int ret;
+    if (hardware)
+    {
+        int ret = cpu_render_init();
+        if (ret) return ret;
+        unsigned int frames = 0;
+        unsigned long deadline = jiffies + 5 * HZ;
+        while (time_before(jiffies, deadline))
+        {
+            ret = cpu_render_begin_frame();
+            if (ret) break;
+            ret = cpu_render_clear(0xff101820U);
+            if (!ret) ret = cpu_render_text(224, 160, "LSDRIVER", 4, 0xffffffffU);
+            if (!ret) ret = cpu_render_rect(140, 220, 500, 420, 0xff00ff00U, 0, true);
+            int present_ret = cpu_render_end_frame();
+            if (!ret) ret = present_ret;
+            if (ret) break;
+            frames++;
+            usleep_range(16000, 17000);
+        }
+        int detach_ret = cpu_render_exit();
+        if (detach_ret)
+        {
+            __module_get(THIS_MODULE);
+            pr_err("cpu_render_test: detach failed ret=%d; module pinned until reboot\n", detach_ret);
+            return 0;
+        }
+        pr_info("cpu_render_test: hardware submissions=%u ret=%d detached=1\n", frames, ret);
+        return ret;
+    }
+    struct test_buffer buffers[2] = {};
+    int ret = -ENOMEM;
 
-    buffer.allocation_size = TEST_GUARD_SIZE +
-                             TEST_WIDTH * TEST_HEIGHT * sizeof(u32) +
-                             TEST_GUARD_SIZE;
-    buffer.allocation = vmalloc(buffer.allocation_size);
-    if (!buffer.allocation) return -ENOMEM;
-
-    memset(buffer.allocation, TEST_GUARD_BYTE, buffer.allocation_size);
-    buffer.pixels = buffer.allocation + TEST_GUARD_SIZE;
-    active_buffer = &buffer;
-    ret = cpu_render_init();
-    if (!ret) ret = test_all_primitives(&buffer);
-    cpu_render_exit();
-    active_buffer = NULL;
-    vfree(buffer.allocation);
+    for (unsigned int index = 0; index < ARRAY_SIZE(buffers); index++)
+    {
+        buffers[index].allocation_size = 2 * TEST_GUARD_SIZE + TEST_WIDTH * TEST_HEIGHT * sizeof(u32);
+        buffers[index].allocation = vmalloc(buffers[index].allocation_size);
+        if (!buffers[index].allocation) goto out;
+        memset(buffers[index].allocation, TEST_GUARD_BYTE, buffers[index].allocation_size);
+        buffers[index].pixels = buffers[index].allocation + TEST_GUARD_SIZE;
+    }
+    setup_fixture(buffers);
+    ret = test_all_primitives(buffers);
+    if (!ret) ret = test_transactions(buffers);
+out:
+    if (drm_cpu_render.frame_owner == current)
+    {
+        drm_cpu_render.frame_owner = NULL;
+        mutex_unlock(&drm_cpu_lock);
+    }
+    for (unsigned int index = 0; index < ARRAY_SIZE(buffers); index++) vfree(buffers[index].allocation);
 
     if (ret)
     {

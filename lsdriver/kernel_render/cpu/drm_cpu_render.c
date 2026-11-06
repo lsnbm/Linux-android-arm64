@@ -1,12 +1,15 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 #include <linux/err.h>
 #include <linux/kernel.h>
-#include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/sched.h>
 #include <linux/version.h>
-#include <linux/vmalloc.h>
 #include <drm/drm_atomic.h>
+#include <drm/drm_atomic_uapi.h>
+#include <drm/drm_blend.h>
+#include <drm/drm_client.h>
+#include <drm/drm_connector.h>
+#include <drm/drm_crtc.h>
 #include <drm/drm_device.h>
 #include <drm/drm_drv.h>
 #include <drm/drm_file.h>
@@ -14,18 +17,18 @@
 #include <drm/drm_framebuffer.h>
 #include <drm/drm_modeset_lock.h>
 #include <drm/drm_plane.h>
+#include <drm/drm_property.h>
 
 #include "../../export_fun.h"
 #include "../../klog/lsdriver_log.h"
 #include "cpu_raster.h"
 #include "drm_cpu_render.h"
 
-#define DRM_CPU_MINOR 0U
-#define DRM_CPU_OVERLAY_WIDTH 640U
-#define DRM_CPU_OVERLAY_HEIGHT 640U
-#define DRM_CPU_OVERLAY_PITCH (DRM_CPU_OVERLAY_WIDTH * sizeof(u32))
+#define DRM_CPU_WIDTH 640U
+#define DRM_CPU_HEIGHT 640U
+#define DRM_CPU_FORMAT DRM_FORMAT_ARGB8888
 
-struct drm_cpu_render_api
+static struct
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
     struct drm_minor *(*minor_acquire)(struct xarray *, unsigned int);
@@ -34,403 +37,499 @@ struct drm_cpu_render_api
     struct drm_minor *(*minor_acquire)(unsigned int);
 #endif
     void (*minor_release)(struct drm_minor *);
-    void *(*msm_gem_get_vaddr)(struct drm_gem_object *);
-    void (*msm_gem_put_vaddr)(struct drm_gem_object *);
-};
+    typeof(drm_client_init) *client_init;
+    typeof(drm_client_release) *client_release;
+    typeof(drm_client_framebuffer_create) *framebuffer_create;
+    typeof(drm_client_framebuffer_delete) *framebuffer_delete;
+    typeof(drm_client_framebuffer_flush) *framebuffer_flush;
+    typeof(drm_client_buffer_vmap) *buffer_vmap;
+    typeof(drm_modeset_acquire_init) *acquire_init;
+    typeof(drm_modeset_acquire_fini) *acquire_fini;
+    typeof(drm_modeset_lock_all_ctx) *lock_all;
+    typeof(drm_modeset_drop_locks) *drop_locks;
+    typeof(drm_modeset_backoff) *backoff;
+    typeof(drm_atomic_state_alloc) *state_alloc;
+    typeof(drm_atomic_state_clear) *state_clear;
+    typeof(__drm_atomic_state_free) *state_free;
+    typeof(drm_atomic_get_crtc_state) *get_crtc_state;
+    typeof(drm_atomic_get_plane_state) *get_plane_state;
+    typeof(drm_atomic_set_crtc_for_plane) *set_crtc;
+    typeof(drm_atomic_set_fb_for_plane) *set_fb;
+    typeof(drm_atomic_check_only) *check_only;
+    typeof(drm_atomic_commit) *commit;
+    int (*get_property)(struct drm_mode_object *, struct drm_property *, uint64_t *);
+    int (*set_property)(struct drm_atomic_state *, struct drm_file *,
+                        struct drm_mode_object *, struct drm_property *, uint64_t);
+} drm_cpu_api;
 
-struct drm_cpu_render_context
+static struct
 {
     struct drm_minor *minor;
-    struct drm_device *dev;
-    void *overlay_pixels;
-    struct drm_framebuffer *active_fb;
-    struct mutex draw_lock;
-    const struct drm_mode_config_funcs *original_funcs;
-    struct drm_mode_config_funcs hooked_funcs;
-    bool attached;
-    bool hook_installed;
-    u64 overlay_generation;
-    u64 presented_generation;
-    bool frame_active;
-    struct task_struct *frame_owner;
-};
-
-static struct drm_cpu_render_context drm_cpu_render;
-static struct drm_cpu_render_api drm_cpu_render_api;
-
-static void set_active_framebuffer(struct drm_framebuffer *fb)
-{
-    if (fb == drm_cpu_render.active_fb) return;
-    if (fb) drm_framebuffer_get(fb);
-    if (drm_cpu_render.active_fb) drm_framebuffer_put(drm_cpu_render.active_fb);
-    drm_cpu_render.active_fb = fb;
-    drm_cpu_render.presented_generation = 0;
-}
-
-static int framebuffer_swap_channels(const struct drm_framebuffer *fb)
-{
-    if (!fb || !fb->format) return -EINVAL;
-    switch (fb->format->format)
-    {
-    case DRM_FORMAT_ARGB8888:
-    case DRM_FORMAT_XRGB8888:
-        return 0;
-    case DRM_FORMAT_ABGR8888:
-    case DRM_FORMAT_XBGR8888:
-        return 1;
-    default:
-        return -EOPNOTSUPP;
-    }
-}
-
-static struct drm_framebuffer *find_primary_framebuffer(struct drm_atomic_state *state)
-{
+    struct drm_client_dev client;
+    struct drm_client_buffer *buffers[2];
+    void *pixels[2];
     struct drm_plane *plane;
+    struct task_struct *frame_owner;
+    unsigned int back;
+    bool initialized;
+} drm_cpu_render;
 
-    drm_for_each_plane(plane, drm_cpu_render.dev)
+static DEFINE_MUTEX(drm_cpu_lock);
+
+static bool owns_framebuffer(struct drm_framebuffer *fb)
+{
+    return fb && ((drm_cpu_render.buffers[0] && fb == drm_cpu_render.buffers[0]->fb) ||
+                  (drm_cpu_render.buffers[1] && fb == drm_cpu_render.buffers[1]->fb));
+}
+
+static struct drm_property *plane_property(struct drm_plane *plane, const char *name)
+{
+    for (int index = 0; index < plane->base.properties->count; index++)
     {
-        struct drm_plane_state *plane_state = state ?
-                drm_atomic_get_new_plane_state(state, plane) : plane->state;
-        struct drm_framebuffer *fb;
+        struct drm_property *property = plane->base.properties->properties[index];
 
-        if (plane->type != DRM_PLANE_TYPE_PRIMARY || !plane_state ||
-            !plane_state->crtc)
-            continue;
-        fb = plane_state->fb;
-        if (!fb || !fb->obj[0] || framebuffer_swap_channels(fb) < 0 ||
-            fb->modifier != DRM_FORMAT_MOD_LINEAR ||
-            fb->pitches[0] < fb->width * 4)
-            continue;
-        return fb;
+        if (!__builtin_strcmp(property->name, name)) return property;
     }
     return NULL;
 }
 
-static int blend_into_framebuffer(struct drm_framebuffer *fb)
+static int commit_plane(bool disable)
 {
-    struct drm_gem_object *object;
-    void *pixels;
-    int swap_channels;
+    struct drm_modeset_acquire_ctx acquire;
+    struct drm_atomic_state *state = drm_cpu_api.state_alloc(drm_cpu_render.client.dev);
+    if (!state) return -ENOMEM;
 
-    if (!fb || !fb->obj[0]) return -ENODEV;
-    swap_channels = framebuffer_swap_channels(fb);
-    if (swap_channels < 0) return swap_channels;
-    if (fb->modifier != DRM_FORMAT_MOD_LINEAR || fb->pitches[0] < fb->width * 4)
-        return -EOPNOTSUPP;
-
-    object = fb->obj[0];
-    pixels = drm_cpu_render_api.msm_gem_get_vaddr(object);
-    if (IS_ERR_OR_NULL(pixels)) return pixels ? PTR_ERR(pixels) : -ENOMEM;
-    cpu_raster_blend_format((u8 *)pixels + fb->offsets[0], fb->width,
-                            fb->height, fb->pitches[0],
-                            drm_cpu_render.overlay_pixels,
-                            DRM_CPU_OVERLAY_WIDTH, DRM_CPU_OVERLAY_HEIGHT,
-                            DRM_CPU_OVERLAY_PITCH,
-                            ((int)fb->width - DRM_CPU_OVERLAY_WIDTH) / 2,
-                            ((int)fb->height - DRM_CPU_OVERLAY_HEIGHT) / 2,
-                            swap_channels != 0);
-    wmb();
-    drm_cpu_render_api.msm_gem_put_vaddr(object);
-    return 0;
-}
-
-static int drm_cpu_render_atomic_commit(struct drm_device *dev,
-                                        struct drm_atomic_state *state,
-                                        bool nonblock)
-{
-    bool locked = dev == drm_cpu_render.dev && READ_ONCE(drm_cpu_render.attached);
+    drm_cpu_api.acquire_init(&acquire, 0);
+    state->acquire_ctx = &acquire;
+    state->allow_modeset = false;
     int ret;
+retry:
+    ret = drm_cpu_api.lock_all(drm_cpu_render.client.dev, &acquire);
+    if (ret) goto out;
 
-    if (locked)
+    if (drm_cpu_render.plane && drm_cpu_render.plane->state->fb &&
+        !owns_framebuffer(drm_cpu_render.plane->state->fb))
     {
-        struct drm_framebuffer *fb;
-
-        mutex_lock(&drm_cpu_render.draw_lock);
-        fb = find_primary_framebuffer(state);
-        if (fb)
-        {
-            set_active_framebuffer(fb);
-            if (drm_cpu_render.presented_generation != drm_cpu_render.overlay_generation &&
-                !blend_into_framebuffer(fb))
-                drm_cpu_render.presented_generation = drm_cpu_render.overlay_generation;
-        }
-        else set_active_framebuffer(NULL);
+        ret = disable ? 0 : -EBUSY;
+        goto out;
     }
-    ret = drm_cpu_render.original_funcs->atomic_commit(dev, state, nonblock);
-    if (locked) mutex_unlock(&drm_cpu_render.draw_lock);
+    if (disable)
+    {
+        if (!drm_cpu_render.plane || !owns_framebuffer(drm_cpu_render.plane->state->fb))
+        {
+            ret = 0;
+            goto out;
+        }
+        if (drm_cpu_render.plane->state->crtc)
+        {
+            struct drm_crtc_state *crtc_state = drm_cpu_api.get_crtc_state(state, drm_cpu_render.plane->state->crtc);
+            if (IS_ERR(crtc_state))
+            {
+                ret = PTR_ERR(crtc_state);
+                goto out;
+            }
+        }
+        struct drm_plane_state *plane_state = drm_cpu_api.get_plane_state(state, drm_cpu_render.plane);
+        if (IS_ERR(plane_state))
+        {
+            ret = PTR_ERR(plane_state);
+            goto out;
+        }
+        drm_cpu_api.set_fb(plane_state, NULL);
+        ret = drm_cpu_api.set_crtc(plane_state, NULL);
+        if (!ret) ret = drm_cpu_api.commit(state);
+        goto out;
+    }
+
+    struct drm_crtc *crtc = NULL;
+    struct drm_connector *connector;
+    list_for_each_entry(connector, &drm_cpu_render.client.dev->mode_config.connector_list, head)
+    {
+        if (connector->connector_type != DRM_MODE_CONNECTOR_DSI ||
+            !connector->state || !connector->state->crtc)
+            continue;
+        if (connector->state->crtc->state->active)
+        {
+            crtc = connector->state->crtc;
+            break;
+        }
+    }
+    if (!crtc)
+    {
+        ret = -ENODEV;
+        goto out;
+    }
+    if (crtc->state->mode.hdisplay < DRM_CPU_WIDTH || crtc->state->mode.vdisplay < DRM_CPU_HEIGHT)
+    {
+        ret = -ERANGE;
+        goto out;
+    }
+    struct drm_plane *plane;
+    ret = -ENOSPC;
+    drm_for_each_plane(plane, drm_cpu_render.client.dev)
+    {
+        if (drm_cpu_render.plane && drm_cpu_render.plane != plane) continue;
+        if (plane->type == DRM_PLANE_TYPE_CURSOR || plane_property(plane, "multirect_mode") ||
+            !(plane->possible_crtcs & drm_crtc_mask(crtc)) ||
+            (plane->state->crtc && !owns_framebuffer(plane->state->fb)) ||
+            (plane->state->fb && !owns_framebuffer(plane->state->fb)))
+            continue;
+
+        bool supported = false;
+        for (unsigned int index = 0; index < plane->format_count; index++)
+            if (plane->format_types[index] == DRM_CPU_FORMAT)
+            {
+                supported = true;
+                break;
+            }
+        if (!supported) continue;
+        if (plane->funcs->format_mod_supported &&
+            !plane->funcs->format_mod_supported(plane, DRM_CPU_FORMAT, DRM_FORMAT_MOD_LINEAR))
+            continue;
+
+        bool validated = false;
+    prepare_candidate:;
+        struct drm_crtc_state *crtc_state = drm_cpu_api.get_crtc_state(state, crtc);
+        if (IS_ERR(crtc_state))
+        {
+            ret = PTR_ERR(crtc_state);
+            goto out;
+        }
+        struct drm_plane_state *plane_state = drm_cpu_api.get_plane_state(state, plane);
+        if (IS_ERR(plane_state))
+        {
+            ret = PTR_ERR(plane_state);
+            goto out;
+        }
+        ret = drm_cpu_api.set_crtc(plane_state, crtc);
+        if (ret) goto out;
+        drm_cpu_api.set_fb(plane_state, drm_cpu_render.buffers[drm_cpu_render.back]->fb);
+        plane_state->src_x = 0;
+        plane_state->src_y = 0;
+        plane_state->src_w = DRM_CPU_WIDTH << 16;
+        plane_state->src_h = DRM_CPU_HEIGHT << 16;
+        plane_state->crtc_x = (crtc->state->mode.hdisplay - (int)DRM_CPU_WIDTH) / 2;
+        plane_state->crtc_y = (crtc->state->mode.vdisplay - (int)DRM_CPU_HEIGHT) / 2;
+        plane_state->crtc_w = DRM_CPU_WIDTH;
+        plane_state->crtc_h = DRM_CPU_HEIGHT;
+        plane_state->rotation = DRM_MODE_ROTATE_0;
+        plane_state->alpha = DRM_BLEND_ALPHA_OPAQUE;
+        plane_state->pixel_blend_mode = DRM_MODE_BLEND_PREMULTI;
+
+        uint64_t zpos = 0;
+        struct drm_plane *other;
+        drm_for_each_plane(other, drm_cpu_render.client.dev)
+        {
+            if (other == plane || other->state->crtc != crtc || !other->state->fb) continue;
+            struct drm_property *property = plane_property(other, "zpos");
+            uint64_t value;
+            if (!property)
+            {
+                ret = -EOPNOTSUPP;
+                goto out;
+            }
+            ret = drm_cpu_api.get_property(&other->base, property, &value);
+            if (ret) goto out;
+            if (value >= UINT_MAX)
+            {
+                ret = -ERANGE;
+                goto out;
+            }
+            zpos = max_t(uint64_t, zpos, value + 1);
+        }
+        struct drm_property *property = plane_property(plane, "zpos");
+        ret = -EOPNOTSUPP;
+        if (property && !(property->flags & DRM_MODE_PROP_IMMUTABLE))
+            ret = drm_cpu_api.set_property(state, drm_cpu_render.client.file,
+                                            &plane->base, property, zpos);
+        if (!ret)
+        {
+            property = plane_property(plane, "alpha");
+            if (property)
+            {
+                if (!(property->flags & DRM_MODE_PROP_RANGE) || property->num_values != 2 ||
+                    (property->flags & DRM_MODE_PROP_IMMUTABLE))
+                    ret = -EOPNOTSUPP;
+                else
+                    ret = drm_cpu_api.set_property(state, drm_cpu_render.client.file,
+                                                    &plane->base, property, property->values[1]);
+            }
+        }
+        if (!ret)
+        {
+            property = plane_property(plane, "blend_op");
+            if (property)
+            {
+                struct drm_property_enum *entry;
+                ret = -EOPNOTSUPP;
+                list_for_each_entry(entry, &property->enum_list, head)
+                {
+                    if (__builtin_strcmp(entry->name, "premultiplied")) continue;
+                    ret = drm_cpu_api.set_property(state, drm_cpu_render.client.file,
+                                                    &plane->base, property, entry->value);
+                    break;
+                }
+            }
+        }
+        if (!ret && !drm_cpu_render.plane && !validated) ret = drm_cpu_api.check_only(state);
+        if (!ret && !drm_cpu_render.plane && !validated)
+        {
+            drm_cpu_api.state_clear(state);
+            validated = true;
+            goto prepare_candidate;
+        }
+        if (ret)
+        {
+            if (ret == -EDEADLK || drm_cpu_render.plane) goto out;
+            drm_cpu_api.state_clear(state);
+            continue;
+        }
+        ret = drm_cpu_api.commit(state);
+        if (!ret)
+        {
+            drm_cpu_render.plane = plane;
+            drm_cpu_render.back ^= 1;
+        }
+        goto out;
+    }
+out:
+    if (ret == -EDEADLK)
+    {
+        drm_cpu_api.state_clear(state);
+        ret = drm_cpu_api.backoff(&acquire);
+        if (!ret) goto retry;
+    }
+    kref_put(&state->ref, drm_cpu_api.state_free);
+    drm_cpu_api.drop_locks(&acquire);
+    drm_cpu_api.acquire_fini(&acquire);
     return ret;
 }
 
-static int release_output(void)
+static void release_buffers(void)
 {
-    if (drm_cpu_render.hook_installed)
+    for (unsigned int index = 0; index < ARRAY_SIZE(drm_cpu_render.buffers); index++)
     {
-        if (cmpxchg(&drm_cpu_render.dev->mode_config.funcs,
-                    &drm_cpu_render.hooked_funcs,
-                    drm_cpu_render.original_funcs) != &drm_cpu_render.hooked_funcs)
-            return -EBUSY;
-        drm_cpu_render.hook_installed = false;
-        module_put(THIS_MODULE);
+        if (drm_cpu_render.buffers[index]) drm_cpu_api.framebuffer_delete(drm_cpu_render.buffers[index]);
+        drm_cpu_render.buffers[index] = NULL;
+        drm_cpu_render.pixels[index] = NULL;
     }
-    drm_cpu_render.attached = false;
-    set_active_framebuffer(NULL);
-    vfree(drm_cpu_render.overlay_pixels);
-    drm_cpu_render.overlay_pixels = NULL;
-    if (drm_cpu_render.minor)
-        drm_cpu_render_api.minor_release(drm_cpu_render.minor);
+    if (drm_cpu_render.client.dev)
+    {
+        drm_cpu_api.client_release(&drm_cpu_render.client);
+        __builtin_memset(&drm_cpu_render.client, 0, sizeof(drm_cpu_render.client));
+    }
+    if (drm_cpu_render.minor) drm_cpu_api.minor_release(drm_cpu_render.minor);
     drm_cpu_render.minor = NULL;
-    drm_cpu_render.dev = NULL;
-    drm_cpu_render.original_funcs = NULL;
-    return 0;
+    drm_cpu_render.plane = NULL;
+    drm_cpu_render.back = 0;
 }
 
-static int acquire_output(void)
+int drm_cpu_render_init(void)
 {
-    int ret;
+    mutex_lock(&drm_cpu_lock);
+    if (drm_cpu_render.initialized)
+    {
+        mutex_unlock(&drm_cpu_lock);
+        return -EBUSY;
+    }
+    int ret = -ENOENT;
+#define RESOLVE_CPU_API(member, symbol) \
+    do { \
+        drm_cpu_api.member = (typeof(drm_cpu_api.member))generic_kallsyms_lookup_name(#symbol); \
+        if (!drm_cpu_api.member) { \
+            ls_log_always_tag("cpu_render", "missing DRM symbol: %s\n", #symbol); \
+            goto fail; \
+        } \
+    } while (0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+    RESOLVE_CPU_API(minors_xa, drm_minors_xa);
+#endif
+    RESOLVE_CPU_API(minor_acquire, drm_minor_acquire);
+    RESOLVE_CPU_API(minor_release, drm_minor_release);
+    RESOLVE_CPU_API(client_init, drm_client_init);
+    RESOLVE_CPU_API(client_release, drm_client_release);
+    RESOLVE_CPU_API(framebuffer_create, drm_client_framebuffer_create);
+    RESOLVE_CPU_API(framebuffer_delete, drm_client_framebuffer_delete);
+    RESOLVE_CPU_API(framebuffer_flush, drm_client_framebuffer_flush);
+    RESOLVE_CPU_API(buffer_vmap, drm_client_buffer_vmap);
+    RESOLVE_CPU_API(acquire_init, drm_modeset_acquire_init);
+    RESOLVE_CPU_API(acquire_fini, drm_modeset_acquire_fini);
+    RESOLVE_CPU_API(lock_all, drm_modeset_lock_all_ctx);
+    RESOLVE_CPU_API(drop_locks, drm_modeset_drop_locks);
+    RESOLVE_CPU_API(backoff, drm_modeset_backoff);
+    RESOLVE_CPU_API(state_alloc, drm_atomic_state_alloc);
+    RESOLVE_CPU_API(state_clear, drm_atomic_state_clear);
+    RESOLVE_CPU_API(state_free, __drm_atomic_state_free);
+    RESOLVE_CPU_API(get_crtc_state, drm_atomic_get_crtc_state);
+    RESOLVE_CPU_API(get_plane_state, drm_atomic_get_plane_state);
+    RESOLVE_CPU_API(set_crtc, drm_atomic_set_crtc_for_plane);
+    RESOLVE_CPU_API(set_fb, drm_atomic_set_fb_for_plane);
+    RESOLVE_CPU_API(check_only, drm_atomic_check_only);
+    RESOLVE_CPU_API(commit, drm_atomic_commit);
+    RESOLVE_CPU_API(get_property, drm_atomic_get_property);
+    RESOLVE_CPU_API(set_property, drm_atomic_set_property);
+#undef RESOLVE_CPU_API
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
-    drm_cpu_render.minor = drm_cpu_render_api.minor_acquire(drm_cpu_render_api.minors_xa, DRM_CPU_MINOR);
+    drm_cpu_render.minor = drm_cpu_api.minor_acquire(drm_cpu_api.minors_xa, 0);
 #else
-    drm_cpu_render.minor = drm_cpu_render_api.minor_acquire(DRM_CPU_MINOR);
+    drm_cpu_render.minor = drm_cpu_api.minor_acquire(0);
 #endif
     if (IS_ERR(drm_cpu_render.minor))
     {
         ret = PTR_ERR(drm_cpu_render.minor);
         drm_cpu_render.minor = NULL;
-        return ret;
+        goto fail;
     }
-    drm_cpu_render.dev = drm_cpu_render.minor->dev;
-    if (strcmp(drm_cpu_render.dev->driver->name, "msm") && strcmp(drm_cpu_render.dev->driver->name, "msm_drm"))
+    if (__builtin_strcmp(drm_cpu_render.minor->dev->driver->name, "msm") &&
+        __builtin_strcmp(drm_cpu_render.minor->dev->driver->name, "msm_drm"))
     {
         ret = -ENODEV;
         goto fail;
     }
-    drm_cpu_render.original_funcs = READ_ONCE(drm_cpu_render.dev->mode_config.funcs);
-    if (!drm_cpu_render.original_funcs || !drm_cpu_render.original_funcs->atomic_commit)
+    if (!drm_drv_uses_atomic_modeset(drm_cpu_render.minor->dev))
     {
         ret = -EOPNOTSUPP;
         goto fail;
     }
-    drm_cpu_render.overlay_pixels = vzalloc((size_t)DRM_CPU_OVERLAY_PITCH * DRM_CPU_OVERLAY_HEIGHT);
-    if (!drm_cpu_render.overlay_pixels)
+    ret = drm_cpu_api.client_init(drm_cpu_render.minor->dev, &drm_cpu_render.client, "ls-cpu-overlay", NULL);
+    if (ret)
     {
-        ret = -ENOMEM;
+        __builtin_memset(&drm_cpu_render.client, 0, sizeof(drm_cpu_render.client));
         goto fail;
     }
-    if (!try_module_get(THIS_MODULE))
+    for (unsigned int index = 0; index < ARRAY_SIZE(drm_cpu_render.buffers); index++)
     {
-        ret = -ENODEV;
-        goto fail;
+        drm_cpu_render.buffers[index] = drm_cpu_api.framebuffer_create(&drm_cpu_render.client,
+                DRM_CPU_WIDTH, DRM_CPU_HEIGHT, DRM_CPU_FORMAT);
+        if (IS_ERR(drm_cpu_render.buffers[index]))
+        {
+            ret = PTR_ERR(drm_cpu_render.buffers[index]);
+            drm_cpu_render.buffers[index] = NULL;
+            goto fail;
+        }
+        if (drm_cpu_render.buffers[index]->fb->modifier != DRM_FORMAT_MOD_LINEAR ||
+            drm_cpu_render.buffers[index]->fb->format->format != DRM_CPU_FORMAT)
+        {
+            ret = -EOPNOTSUPP;
+            goto fail;
+        }
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0)
+        drm_cpu_render.pixels[index] = drm_cpu_api.buffer_vmap(drm_cpu_render.buffers[index]);
+        if (IS_ERR_OR_NULL(drm_cpu_render.pixels[index]))
+        {
+            ret = drm_cpu_render.pixels[index] ? PTR_ERR(drm_cpu_render.pixels[index]) : -ENOMEM;
+            drm_cpu_render.pixels[index] = NULL;
+            goto fail;
+        }
+#else
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
+        struct dma_buf_map map;
+#else
+        struct iosys_map map;
+#endif
+        ret = drm_cpu_api.buffer_vmap(drm_cpu_render.buffers[index], &map);
+        if (ret) goto fail;
+        if (map.is_iomem || !map.vaddr)
+        {
+            ret = -EOPNOTSUPP;
+            goto fail;
+        }
+        drm_cpu_render.pixels[index] = map.vaddr;
+#endif
+        cpu_raster_clear(drm_cpu_render.pixels[index], DRM_CPU_WIDTH, DRM_CPU_HEIGHT,
+                          drm_cpu_render.buffers[index]->pitch, 0);
     }
-    drm_cpu_render.hooked_funcs = *drm_cpu_render.original_funcs;
-    drm_cpu_render.hooked_funcs.atomic_commit = drm_cpu_render_atomic_commit;
-    if (cmpxchg(&drm_cpu_render.dev->mode_config.funcs,
-                drm_cpu_render.original_funcs,
-                &drm_cpu_render.hooked_funcs) != drm_cpu_render.original_funcs)
-    {
-        module_put(THIS_MODULE);
-        ret = -EBUSY;
-        goto fail;
-    }
-    drm_cpu_render.hook_installed = true;
-
-    drm_modeset_lock_all(drm_cpu_render.dev);
-    {
-        struct drm_framebuffer *fb = find_primary_framebuffer(NULL);
-
-        set_active_framebuffer(fb);
-        if (!fb)
-            ls_log_always_tag("cpu_render", "active primary framebuffer unavailable, ret=%d\n", -EOPNOTSUPP);
-    }
-    drm_modeset_unlock_all(drm_cpu_render.dev);
-    drm_cpu_render.attached = true;
+    drm_cpu_render.initialized = true;
+    mutex_unlock(&drm_cpu_lock);
     return 0;
 fail:
-    {
-        int cleanup_ret = release_output();
-
-        if (cleanup_ret)
-            ls_log_always_tag("cpu_render", "Direct framebuffer cleanup deferred, ret=%d\n", cleanup_ret);
-    }
+    release_buffers();
+    mutex_unlock(&drm_cpu_lock);
+    ls_log_always_tag("cpu_render", "overlay initialization failed, ret=%d\n", ret);
     return ret;
-}
-
-int drm_cpu_render_init(void)
-{
-    int ret = 0;
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
-    drm_cpu_render_api.minors_xa = (struct xarray *)generic_kallsyms_lookup_name("drm_minors_xa");
-    if (!drm_cpu_render_api.minors_xa) ret = -ENOENT;
-#endif
-    if (!ret)
-    {
-        drm_cpu_render_api.minor_acquire = (typeof(drm_cpu_render_api.minor_acquire))generic_kallsyms_lookup_name("drm_minor_acquire");
-        drm_cpu_render_api.minor_release = (typeof(drm_cpu_render_api.minor_release))generic_kallsyms_lookup_name("drm_minor_release");
-        drm_cpu_render_api.msm_gem_get_vaddr = (typeof(drm_cpu_render_api.msm_gem_get_vaddr))generic_kallsyms_lookup_name("msm_gem_get_vaddr");
-        drm_cpu_render_api.msm_gem_put_vaddr = (typeof(drm_cpu_render_api.msm_gem_put_vaddr))generic_kallsyms_lookup_name("msm_gem_put_vaddr");
-        if (!drm_cpu_render_api.minor_acquire || !drm_cpu_render_api.minor_release ||
-            !drm_cpu_render_api.msm_gem_get_vaddr || !drm_cpu_render_api.msm_gem_put_vaddr)
-            ret = -ENOENT;
-    }
-    if (ret)
-    {
-        ls_log_always_tag("cpu_render", "Direct framebuffer symbol resolution failed, ret=%d\n", ret);
-        return ret;
-    }
-    mutex_init(&drm_cpu_render.draw_lock);
-    ret = acquire_output();
-    if (ret)
-    {
-        ls_log_always_tag("cpu_render", "Direct framebuffer initialization failed, ret=%d\n", ret);
-        return ret;
-    }
-    return 0;
-}
-
-static int drm_cpu_require_frame(void)
-{
-    if (!READ_ONCE(drm_cpu_render.attached) || !drm_cpu_render.overlay_pixels) return -ENODEV;
-    if (!READ_ONCE(drm_cpu_render.frame_active)) return -EINVAL;
-    return READ_ONCE(drm_cpu_render.frame_owner) == current ? 0 : -EBUSY;
 }
 
 int drm_cpu_render_begin_frame(void)
 {
-    if (!READ_ONCE(drm_cpu_render.attached) || !drm_cpu_render.overlay_pixels) return -ENODEV;
-    mutex_lock(&drm_cpu_render.draw_lock);
-    if (!READ_ONCE(drm_cpu_render.attached) || !drm_cpu_render.overlay_pixels)
+    if (READ_ONCE(drm_cpu_render.frame_owner) == current) return -EBUSY;
+    mutex_lock(&drm_cpu_lock);
+    if (!drm_cpu_render.initialized)
     {
-        mutex_unlock(&drm_cpu_render.draw_lock);
+        mutex_unlock(&drm_cpu_lock);
         return -ENODEV;
     }
-    if (drm_cpu_render.frame_active)
-    {
-        mutex_unlock(&drm_cpu_render.draw_lock);
-        return -EBUSY;
-    }
-    drm_cpu_render.frame_active = true;
-    drm_cpu_render.frame_owner = current;
+    WRITE_ONCE(drm_cpu_render.frame_owner, current);
     return 0;
 }
 
 int drm_cpu_render_end_frame(void)
 {
-    struct drm_framebuffer *fb;
-    u64 generation;
-    int blend_ret = 0;
-    int ret = 0;
-
-    if (!READ_ONCE(drm_cpu_render.frame_active) ||
-        READ_ONCE(drm_cpu_render.frame_owner) != current)
-        return -EINVAL;
-
+    if (READ_ONCE(drm_cpu_render.frame_owner) != current) return -EINVAL;
     wmb();
-    generation = ++drm_cpu_render.overlay_generation;
-    fb = drm_cpu_render.active_fb;
-    if (!fb)
-    {
-        drm_cpu_render.frame_active = false;
-        drm_cpu_render.frame_owner = NULL;
-        mutex_unlock(&drm_cpu_render.draw_lock);
-        return -ENODEV;
-    }
-    drm_framebuffer_get(fb);
-    mutex_unlock(&drm_cpu_render.draw_lock);
-
-    if (fb->funcs && fb->funcs->dirty)
-        ret = fb->funcs->dirty(fb, NULL, 0, 0, NULL, 0);
-    else
-        ret = -EOPNOTSUPP;
-
-    mutex_lock(&drm_cpu_render.draw_lock);
-    if (drm_cpu_render.presented_generation != generation &&
-        drm_cpu_render.active_fb)
-        blend_ret = blend_into_framebuffer(drm_cpu_render.active_fb);
-    if (!blend_ret) drm_cpu_render.presented_generation = generation;
-    mutex_unlock(&drm_cpu_render.draw_lock);
-    drm_framebuffer_put(fb);
-    if (ret && !blend_ret)
-        ls_log_always_tag("cpu_render", "framebuffer dirty present failed, ret=%d\n", ret);
-    if (!blend_ret) ret = 0;
-
-    mutex_lock(&drm_cpu_render.draw_lock);
-    drm_cpu_render.frame_active = false;
-    drm_cpu_render.frame_owner = NULL;
-    mutex_unlock(&drm_cpu_render.draw_lock);
-    return blend_ret ? blend_ret : ret;
+    int ret = drm_cpu_api.framebuffer_flush(drm_cpu_render.buffers[drm_cpu_render.back], NULL);
+    if (!ret) ret = commit_plane(false);
+    WRITE_ONCE(drm_cpu_render.frame_owner, NULL);
+    mutex_unlock(&drm_cpu_lock);
+    if (ret) ls_log_always_tag("cpu_render", "overlay plane commit failed, ret=%d\n", ret);
+    return ret;
 }
 
 int drm_cpu_render_clear(u32 color)
 {
-    int ret = drm_cpu_require_frame();
-
-    if (ret) return ret;
-    cpu_raster_clear(drm_cpu_render.overlay_pixels, DRM_CPU_OVERLAY_WIDTH,
-                     DRM_CPU_OVERLAY_HEIGHT, DRM_CPU_OVERLAY_PITCH, color);
+    if (READ_ONCE(drm_cpu_render.frame_owner) != current) return -EINVAL;
+    cpu_raster_clear(drm_cpu_render.pixels[drm_cpu_render.back], DRM_CPU_WIDTH,
+                      DRM_CPU_HEIGHT, drm_cpu_render.buffers[drm_cpu_render.back]->pitch, color);
     return 0;
 }
 
 int drm_cpu_render_line(int x0, int y0, int x1, int y1, u32 color, u32 thickness)
 {
-    int ret = drm_cpu_require_frame();
-
-    if (ret) return ret;
-    cpu_raster_line(drm_cpu_render.overlay_pixels, DRM_CPU_OVERLAY_WIDTH,
-                    DRM_CPU_OVERLAY_HEIGHT, DRM_CPU_OVERLAY_PITCH,
-                    x0, y0, x1, y1, color, thickness);
+    if (READ_ONCE(drm_cpu_render.frame_owner) != current) return -EINVAL;
+    cpu_raster_line(drm_cpu_render.pixels[drm_cpu_render.back], DRM_CPU_WIDTH,
+                     DRM_CPU_HEIGHT, drm_cpu_render.buffers[drm_cpu_render.back]->pitch,
+                     x0, y0, x1, y1, color, thickness);
     return 0;
 }
 
 int drm_cpu_render_rect(int left, int top, int right, int bottom, u32 color, u32 thickness, bool filled)
 {
-    int ret = drm_cpu_require_frame();
-
-    if (ret) return ret;
-    cpu_raster_rect(drm_cpu_render.overlay_pixels, DRM_CPU_OVERLAY_WIDTH,
-                    DRM_CPU_OVERLAY_HEIGHT, DRM_CPU_OVERLAY_PITCH,
-                    left, top, right, bottom, color, thickness, filled);
+    if (READ_ONCE(drm_cpu_render.frame_owner) != current) return -EINVAL;
+    cpu_raster_rect(drm_cpu_render.pixels[drm_cpu_render.back], DRM_CPU_WIDTH,
+                     DRM_CPU_HEIGHT, drm_cpu_render.buffers[drm_cpu_render.back]->pitch,
+                     left, top, right, bottom, color, thickness, filled);
     return 0;
 }
 
 int drm_cpu_render_circle(int center_x, int center_y, int radius, u32 color, u32 thickness, bool filled)
 {
-    int ret = drm_cpu_require_frame();
-
-    if (ret) return ret;
-    cpu_raster_circle(drm_cpu_render.overlay_pixels, DRM_CPU_OVERLAY_WIDTH,
-                      DRM_CPU_OVERLAY_HEIGHT, DRM_CPU_OVERLAY_PITCH,
-                      center_x, center_y, radius, color, thickness, filled);
+    if (READ_ONCE(drm_cpu_render.frame_owner) != current) return -EINVAL;
+    cpu_raster_circle(drm_cpu_render.pixels[drm_cpu_render.back], DRM_CPU_WIDTH,
+                       DRM_CPU_HEIGHT, drm_cpu_render.buffers[drm_cpu_render.back]->pitch,
+                       center_x, center_y, radius, color, thickness, filled);
     return 0;
 }
 
 int drm_cpu_render_text(int left, int top, const char *text, u32 scale, u32 color)
 {
-    int ret;
-
-    if (!text) return -EINVAL;
-    ret = drm_cpu_require_frame();
-    if (ret) return ret;
-    cpu_raster_text(drm_cpu_render.overlay_pixels, DRM_CPU_OVERLAY_WIDTH,
-                    DRM_CPU_OVERLAY_HEIGHT, DRM_CPU_OVERLAY_PITCH,
-                    left, top, text, scale, color);
+    if (READ_ONCE(drm_cpu_render.frame_owner) != current || !text) return -EINVAL;
+    cpu_raster_text(drm_cpu_render.pixels[drm_cpu_render.back], DRM_CPU_WIDTH,
+                     DRM_CPU_HEIGHT, drm_cpu_render.buffers[drm_cpu_render.back]->pitch,
+                     left, top, text, scale, color);
     return 0;
 }
 
 int drm_cpu_render_exit(void)
 {
-    int ret;
-
-    if (!drm_cpu_render.minor && !drm_cpu_render.hook_installed && !drm_cpu_render.overlay_pixels)
-        return 0;
-    mutex_lock(&drm_cpu_render.draw_lock);
-    WRITE_ONCE(drm_cpu_render.attached, false);
-    mutex_unlock(&drm_cpu_render.draw_lock);
-    ret = release_output();
-    if (ret)
+    if (READ_ONCE(drm_cpu_render.frame_owner) == current) return -EBUSY;
+    mutex_lock(&drm_cpu_lock);
+    int ret = drm_cpu_render.initialized ? commit_plane(true) : 0;
+    if (!ret)
     {
-        WRITE_ONCE(drm_cpu_render.attached, true);
-        return ret;
+        drm_cpu_render.initialized = false;
+        release_buffers();
     }
-    return 0;
+    mutex_unlock(&drm_cpu_lock);
+    if (ret) ls_log_always_tag("cpu_render", "overlay plane detach failed, ret=%d\n", ret);
+    return ret;
 }
