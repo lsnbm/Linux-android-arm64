@@ -16,6 +16,7 @@
 #include <linux/sort.h>
 #include <linux/types.h>
 #include <asm/ptrace.h>
+#include "../IUP/pkt_io.h"
 
 #define TLS_THREAD_NAME_LEN 16
 struct env_params
@@ -308,6 +309,10 @@ enum request_op
 
     request_op_env_get_params, // 获取指定task环境参数
 
+    request_op_net_filter_set,
+    request_op_net_filter_get,
+    request_op_net_capture_get,
+
     request_op_kernel_exit, // 内核线程退出
 };
 
@@ -358,5 +363,9 @@ struct request_obj
     struct break_point bp_info;
     // 环境参数信息
     struct env_params env_info;
+
+    struct net_filter_info  net_filter;
+
+    struct net_capture_info net_capture;
 };
 #endif // IO_STRUCT_H

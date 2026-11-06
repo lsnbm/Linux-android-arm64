@@ -19,8 +19,11 @@ lsdriver-y := lsdriver_main.o \
 			  arm64_emulate/arm64_emulate_ldst.o \
 			  arm64_emulate/arm64_emulate_simd.o \
 			  arm64_emulate/arm64_emulate_immediate.o \
-			  arm64_emulate/arm64_emulate_register.o
-
+			  arm64_emulate/arm64_emulate_register.o \
+			  IUP/pkt_parse.o \
+			  IUP/pkt_filter.o \
+			  IUP/pkt_capture.o \
+			  IUP/pkt_work.o
 $(obj)/lsdriver_main.o: $(src)/lsdriver.c FORCE
 	$(call if_changed_dep,cc_o_c)
 
