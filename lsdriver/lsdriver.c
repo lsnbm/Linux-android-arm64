@@ -36,7 +36,7 @@
 #include "virtual_memory_enum.h"
 #include "break_point.h"
 #include "network/ipv4_ping.h"
-#include "kernel_render/cpu/cpu_render.h"
+//#include "kernel_render/cpu/cpu_render.h"
 
 static struct request_obj *req = NULL;
 
@@ -52,38 +52,38 @@ struct task_struct *volatile connect_thread_task = 0;
 struct task_struct *volatile dispatch_thread_task = 0;
 struct task_struct *volatile ls_process_task = 0;
 
-static int CpuRenderTestThreadFunction(void *data)
-{
-    unsigned long deadline = jiffies + 5 * HZ;
-    bool frame_open;
-    int ret;
+// static int CpuRenderTestThreadFunction(void *data)
+// {
+//     unsigned long deadline = jiffies + 5 * HZ;
+//     bool frame_open;
+//     int ret;
 
-    (void)data;
-    while (!kthread_should_stop() && time_before(jiffies, deadline))
-    {
-        frame_open = false;
-        ret = cpu_render_begin_frame();
-        if (!ret) frame_open = true;
-        if (!ret) ret = cpu_render_clear(0xff101820U);
-        if (!ret) ret = cpu_render_text(224, 160, "LSDRIVER", 4, 0xffffffffU);
-        if (!ret) ret = cpu_render_rect(140, 220, 500, 420, 0xff00ff00U, 0, true);
-        if (frame_open)
-        {
-            int end_ret = cpu_render_end_frame();
+//     (void)data;
+//     while (!kthread_should_stop() && time_before(jiffies, deadline))
+//     {
+//         frame_open = false;
+//         ret = cpu_render_begin_frame();
+//         if (!ret) frame_open = true;
+//         if (!ret) ret = cpu_render_clear(0xff101820U);
+//         if (!ret) ret = cpu_render_text(224, 160, "LSDRIVER", 4, 0xffffffffU);
+//         if (!ret) ret = cpu_render_rect(140, 220, 500, 420, 0xff00ff00U, 0, true);
+//         if (frame_open)
+//         {
+//             int end_ret = cpu_render_end_frame();
 
-            frame_open = false;
-            if (!ret) ret = end_ret;
-        }
-        if (ret)
-        {
-            ls_log_always_tag("cpu_render", "测试绘制失败，错误码: %d\n", ret);
-            break;
-        }
+//             frame_open = false;
+//             if (!ret) ret = end_ret;
+//         }
+//         if (ret)
+//         {
+//             ls_log_always_tag("cpu_render", "测试绘制失败，错误码: %d\n", ret);
+//             break;
+//         }
 
-        usleep_range(8000, 8500);
-    }
-    return 0;
-}
+//         usleep_range(8000, 8500);
+//     }
+//     return 0;
+// }
 
 static int DispatchThreadFunction(void *data)
 {
@@ -596,7 +596,7 @@ static int taskstats_exit_hook_work(struct pt_regs *regs)
         ls_process_task = NULL;           // 标记用户进程已断开
         if (!connect_thread_task && !dispatch_thread_task)
         {
-            cpu_render_exit();
+            //cpu_render_exit();
             inline_hook_remove_all(); // 内核退出才清理所有hook
         }
     }
@@ -807,23 +807,24 @@ static int __init lsdriver_init(void)
         ls_log_always_tag("core", "注册 taskstats_exit 清理 hook 失败，错误码: %d\n", status);
         goto fail;
     }
-    //初始化cpu渲染相关资源
-    status = cpu_render_init();
-    if (status < 0)
-    {
-        ls_log_always_tag("core", "初始化 Qualcomm/MediaTek CPU 渲染统一抽象失败，错误码: %d\n", status);
-        status = 0; //失败无关紧要，继续运行
-    }
-    else
-    {
-        struct task_struct *render_task = kthread_run(CpuRenderTestThreadFunction, NULL, "ls-cpu-render");
-        if (IS_ERR(render_task))
-        {
-            status = PTR_ERR(render_task);
-            ls_log_always_tag("core", "创建 CPU 渲染测试线程失败，错误码: %d\n", status);
-            status = 0;
-        }
-    }
+    
+    // //初始化cpu渲染相关资源
+    // status = cpu_render_init();
+    // if (status < 0)
+    // {
+    //     ls_log_always_tag("core", "初始化 Qualcomm/MediaTek CPU 渲染统一抽象失败，错误码: %d\n", status);
+    //     status = 0; //失败无关紧要，继续运行
+    // }
+    // else
+    // {
+    //     struct task_struct *render_task = kthread_run(CpuRenderTestThreadFunction, NULL, "ls-cpu-render");
+    //     if (IS_ERR(render_task))
+    //     {
+    //         status = PTR_ERR(render_task);
+    //         ls_log_always_tag("core", "创建 CPU 渲染测试线程失败，错误码: %d\n", status);
+    //         status = 0;
+    //     }
+    // }
 
     /*
     隐藏内核模块本身必须放在所有初始化完成后运行。
@@ -846,7 +847,7 @@ fail:
     if (dispatch_thread_task) hide_task_remove(dispatch_thread_task->pid);
     connect_thread_task = NULL;
     dispatch_thread_task = NULL;
-    cpu_render_exit();
+    //cpu_render_exit();
     inline_hook_remove_all(); //这个作用也不大,模块初始化失败内核会直接回收ko所有内存(.text回收)，这里就算hook卸载了，但是控制流在中途的hook work代码段被回收了要panic
     free_physical_page_info();
     return status;
