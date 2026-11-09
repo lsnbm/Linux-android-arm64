@@ -14,15 +14,6 @@
 
 struct RoundResult
 {
-    bool largeBlock;
-    int operationCount;
-    int protocolOperationCount;
-
-    // Null IO
-    double nullIoTotalMs;
-    double nullIoAvgNs;
-    double nullIoThroughputK; // K ops/s
-
     // Read
     double readTotalMs;
     double readAvgNs;
@@ -79,11 +70,6 @@ inline int RunReadWriteTest()
         }
     };
 
-    auto resetTestArray = [&](const std::vector<int> &values)
-    {
-        for (size_t i = 0; i < ARRAY_CAPACITY; ++i) testArray[i] = values[i];
-    };
-
     double nullIoBaselineTotalMs;
     double nullIoBaselineAvgNs;
     double nullIoBaselineThroughputK;
@@ -109,21 +95,11 @@ inline int RunReadWriteTest()
     {
         RoundResult &r = results[round];
         const bool largeBlock = round >= SMALL_ROUND_COUNT;
-        const int operationCount = TEST_COUNT;
-        const int protocolOperationCount = largeBlock ? LARGE_CHUNK_COUNT : TEST_COUNT;
-        r.largeBlock = largeBlock;
-        r.operationCount = operationCount;
-        r.protocolOperationCount = protocolOperationCount;
-
         LS_LOGI_TAG_FMT("ReadWrite", "第 {:>2}/{} 轮测试 [{}]", round + 1, ROUND_COUNT, largeBlock ? "大块" : "小块");
-
-        r.nullIoTotalMs = nullIoBaselineTotalMs;
-        r.nullIoAvgNs = nullIoBaselineAvgNs;
-        r.nullIoThroughputK = nullIoBaselineThroughputK;
 
         {
             fillRandomValues(randomValues);
-            resetTestArray(randomValues);
+            std::ranges::copy(randomValues, testArray.begin());
             r.readFailCount = 0;
             size_t readTransferred = 0;
 
@@ -136,8 +112,7 @@ inline int RunReadWriteTest()
             }
             else for (int i = 0; i < TEST_COUNT; ++i)
             {
-                uint64_t currentAddr = testAddr + static_cast<uint64_t>(i * sizeof(int));
-                readBytes = dr->Read(currentAddr, &readValues[static_cast<size_t>(i)], sizeof(int));
+                readBytes = dr->Read(testAddr + static_cast<uint64_t>(i * sizeof(int)), &readValues[static_cast<size_t>(i)], sizeof(int));
                 if (readBytes > 0) readTransferred += static_cast<size_t>(readBytes);
                 transferFailed[static_cast<size_t>(i)] = readBytes != static_cast<int>(sizeof(int));
             }
@@ -152,13 +127,13 @@ inline int RunReadWriteTest()
 
             double totalS = ns / 1e9;
             r.readTotalMs = ns / 1e6;
-            r.readAvgNs = static_cast<double>(ns) / operationCount;
-            r.readThroughputK = (operationCount / totalS) / 1000.0;
+            r.readAvgNs = static_cast<double>(ns) / TEST_COUNT;
+            r.readThroughputK = (TEST_COUNT / totalS) / 1000.0;
             r.readBandwidthMB = static_cast<double>(readTransferred) / totalS / (1024.0 * 1024.0);
         }
 
         {
-            resetTestArray(randomValues);
+            std::ranges::copy(randomValues, testArray.begin());
             fillRandomValues(writeValues);
             r.writeFailCount = 0;
             size_t writeTransferred = 0;
@@ -172,8 +147,7 @@ inline int RunReadWriteTest()
             }
             else for (int i = 0; i < TEST_COUNT; ++i)
             {
-                uint64_t currentAddr = testAddr + static_cast<uint64_t>(i * sizeof(int));
-                writeBytes = dr->Write(currentAddr, &writeValues[static_cast<size_t>(i)], sizeof(int));
+                writeBytes = dr->Write(testAddr + static_cast<uint64_t>(i * sizeof(int)), &writeValues[static_cast<size_t>(i)], sizeof(int));
                 if (writeBytes > 0) writeTransferred += static_cast<size_t>(writeBytes);
                 transferFailed[static_cast<size_t>(i)] = writeBytes != static_cast<int>(sizeof(int));
             }
@@ -188,8 +162,8 @@ inline int RunReadWriteTest()
 
             double totalS = ns / 1e9;
             r.writeTotalMs = ns / 1e6;
-            r.writeAvgNs = static_cast<double>(ns) / operationCount;
-            r.writeThroughputK = (operationCount / totalS) / 1000.0;
+            r.writeAvgNs = static_cast<double>(ns) / TEST_COUNT;
+            r.writeThroughputK = (TEST_COUNT / totalS) / 1000.0;
             r.writeBandwidthMB = static_cast<double>(writeTransferred) / totalS / (1024.0 * 1024.0);
         }
 
@@ -198,10 +172,8 @@ inline int RunReadWriteTest()
         r.readOverheadPct = (readIoMs / r.readTotalMs) * 100.0;
         r.writeOverheadPct = (writeIoMs / r.writeTotalMs) * 100.0;
 
-        const double readTotalNs = r.readTotalMs * 1e6;
-        const double writeTotalNs = r.writeTotalMs * 1e6;
-        LS_LOGI_TAG_FMT("ReadWrite", "读取: 总 {:>14.2f}ns，平均 {:>10.3f}ns/int（{} 个 int）吞吐 {:>8.2f}K int/s 带宽 {:>6.2f}MB/s IO耗时 {:>12.2f}ns 占用 {:>7.2f}% 随机校验失败 {}", readTotalNs, r.readAvgNs, operationCount, r.readThroughputK, r.readBandwidthMB, readIoMs * 1e6, r.readOverheadPct, r.readFailCount);
-        LS_LOGI_TAG_FMT("ReadWrite", "写入: 总 {:>14.2f}ns，平均 {:>10.3f}ns/int（{} 个 int）吞吐 {:>8.2f}K int/s 带宽 {:>6.2f}MB/s IO耗时 {:>12.2f}ns 占用 {:>7.2f}% 随机校验失败 {}", writeTotalNs, r.writeAvgNs, operationCount, r.writeThroughputK, r.writeBandwidthMB, writeIoMs * 1e6, r.writeOverheadPct, r.writeFailCount);
+        LS_LOGI_TAG_FMT("ReadWrite", "读取: 总 {:>14.2f}ns，平均 {:>10.3f}ns/int（{} 个 int）吞吐 {:>8.2f}K int/s 带宽 {:>6.2f}MB/s IO耗时 {:>12.2f}ns 占用 {:>7.2f}% 随机校验失败 {}", r.readTotalMs * 1e6, r.readAvgNs, TEST_COUNT, r.readThroughputK, r.readBandwidthMB, readIoMs * 1e6, r.readOverheadPct, r.readFailCount);
+        LS_LOGI_TAG_FMT("ReadWrite", "写入: 总 {:>14.2f}ns，平均 {:>10.3f}ns/int（{} 个 int）吞吐 {:>8.2f}K int/s 带宽 {:>6.2f}MB/s IO耗时 {:>12.2f}ns 占用 {:>7.2f}% 随机校验失败 {}", r.writeTotalMs * 1e6, r.writeAvgNs, TEST_COUNT, r.writeThroughputK, r.writeBandwidthMB, writeIoMs * 1e6, r.writeOverheadPct, r.writeFailCount);
     }
 
     int totalReadFail = 0;

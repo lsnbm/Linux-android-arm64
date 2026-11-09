@@ -1,17 +1,52 @@
 #pragma once
-#include "../base/memory_utils.h"
+#include "../base/config.h"
+#include "../base/scan_value.h"
 #include <atomic>
+#include <cstdio>
+#include <cstring>
 #include <mutex>
 #include <numeric>
 #include <optional>
 #include <shared_mutex>
+#include <span>
+#include <unistd.h>
+#include <vector>
 
-class MemScanner
+template <typename MemoryReader> class MemScanner
 {
 public:
     using Results = std::vector<uintptr_t>;
 
 private:
+    MemoryReader &memory_;
+    size_t alignment_ = 1;
+
+    template <typename T> struct ValueWindow
+    {
+        std::vector<uint8_t> combined;
+        std::array<uint8_t, sizeof(T) - 1> tail{};
+        size_t tailSize = 0;
+        uintptr_t previousEnd = 0;
+
+        template <typename Process> void process(uintptr_t address, const uint8_t *buffer, size_t size, size_t alignment, Process &&processValue)
+        {
+            if (address != previousEnd) tailSize = 0;
+            combined.resize(tailSize + size);
+            if (tailSize != 0) std::memcpy(combined.data(), tail.data(), tailSize);
+            std::memcpy(combined.data() + tailSize, buffer, size);
+            const uintptr_t base = address - tailSize;
+            for (size_t offset = (alignment - base % alignment) % alignment; offset + sizeof(T) <= combined.size(); offset += alignment)
+            {
+                T value{};
+                std::memcpy(&value, combined.data() + offset, sizeof(T));
+                processValue(base + offset, value);
+            }
+            tailSize = std::min(sizeof(T) - 1, combined.size());
+            if (tailSize != 0) std::memcpy(tail.data(), combined.data() + combined.size() - tailSize, tailSize);
+            previousEnd = address + size;
+        }
+    };
+
     struct CandidateRecord
     {
         uintptr_t address;
@@ -86,44 +121,18 @@ private:
         return pread(fileno(file), buffer, size, static_cast<off_t>(offset)) == static_cast<ssize_t>(size);
     }
 
-    static std::vector<std::pair<uintptr_t, uintptr_t>> normalizeScanRegions(std::vector<std::pair<uintptr_t, uintptr_t>> regions, size_t alignment)
+    static std::vector<std::pair<uintptr_t, uintptr_t>> normalizeScanRegions(std::vector<std::pair<uintptr_t, uintptr_t>> regions)
     {
-        std::vector<std::pair<uintptr_t, uintptr_t>> normalized;
-        normalized.reserve(regions.size());
-        for (auto [start, end] : regions)
-        {
-            if (end <= start) continue;
-            const uintptr_t remainder = start % alignment;
-            if (remainder != 0)
-            {
-                const uintptr_t adjustment = alignment - remainder;
-                if (start > std::numeric_limits<uintptr_t>::max() - adjustment) continue;
-                start += adjustment;
-            }
-            end -= end % alignment;
-            if (start < end && end - start >= alignment) normalized.emplace_back(start, end);
-        }
-
-        std::sort(normalized.begin(), normalized.end());
+        std::erase_if(regions, [](const auto &region) { return region.second <= region.first; });
+        std::sort(regions.begin(), regions.end());
         size_t write = 0;
-        for (const auto &[start, end] : normalized)
-        {
-            if (write == 0 || start > normalized[write - 1].second) normalized[write++] = {start, end};
-            else normalized[write - 1].second = std::max(normalized[write - 1].second, end);
-        }
-        normalized.resize(write);
-        return normalized;
-    }
-
-    static size_t regionBytes(const std::vector<std::pair<uintptr_t, uintptr_t>> &regions)
-    {
-        size_t total = 0;
         for (const auto &[start, end] : regions)
         {
-            const size_t bytes = static_cast<size_t>(end - start);
-            total = bytes > std::numeric_limits<size_t>::max() - total ? std::numeric_limits<size_t>::max() : total + bytes;
+            if (write == 0 || start > regions[write - 1].second) regions[write++] = {start, end};
+            else regions[write - 1].second = std::max(regions[write - 1].second, end);
         }
-        return total;
+        regions.resize(write);
+        return regions;
     }
 
     void updateByteProgress(size_t completed, size_t total)
@@ -147,7 +156,7 @@ private:
         return value;
     }
 
-    static bool scanReadExact(uintptr_t addr, void *buffer, size_t size)
+    bool scanReadExact(uintptr_t addr, void *buffer, size_t size)
     {
         auto *bytes = static_cast<uint8_t *>(buffer);
         size_t done = 0;
@@ -155,7 +164,7 @@ private:
         {
             const size_t pageOffset = static_cast<size_t>((addr + done) % Config::Constants::SCAN_BUFFER);
             const size_t request = std::min(size - done, Config::Constants::SCAN_BUFFER - pageOffset);
-            if (dr->Read(addr + done, bytes + done, request) != static_cast<int>(request)) return false;
+            if (memory_.Read(addr + done, bytes + done, request) != static_cast<int>(request)) return false;
             done += request;
         }
         return true;
@@ -183,21 +192,14 @@ private:
         scanMode_ = mode;
     }
 
-    void publishSnapshot(FilePtr snapshot, std::vector<SnapshotSpan> spans, size_t count)
-    {
-        std::unique_lock lock(mutex_);
-        candidates_.reset();
-        snapshot_ = std::move(snapshot);
-        snapshotSpans_ = std::move(spans);
-        candidateCount_ = 0;
-        snapshotCount_ = count;
-        liveCount_ = count;
-        scanMode_ = Types::FuzzyMode::Unknown;
-    }
-
     template <typename Process> void scanMemoryRegions(const std::vector<std::pair<uintptr_t, uintptr_t>> &regions, Process &&process)
     {
-        const size_t totalBytes = regionBytes(regions);
+        size_t totalBytes = 0;
+        for (const auto &[start, end] : regions)
+        {
+            const size_t bytes = static_cast<size_t>(end - start);
+            totalBytes = bytes > std::numeric_limits<size_t>::max() - totalBytes ? std::numeric_limits<size_t>::max() : totalBytes + bytes;
+        }
         size_t completedBytes = 0;
         std::vector<uint8_t> batch(Config::Constants::BATCH_SIZE);
         std::vector<uint8_t> page(Config::Constants::SCAN_BUFFER);
@@ -207,7 +209,7 @@ private:
             for (uintptr_t address = start; address < end && Config::g_Running;)
             {
                 const size_t request = std::min(static_cast<size_t>(end - address), batch.size());
-                if (dr->Read(address, batch.data(), request) == static_cast<int>(request))
+                if (memory_.Read(address, batch.data(), request) == static_cast<int>(request))
                 {
                     process(address, batch.data(), request);
                 }
@@ -247,88 +249,82 @@ private:
 
     template <typename T> void scanFirstUnknown()
     {
-        auto regions = normalizeScanRegions(dr->GetScanRegions(), sizeof(T));
+        auto regions = normalizeScanRegions(memory_.GetScanRegions(true));
         auto snapshot = createCandidateFile();
         std::vector<SnapshotSpan> spans;
         std::uint64_t fileOffset = 0;
         size_t count = 0;
+        ValueWindow<T> window;
 
         scanMemoryRegions(regions,
                           [&](uintptr_t address, const uint8_t *buffer, size_t size)
                           {
-                              const size_t usable = size / sizeof(T) * sizeof(T);
-                              if (usable == 0) return;
-                              if (fwrite(buffer, 1, usable, snapshot.get()) != usable) throw std::runtime_error("写入 Unknown 快照失败");
+                              if (fwrite(buffer, 1, size, snapshot.get()) != size) throw std::runtime_error("写入 Unknown 快照失败");
                               if (!spans.empty() && spans.back().address + spans.back().size == address && spans.back().fileOffset + spans.back().size == fileOffset)
-                                  spans.back().size += usable;
+                                  spans.back().size += size;
                               else
-                                  spans.push_back({address, fileOffset, usable});
-                              fileOffset += usable;
-                              if constexpr (!std::is_floating_point_v<T>)
-                              {
-                                  count += usable / sizeof(T);
-                              }
-                              else
-                              {
-                                  for (size_t offset = 0; offset + sizeof(T) <= usable; offset += sizeof(T))
-                                  {
-                                      T value{};
-                                      std::memcpy(&value, buffer + offset, sizeof(value));
-                                      if (MemUtils::IsValidFloat(value)) ++count;
-                                  }
-                              }
+                                  spans.push_back({address, fileOffset, size});
+                              fileOffset += size;
+                              window.process(address, buffer, size, alignment_, [&](uintptr_t, T value) { if (MemUtils::IsValidFloat(value)) ++count; });
                               liveCount_ = count;
                           });
 
         finishFile(snapshot.get());
-        publishSnapshot(std::move(snapshot), std::move(spans), count);
+        std::unique_lock lock(mutex_);
+        candidates_.reset();
+        snapshot_ = std::move(snapshot);
+        snapshotSpans_ = std::move(spans);
+        candidateCount_ = 0;
+        snapshotCount_ = count;
+        liveCount_ = count;
+        scanMode_ = Types::FuzzyMode::Unknown;
     }
 
-    template <typename T> void scanFirst(T target, Types::FuzzyMode mode, T rangeMax)
+    template <typename T> void scanFirst(T target, Types::FuzzyMode mode, T rangeMax, MemUtils::FloatScanRange floatRange)
     {
-        auto regions = normalizeScanRegions(dr->GetScanRegions(), sizeof(T));
+        auto regions = normalizeScanRegions(memory_.GetScanRegions(true));
         auto output = createCandidateFile();
         std::vector<CandidateRecord> outputBuffer;
         outputBuffer.reserve(4096);
         size_t count = 0;
+        ValueWindow<T> window;
 
         scanMemoryRegions(regions,
                           [&](uintptr_t address, const uint8_t *buffer, size_t size)
                           {
-                              for (size_t offset = 0; offset + sizeof(T) <= size; offset += sizeof(T))
-                              {
-                                  T value{};
-                                  std::memcpy(&value, buffer + offset, sizeof(value));
-                                  if (!MemUtils::Compare(value, target, mode, T{}, rangeMax)) continue;
-                                  appendCandidate(output.get(), outputBuffer, {address + offset, storeValue(value)});
-                                  liveCount_ = ++count;
-                              }
+                              window.process(address, buffer, size, alignment_,
+                                             [&](uintptr_t valueAddress, T value)
+                                             {
+                                                 if (!MemUtils::Compare(value, target, mode, T{}, rangeMax, floatRange)) return;
+                                                 appendCandidate(output.get(), outputBuffer, {valueAddress, storeValue(value)});
+                                                 liveCount_ = ++count;
+                                             });
                           });
 
         finishCandidates(output.get(), outputBuffer);
         publishCandidates(std::move(output), count, mode);
     }
 
-    template <typename T> void scanSnapshot(T target, Types::FuzzyMode mode, T rangeMax)
+    template <typename T> void scanSnapshot(T target, Types::FuzzyMode mode, T rangeMax, MemUtils::FloatScanRange floatRange)
     {
         auto output = createCandidateFile();
         std::vector<CandidateRecord> outputBuffer;
         outputBuffer.reserve(4096);
-        std::vector<uint8_t> oldValues(Config::Constants::BATCH_SIZE);
-        std::vector<uint8_t> currentValues(Config::Constants::BATCH_SIZE);
+        std::vector<uint8_t> oldValues(Config::Constants::BATCH_SIZE + sizeof(T) - 1);
+        std::vector<uint8_t> currentValues(oldValues.size());
         const size_t totalBytes = std::accumulate(snapshotSpans_.begin(), snapshotSpans_.end(), size_t{}, [](size_t total, const SnapshotSpan &span) { return total + span.size; });
         size_t completedBytes = 0;
         size_t count = 0;
 
-        auto compareBlock = [&](uintptr_t address, const uint8_t *oldBuffer, const uint8_t *currentBuffer, size_t size)
+        auto compareBlock = [&](uintptr_t address, const uint8_t *oldBuffer, const uint8_t *currentBuffer, size_t size, size_t advance)
         {
-            for (size_t offset = 0; offset + sizeof(T) <= size; offset += sizeof(T))
+            for (size_t offset = (alignment_ - address % alignment_) % alignment_; offset < advance && offset + sizeof(T) <= size; offset += alignment_)
             {
                 T oldValue{};
                 T currentValue{};
                 std::memcpy(&oldValue, oldBuffer + offset, sizeof(oldValue));
                 std::memcpy(&currentValue, currentBuffer + offset, sizeof(currentValue));
-                if (!MemUtils::Compare(currentValue, target, mode, oldValue, rangeMax)) continue;
+                if (!MemUtils::Compare(currentValue, target, mode, oldValue, rangeMax, floatRange)) continue;
                 appendCandidate(output.get(), outputBuffer, {address + offset, storeValue(currentValue)});
                 liveCount_ = ++count;
             }
@@ -339,25 +335,30 @@ private:
         {
             for (size_t offset = 0; offset < span.size && Config::g_Running;)
             {
+                const size_t advance = std::min(span.size - offset, Config::Constants::BATCH_SIZE);
                 const size_t request = std::min(span.size - offset, oldValues.size());
                 if (!readExactAt(snapshot_.get(), oldValues.data(), request, span.fileOffset + offset)) throw std::runtime_error("读取 Unknown 快照失败");
                 const uintptr_t address = span.address + offset;
-                if (dr->Read(address, currentValues.data(), request) == static_cast<int>(request))
+                if (memory_.Read(address, currentValues.data(), request) == static_cast<int>(request))
                 {
-                    compareBlock(address, oldValues.data(), currentValues.data(), request);
+                    compareBlock(address, oldValues.data(), currentValues.data(), request, advance);
                 }
                 else
                 {
-                    for (size_t pageOffset = 0; pageOffset < request;)
+                    for (size_t pageOffset = 0; pageOffset < advance;)
                     {
                         const size_t inPage = static_cast<size_t>((address + pageOffset) % Config::Constants::SCAN_BUFFER);
-                        const size_t chunk = std::min(request - pageOffset, Config::Constants::SCAN_BUFFER - inPage);
-                        if (scanReadExact(address + pageOffset, currentValues.data() + pageOffset, chunk)) compareBlock(address + pageOffset, oldValues.data() + pageOffset, currentValues.data() + pageOffset, chunk);
+                        const size_t chunk = std::min(advance - pageOffset, Config::Constants::SCAN_BUFFER - inPage);
+                        const size_t withOverlap = std::min(request - pageOffset, chunk + sizeof(T) - 1);
+                        if (scanReadExact(address + pageOffset, currentValues.data() + pageOffset, withOverlap))
+                            compareBlock(address + pageOffset, oldValues.data() + pageOffset, currentValues.data() + pageOffset, withOverlap, chunk);
+                        else if (withOverlap != chunk && scanReadExact(address + pageOffset, currentValues.data() + pageOffset, chunk))
+                            compareBlock(address + pageOffset, oldValues.data() + pageOffset, currentValues.data() + pageOffset, chunk, chunk);
                         pageOffset += chunk;
                     }
                 }
-                offset += request;
-                completedBytes += request;
+                offset += advance;
+                completedBytes += advance;
                 updateByteProgress(completedBytes, totalBytes);
             }
         }
@@ -366,7 +367,7 @@ private:
         publishCandidates(std::move(output), count, mode);
     }
 
-    template <typename T> void scanCandidates(T target, Types::FuzzyMode mode, T rangeMax)
+    template <typename T> void scanCandidates(T target, Types::FuzzyMode mode, T rangeMax, MemUtils::FloatScanRange floatRange)
     {
         auto output = createCandidateFile();
         std::vector<CandidateRecord> outputBuffer;
@@ -385,7 +386,7 @@ private:
                 T value{};
                 const size_t offset = static_cast<size_t>(record.address - pageBase);
                 const bool readable = offset + sizeof(T) <= page.size() && pageReadable ? (std::memcpy(&value, page.data() + offset, sizeof(value)), true) : scanReadExact(record.address, &value, sizeof(value));
-                if (readable && MemUtils::Compare(value, target, mode, loadValue<T>(record.value), rangeMax))
+                if (readable && MemUtils::Compare(value, target, mode, loadValue<T>(record.value), rangeMax, floatRange))
                 {
                     appendCandidate(output.get(), outputBuffer, {record.address, storeValue(value)});
                     liveCount_ = ++count;
@@ -417,7 +418,7 @@ private:
     void scanFirstString(const std::string &needle)
     {
         if (needle.empty()) return;
-        auto regions = normalizeScanRegions(dr->GetScanRegions(), 1);
+        auto regions = normalizeScanRegions(memory_.GetScanRegions(true));
         auto output = createCandidateFile();
         std::vector<CandidateRecord> outputBuffer;
         outputBuffer.reserve(4096);
@@ -457,15 +458,17 @@ private:
 
     template <typename T> void appendSnapshotPage(size_t start, size_t count, Results &results) const
     {
-        std::vector<uint8_t> buffer(Config::Constants::BATCH_SIZE);
+        std::vector<uint8_t> buffer(Config::Constants::BATCH_SIZE + sizeof(T) - 1);
         size_t skipped = 0;
         for (const auto &span : snapshotSpans_)
         {
             for (size_t spanOffset = 0; spanOffset < span.size && results.size() < count;)
             {
+                const size_t advance = std::min(span.size - spanOffset, Config::Constants::BATCH_SIZE);
                 const size_t request = std::min(span.size - spanOffset, buffer.size());
                 if (!readExactAt(snapshot_.get(), buffer.data(), request, span.fileOffset + spanOffset)) return;
-                for (size_t offset = 0; offset + sizeof(T) <= request && results.size() < count; offset += sizeof(T))
+                const uintptr_t address = span.address + spanOffset;
+                for (size_t offset = (alignment_ - address % alignment_) % alignment_; offset < advance && offset + sizeof(T) <= request && results.size() < count; offset += alignment_)
                 {
                     if constexpr (std::is_floating_point_v<T>)
                     {
@@ -476,7 +479,7 @@ private:
                     if (skipped++ < start) continue;
                     results.push_back(span.address + spanOffset + offset);
                 }
-                spanOffset += request;
+                spanOffset += advance;
             }
             if (results.size() >= count) break;
         }
@@ -575,33 +578,6 @@ private:
         }
     }
 
-    template <typename T> void runScan(T target, Types::FuzzyMode mode, bool isFirst, T rangeMax)
-    {
-        run(
-            [&]
-            {
-                if (isFirst)
-                {
-                    if (mode == Types::FuzzyMode::Unknown) scanFirstUnknown<T>();
-                    else scanFirst<T>(target, mode, rangeMax);
-                }
-                else if (snapshot_)
-                {
-                    scanSnapshot(target, mode, rangeMax);
-                }
-                else
-                {
-                    scanCandidates(target, mode, rangeMax);
-                }
-            },
-            "扫描");
-    }
-
-    void runStringScan(const std::string &needle, bool isFirst)
-    {
-        run([&] { isFirst ? scanFirstString(needle) : scanNextString(needle); }, "字符串扫描");
-    }
-
 public:
     struct State
     {
@@ -611,6 +587,7 @@ public:
         std::optional<Types::DataType> dataType;
         Types::FuzzyMode mode;
         bool stringScan;
+        size_t alignment;
     };
 
     struct PageState
@@ -619,7 +596,7 @@ public:
         Results results;
     };
 
-    MemScanner() = default;
+    explicit MemScanner(MemoryReader &memory) : memory_(memory) {}
     ~MemScanner() = default;
     MemScanner(const MemScanner &) = delete;
     MemScanner &operator=(const MemScanner &) = delete;
@@ -638,7 +615,7 @@ public:
     State state() const
     {
         std::shared_lock lock(mutex_);
-        return {scanning_.load(), progress_.load(), liveCount_.load(), dataType_, scanMode_, stringScan_};
+        return {scanning_.load(), progress_.load(), liveCount_.load(), dataType_, scanMode_, stringScan_, alignment_};
     }
 
     PageState pageState(size_t start, size_t cnt) const
@@ -646,13 +623,13 @@ public:
         if (scanning_)
         {
             std::shared_lock lock(mutex_);
-            return {{true, progress_.load(), liveCount_.load(), dataType_, scanMode_, stringScan_}, {}};
+            return {{true, progress_.load(), liveCount_.load(), dataType_, scanMode_, stringScan_, alignment_}, {}};
         }
 
         std::lock_guard operationLock(operationMutex_);
         std::shared_lock lock(mutex_);
 
-        PageState snapshot{{scanning_.load(), progress_.load(), liveCount_.load(), dataType_, scanMode_, stringScan_}, {}};
+        PageState snapshot{{scanning_.load(), progress_.load(), liveCount_.load(), dataType_, scanMode_, stringScan_, alignment_}, {}};
         if (snapshot.state.scanning || snapshot.state.count == 0) return snapshot;
         appendResultPage(start, cnt, snapshot.results);
         return snapshot;
@@ -705,10 +682,21 @@ public:
         dataType_.reset();
         scanMode_ = Types::FuzzyMode::Unknown;
         stringScan_ = false;
+        alignment_ = 1;
     }
 
-    template <typename T> bool startAsync(pid_t pid, T target, Types::DataType dataType, Types::FuzzyMode mode, bool isFirst, T rangeMax = T{})
+    template <typename T> bool startAsync(pid_t pid, T target, Types::DataType dataType, Types::FuzzyMode mode, bool isFirst, T rangeMax = T{}, std::string_view valueText = {}, MemUtils::FloatRounding rounding = MemUtils::FloatRounding::Rounded, size_t alignment = 0)
     {
+        MemUtils::FloatScanRange floatRange;
+        if constexpr (std::is_floating_point_v<T>)
+        {
+            if (mode == Types::FuzzyMode::Equal && !valueText.empty())
+            {
+                const auto parsedRange = MemUtils::ParseFloatScanRange<T>(valueText, rounding);
+                if (!parsedRange) return false;
+                floatRange = *parsedRange;
+            }
+        }
         std::lock_guard targetLock(Config::TargetMutex);
         std::unique_lock lock(mutex_);
         if (scanning_.exchange(true)) return false;
@@ -721,14 +709,14 @@ public:
         else if constexpr (std::is_same_v<T, float>) actualType = Types::DataType::Float;
         else actualType = Types::DataType::Double;
 
-        bool accepted = pid > 0 && pid == dr->GetGlobalPid() && dataType == actualType && mode != Types::FuzzyMode::String && (mode != Types::FuzzyMode::Pointer || dataType == Types::DataType::I64);
+        bool accepted = pid > 0 && pid == memory_.GetGlobalPid() && dataType == actualType && mode != Types::FuzzyMode::String && (mode != Types::FuzzyMode::Pointer || dataType == Types::DataType::I64);
         if (isFirst)
         {
-            accepted = accepted && !(mode >= Types::FuzzyMode::Increased && mode <= Types::FuzzyMode::Unchanged);
+            accepted = accepted && (alignment == 0 || alignment == 1 || alignment == 2 || alignment == 4 || alignment == 8) && !(mode >= Types::FuzzyMode::Increased && mode <= Types::FuzzyMode::Unchanged);
         }
         else
         {
-            accepted = accepted && dataType_.has_value() && *dataType_ == dataType && !stringScan_ && mode != Types::FuzzyMode::Unknown && (candidates_ || snapshot_);
+            accepted = accepted && dataType_.has_value() && *dataType_ == dataType && !stringScan_ && mode != Types::FuzzyMode::Unknown && (alignment == 0 || alignment == alignment_) && (candidates_ || snapshot_);
         }
         if (!accepted)
         {
@@ -739,6 +727,7 @@ public:
         if (isFirst)
         {
             clearStorage();
+            alignment_ = alignment == 0 ? std::min(sizeof(T), size_t{4}) : alignment;
         }
         dataType_ = dataType;
         scanMode_ = mode;
@@ -749,7 +738,16 @@ public:
         lock.unlock();
         try
         {
-            Config::IoThreadPool().detach_task([this, target, mode, isFirst, rangeMax] { runScan(target, mode, isFirst, rangeMax); });
+            Config::IoThreadPool().detach_task([this, target, mode, isFirst, rangeMax, floatRange]
+            {
+                run([&]
+                {
+                    if (isFirst && mode == Types::FuzzyMode::Unknown) scanFirstUnknown<T>();
+                    else if (isFirst) scanFirst<T>(target, mode, rangeMax, floatRange);
+                    else if (snapshot_) scanSnapshot(target, mode, rangeMax, floatRange);
+                    else scanCandidates(target, mode, rangeMax, floatRange);
+                }, "扫描");
+            });
         }
         catch (...)
         {
@@ -762,12 +760,11 @@ public:
     bool startStringAsync(pid_t pid, std::string needle, bool isFirst)
     {
         std::lock_guard targetLock(Config::TargetMutex);
-        if (pid <= 0 || pid != dr->GetGlobalPid() || needle.empty() || needle.size() > Config::Constants::SCAN_BUFFER) return false;
+        if (pid <= 0 || pid != memory_.GetGlobalPid() || needle.empty() || needle.size() > Config::Constants::SCAN_BUFFER) return false;
         std::unique_lock lock(mutex_);
         if (scanning_.exchange(true)) return false;
 
-        bool accepted = isFirst || (stringScan_ && candidates_);
-        if (!accepted)
+        if (!isFirst && (!stringScan_ || !candidates_))
         {
             scanning_ = false;
             return false;
@@ -780,13 +777,17 @@ public:
         dataType_.reset();
         scanMode_ = Types::FuzzyMode::String;
         stringScan_ = true;
+        alignment_ = 1;
         liveCount_ = 0;
 
         progress_ = 0.0f;
         lock.unlock();
         try
         {
-            Config::IoThreadPool().detach_task([this, needle = std::move(needle), isFirst] { runStringScan(needle, isFirst); });
+            Config::IoThreadPool().detach_task([this, needle = std::move(needle), isFirst]
+            {
+                run([&] { isFirst ? scanFirstString(needle) : scanNextString(needle); }, "字符串扫描");
+            });
         }
         catch (...)
         {

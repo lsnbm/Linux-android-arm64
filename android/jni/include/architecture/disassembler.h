@@ -23,6 +23,10 @@ namespace Disasm
 
     class Disassembler
     {
+    private:
+        csh m_handle;
+        bool m_valid;
+
     public:
         static constexpr size_t DEFAULT_MAX_INSTRUCTIONS = 500;
 
@@ -63,11 +67,6 @@ namespace Disasm
         Disassembler(const Disassembler &) = delete;
         Disassembler &operator=(const Disassembler &) = delete;
 
-        bool IsValid() const
-        {
-            return m_valid;
-        }
-
         std::vector<DisasmLine> Disassemble(uint64_t address, const uint8_t *buffer, size_t size, size_t maxCount = DEFAULT_MAX_INSTRUCTIONS, bool logInstructions = false)
         {
             std::vector<DisasmLine> results;
@@ -102,8 +101,7 @@ namespace Disasm
                 line.address = insn[i].address;
                 line.size = insn[i].size;
 
-                const size_t copyLen = std::min(static_cast<size_t>(insn[i].size), sizeof(line.bytes));
-                memcpy(line.bytes, insn[i].bytes, copyLen);
+                memcpy(line.bytes, insn[i].bytes, std::min(static_cast<size_t>(insn[i].size), sizeof(line.bytes)));
 
                 strncpy(line.mnemonic, insn[i].mnemonic, sizeof(line.mnemonic) - 1);
                 strncpy(line.op_str, insn[i].op_str, sizeof(line.op_str) - 1);
@@ -133,9 +131,6 @@ namespace Disasm
             return results;
         }
 
-    private:
-        csh m_handle;
-        bool m_valid;
     };
 
 } // namespace Disasm

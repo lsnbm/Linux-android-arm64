@@ -1,4 +1,4 @@
-﻿
+
 #include <imgui.h>
 #include <android_imgui_input/imgui_floating_keyboard.h>
 #include <cstdarg>
@@ -165,17 +165,14 @@ namespace Colors
 class MainUI
 {
 private:
-    ApplicationRuntime &application_;
     ApplicationRuntime::ResourceSet &runtime_;
-    MemScanner &scanner_;
-    PointerManager &ptrManager_;
-    SavedAddressManager &savedManager_;
-    MemViewer &memViewer_;
 
     struct ScanParams
     {
         Types::DataType dataType = Types::DataType::I32;
         Types::FuzzyMode fuzzyMode = Types::FuzzyMode::Unknown;
+        int floatRounding = 0;
+        bool unaligned = false;
         int page = 0;
         std::string lastStringPattern;
     } scanParams_;
@@ -268,7 +265,7 @@ private:
 
     float S(float v) const
     {
-        return style_.S(v);
+        return v * style_.scale;
     }
 
     static std::optional<uintptr_t> ParseHexAddress(const char *buf)
@@ -318,24 +315,17 @@ private:
         scanParams_.page = 0;
         auto type = scanParams_.dataType;
         auto mode = scanParams_.fuzzyMode;
+        const size_t alignment = scanParams_.unaligned ? 1 : 0;
         const auto pid = dr->GetGlobalPid();
-        const auto lockedType = scanner_.dataType();
-        const bool stringBaseline = scanner_.isStringScan();
+        const auto lockedType = runtime_.scanner.dataType();
+        const bool stringBaseline = runtime_.scanner.isStringScan();
         const bool hasBaseline = lockedType.has_value() || stringBaseline;
 
-        if (isFirst)
+        if (isFirst && hasBaseline) return;
+        if (!isFirst)
         {
-            if (hasBaseline || (mode >= Types::FuzzyMode::Increased && mode <= Types::FuzzyMode::Unchanged)) return;
-        }
-        else
-        {
-            if (!hasBaseline || mode == Types::FuzzyMode::Unknown) return;
-            if (stringBaseline && mode != Types::FuzzyMode::String) return;
-            if (lockedType)
-            {
-                if (mode == Types::FuzzyMode::String || (mode == Types::FuzzyMode::Pointer && *lockedType != Types::DataType::I64)) return;
-                type = *lockedType;
-            }
+            if (!hasBaseline) return;
+            if (lockedType) type = *lockedType;
         }
 
         if (mode == Types::FuzzyMode::Pointer)
@@ -343,14 +333,14 @@ private:
             type = Types::DataType::I64;
             auto parsed = MemUtils::ParseUInt64(valueStr, 16);
             if (!parsed) return;
-            scanner_.startAsync<int64_t>(pid, static_cast<int64_t>(MemUtils::Normalize(static_cast<uintptr_t>(*parsed))), type, mode, isFirst);
+            runtime_.scanner.startAsync<int64_t>(pid, static_cast<int64_t>(MemUtils::Normalize(static_cast<uintptr_t>(*parsed))), type, mode, isFirst, int64_t{}, {}, MemUtils::FloatRounding::Rounded, alignment);
             return;
         }
         if (mode == Types::FuzzyMode::String)
         {
             if (valueStr.empty()) return;
             scanParams_.lastStringPattern = valueStr;
-            scanner_.startStringAsync(pid, std::string(valueStr), isFirst);
+            runtime_.scanner.startStringAsync(pid, std::string(valueStr), isFirst);
             return;
         }
 
@@ -359,7 +349,7 @@ private:
                                {
                                    if (mode == Types::FuzzyMode::Unknown || (mode >= Types::FuzzyMode::Increased && mode <= Types::FuzzyMode::Unchanged))
                                    {
-                                       scanner_.startAsync<T>(pid, T{}, type, mode, isFirst);
+                                       runtime_.scanner.startAsync<T>(pid, T{}, type, mode, isFirst, T{}, {}, MemUtils::FloatRounding::Rounded, alignment);
                                        return;
                                    }
 
@@ -370,12 +360,12 @@ private:
                                        const auto minValue = MemUtils::ParseScanValue<T>(valueStr.substr(0, pos));
                                        const auto maxValue = MemUtils::ParseScanValue<T>(valueStr.substr(pos + 1));
                                        if (!minValue || !maxValue) return;
-                                       scanner_.startAsync<T>(pid, *minValue, type, mode, isFirst, *maxValue);
+                                       runtime_.scanner.startAsync<T>(pid, *minValue, type, mode, isFirst, *maxValue, {}, MemUtils::FloatRounding::Rounded, alignment);
                                        return;
                                    }
 
                                    const auto value = MemUtils::ParseScanValue<T>(valueStr);
-                                   if (value) scanner_.startAsync<T>(pid, *value, type, mode, isFirst);
+                                   if (value) runtime_.scanner.startAsync<T>(pid, *value, type, mode, isFirst, T{}, valueStr, static_cast<MemUtils::FloatRounding>(scanParams_.floatRounding), alignment);
                                });
     }
 
@@ -467,13 +457,13 @@ private:
                     ImGui::Text("?");
                 }
                 ImGui::TableSetColumnIndex(2);
-                if (UI::Btn("存", {S(42), S(28)}, {0.2f, 0.4f, 0.25f, 1})) savedManager_.add(addr, savedType);
+                if (UI::Btn("存", {S(42), S(28)}, {0.2f, 0.4f, 0.25f, 1})) runtime_.saved.add(addr, savedType);
                 ImGui::TableSetColumnIndex(3);
                 uintptr_t jump = MemUtils::Normalize(ptrVal);
                 bool canJump = (format == Types::ViewFormat::I32 || format == Types::ViewFormat::I64 || format == Types::ViewFormat::Hexadecimal) && MemUtils::IsValidAddr(jump);
                 if (canJump)
                 {
-                    if (UI::Btn("->", {S(42), S(28)}, Colors::BTN_PURPLE)) memViewer_.open(jump);
+                    if (UI::Btn("->", {S(42), S(28)}, Colors::BTN_PURPLE)) runtime_.viewer.open(jump);
                 }
                 else
                 {
@@ -537,7 +527,7 @@ private:
                 ImGui::TableSetColumnIndex(5);
                 UI::Text({0.65f, 0.65f, 0.5f, 1}, "%s", ascii);
                 ImGui::TableSetColumnIndex(6);
-                if (UI::Btn("存", {S(32), S(22)}, {0.2f, 0.4f, 0.25f, 1})) savedManager_.add(rowAddr, Types::DataType::I32);
+                if (UI::Btn("存", {S(32), S(22)}, {0.2f, 0.4f, 0.25f, 1})) runtime_.saved.add(rowAddr, Types::DataType::I32);
                 ImGui::TableSetColumnIndex(7);
                 uintptr_t ptrVal = 0;
                 bool canJump = false;
@@ -558,7 +548,7 @@ private:
                 }
                 if (canJump)
                 {
-                    if (UI::Btn("->", {S(32), S(22)}, Colors::BTN_PURPLE)) memViewer_.open(ptrVal);
+                    if (UI::Btn("->", {S(32), S(22)}, Colors::BTN_PURPLE)) runtime_.viewer.open(ptrVal);
                     if (ImGui::IsItemHovered()) ImGui::SetTooltip("跳转到: %lX", ptrVal);
                 }
                 else
@@ -622,10 +612,10 @@ private:
                 if (isJump)
                 {
                     if (const char *targetText = std::strstr(line.op_str, "0X"))
-                        if (const auto target = ParseHexAddress(targetText); target && UI::Btn("跳", {S(35), S(24)}, Colors::BTN_PURPLE)) memViewer_.open(*target);
+                        if (const auto target = ParseHexAddress(targetText); target && UI::Btn("跳", {S(35), S(24)}, Colors::BTN_PURPLE)) runtime_.viewer.open(*target);
                     ImGui::SameLine();
                 }
-                if (UI::Btn("存", {S(35), S(24)}, {0.2f, 0.4f, 0.25f, 1})) savedManager_.add(line.address, Types::DataType::I32);
+                if (UI::Btn("存", {S(35), S(24)}, {0.2f, 0.4f, 0.25f, 1})) runtime_.saved.add(line.address, Types::DataType::I32);
                 ImGui::PopID();
             }
             ImGui::EndTable();
@@ -942,7 +932,7 @@ private:
                     if (UI::Btn(labels[i], {bw, h - S(14)}, c))
                     {
                         state_.tab = i;
-                        if (i == 2 && memViewer_.base()) memViewer_.refresh();
+                        if (i == 2 && runtime_.viewer.base()) runtime_.viewer.refresh();
                     }
                 }
             },
@@ -1041,35 +1031,22 @@ private:
     }
 
     // ================================================================
-    // 监控页入口
-    // ================================================================
-    void drawSyscallTab()
-    {
-        drawMonitorTab("━━ 系统调用监控 ━━", "sysmon", "实时筛选包含 lsdriver 的内核日志", "SyscallLog", "暂无系统调用日志", runtime_.syscallMonitor, syscallParams_, [this] { return runtime_.startSyscallMonitor(); }, [this] { return runtime_.stopSyscallMonitor(); });
-    }
-
-    void drawCntvctTab()
-    {
-        drawMonitorTab("━━ CNTVCT_EL0 读取监控 ━━", "cntvct", "实时筛选 cntvct 标签的内核日志", "CntvctLog", "暂无 CNTVCT 读取日志", runtime_.cntvctMonitor, cntvctParams_, [this] { return runtime_.startCntvctMonitor(); }, [this] { return runtime_.stopCntvctMonitor(); });
-    }
-
-    // ================================================================
     // 扫描页
     // ================================================================
     void drawScanResults(float width)
     {
-        if (scanner_.isScanning()) return;
+        if (runtime_.scanner.isScanning()) return;
 
-        const size_t total = scanner_.count();
+        const size_t total = runtime_.scanner.count();
         if (!total) return;
 
-        const auto resultType = scanner_.dataType().value_or(scanParams_.dataType);
-        const bool pointerMode = scanner_.scanMode() == Types::FuzzyMode::Pointer;
-        const bool stringMode = scanner_.isStringScan();
+        const auto resultType = runtime_.scanner.dataType().value_or(scanParams_.dataType);
+        const bool pointerMode = runtime_.scanner.scanMode() == Types::FuzzyMode::Pointer;
+        const bool stringMode = runtime_.scanner.isStringScan();
         const int perPage = Config::g_ItemsPerPage.load();
         const int maxPage = static_cast<int>((total - 1) / perPage);
         scanParams_.page = std::clamp(scanParams_.page, 0, maxPage);
-        const auto data = scanner_.getPage(scanParams_.page * perPage, perPage);
+        const auto data = runtime_.scanner.getPage(scanParams_.page * perPage, perPage);
 
         UI::Space(S(6));
         ImGui::Separator();
@@ -1106,7 +1083,7 @@ private:
             for (int index = state_.resultScrollIdx; index < static_cast<int>(data.size()) && index < endIndex; ++index)
             {
                 const uintptr_t address = data[index];
-                const bool saved = savedManager_.contains(address);
+                const bool saved = runtime_.saved.contains(address);
                 ImGui::PushID(reinterpret_cast<void *>(address));
                 UI::ColorChild(
                     "ScanResult", {contentWidth - S(10), S(68)}, Colors::BG_PANEL,
@@ -1123,13 +1100,13 @@ private:
                         ImGui::BeginDisabled(saved);
                         if (UI::Btn(saved ? "已保存" : "保存", {buttonWidth, S(30)}, Colors::BTN_GREEN))
                         {
-                            if (scanner_.isStringScan())
+                            if (runtime_.scanner.isStringScan())
                             {
-                                savedManager_.add(address, Types::DataType::I8, Types::SavedValueKind::Text, std::clamp(scanParams_.lastStringPattern.size(), size_t(1), size_t(256)));
+                                runtime_.saved.add(address, Types::DataType::I8, Types::SavedValueKind::Text, std::clamp(scanParams_.lastStringPattern.size(), size_t(1), size_t(256)));
                             }
-                            else if (const auto type = scanner_.dataType())
+                            else if (const auto type = runtime_.scanner.dataType())
                             {
-                                savedManager_.add(address, *type, scanner_.scanMode() == Types::FuzzyMode::Pointer ? Types::SavedValueKind::Pointer : Types::SavedValueKind::Numeric);
+                                runtime_.saved.add(address, *type, runtime_.scanner.scanMode() == Types::FuzzyMode::Pointer ? Types::SavedValueKind::Pointer : Types::SavedValueKind::Numeric);
                             }
                         }
                         ImGui::EndDisabled();
@@ -1149,9 +1126,9 @@ private:
     void drawScanTab()
     {
         float w = ImGui::GetContentRegionAvail().x;
-        const bool scanning = scanner_.isScanning();
-        const auto lockedType = scanner_.dataType();
-        const bool stringBaseline = scanner_.isStringScan();
+        const bool scanning = runtime_.scanner.isScanning();
+        const auto lockedType = runtime_.scanner.dataType();
+        const bool stringBaseline = runtime_.scanner.isStringScan();
         const bool hasBaseline = lockedType.has_value() || stringBaseline;
         const bool typeLocked = lockedType.has_value();
         if (lockedType) scanParams_.dataType = *lockedType;
@@ -1195,6 +1172,23 @@ private:
         if (ImGui::Button(Types::Labels::FUZZY[static_cast<int>(scanParams_.fuzzyMode)], {w, S(45)})) state_.showMode = true;
         ImGui::EndDisabled();
 
+        if (!isStringMode)
+        {
+            ImGui::BeginDisabled(scanning || hasBaseline);
+            ImGui::Checkbox("逐字节扫描（含未对齐地址）", &scanParams_.unaligned);
+            ImGui::EndDisabled();
+        }
+
+        if (scanParams_.fuzzyMode == Types::FuzzyMode::Equal && (scanParams_.dataType == Types::DataType::Float || scanParams_.dataType == Types::DataType::Double))
+        {
+            UI::Space(S(6));
+            UI::Text(Colors::LABEL, "浮点匹配:");
+            ImGui::BeginDisabled(scanning);
+            ImGui::SetNextItemWidth(w);
+            ImGui::Combo("##FloatRounding", &scanParams_.floatRounding, "四舍五入\0截断区间\0扩大范围\0精确数值\0");
+            ImGui::EndDisabled();
+        }
+
         UI::Space(S(6));
         UI::Text(Colors::LABEL, isPtrMode ? "目标地址(Hex):" : "搜索数值:");
         ImGuiFloatingKeyboard::InputButton(buf_.value, isPtrMode ? "输入Hex地址..." : "点击输入...", {w, S(52)}, isPtrMode ? "目标地址(Hex)" : "数值");
@@ -1216,7 +1210,7 @@ private:
         ImGui::SameLine();
         if (UI::Btn("清空", {bw, S(52)}, Colors::BTN_RED))
         {
-            scanner_.clear();
+            runtime_.scanner.clear();
             scanParams_.page = 0;
             scanParams_.lastStringPattern.clear();
         }
@@ -1226,11 +1220,11 @@ private:
         if (scanning)
         {
             UI::Text(Colors::WARN, "扫描中...");
-            ImGui::ProgressBar(scanner_.progress(), {w, S(18)});
+            ImGui::ProgressBar(runtime_.scanner.progress(), {w, S(18)});
         }
         else
         {
-            const size_t resultCount = scanner_.count();
+            const size_t resultCount = runtime_.scanner.count();
             resultCount ? UI::Text(Colors::OK, "找到 %zu 个", resultCount) : UI::Text(Colors::HINT, "暂无结果");
         }
         drawScanResults(w);
@@ -1252,12 +1246,12 @@ private:
         {
             if (const auto address = ParseHexAddress(buf_.savedAddr))
             {
-                savedManager_.add(*address, savedParams_.dataType);
+                runtime_.saved.add(*address, savedParams_.dataType);
                 buf_.savedAddr[0] = 0;
             }
         }
 
-        auto items = savedManager_.snapshotStates();
+        auto items = runtime_.saved.snapshotStates();
         const size_t total = items.size();
         if (!total)
         {
@@ -1294,11 +1288,11 @@ private:
         ImGui::EndDisabled();
 
         const bool anyLocked = std::ranges::any_of(page, [](const auto &state) { return state.locked; });
-        if (UI::Btn(anyLocked ? "解锁本页" : "锁定本页", {S(90), S(36)}, anyLocked ? Colors::BTN_UNLOCK : Colors::BTN_LOCK)) savedManager_.togglePage(page, !anyLocked);
+        if (UI::Btn(anyLocked ? "解锁本页" : "锁定本页", {S(90), S(36)}, anyLocked ? Colors::BTN_UNLOCK : Colors::BTN_LOCK)) runtime_.saved.togglePage(page, !anyLocked);
         ImGui::SameLine();
         if (ImGuiFloatingKeyboard::ActionButton("偏移全部", {S(90), S(36)}, buf_.savedOffset, "偏移量(Hex,可负)", Colors::BTN_ORANGE) && buf_.savedOffset[0])
         {
-            if (const auto offset = MemUtils::ParseHexOffset(buf_.savedOffset)) savedManager_.applyOffset(offset->offset, offset->negative);
+            if (const auto offset = MemUtils::ParseHexOffset(buf_.savedOffset)) runtime_.saved.applyOffset(offset->offset, offset->negative);
             buf_.savedOffset[0] = 0;
             savedParams_.page = 0;
             state_.savedScrollIdx = 0;
@@ -1307,7 +1301,7 @@ private:
         ImGui::SameLine();
         if (UI::Btn("清空保存", {S(90), S(36)}, Colors::BTN_RED))
         {
-            savedManager_.clear();
+            runtime_.saved.clear();
             savedParams_.page = 0;
             state_.savedScrollIdx = 0;
             return;
@@ -1324,45 +1318,42 @@ private:
             for (int index = state_.savedScrollIdx; index < static_cast<int>(page.size()) && index < endIndex; ++index)
             {
                 const auto &state = page[index];
-                const auto &item = state.item;
-                const bool locked = state.locked;
-                const auto &value = state.value;
-                const char *kindLabel = item.kind == Types::SavedValueKind::Pointer ? "指针" : item.kind == Types::SavedValueKind::Text ? "文本" : Types::Labels::TYPE[static_cast<size_t>(item.type)];
-                ImGui::PushID(reinterpret_cast<void *>(item.address));
+                const char *kindLabel = state.item.kind == Types::SavedValueKind::Pointer ? "指针" : state.item.kind == Types::SavedValueKind::Text ? "文本" : Types::Labels::TYPE[static_cast<size_t>(state.item.type)];
+                ImGui::PushID(reinterpret_cast<void *>(state.item.address));
                 UI::ColorChild(
-                    "SavedItem", {contentWidth - S(10), S(114)}, locked ? Colors::LOCKED : Colors::BG_PANEL,
+                    "SavedItem", {contentWidth - S(10), S(114)}, state.locked ? Colors::LOCKED : Colors::BG_PANEL,
                     [&]
                     {
                         const float cardWidth = ImGui::GetContentRegionAvail().x;
-                        UI::LabelValue(Colors::LABEL, "地址: ", locked ? ImVec4{1, 0.5f, 0.5f, 1} : Colors::ADDR_GREEN, "%lX", item.address);
+                        UI::LabelValue(Colors::LABEL, "地址: ", state.locked ? ImVec4{1, 0.5f, 0.5f, 1} : Colors::ADDR_GREEN, "%lX", state.item.address);
                         ImGui::SameLine(cardWidth * 0.42f);
-                        UI::LabelValue(Colors::LABEL, kindLabel, Colors::VAL_YELLOW, ": %s", value.c_str());
+                        UI::LabelValue(Colors::LABEL, kindLabel, Colors::VAL_YELLOW, ": %s", state.value.c_str());
 
-                        ImGui::TextColored(Colors::HINT, "备注: %s", item.note.empty() ? "--" : item.note.c_str());
-                        if (!item.note.empty() && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", item.note.c_str());
+                        ImGui::TextColored(Colors::HINT, "备注: %s", state.item.note.empty() ? "--" : state.item.note.c_str());
+                        if (!state.item.note.empty() && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", state.item.note.c_str());
 
                         const float actionWidth = (cardWidth - S(20)) / 5;
                         if (UI::Btn("修改", {actionWidth, S(36)}))
                         {
-                            state_.modifyAddr = item.address;
-                            std::snprintf(buf_.modify, sizeof(buf_.modify), "%s", value.c_str());
+                            state_.modifyAddr = state.item.address;
+                            std::snprintf(buf_.modify, sizeof(buf_.modify), "%s", state.value.c_str());
                             state_.showModify = true;
-                            ImGuiFloatingKeyboard::Open(buf_.modify, item.kind == Types::SavedValueKind::Pointer ? "新地址(Hex)" : item.kind == Types::SavedValueKind::Text ? "新字符串" : "新数值");
+                            ImGuiFloatingKeyboard::Open(buf_.modify, state.item.kind == Types::SavedValueKind::Pointer ? "新地址(Hex)" : state.item.kind == Types::SavedValueKind::Text ? "新字符串" : "新数值");
                         }
                         ImGui::SameLine();
                         if (UI::Btn("备注", {actionWidth, S(36)}))
                         {
-                            state_.noteAddr = item.address;
-                            std::snprintf(buf_.savedNote, sizeof(buf_.savedNote), "%s", item.note.c_str());
+                            state_.noteAddr = state.item.address;
+                            std::snprintf(buf_.savedNote, sizeof(buf_.savedNote), "%s", state.item.note.c_str());
                             state_.showSavedNote = true;
                             ImGuiFloatingKeyboard::Open(buf_.savedNote, "文字备注");
                         }
                         ImGui::SameLine();
-                        if (UI::Btn(locked ? "解锁" : "锁定", {actionWidth, S(36)}, locked ? Colors::BTN_UNLOCK : Colors::BTN_LOCK)) savedManager_.toggle(item.address);
+                        if (UI::Btn(state.locked ? "解锁" : "锁定", {actionWidth, S(36)}, state.locked ? Colors::BTN_UNLOCK : Colors::BTN_LOCK)) runtime_.saved.toggle(state.item.address);
                         ImGui::SameLine();
-                        if (UI::Btn("复制", {actionWidth, S(36)}, Colors::BTN_COPY)) ImGui::SetClipboardText(std::format("{:X}", item.address).c_str());
+                        if (UI::Btn("复制", {actionWidth, S(36)}, Colors::BTN_COPY)) ImGui::SetClipboardText(std::format("{:X}", state.item.address).c_str());
                         ImGui::SameLine();
-                        if (UI::Btn("删除", {actionWidth, S(36)}, Colors::BTN_DEL)) savedManager_.remove(item.address);
+                        if (UI::Btn("删除", {actionWidth, S(36)}, Colors::BTN_DEL)) runtime_.saved.remove(state.item.address);
                     },
                     ImGuiWindowFlags_NoScrollbar);
                 ImGui::PopID();
@@ -1379,7 +1370,7 @@ private:
     // ================================================================
     void drawViewerTab()
     {
-        memViewer_.pollDisasm();
+        runtime_.viewer.pollDisasm();
 
         float w = ImGui::GetContentRegionAvail().x, bh = S(42);
         float goW = S(55), ofsW = S(55), fmtW = S(110), refW = S(55);
@@ -1390,25 +1381,25 @@ private:
         ImGui::SameLine();
         if (UI::Btn("跳转", {goW, bh}, {0.15f, 0.4f, 0.25f, 1}))
         {
-            if (auto addr = ParseHexAddress(buf_.viewAddr)) memViewer_.open(*addr);
+            if (auto addr = ParseHexAddress(buf_.viewAddr)) runtime_.viewer.open(*addr);
         }
         ImGui::SameLine();
         if (ImGuiFloatingKeyboard::ActionButton("偏移", {ofsW, bh}, buf_.memOffset, "偏移量(Hex,可负)", Colors::BTN_ORANGE) && buf_.memOffset[0])
         {
-            memViewer_.applyOffset(buf_.memOffset);
+            runtime_.viewer.applyOffset(buf_.memOffset);
             buf_.memOffset[0] = 0;
         }
         ImGui::SameLine();
-        if (UI::Btn(Types::Labels::VIEW_FORMAT[static_cast<size_t>(memViewer_.format())], {fmtW, bh}, {0.18f, 0.25f, 0.35f, 1})) state_.showFormat = true;
+        if (UI::Btn(Types::Labels::VIEW_FORMAT[static_cast<size_t>(runtime_.viewer.format())], {fmtW, bh}, {0.18f, 0.25f, 0.35f, 1})) state_.showFormat = true;
         ImGui::SameLine();
-        if (UI::Btn("刷新", {refW, bh}, Colors::BTN_TEAL)) memViewer_.refresh();
+        if (UI::Btn("刷新", {refW, bh}, Colors::BTN_TEAL)) runtime_.viewer.refresh();
 
         // 基址信息
         UI::Space(S(2));
-        if (memViewer_.base())
+        if (runtime_.viewer.base())
         {
-            UI::LabelValue(Colors::ADDR_CYAN, "基址: ", Colors::ADDR_GREEN, "%lX", memViewer_.base());
-            if (!memViewer_.readSuccess())
+            UI::LabelValue(Colors::ADDR_CYAN, "基址: ", Colors::ADDR_GREEN, "%lX", runtime_.viewer.base());
+            if (!runtime_.viewer.readSuccess())
             {
                 ImGui::SameLine();
                 UI::Text(Colors::ERR, "[读取失败]");
@@ -1419,10 +1410,10 @@ private:
             UI::Text(Colors::HINT, "输入地址后点击跳转开始浏览");
         }
         ImGui::Separator();
-        if (!memViewer_.base()) return;
+        if (!runtime_.viewer.base()) return;
 
         // 读取失败提示
-        if (!memViewer_.readSuccess())
+        if (!runtime_.viewer.readSuccess())
         {
             UI::Space(S(20));
             ImGui::PushStyleColor(ImGuiCol_Text, {1, 0.5f, 0.5f, 1});
@@ -1430,12 +1421,12 @@ private:
                                "2. 目标地址是否有效\n3. 驱动是否正常工作\n4. 目标进程是否仍在运行");
             ImGui::PopStyleColor();
             UI::Space(S(10));
-            if (ImGui::Button("重试", {S(80), S(36)})) memViewer_.refresh();
+            if (ImGui::Button("重试", {S(80), S(36)})) runtime_.viewer.refresh();
             return;
         }
 
         // 数据显示 + 箭头
-        auto fmt = memViewer_.format();
+        auto fmt = runtime_.viewer.format();
         int64_t byteOffset = fmt == Types::ViewFormat::Disasm ? 4 : (fmt == Types::ViewFormat::Hex ? 16 : Types::GetViewSize(fmt));
         float cH = ImGui::GetContentRegionAvail().y, aW = S(50);
         float cW = ImGui::GetContentRegionAvail().x - aW - S(6);
@@ -1446,11 +1437,11 @@ private:
         {
             if (fmt == Types::ViewFormat::Disasm)
             {
-                if (memViewer_.disasmBusy()) UI::Text(Colors::HINT, "反汇编中...");
-                else drawDisasmView(memViewer_.base(), memViewer_.getDisasm(), rows);
+                if (runtime_.viewer.disasmBusy()) UI::Text(Colors::HINT, "反汇编中...");
+                else drawDisasmView(runtime_.viewer.base(), runtime_.viewer.getDisasm(), rows);
             }
-            else if (fmt == Types::ViewFormat::Hex) drawHexDump(memViewer_.base(), memViewer_.buffer(), rows);
-            else drawTypedView(fmt, memViewer_.base(), memViewer_.buffer(), rows);
+            else if (fmt == Types::ViewFormat::Hex) drawHexDump(runtime_.viewer.base(), runtime_.viewer.buffer(), rows);
+            else drawTypedView(fmt, runtime_.viewer.base(), runtime_.viewer.buffer(), rows);
         }
         ImGui::EndChild();
         ImGui::SameLine();
@@ -1458,9 +1449,9 @@ private:
         if (ImGui::BeginChild("MemArrows", {aW, cH}, false, ImGuiWindowFlags_NoScrollbar))
         {
             ImGui::PushStyleColor(ImGuiCol_Button, {0.2f, 0.3f, 0.4f, 1});
-            ImGui::BeginDisabled(fmt == Types::ViewFormat::Disasm && memViewer_.disasmBusy());
-            if (ImGui::Button("▲##view_up", {aW, cH / 2 - S(3)})) memViewer_.applyOffset(-byteOffset);
-            if (ImGui::Button("▼##view_down", {aW, cH / 2 - S(3)})) memViewer_.applyOffset(byteOffset);
+            ImGui::BeginDisabled(fmt == Types::ViewFormat::Disasm && runtime_.viewer.disasmBusy());
+            if (ImGui::Button("▲##view_up", {aW, cH / 2 - S(3)})) runtime_.viewer.applyOffset(-byteOffset);
+            if (ImGui::Button("▼##view_down", {aW, cH / 2 - S(3)})) runtime_.viewer.applyOffset(byteOffset);
             ImGui::EndDisabled();
             ImGui::PopStyleColor();
         }
@@ -1541,7 +1532,7 @@ private:
     void drawPointerTab()
     {
         float w = ImGui::GetContentRegionAvail().x, bh = S(45);
-        const auto pointerState = ptrManager_.state();
+        const auto pointerState = runtime_.pointer.state();
         const bool busy = pointerState.operation != PointerManager::Operation::Idle;
         ImGui::PushID("PtrScan");
         UI::Text(Colors::TITLE, "━━ 指针扫描 ━━");
@@ -1612,7 +1603,7 @@ private:
                         valid = false;
                     }
                 }
-                if (valid) ptrManager_.startAsync(dr->GetGlobalPid(), *target, ptrParams_.depth, (selectedOffsetIdx_ + 1) * 500, ptrParams_.useManual, manualBase, ptrParams_.useArray, arrayBase, arrayCount, buf_.filterModule);
+                if (valid) runtime_.pointer.startAsync(dr->GetGlobalPid(), *target, ptrParams_.depth, (selectedOffsetIdx_ + 1) * 500, ptrParams_.useManual, manualBase, ptrParams_.useArray, arrayBase, arrayCount, buf_.filterModule);
             }
         }
 
@@ -1622,9 +1613,9 @@ private:
         UI::Text({0.6f, 0.7f, 0.8f, 1}, "文件操作 (Pointer.bin)");
         UI::Space(S(4));
         const float buttonWidth = (w - S(8)) / 2;
-        if (UI::Btn("开始对比", {buttonWidth, S(40)}, Colors::BTN_PURPLE)) ptrManager_.MergeBins();
+        if (UI::Btn("开始对比", {buttonWidth, S(40)}, Colors::BTN_PURPLE)) runtime_.pointer.MergeBins();
         ImGui::SameLine();
-        if (UI::Btn("格式化输出", {buttonWidth, S(40)}, {0.45f, 0.35f, 0.2f, 1})) ptrManager_.ExportToTxt();
+        if (UI::Btn("格式化输出", {buttonWidth, S(40)}, {0.45f, 0.35f, 0.2f, 1})) runtime_.pointer.ExportToTxt();
         ImGui::EndDisabled();
 
         UI::Space(S(8));
@@ -1914,10 +1905,9 @@ private:
         if (state_.showMode) doSelector("模式", &state_.showMode, Types::Labels::FUZZY.data(), (int)Types::Labels::FUZZY.size(), &scanParams_.fuzzyMode);
         if (state_.showFormat)
         {
-            auto fmt = memViewer_.format();
-            auto oldFmt = fmt;
+            auto fmt = runtime_.viewer.format();
             doSelector("格式", &state_.showFormat, Types::Labels::VIEW_FORMAT.data(), (int)Types::ViewFormat::Count, &fmt);
-            if (fmt != oldFmt) memViewer_.setFormat(fmt);
+            if (fmt != runtime_.viewer.format()) runtime_.viewer.setFormat(fmt);
         }
         if (state_.bpPopupPoint >= 0 && state_.bpPopupPoint < bpParams_.configPointCount)
         {
@@ -1986,7 +1976,7 @@ private:
         if (state_.showModify)
         {
             const auto result = ImGuiFloatingKeyboard::ConsumeResult(buf_.modify);
-            if (result == ImGuiFloatingKeyboard::Result::Accepted && state_.modifyAddr && buf_.modify[0]) savedManager_.write(state_.modifyAddr, buf_.modify);
+            if (result == ImGuiFloatingKeyboard::Result::Accepted && state_.modifyAddr && buf_.modify[0]) runtime_.saved.write(state_.modifyAddr, buf_.modify);
             if (result != ImGuiFloatingKeyboard::Result::None)
             {
                 state_.showModify = false;
@@ -1998,7 +1988,7 @@ private:
         if (state_.showSavedNote)
         {
             const auto result = ImGuiFloatingKeyboard::ConsumeResult(buf_.savedNote);
-            if (result == ImGuiFloatingKeyboard::Result::Accepted && state_.noteAddr) savedManager_.setNote(state_.noteAddr, buf_.savedNote);
+            if (result == ImGuiFloatingKeyboard::Result::Accepted && state_.noteAddr) runtime_.saved.setNote(state_.noteAddr, buf_.savedNote);
             if (result != ImGuiFloatingKeyboard::Result::None)
             {
                 state_.showSavedNote = false;
@@ -2008,36 +1998,8 @@ private:
         }
     }
 
-    // ---- 内容区 ----
-    void drawContent(float w, float h)
-    {
-        using DrawFn = void (MainUI::*)();
-        DrawFn tabs[] = {&MainUI::drawScanTab, &MainUI::drawSavedTab, &MainUI::drawViewerTab, &MainUI::drawModuleTab, &MainUI::drawPointerTab, &MainUI::drawSignatureTab, &MainUI::drawBreakpointTab, &MainUI::drawSyscallTab, &MainUI::drawCntvctTab, &MainUI::drawEnvTab};
-        UI::ColorChild("Content", {w, h}, Colors::BG_MID, [&] { (this->*tabs[state_.tab])(); });
-    }
-
-    // ---- 主窗口 ----
-    void drawMainWindow(float x, float y, float w, float h)
-    {
-        ImGui::SetNextWindowPos({x, y});
-        ImGui::SetNextWindowSize({w, h});
-        ImGui::PushStyleColor(ImGuiCol_WindowBg, Colors::BG_DARK);
-        if (ImGui::Begin("##Main", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove))
-        {
-            float cw = ImGui::GetContentRegionAvail().x;
-            drawTopBar(cw, S(55));
-            UI::Space(S(4));
-            float contentH = ImGui::GetContentRegionAvail().y - S(60) - S(4);
-            drawContent(cw, contentH);
-            UI::Space(S(4));
-            drawTabs(cw, S(60));
-        }
-        ImGui::End();
-        ImGui::PopStyleColor();
-    }
-
 public:
-    explicit MainUI(ApplicationRuntime &application) : application_(application), runtime_(application.resources()), scanner_(runtime_.scanner), ptrManager_(runtime_.pointer), savedManager_(runtime_.saved), memViewer_(runtime_.viewer)
+    explicit MainUI(ApplicationRuntime &application) : runtime_(application.resources())
     {
         for (int i = 500; i <= 100000; i += 500)
         {
@@ -2050,8 +2012,8 @@ public:
     ~MainUI()
     {
         Config::g_Running = false;
-        runtime_.stopSyscallMonitor();
-        runtime_.stopCntvctMonitor();
+        runtime_.syscallMonitor.stop();
+        runtime_.cntvctMonitor.stop();
     }
 
     void draw()
@@ -2063,7 +2025,35 @@ public:
             float m = style_.margin;
             float w = RenderVK::displayInfo.width - 2 * m;
             float h = RenderVK::displayInfo.height - 2 * m;
-            drawMainWindow(m, m, w, h);
+            ImGui::SetNextWindowPos({m, m});
+            ImGui::SetNextWindowSize({w, h});
+            ImGui::PushStyleColor(ImGuiCol_WindowBg, Colors::BG_DARK);
+            if (ImGui::Begin("##Main", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove))
+            {
+                const float contentWidth = ImGui::GetContentRegionAvail().x;
+                drawTopBar(contentWidth, S(55));
+                UI::Space(S(4));
+                UI::ColorChild("Content", {contentWidth, ImGui::GetContentRegionAvail().y - S(64)}, Colors::BG_MID, [&]
+                {
+                    switch (state_.tab)
+                    {
+                    case 0: drawScanTab(); break;
+                    case 1: drawSavedTab(); break;
+                    case 2: drawViewerTab(); break;
+                    case 3: drawModuleTab(); break;
+                    case 4: drawPointerTab(); break;
+                    case 5: drawSignatureTab(); break;
+                    case 6: drawBreakpointTab(); break;
+                    case 7: drawMonitorTab("━━ 系统调用监控 ━━", "sysmon", "实时筛选包含 lsdriver 的内核日志", "SyscallLog", "暂无系统调用日志", runtime_.syscallMonitor, syscallParams_, [this] { return runtime_.startSyscallMonitor(); }, [this] { return runtime_.syscallMonitor.stop(); }); break;
+                    case 8: drawMonitorTab("━━ CNTVCT_EL0 读取监控 ━━", "cntvct", "实时筛选 cntvct 标签的内核日志", "CntvctLog", "暂无 CNTVCT 读取日志", runtime_.cntvctMonitor, cntvctParams_, [this] { return runtime_.startCntvctMonitor(); }, [this] { return runtime_.cntvctMonitor.stop(); }); break;
+                    case 9: drawEnvTab(); break;
+                    }
+                });
+                UI::Space(S(4));
+                drawTabs(contentWidth, S(60));
+            }
+            ImGui::End();
+            ImGui::PopStyleColor();
             drawPopups(m, m, w, h);
         }
         ImGuiFloatingKeyboard::Draw();

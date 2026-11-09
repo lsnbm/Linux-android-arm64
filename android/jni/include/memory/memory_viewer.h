@@ -84,52 +84,33 @@ public:
     // 重新读取并刷新当前浏览缓存。
     void refresh()
     {
+        disasmBusy_ = false;
+        disasmCache_.clear();
         if (!MemUtils::IsValidAddr(base_))
         {
             readSuccess_ = false;
             readStatus_ = -EINVAL;
-            disasmBusy_ = false;
-            disasmCache_.clear();
             return;
         }
         std::ranges::fill(buffer_, 0);
-        const int readBytes = dr->Read(base_, buffer_.data(), buffer_.size());
-        readSuccess_ = readBytes > 0;
-        readStatus_ = readBytes;
-        if (!readSuccess_)
+        readStatus_ = dr->Read(base_, buffer_.data(), buffer_.size());
+        readSuccess_ = readStatus_ > 0;
+        if (!readSuccess_ || format_ != Types::ViewFormat::Disasm) return;
+
+        const size_t disasmSize = std::min(static_cast<size_t>(readStatus_), buffer_.size()) & ~static_cast<size_t>(3);
+        if (disasmSize == 0) return;
+        try
         {
-            disasmBusy_ = false;
-            disasmCache_.clear();
-            return;
-        }
-        if (format_ == Types::ViewFormat::Disasm)
-        {
-            disasmCache_.clear();
-            disasmBusy_ = false;
-            const size_t disasmSize = std::min(static_cast<size_t>(readBytes), buffer_.size()) & ~static_cast<size_t>(3);
-            if (disasmSize > 0)
-            {
-                try
+            disasmFuture_ = Config::CpuThreadPool().submit_task(
+                [base = base_, bytes = buffer_, disasmSize]
                 {
-                    disasmFuture_ = Config::CpuThreadPool().submit_task(
-                        [base = base_, bytes = buffer_, disasmSize]
-                        {
-                            Disasm::Disassembler disasm;
-                            if (!disasm.IsValid()) return std::vector<Disasm::DisasmLine>{};
-                            return disasm.Disassemble(base, bytes.data(), disasmSize, Disasm::Disassembler::DEFAULT_MAX_INSTRUCTIONS, true);
-                        });
-                    disasmBusy_ = true;
-                }
-                catch (...)
-                {
-                    disasmCache_.clear();
-                }
-            }
+                    Disasm::Disassembler disasm;
+                    return disasm.Disassemble(base, bytes.data(), disasmSize, Disasm::Disassembler::DEFAULT_MAX_INSTRUCTIONS, true);
+                });
+            disasmBusy_ = true;
         }
-        else
+        catch (...)
         {
-            disasmBusy_ = false;
-            disasmCache_.clear();
         }
     }
 

@@ -8,6 +8,7 @@
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
+#include <fstream>
 #include <iterator>
 #include <memory>
 #include <mutex>
@@ -606,9 +607,25 @@ public: // 外部获取内存信息
     }
 
     // 获取扫描区域
-    std::vector<std::pair<uintptr_t, uintptr_t>> GetScanRegions()
+    std::vector<std::pair<uintptr_t, uintptr_t>> GetScanRegions(bool allReadable = false)
     {
         std::vector<std::pair<uintptr_t, uintptr_t>> regions;
+
+        if (allReadable)
+        {
+            std::ifstream maps("/proc/" + std::to_string(GetGlobalPid()) + "/maps");
+            std::string line;
+            while (std::getline(maps, line))
+            {
+                unsigned long long start = 0, end = 0;
+                char permissions[5]{};
+                if (std::sscanf(line.c_str(), "%llx-%llx %4s", &start, &end, permissions) != 3 || permissions[0] != 'r' || end <= start) continue;
+                regions.emplace_back(static_cast<uintptr_t>(start), static_cast<uintptr_t>(end));
+            }
+            if (maps.eof() && !regions.empty()) return regions;
+            regions.clear();
+            LS_LOGE_TAG("MemoryScan", "无法完整读取目标 maps，回退到驱动扫描区域");
+        }
 
         const std::unique_ptr<virtual_memory> snapshot(new virtual_memory(GetMemoryInfo()));
         const int regionCount = std::clamp(snapshot->region_count, 0, MAX_SCAN_REGIONS);

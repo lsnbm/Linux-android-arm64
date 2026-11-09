@@ -13,19 +13,6 @@ namespace SignatureScanner
     {
         std::vector<uint8_t> bytes;
         std::vector<bool> mask;
-        bool empty() const
-        {
-            return bytes.empty();
-        }
-        size_t size() const
-        {
-            return bytes.size();
-        }
-        void clear()
-        {
-            bytes.clear();
-            mask.clear();
-        }
     };
 
     struct SigFilterResult
@@ -45,22 +32,16 @@ namespace SignatureScanner
             return std::string(SIG_DEFAULT_FILE);
         }
 
-        bool IsAbsoluteSigPath(std::string_view path)
-        {
-            return !path.empty() && path.front() == '/';
-        }
-
         std::string ResolveSigPath(std::string_view path)
         {
-            if (IsAbsoluteSigPath(path)) return std::string(path);
+            if (path.starts_with('/')) return std::string(path);
             return std::string("/data/akernel/") + std::string(path);
         }
 
         std::string FormatSignature(const SigElement &sig)
         {
-            if (sig.empty()) return "";
             std::string result;
-            result.reserve(sig.size() * 4);
+            result.reserve(sig.bytes.size() * 4);
             for (size_t i = 0; i < sig.bytes.size(); ++i)
             {
                 if (i > 0) result += ' ';
@@ -73,8 +54,6 @@ namespace SignatureScanner
         SigElement ParseSignature(std::string_view text)
         {
             SigElement sig;
-            if (text.empty()) return sig;
-
             std::istringstream iss{std::string{text}};
             std::string token;
 
@@ -92,7 +71,7 @@ namespace SignatureScanner
 
                     unsigned val = 0;
                     auto [ptr, ec] = std::from_chars(hex.data(), hex.data() + hex.size(), val, 16);
-                    if (ec == std::errc() && val <= 0xFF)
+                    if (ec == std::errc() && ptr == hex.data() + hex.size() && val <= 0xFF)
                     {
                         sig.bytes.push_back(static_cast<uint8_t>(val));
                         sig.mask.push_back(true);
@@ -100,8 +79,7 @@ namespace SignatureScanner
                     else
                     {
                         LS_LOGE_TAG_FMT("Signature", "无法解析: '{}'", token);
-                        sig.clear();
-                        return sig;
+                        return {};
                     }
                 }
             }
@@ -111,12 +89,11 @@ namespace SignatureScanner
         std::vector<uintptr_t> ScanCore(const SigElement &sig, int rangeOffset)
         {
             std::vector<uintptr_t> matches;
-            if (sig.empty()) return matches;
+            if (sig.bytes.empty() || sig.bytes.size() > SIG_BUFFER_SIZE) return matches;
 
             auto regions = dr->GetScanRegions();
-            if (regions.empty()) return matches;
 
-            const size_t sigSize = sig.size();
+            const size_t sigSize = sig.bytes.size();
             std::vector<uint8_t> buffer(SIG_BUFFER_SIZE);
             const size_t step = SIG_BUFFER_SIZE - sigSize + 1;
 
@@ -127,7 +104,6 @@ namespace SignatureScanner
                 for (uintptr_t addr = rStart; addr <= rEnd - sigSize; addr += step)
                 {
                     size_t readSize = std::min(static_cast<size_t>(rEnd - addr), SIG_BUFFER_SIZE);
-                    if (readSize < sigSize) break;
                     if (dr->Read(addr, buffer.data(), readSize) != static_cast<int>(readSize)) continue;
 
                     size_t searchEnd = readSize - sigSize;
@@ -151,66 +127,54 @@ namespace SignatureScanner
 
         bool ReadSigFile(const char *filename, int &range, std::string &sigText)
         {
-            std::ifstream fp(filename);
-            if (!fp) return false;
-
-            range = 0;
-            sigText.clear();
-            std::string line;
-
-            while (std::getline(fp, line))
+            for (std::string path = NormalizeSigFileName(filename);; path = ResolveSigPath(path))
             {
-                while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.pop_back();
-
-                if (line.starts_with("范围:"))
+                std::ifstream file(path);
+                range = 0;
+                sigText.clear();
+                std::string line;
+                while (std::getline(file, line))
                 {
-                    auto sub = line.substr(line.find(':') + 1);
-                    auto it = std::ranges::find_if(sub, [](char ch) { return std::isdigit(static_cast<unsigned char>(ch)); });
-                    if (it != sub.end()) std::from_chars(&*it, sub.data() + sub.size(), range);
+                    while (!line.empty() && line.back() == '\r') line.pop_back();
+                    if (line.starts_with("范围:"))
+                    {
+                        const auto text = std::string_view(line).substr(line.find(':') + 1);
+                        const auto first = text.find_first_not_of(" \t");
+                        if (first != std::string_view::npos)
+                        {
+                            const auto [end, error] = std::from_chars(text.data() + first, text.data() + text.size(), range);
+                            if (error != std::errc{} || end != text.data() + text.size()) range = 0;
+                        }
+                    }
+                    else if (line.starts_with("特征码:"))
+                    {
+                        const auto text = std::string_view(line).substr(line.find(':') + 1);
+                        if (const auto first = text.find_first_not_of(' '); first != std::string_view::npos) sigText = text.substr(first);
+                    }
                 }
-                else if (line.starts_with("特征码:"))
-                {
-                    auto sub = line.substr(line.find(':') + 1);
-                    if (auto f = sub.find_first_not_of(' '); f != std::string::npos) sigText = sub.substr(f);
-                }
+                if (range > 0 && range <= SIG_MAX_RANGE && !sigText.empty()) return true;
+                if (path.starts_with('/')) return false;
             }
-            return (range > 0 && !sigText.empty());
         }
 
         bool WriteSigFile(const char *filename, uintptr_t addr, int range, const SigElement &sig)
         {
-            std::ofstream fp(filename);
-            if (!fp) return false;
-            std::println(fp, "目标地址: 0x{:X}", addr);
-            std::println(fp, "范围: {}", range);
-            std::println(fp, "总字节: {}", sig.size());
-            std::println(fp, "特征码: {}", FormatSignature(sig));
-            return !fp.fail();
+            for (std::string path = NormalizeSigFileName(filename);; path = ResolveSigPath(path))
+            {
+                std::ofstream file(path);
+                if (file)
+                {
+                    std::println(file, "目标地址: 0x{:X}", addr);
+                    std::println(file, "范围: {}", range);
+                    std::println(file, "总字节: {}", sig.bytes.size());
+                    std::println(file, "特征码: {}", FormatSignature(sig));
+                    file.close();
+                    if (!file.fail()) return true;
+                }
+                if (path.starts_with('/')) return false;
+            }
         }
 
-        bool ReadSigFileWithFallback(const char *filename, int &range, std::string &sigText)
-        {
-            const std::string rawName = NormalizeSigFileName(filename);
-            if (ReadSigFile(rawName.c_str(), range, sigText)) return true;
-            if (!IsAbsoluteSigPath(rawName))
-            {
-                const std::string fallback = ResolveSigPath(rawName);
-                return ReadSigFile(fallback.c_str(), range, sigText);
-            }
-            return false;
-        }
-
-        bool WriteSigFileWithFallback(const char *filename, uintptr_t addr, int range, const SigElement &sig)
-        {
-            const std::string rawName = NormalizeSigFileName(filename);
-            if (WriteSigFile(rawName.c_str(), addr, range, sig)) return true;
-            if (!IsAbsoluteSigPath(rawName))
-            {
-                const std::string fallback = ResolveSigPath(rawName);
-                return WriteSigFile(fallback.c_str(), addr, range, sig);
-            }
-            return false;
-        }
     } // namespace
 
     inline bool ScanAddressSignature(uintptr_t addr, int range, const char *filename = SIG_DEFAULT_FILE)
@@ -238,7 +202,7 @@ namespace SignatureScanner
 
         sig.mask.assign(totalSize, true);
 
-        if (!WriteSigFileWithFallback(filename, addr, range, sig))
+        if (!WriteSigFile(filename, addr, range, sig))
         {
             LS_LOGE_TAG_FMT("Signature", "写文件失败: {}", filename);
             return false;
@@ -254,14 +218,14 @@ namespace SignatureScanner
 
         int range = 0;
         std::string oldSigText;
-        if (!ReadSigFileWithFallback(filename, range, oldSigText))
+        if (!ReadSigFile(filename, range, oldSigText))
         {
             LS_LOGE_TAG_FMT("Signature", "读取文件失败: {}", filename);
             return result;
         }
 
         SigElement oldSig = ParseSignature(oldSigText);
-        if (oldSig.empty())
+        if (oldSig.bytes.empty())
         {
             LS_LOGE_TAG("Signature", "特征码解析失败");
             return result;
@@ -282,7 +246,7 @@ namespace SignatureScanner
             return result;
         }
 
-        size_t cmpSize = std::min(oldSig.size(), curData.size());
+        size_t cmpSize = std::min(oldSig.bytes.size(), curData.size());
         SigElement newSig;
         newSig.bytes.resize(cmpSize);
         newSig.mask.resize(cmpSize);
@@ -290,28 +254,18 @@ namespace SignatureScanner
 
         for (size_t i = 0; i < cmpSize; ++i)
         {
-            if (!oldSig.mask[i])
-            {
-                newSig.bytes[i] = 0;
-                newSig.mask[i] = false;
-            }
-            else if (oldSig.bytes[i] != curData[i])
-            {
-                newSig.bytes[i] = 0;
-                newSig.mask[i] = false;
-                ++result.changedCount;
-            }
-            else
+            if (oldSig.mask[i] && oldSig.bytes[i] == curData[i])
             {
                 newSig.bytes[i] = curData[i];
                 newSig.mask[i] = true;
             }
+            else if (oldSig.mask[i]) ++result.changedCount;
         }
 
         result.oldSignature = oldSigText;
         result.newSignature = FormatSignature(newSig);
 
-        if (!WriteSigFileWithFallback(filename, addr, range, newSig))
+        if (!WriteSigFile(filename, addr, range, newSig))
         {
             LS_LOGE_TAG_FMT("Signature", "过滤结果写文件失败: {}", filename);
             return result;
@@ -325,13 +279,13 @@ namespace SignatureScanner
     inline std::vector<uintptr_t> ScanSignature(const char *pattern, int range = 0)
     {
         SigElement sig = ParseSignature(pattern);
-        if (sig.empty())
+        if (sig.bytes.empty())
         {
             LS_LOGE_TAG("Signature", "扫描特征码解析失败");
             return {};
         }
 
-        LS_LOGI_TAG_FMT("Signature", "开始扫描: 长度={} 偏移={}", sig.size(), range);
+        LS_LOGI_TAG_FMT("Signature", "开始扫描: 长度={} 偏移={}", sig.bytes.size(), range);
         auto matches = ScanCore(sig, range);
         LS_LOGI_TAG_FMT("Signature", "扫描完成: 找到 {} 个匹配", matches.size());
         return matches;
@@ -341,16 +295,16 @@ namespace SignatureScanner
     {
         int range = 0;
         std::string sigText;
-        if (!ReadSigFileWithFallback(filename, range, sigText))
+        if (!ReadSigFile(filename, range, sigText))
         {
             LS_LOGE_TAG_FMT("Signature", "扫描读取文件失败: {}", filename);
             return {};
         }
 
         SigElement sig = ParseSignature(sigText);
-        if (sig.empty()) return {};
+        if (sig.bytes.empty()) return {};
 
-        LS_LOGI_TAG_FMT("Signature", "开始文件扫描: 长度={} 范围偏移={}", sig.size(), range);
+        LS_LOGI_TAG_FMT("Signature", "开始文件扫描: 长度={} 范围偏移={}", sig.bytes.size(), range);
         auto matches = ScanCore(sig, range);
         LS_LOGI_TAG_FMT("Signature", "文件扫描完成: 找到 {} 个匹配", matches.size());
 

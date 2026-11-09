@@ -79,7 +79,7 @@ public:
         Driver &driver_;
 
     public:
-        MemScanner scanner;
+        MemScanner<Driver> scanner;
         MemViewer viewer;
         PointerManager pointer;
         SavedAddressManager saved;
@@ -87,7 +87,7 @@ public:
         ProcessMonitor syscallMonitor;
         ProcessMonitor cntvctMonitor;
 
-        explicit ResourceSet(Driver &driver) : driver_(driver), syscallMonitor(driver, ProcessMonitor::Kind::Syscall), cntvctMonitor(driver, ProcessMonitor::Kind::Cntvct)
+        explicit ResourceSet(Driver &driver) : driver_(driver), scanner(driver), syscallMonitor(driver, ProcessMonitor::Kind::Syscall), cntvctMonitor(driver, ProcessMonitor::Kind::Cntvct)
         {
         }
 
@@ -100,20 +100,10 @@ public:
             return syscallMonitor.start();
         }
 
-        int stopSyscallMonitor()
-        {
-            return syscallMonitor.stop();
-        }
-
         int startCntvctMonitor()
         {
             std::lock_guard targetLock(Config::TargetMutex);
             return cntvctMonitor.start();
-        }
-
-        int stopCntvctMonitor()
-        {
-            return cntvctMonitor.stop();
         }
 
         bool selectTarget(int pid)
@@ -145,22 +135,20 @@ public:
     };
 
 private:
-    Driver &driver_;
     Config::ThreadPools threadPools_;
     std::unique_ptr<ResourceSet> resources_;
     bool graphicsInitialized_ = false;
 
 public:
-    explicit ApplicationRuntime(Driver &driver) : driver_(driver)
+    explicit ApplicationRuntime(Driver &driver)
     {
         try
         {
             Config::InstallThreadPools(threadPools_);
-            resources_ = std::make_unique<ResourceSet>(driver_);
+            resources_ = std::make_unique<ResourceSet>(driver);
         }
         catch (...)
         {
-            resources_.reset();
             Config::UninstallThreadPools(threadPools_);
             threadPools_.shutdown();
             throw;

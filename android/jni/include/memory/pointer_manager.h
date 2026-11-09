@@ -13,25 +13,13 @@ class PointerManager
 public:
     struct PtrData
     {
-        uintptr_t address, value;
-        PtrData() : address(0), value(0)
-        {
-        }
-        PtrData(uintptr_t a, uintptr_t v) : address(a), value(v)
-        {
-        }
+        uintptr_t address = 0, value = 0;
     };
 
     struct PtrDir
     {
-        uintptr_t address, value;
-        uint32_t start, end;
-        PtrDir() : address(0), value(0), start(0), end(0)
-        {
-        }
-        PtrDir(uintptr_t a, uintptr_t v, uint32_t s = 0, uint32_t e = 0) : address(a), value(v), start(s), end(e)
-        {
-        }
+        uintptr_t address = 0, value = 0;
+        uint32_t start = 0, end = 0;
     };
 
     enum class BaseMode : uint8_t
@@ -175,17 +163,6 @@ private:
         if (!operation_.compare_exchange_strong(expected, Operation::Idle, std::memory_order_acq_rel)) operation_.store(Operation::Idle, std::memory_order_release);
     }
 
-    static uint64_t HashSource(std::string_view text)
-    {
-        uint64_t hash = 1469598103934665603ULL;
-        for (const unsigned char ch : text)
-        {
-            hash ^= ch;
-            hash *= 1099511628211ULL;
-        }
-        return hash;
-    }
-
     static uintptr_t OffsetEnd(uintptr_t base, size_t offset)
     {
         const uintptr_t maxAddress = Config::Constants::ADDR_MAX - 1;
@@ -277,11 +254,15 @@ private:
         for (int moduleIndex = 0; moduleIndex < moduleCount; ++moduleIndex)
         {
             const auto &module = snapshot->modules[moduleIndex];
-            const size_t pathLength = strnlen(module.name, sizeof(module.name));
-            const std::string fullPath(module.name, pathLength);
+            const std::string fullPath(module.name, strnlen(module.name, sizeof(module.name)));
             const std::string name(MemUtils::BaseName(fullPath));
             const bool accepted = filterModule.empty() || name.find(filterModule) != std::string::npos;
-            const uint64_t sourceId = HashSource(fullPath);
+            uint64_t sourceId = 1469598103934665603ULL;
+            for (const unsigned char character : fullPath)
+            {
+                sourceId ^= character;
+                sourceId *= 1099511628211ULL;
+            }
             const int segmentCount = std::clamp(module.seg_count, 0, MAX_SEGS_PER_MODULE);
 
             for (int segmentIndex = 0; segmentIndex < segmentCount; ++segmentIndex)
@@ -346,8 +327,7 @@ private:
             }
         }
         if (ferror(source) != 0 || fflush(temp.get()) != 0 || fsync(fileno(temp.get())) != 0 || ferror(temp.get()) != 0) ok = false;
-        FILE *raw = temp.release();
-        if (fclose(raw) != 0) ok = false;
+        if (fclose(temp.release()) != 0) ok = false;
 
         char candidate[256];
         bool published = false;
@@ -424,61 +404,6 @@ private:
         return bases;
     }
 
-    template <typename F>
-    // 借用缓冲块执行任务并自动归还。
-    void with_buffer_block(char **bufs, int &idx, uintptr_t start, size_t len, F &&call)
-    {
-        char *buf;
-        {
-            std::unique_lock<std::mutex> lk(block_mtx_);
-            block_cv_.wait(lk, [&idx] { return idx >= 0; });
-            buf = bufs[idx--];
-        }
-        struct BufGuard
-        {
-            char **b;
-            int &i;
-            char *p;
-            std::mutex &m;
-            std::condition_variable &cv;
-            ~BufGuard()
-            {
-                std::lock_guard<std::mutex> lk(m);
-                b[++i] = p;
-                cv.notify_one();
-            }
-        } guard{bufs, idx, buf, block_mtx_, block_cv_};
-
-        call(buf, start, len);
-    }
-
-    // 扫描缓冲块并提取候选指针。
-    bool collect_pointers_block(char *buf, uintptr_t start, size_t len, std::vector<PtrData> &out)
-    {
-        out.clear();
-        size_t cursor = 0;
-        out.reserve(len / sizeof(uintptr_t));
-
-        while (cursor < len)
-        {
-            const size_t request = std::min(static_cast<size_t>(PAGE_SIZE), len - cursor);
-            if (dr->Read(start + cursor, buf, request) != static_cast<int>(request)) return false;
-            const size_t pointerCount = request / sizeof(uintptr_t);
-            auto *values = reinterpret_cast<uintptr_t *>(buf);
-
-            for (size_t i = 0; i < pointerCount; ++i)
-            {
-                const uintptr_t value = MemUtils::Normalize(values[i]);
-                const auto region = std::upper_bound(regions_.begin(), regions_.end(), value, [](uintptr_t address, const auto &range) { return address < range.second; });
-                if (region == regions_.end() || value < region->first) continue;
-
-                out.emplace_back(MemUtils::Normalize(start + cursor + i * sizeof(uintptr_t)), value);
-            }
-            cursor += request;
-        }
-        return true;
-    }
-
     // 在候选指针中筛选可匹配项。
     void search_in_pointers(std::vector<PtrDir> &input, std::vector<PtrData *> &out, size_t offset)
     {
@@ -538,20 +463,6 @@ private:
         for (auto &[baseIndex, range] : found) ranges.push_back(std::move(range));
     }
 
-    // 回填父子区间索引关系。
-    void assoc_index(std::vector<PtrDir> &prev, PtrDir *start, size_t count, size_t offset)
-    {
-        for (size_t i = 0; i < count; i++)
-        {
-            uintptr_t normVal = MemUtils::Normalize(start[i].value);
-            const uintptr_t upper = offset > std::numeric_limits<uintptr_t>::max() - normVal ? std::numeric_limits<uintptr_t>::max() : normVal + offset;
-            const auto first = std::lower_bound(prev.begin(), prev.end(), normVal, [](const PtrDir &node, uintptr_t address) { return node.address < address; });
-            const auto last = std::upper_bound(first, prev.end(), upper, [](uintptr_t address, const PtrDir &node) { return address < node.address; });
-            start[i].start = static_cast<uint32_t>(first - prev.begin());
-            start[i].end = static_cast<uint32_t>(last - prev.begin());
-        }
-    }
-
     // 并发建立各层索引关联。
     std::vector<std::future<void>> create_assoc_index(std::vector<PtrDir> &prev, std::vector<PtrDir> &curr, size_t offset)
     {
@@ -564,7 +475,18 @@ private:
             while (pos < total)
             {
                 size_t chunk = std::min(total - pos, static_cast<size_t>(10000));
-                futures.push_back(Config::CpuThreadPool().submit_task([this, &prev, s = &curr[pos], chunk, offset] { assoc_index(prev, s, chunk, offset); }));
+                futures.push_back(Config::CpuThreadPool().submit_task([&prev, nodes = &curr[pos], chunk, offset]
+                {
+                    for (size_t index = 0; index < chunk; ++index)
+                    {
+                        const uintptr_t value = MemUtils::Normalize(nodes[index].value);
+                        const uintptr_t upper = offset > std::numeric_limits<uintptr_t>::max() - value ? std::numeric_limits<uintptr_t>::max() : value + offset;
+                        const auto first = std::lower_bound(prev.begin(), prev.end(), value, [](const PtrDir &node, uintptr_t address) { return node.address < address; });
+                        const auto last = std::upper_bound(first, prev.end(), upper, [](uintptr_t address, const PtrDir &node) { return address < node.address; });
+                        nodes[index].start = static_cast<uint32_t>(first - prev.begin());
+                        nodes[index].end = static_cast<uint32_t>(last - prev.begin());
+                    }
+                }));
                 pos += chunk;
             }
         }
@@ -590,31 +512,6 @@ private:
         bool valid = false;
     };
 
-    // 合并相邻且可并入的区间节点。
-    void merge_dirs(const std::vector<PtrDir *> &sorted_ptrs, PtrDir *base_dir, std::vector<PtrDir *> &out)
-    {
-        size_t dist = 0;
-        uint32_t right = 0;
-        out.reserve(sorted_ptrs.size());
-
-        for (auto *p : sorted_ptrs)
-        {
-            if (right <= p->start)
-            {
-                dist += p->start - right;
-                for (uint32_t j = p->start; j < p->end; j++) out.push_back(&base_dir[j]);
-                right = p->end;
-            }
-            else if (right < p->end)
-            {
-                for (uint32_t j = right; j < p->end; j++) out.push_back(&base_dir[j]);
-                right = p->end;
-            }
-            p->start -= static_cast<uint32_t>(dist);
-            p->end -= static_cast<uint32_t>(dist);
-        }
-    }
-
     // 构建层级化指针目录树结构。
     DirTree build_dir_tree(std::vector<std::vector<PtrDir>> &dirs, std::vector<PtrRange> &ranges)
     {
@@ -639,12 +536,18 @@ private:
 
             std::sort(stn.begin(), stn.end(), [](auto a, auto b) { return a->start < b->start; });
 
-            std::vector<PtrDir *> merged_out;
-            merge_dirs(stn, dirs[i - 1].data(), merged_out);
-
-            if (merged_out.empty()) return tree;
-
-            tree.contents[i - 1] = std::move(merged_out);
+            size_t distance = 0;
+            uint32_t right = 0;
+            tree.contents[i - 1].reserve(stn.size());
+            for (auto *node : stn)
+            {
+                if (right <= node->start) distance += node->start - right;
+                for (uint32_t child = std::max(right, node->start); child < node->end; ++child) tree.contents[i - 1].push_back(&dirs[i - 1][child]);
+                right = std::max(right, node->end);
+                node->start -= static_cast<uint32_t>(distance);
+                node->end -= static_cast<uint32_t>(distance);
+            }
+            if (tree.contents[i - 1].empty()) return tree;
         }
 
         tree.counts[0].assign(tree.contents[0].size(), 1);
@@ -748,15 +651,7 @@ public:
     State state() const
     {
         std::lock_guard lock(statusMutex_);
-        State result;
-        result.operation = operation_.load(std::memory_order_acquire);
-        result.lastOperation = lastOperation_.load(std::memory_order_acquire);
-        result.progress = scanProgress_.load(std::memory_order_acquire);
-        result.count = chainCount_.load(std::memory_order_acquire);
-        result.completed = completed_.load(std::memory_order_acquire);
-        result.success = success_.load(std::memory_order_acquire);
-        result.error = lastError_;
-        return result;
+        return {operation_.load(std::memory_order_acquire), lastOperation_.load(std::memory_order_acquire), scanProgress_.load(std::memory_order_acquire), chainCount_.load(std::memory_order_acquire), completed_.load(std::memory_order_acquire), success_.load(std::memory_order_acquire), lastError_};
     }
 
     bool isBusy() const noexcept
@@ -800,7 +695,7 @@ public:
         std::vector<char *> bufs(buf_count);
         for (int i = 0; i < buf_count; i++)
         {
-            bufferStorage.push_back(std::make_unique<char[]>(blockSize + sizeof(uintptr_t)));
+            bufferStorage.push_back(std::make_unique<char[]>(PAGE_SIZE));
             bufs[i] = bufferStorage.back().get();
         }
 
@@ -818,12 +713,44 @@ public:
                         [this, &bufs, &idx, pos, chunk = std::min(static_cast<size_t>(rend - pos), blockSize), file = merged.get(), &mergedMtx, &collectionFailed]
                         {
                             std::vector<PtrData> blockPointers;
-                            bool blockOk = true;
-                            with_buffer_block(bufs.data(), idx, pos, chunk, [this, &blockPointers, &blockOk](char *buf, uintptr_t s, size_t l) { blockOk = collect_pointers_block(buf, s, l, blockPointers); });
-                            if (!blockOk)
+                            blockPointers.reserve(chunk / sizeof(uintptr_t));
                             {
-                                collectionFailed = true;
-                                return;
+                                char *buffer;
+                                {
+                                    std::unique_lock lock(block_mtx_);
+                                    block_cv_.wait(lock, [&idx] { return idx >= 0; });
+                                    buffer = bufs[idx--];
+                                }
+                                struct BufferGuard
+                                {
+                                    PointerManager &owner;
+                                    std::vector<char *> &buffers;
+                                    int &index;
+                                    char *buffer;
+                                    ~BufferGuard()
+                                    {
+                                        std::lock_guard lock(owner.block_mtx_);
+                                        buffers[++index] = buffer;
+                                        owner.block_cv_.notify_one();
+                                    }
+                                } guard{*this, bufs, idx, buffer};
+
+                                for (size_t cursor = 0; cursor < chunk;)
+                                {
+                                    const size_t request = std::min(static_cast<size_t>(PAGE_SIZE), chunk - cursor);
+                                    if (dr->Read(pos + cursor, buffer, request) != static_cast<int>(request))
+                                    {
+                                        collectionFailed = true;
+                                        return;
+                                    }
+                                    for (size_t index = 0; index < request / sizeof(uintptr_t); ++index)
+                                    {
+                                        const uintptr_t value = MemUtils::Normalize(reinterpret_cast<const uintptr_t *>(buffer)[index]);
+                                        const auto region = std::upper_bound(regions_.begin(), regions_.end(), value, [](uintptr_t address, const auto &range) { return address < range.second; });
+                                        if (region != regions_.end() && value >= region->first) blockPointers.emplace_back(pos + cursor + index * sizeof(uintptr_t), value);
+                                    }
+                                    cursor += request;
+                                }
                             }
                             if (!blockPointers.empty())
                             {
@@ -893,179 +820,6 @@ public:
         return true;
     }
 
-private:
-    // 执行指针链扫描主流程。
-    void runScan(pid_t pid, uintptr_t target, int depth, int maxOffset, bool useManual, uintptr_t manualBase, bool useArray, uintptr_t arrayBase, size_t arrayCount, const std::string &filterModule)
-    {
-        bool succeeded = false;
-        std::string error;
-        struct ScanGuard
-        {
-            PointerManager &owner;
-            bool &succeeded;
-            std::string &error;
-            ~ScanGuard()
-            {
-                owner.finishOperation(PointerManager::Operation::Scanning, succeeded, std::move(error));
-            }
-        } guard{*this, succeeded, error};
-
-        try
-        {
-            if (pid <= 0 || pid != dr->GetGlobalPid())
-            {
-                error = "目标进程已变化";
-                return;
-            }
-
-            scanProgress_ = 0.0f;
-            chainCount_ = 0;
-
-            target = MemUtils::Normalize(target);
-            manualBase = MemUtils::Normalize(manualBase);
-            arrayBase = MemUtils::Normalize(arrayBase);
-
-            LS_LOGI_TAG_FMT("Pointer", "开始扫描: 目标=0x{:X} 深度={} 偏移={}", target, depth, maxOffset);
-
-            if (!SnapshotLayout(filterModule))
-            {
-                error = "无法获取有效内存布局";
-                return;
-            }
-
-            const BaseMode scanMode = useManual ? BaseMode::Manual : (useArray ? BaseMode::Array : BaseMode::Module);
-            auto baseSnapshot = SnapshotBases(scanMode, manualBase, arrayBase, arrayCount, static_cast<size_t>(maxOffset));
-            if (!baseSnapshot)
-            {
-                error = "无法完整读取 Array 基址快照";
-                return;
-            }
-            std::vector<BaseRange> bases = std::move(*baseSnapshot);
-            if (scanMode == BaseMode::Module && bases.empty())
-            {
-                error = filterModule.empty() ? "内存布局中没有可用模块基址" : std::format("没有匹配模块过滤条件: {}", filterModule);
-                return;
-            }
-
-            size_t pointerCount = 0;
-            if (!CollectPointers(pointerCount))
-            {
-                LS_LOGE_TAG("Pointer", "扫描失败: 无法创建内存快照");
-                error = "无法创建内存快照";
-                return;
-            }
-            LS_LOGI_TAG_FMT("Pointer", "内存快照数量: {}", pointerCount);
-
-            FilePtr outfile(tmpfile());
-            if (!outfile)
-            {
-                LS_LOGE_TAG("Pointer", "无法创建结果临时文件");
-                error = "无法创建结果临时文件";
-                return;
-            }
-
-            std::vector<PtrRange> ranges;
-            std::vector<std::vector<PtrDir>> dirs(depth + 1);
-            size_t totalChains = 0;
-            bool wroteResults = false;
-
-            dirs[0].emplace_back(target, 0, 0, 1);
-            LS_LOGI_TAG_FMT("Pointer", "Level 0 初始化完成，目标地址数量: {}", dirs[0].size());
-
-            for (int level = 1; level <= depth; level++)
-            {
-                std::vector<PtrData *> curr;
-                search_in_pointers(dirs[level - 1], curr, static_cast<size_t>(maxOffset));
-
-                if (curr.empty())
-                {
-                    LS_LOGI_TAG_FMT("Pointer", "扫描在 Level {} 结束: 未找到指向上级的指针", level);
-                    break;
-                }
-
-                LS_LOGI_TAG_FMT("Pointer", "Level {} 搜索结果: 找到 {} 个指针", level, curr.size());
-                std::sort(curr.begin(), curr.end(), [](auto a, auto b) { return a->address < b->address; });
-
-                filter_to_ranges(dirs, ranges, curr, level, bases);
-
-                auto futures = create_assoc_index(dirs[level - 1], dirs[level], static_cast<size_t>(maxOffset));
-                WaitFutures(futures);
-
-                scanProgress_ = static_cast<float>(level + 1) / (depth + 2);
-            }
-
-            for (auto &range : ranges)
-            {
-                if (range.level > 0)
-                {
-                    auto futures = create_assoc_index(dirs[range.level - 1], range.results, static_cast<size_t>(maxOffset));
-                    WaitFutures(futures);
-                }
-            }
-
-            if (!ranges.empty())
-            {
-                auto tree = build_dir_tree(dirs, ranges);
-                if (tree.valid)
-                {
-                    for (auto &r : ranges)
-                    {
-                        if (r.level > 0 && static_cast<size_t>(r.level - 1) < tree.counts.size())
-                        {
-                            for (auto &v : r.results)
-                            {
-                                const auto &counts = tree.counts[r.level - 1];
-                                if (v.start >= v.end || v.end > counts.size()) continue;
-                                for (uint32_t child = v.start; child < v.end; ++child) totalChains = SaturatingAdd(totalChains, counts[child]);
-                            }
-                        }
-                    }
-
-                    LS_LOGI_TAG_FMT("Pointer", "开始保存 {} 条链条", totalChains);
-                    wroteResults = write_bin_file(tree.contents, ranges, outfile.get(), scanMode, target, manualBase, arrayBase, arrayCount);
-                    if (wroteResults) LS_LOGI_TAG_FMT("Pointer", "文件写入完成，总链数: {}", totalChains);
-                    else LS_LOGE_TAG("Pointer", "指针结果序列化失败");
-                }
-            }
-            else
-            {
-                std::vector<std::vector<PtrDir *>> emptyContents;
-                wroteResults = write_bin_file(emptyContents, ranges, outfile.get(), scanMode, target, manualBase, arrayBase, arrayCount);
-                LS_LOGI_TAG("Pointer", "扫描结果为空，已生成空图");
-            }
-
-            if (!wroteResults)
-            {
-                chainCount_ = 0;
-                error = "无法序列化指针结果";
-                return;
-            }
-
-            if (pid != dr->GetGlobalPid())
-            {
-                error = "目标进程在扫描期间发生变化";
-                return;
-            }
-
-            std::string autoName;
-            const bool saved = SaveUniqueBin(outfile.get(), autoName);
-            if (saved) LS_LOGI_TAG_FMT("Pointer", "结果已保存至: {}", autoName);
-            else LS_LOGE_TAG("Pointer", "无法原子保存指针结果文件");
-
-            chainCount_ = saved ? totalChains : 0;
-            succeeded = saved;
-            if (!saved) error = "无法完整保存指针结果";
-        }
-        catch (const std::exception &ex)
-        {
-            error = ex.what();
-        }
-        catch (...)
-        {
-            error = "指针扫描发生未知异常";
-        }
-    }
-
 public:
     bool startAsync(pid_t pid, uintptr_t target, int depth, int maxOffset, bool useManual, uintptr_t manualBase, bool useArray, uintptr_t arrayBase, size_t arrayCount, std::string filterModule)
     {
@@ -1092,7 +846,169 @@ public:
         scanProgress_ = 0.0f;
         try
         {
-            Config::IoThreadPool().detach_task([this, pid, target, depth, maxOffset, useManual, manualBase, useArray, arrayBase, arrayCount, filterModule = std::move(filterModule)] { runScan(pid, target, depth, maxOffset, useManual, manualBase, useArray, arrayBase, arrayCount, filterModule); });
+            Config::IoThreadPool().detach_task([this, pid, target, depth, maxOffset, useManual, manualBase, useArray, arrayBase, arrayCount, filterModule = std::move(filterModule)]() mutable
+            {
+                bool succeeded = false;
+                std::string error;
+                struct ScanGuard
+                {
+                    PointerManager &owner;
+                    bool &succeeded;
+                    std::string &error;
+                    ~ScanGuard()
+                    {
+                        owner.finishOperation(PointerManager::Operation::Scanning, succeeded, std::move(error));
+                    }
+                } guard{*this, succeeded, error};
+
+                try
+                {
+                    if (pid <= 0 || pid != dr->GetGlobalPid())
+                    {
+                        error = "目标进程已变化";
+                        return;
+                    }
+
+                    LS_LOGI_TAG_FMT("Pointer", "开始扫描: 目标=0x{:X} 深度={} 偏移={}", target, depth, maxOffset);
+
+                    if (!SnapshotLayout(filterModule))
+                    {
+                        error = "无法获取有效内存布局";
+                        return;
+                    }
+
+                    const BaseMode scanMode = useManual ? BaseMode::Manual : (useArray ? BaseMode::Array : BaseMode::Module);
+                    auto baseSnapshot = SnapshotBases(scanMode, manualBase, arrayBase, arrayCount, static_cast<size_t>(maxOffset));
+                    if (!baseSnapshot)
+                    {
+                        error = "无法完整读取 Array 基址快照";
+                        return;
+                    }
+                    std::vector<BaseRange> bases = std::move(*baseSnapshot);
+                    if (scanMode == BaseMode::Module && bases.empty())
+                    {
+                        error = filterModule.empty() ? "内存布局中没有可用模块基址" : std::format("没有匹配模块过滤条件: {}", filterModule);
+                        return;
+                    }
+
+                    size_t pointerCount = 0;
+                    if (!CollectPointers(pointerCount))
+                    {
+                        LS_LOGE_TAG("Pointer", "扫描失败: 无法创建内存快照");
+                        error = "无法创建内存快照";
+                        return;
+                    }
+                    LS_LOGI_TAG_FMT("Pointer", "内存快照数量: {}", pointerCount);
+
+                    FilePtr outfile(tmpfile());
+                    if (!outfile)
+                    {
+                        LS_LOGE_TAG("Pointer", "无法创建结果临时文件");
+                        error = "无法创建结果临时文件";
+                        return;
+                    }
+
+                    std::vector<PtrRange> ranges;
+                    std::vector<std::vector<PtrDir>> dirs(depth + 1);
+                    size_t totalChains = 0;
+                    bool wroteResults = false;
+
+                    dirs[0].emplace_back(target, 0, 0, 1);
+                    LS_LOGI_TAG_FMT("Pointer", "Level 0 初始化完成，目标地址数量: {}", dirs[0].size());
+
+                    for (int level = 1; level <= depth; level++)
+                    {
+                        std::vector<PtrData *> curr;
+                        search_in_pointers(dirs[level - 1], curr, static_cast<size_t>(maxOffset));
+
+                        if (curr.empty())
+                        {
+                            LS_LOGI_TAG_FMT("Pointer", "扫描在 Level {} 结束: 未找到指向上级的指针", level);
+                            break;
+                        }
+
+                        LS_LOGI_TAG_FMT("Pointer", "Level {} 搜索结果: 找到 {} 个指针", level, curr.size());
+                        std::sort(curr.begin(), curr.end(), [](auto a, auto b) { return a->address < b->address; });
+
+                        filter_to_ranges(dirs, ranges, curr, level, bases);
+
+                        auto futures = create_assoc_index(dirs[level - 1], dirs[level], static_cast<size_t>(maxOffset));
+                        WaitFutures(futures);
+
+                        scanProgress_ = static_cast<float>(level + 1) / (depth + 2);
+                    }
+
+                    for (auto &range : ranges)
+                    {
+                        if (range.level > 0)
+                        {
+                            auto futures = create_assoc_index(dirs[range.level - 1], range.results, static_cast<size_t>(maxOffset));
+                            WaitFutures(futures);
+                        }
+                    }
+
+                    if (!ranges.empty())
+                    {
+                        auto tree = build_dir_tree(dirs, ranges);
+                        if (tree.valid)
+                        {
+                            for (auto &r : ranges)
+                            {
+                                if (r.level > 0 && static_cast<size_t>(r.level - 1) < tree.counts.size())
+                                {
+                                    for (auto &v : r.results)
+                                    {
+                                        const auto &counts = tree.counts[r.level - 1];
+                                        if (v.start >= v.end || v.end > counts.size()) continue;
+                                        for (uint32_t child = v.start; child < v.end; ++child) totalChains = SaturatingAdd(totalChains, counts[child]);
+                                    }
+                                }
+                            }
+
+                            LS_LOGI_TAG_FMT("Pointer", "开始保存 {} 条链条", totalChains);
+                            wroteResults = write_bin_file(tree.contents, ranges, outfile.get(), scanMode, target, manualBase, arrayBase, arrayCount);
+                            if (wroteResults) LS_LOGI_TAG_FMT("Pointer", "文件写入完成，总链数: {}", totalChains);
+                            else LS_LOGE_TAG("Pointer", "指针结果序列化失败");
+                        }
+                    }
+                    else
+                    {
+                        std::vector<std::vector<PtrDir *>> emptyContents;
+                        wroteResults = write_bin_file(emptyContents, ranges, outfile.get(), scanMode, target, manualBase, arrayBase, arrayCount);
+                        LS_LOGI_TAG("Pointer", "扫描结果为空，已生成空图");
+                    }
+
+                    if (!wroteResults)
+                    {
+                        chainCount_ = 0;
+                        error = "无法序列化指针结果";
+                        return;
+                    }
+
+                    if (pid != dr->GetGlobalPid())
+                    {
+                        error = "目标进程在扫描期间发生变化";
+                        return;
+                    }
+
+                    std::string autoName;
+                    const bool saved = SaveUniqueBin(outfile.get(), autoName);
+                    if (saved) LS_LOGI_TAG_FMT("Pointer", "结果已保存至: {}", autoName);
+                    else LS_LOGE_TAG("Pointer", "无法原子保存指针结果文件");
+
+                    chainCount_ = saved ? totalChains : 0;
+                    succeeded = saved;
+                    if (!saved) error = "无法完整保存指针结果";
+                }
+                catch (const std::exception &ex)
+                {
+                    error = ex.what();
+                }
+                catch (...)
+                {
+                    error = "指针扫描发生未知异常";
+                }
+                    });
         }
         catch (const std::exception &ex)
         {
@@ -1113,41 +1029,31 @@ public:
         std::vector<Block> blocks;
         std::vector<std::vector<PtrDir>> levels;
 
-        static bool ReadBytes(const char *&cur, const char *eof, void *out, size_t size)
-        {
-            if (cur > eof || size > static_cast<size_t>(eof - cur)) return false;
-            std::memcpy(out, cur, size);
-            cur += size;
-            return true;
-        }
-
         template <typename T> static bool ReadObject(const char *&cur, const char *eof, T &out)
         {
-            return ReadBytes(cur, eof, &out, sizeof(T));
+            if (cur > eof || sizeof(T) > static_cast<size_t>(eof - cur)) return false;
+            std::memcpy(&out, cur, sizeof(T));
+            cur += sizeof(T);
+            return true;
         }
 
         template <typename T> static bool ReadVector(const char *&cur, const char *eof, size_t count, std::vector<T> &out)
         {
-            if (cur > eof) return false;
-            if (count > static_cast<size_t>(eof - cur) / sizeof(T)) return false;
+            if (cur > eof || count > static_cast<size_t>(eof - cur) / sizeof(T)) return false;
             out.resize(count);
-            if (count > 0 && !ReadBytes(cur, eof, out.data(), count * sizeof(T))) return false;
+            if (count > 0) std::memcpy(out.data(), cur, count * sizeof(T));
+            cur += count * sizeof(T);
             return true;
-        }
-
-        static bool WriteBytes(FILE *file, const void *data, size_t size)
-        {
-            return size == 0 || fwrite(data, 1, size, file) == size;
         }
 
         template <typename T> static bool WriteObject(FILE *file, const T &value)
         {
-            return WriteBytes(file, &value, sizeof(T));
+            return fwrite(&value, sizeof(T), 1, file) == 1;
         }
 
         template <typename T> static bool WriteVector(FILE *file, const std::vector<T> &values)
         {
-            return values.empty() || WriteBytes(file, values.data(), values.size() * sizeof(T));
+            return values.empty() || fwrite(values.data(), sizeof(T), values.size(), file) == values.size();
         }
 
         bool validate() const
@@ -1177,7 +1083,7 @@ public:
                 if (arrayBase > kMaxArrayBase || hdr.scanArrayCount - 1 > (kMaxArrayBase - arrayBase) / sizeof(uintptr_t)) return false;
             }
 
-            if (blocks.empty()) return hdr.level == 0 && levels.empty();
+            if (blocks.empty()) return hdr.level == 0;
             if (hdr.level == 0) return false;
 
             for (int level = 0; level < hdr.level; ++level)
@@ -1350,31 +1256,20 @@ public:
                 ok = WriteObject(file.get(), bl) && WriteVector(file.get(), levels[i]);
             }
             if (ok) ok = fflush(file.get()) == 0 && fsync(fileno(file.get())) == 0 && ferror(file.get()) == 0;
-            FILE *raw = file.release();
-            if (fclose(raw) != 0) ok = false;
+            if (fclose(file.release()) != 0) ok = false;
             if (!ok) remove(path.c_str());
             return ok;
         }
     };
 
-    static uint64_t ChainBaseAddr(const BinSym &sym)
-    {
-        return (sym.sourceMode == 1) ? sym.manualBase : sym.start;
-    }
-
     using RootIdentity = std::tuple<uint8_t, uint64_t, std::string, int, bool, uint64_t, bool, uint64_t, int>;
 
     static RootIdentity MakeRootIdentity(const BinSym &sym, const PtrDir &root)
     {
-        const uint64_t base = ChainBaseAddr(sym);
+        const uint64_t base = sym.sourceMode == static_cast<uint8_t>(BaseMode::Manual) ? sym.manualBase : sym.start;
         const bool negative = root.address < base;
         const uint64_t offset = negative ? base - root.address : root.address - base;
-        const std::string name = sym.sourceMode == 0 ? std::string(sym.name) : std::string();
-        const uint64_t sourceId = sym.sourceMode == 0 ? sym.sourceId : 0;
-        const int segment = sym.sourceMode == 0 ? sym.segment : 0;
-        const bool isBss = sym.sourceMode == 0 && sym.isBss;
-        const uint64_t arrayIndex = sym.sourceMode == 2 ? sym.arrayIndex : 0;
-        return {sym.sourceMode, sourceId, name, segment, isBss, arrayIndex, negative, offset, sym.level};
+        return {sym.sourceMode, sym.sourceMode == 0 ? sym.sourceId : 0, sym.sourceMode == 0 ? std::string(sym.name) : std::string(), sym.sourceMode == 0 ? sym.segment : 0, sym.sourceMode == 0 && sym.isBss, sym.sourceMode == 2 ? sym.arrayIndex : 0, negative, offset, sym.level};
     }
 
     struct PrunedNode
@@ -1802,8 +1697,7 @@ public:
                                      }
 
                                      if (writeOk) writeOk = fflush(output.get()) == 0 && fsync(fileno(output.get())) == 0 && ferror(output.get()) == 0;
-                                     FILE *rawOutput = output.release();
-                                     if (fclose(rawOutput) != 0) writeOk = false;
+                                     if (fclose(output.release()) != 0) writeOk = false;
                                      if (!writeOk)
                                      {
                                          error = "导出文件写入不完整";

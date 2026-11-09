@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <ifaddrs.h>
 #include <arpa/inet.h>
 #include <net/if.h>
@@ -40,12 +40,6 @@ namespace
         LS_LOGE_TAG_FMT("HTTP", "{}: errno={} ({})", action, error, std::strerror(error));
     }
 
-    bool IsLanInterface(std::string_view interfaceName)
-    {
-        constexpr std::array<std::string_view, 6> prefixes = {"wlan", "eth", "ap", "rndis", "usb", "bt-pan"};
-        return std::ranges::any_of(prefixes, [interfaceName](std::string_view prefix) { return interfaceName.starts_with(prefix); });
-    }
-
     void PrintLanHttpAddresses()
     {
         ifaddrs *interfaces = nullptr;
@@ -55,7 +49,6 @@ namespace
             return;
         }
 
-        bool found = false;
         std::vector<std::string> printedAddresses;
         for (const ifaddrs *entry = interfaces; entry != nullptr; entry = entry->ifa_next)
         {
@@ -63,7 +56,8 @@ namespace
             if ((entry->ifa_flags & IFF_UP) == 0 || (entry->ifa_flags & IFF_LOOPBACK) != 0) continue;
 
             const std::string_view interfaceName = entry->ifa_name != nullptr ? entry->ifa_name : "";
-            if (!IsLanInterface(interfaceName)) continue;
+            constexpr std::array<std::string_view, 6> prefixes = {"wlan", "eth", "ap", "rndis", "usb", "bt-pan"};
+            if (std::ranges::none_of(prefixes, [interfaceName](std::string_view prefix) { return interfaceName.starts_with(prefix); })) continue;
 
             char addressBuffer[INET_ADDRSTRLEN]{};
             const auto *ipv4Address = reinterpret_cast<const sockaddr_in *>(entry->ifa_addr);
@@ -72,13 +66,12 @@ namespace
             const std::string address = addressBuffer;
             if (std::ranges::find(printedAddresses, address) != printedAddresses.end()) continue;
             printedAddresses.push_back(address);
-            found = true;
             LS_LOGI_TAG_FMT("HTTP", "局域网地址 [{}]: http://{}:{}", interfaceName, address, kServerPort);
             LS_LOGI_TAG_FMT("HTTP", "局域网 RPC [{}]: http://{}:{}/api/rpc", interfaceName, address, kServerPort);
         }
         freeifaddrs(interfaces);
 
-        if (!found) LS_LOGW_TAG_FMT("HTTP", "未检测到局域网 IPv4 地址，HTTP 服务仍监听 http://0.0.0.0:{}", kServerPort);
+        if (printedAddresses.empty()) LS_LOGW_TAG_FMT("HTTP", "未检测到局域网 IPv4 地址，HTTP 服务仍监听 http://0.0.0.0:{}", kServerPort);
     }
 
     bool WritePrivateEtcFile(const char *path, std::string_view content)
@@ -90,13 +83,8 @@ namespace
         while (written < content.size())
         {
             const ssize_t result = write(fd, content.data() + written, content.size() - written);
-            if (result < 0)
-            {
-                if (errno == EINTR) continue;
-                close(fd);
-                return false;
-            }
-            if (result == 0)
+            if (result < 0 && errno == EINTR) continue;
+            if (result <= 0)
             {
                 close(fd);
                 return false;
@@ -107,52 +95,29 @@ namespace
         return close(fd) == 0;
     }
 
-    bool ConfigureCloudflaredDns()
-    {
-        if (unshare(CLONE_NEWNS) != 0) return false;
-        if (mount(nullptr, "/", nullptr, MS_REC | MS_PRIVATE, nullptr) != 0) return false;
-        if (mount("tmpfs", "/system/etc", "tmpfs", MS_NOSUID | MS_NODEV, "mode=0755,size=64k") != 0) return false;
-
-        constexpr std::string_view resolvConf = "nameserver 1.1.1.1\n"
-                                                "nameserver 8.8.8.8\n"
-                                                "options timeout:2 attempts:2\n";
-        constexpr std::string_view hosts = "127.0.0.1 localhost\n"
-                                           "::1 ip6-localhost\n";
-
-        if (!WritePrivateEtcFile("/system/etc/resolv.conf", resolvConf)) return false;
-        if (!WritePrivateEtcFile("/system/etc/hosts", hosts)) return false;
-        return setenv("SSL_CERT_DIR", "/apex/com.android.conscrypt/cacerts", 1) == 0;
-    }
-
-    bool ExtractCloudflared()
+    void StartCloudflared()
     {
         const std::size_t blobSize = static_cast<std::size_t>(cloudflared_blob_end - cloudflared_blob_start);
-        if (blobSize == 0) return false;
+        if (blobSize == 0) return;
 
         const int fd = open(kCloudflaredTempPath.data(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0700);
         if (fd < 0)
         {
             printErrno("创建 cloudflared 临时文件失败");
-            return false;
+            return;
         }
 
         std::size_t written = 0;
         while (written < blobSize)
         {
             const ssize_t result = write(fd, cloudflared_blob_start + written, blobSize - written);
-            if (result < 0)
+            if (result < 0 && errno == EINTR) continue;
+            if (result <= 0)
             {
-                if (errno == EINTR) continue;
-                printErrno("释放 cloudflared 失败");
+                if (result < 0) printErrno("释放 cloudflared 失败");
                 close(fd);
                 unlink(kCloudflaredTempPath.data());
-                return false;
-            }
-            if (result == 0)
-            {
-                close(fd);
-                unlink(kCloudflaredTempPath.data());
-                return false;
+                return;
             }
             written += static_cast<std::size_t>(result);
         }
@@ -162,7 +127,7 @@ namespace
             printErrno("设置 cloudflared 权限失败");
             close(fd);
             unlink(kCloudflaredTempPath.data());
-            return false;
+            return;
         }
         close(fd);
 
@@ -170,14 +135,8 @@ namespace
         {
             printErrno("安装 cloudflared 失败");
             unlink(kCloudflaredTempPath.data());
-            return false;
+            return;
         }
-        return true;
-    }
-
-    void StartCloudflared()
-    {
-        if (!ExtractCloudflared()) return;
 
         const pid_t pid = fork();
         if (pid < 0)
@@ -189,7 +148,16 @@ namespace
         if (pid == 0)
         {
             prctl(PR_SET_PDEATHSIG, SIGTERM);
-            if (!ConfigureCloudflaredDns())
+            constexpr std::string_view resolvConf = "nameserver 1.1.1.1\n"
+                                                    "nameserver 8.8.8.8\n"
+                                                    "options timeout:2 attempts:2\n";
+            constexpr std::string_view hosts = "127.0.0.1 localhost\n"
+                                               "::1 ip6-localhost\n";
+
+            if (unshare(CLONE_NEWNS) != 0 || mount(nullptr, "/", nullptr, MS_REC | MS_PRIVATE, nullptr) != 0 ||
+                mount("tmpfs", "/system/etc", "tmpfs", MS_NOSUID | MS_NODEV, "mode=0755,size=64k") != 0 ||
+                !WritePrivateEtcFile("/system/etc/resolv.conf", resolvConf) || !WritePrivateEtcFile("/system/etc/hosts", hosts) ||
+                setenv("SSL_CERT_DIR", "/apex/com.android.conscrypt/cacerts", 1) != 0)
             {
                 printErrno("配置 cloudflared 私有 DNS 失败");
                 _exit(126);
@@ -214,31 +182,16 @@ namespace
         return text;
     }
 
-    // 按空白切分命令参数
-
-    template <typename T, typename ParseFn> std::optional<T> parseNumber(std::string_view text, ParseFn &&parse)
+    std::optional<int> parseInt(std::string_view text)
     {
         if (text.empty()) return std::nullopt;
 
         std::string temp(text);
         char *end = nullptr;
         errno = 0;
-        const auto value = parse(temp.c_str(), &end);
-        if (errno != 0 || end == temp.c_str() || *end != '\0') return std::nullopt;
-        return static_cast<T>(value);
-    }
-
-    // 解析整数参数
-    std::optional<int> parseInt(std::string_view text)
-    {
-        const auto value = parseNumber<std::int64_t>(text, [](const char *s, char **end) { return std::strtoll(s, end, 0); });
-        if (!value || *value < std::numeric_limits<int>::min() || *value > std::numeric_limits<int>::max()) return std::nullopt;
-        return static_cast<int>(*value);
-    }
-
-    std::optional<std::int64_t> parseInt64(std::string_view text)
-    {
-        return parseNumber<std::int64_t>(text, [](const char *s, char **end) { return std::strtoll(s, end, 0); });
+        const auto value = std::strtoll(temp.c_str(), &end, 0);
+        if (errno != 0 || end == temp.c_str() || *end != '\0' || value < std::numeric_limits<int>::min() || value > std::numeric_limits<int>::max()) return std::nullopt;
+        return static_cast<int>(value);
     }
 
     // 将字符串转换为小写ASCII
@@ -528,60 +481,6 @@ namespace
         return bytes;
     }
 
-    // 合并指定起点后的参数为字符串
-
-    // 生成成功响应文本
-
-    // 生成失败响应文本
-
-    // 构建内存信息JSON响应
-    json buildMemoryInfoJson(int status, const auto &info)
-    {
-        json root;
-        const int moduleCount = std::clamp(info.module_count, 0, MAX_MODULES);
-        const int regionCount = std::clamp(info.region_count, 0, MAX_SCAN_REGIONS);
-
-        root["status"] = status;
-        root["module_count"] = moduleCount;
-        root["region_count"] = regionCount;
-        root["modules"] = json::array();
-        root["regions"] = json::array();
-
-        for (int i = 0; i < moduleCount; ++i)
-        {
-            const auto &mod = info.modules[i];
-            const int segCount = std::clamp(mod.seg_count, 0, MAX_SEGS_PER_MODULE);
-
-            json moduleItem;
-            moduleItem["name"] = std::string(mod.name);
-            moduleItem["seg_count"] = segCount;
-            moduleItem["segs"] = json::array();
-
-            for (int j = 0; j < segCount; ++j)
-            {
-                const auto &seg = mod.segs[j];
-                moduleItem["segs"].push_back({
-                    {"index", seg.index},
-                    {"prot", static_cast<int>(seg.prot)},
-                    {"start", std::format("0x{:X}", seg.start)},
-                    {"end", std::format("0x{:X}", seg.end)},
-                });
-            }
-
-            root["modules"].push_back(std::move(moduleItem));
-        }
-
-        for (int i = 0; i < regionCount; ++i)
-        {
-            const auto &region = info.regions[i];
-            root["regions"].push_back({
-                {"start", std::format("0x{:X}", region.start)},
-                {"end", std::format("0x{:X}", region.end)},
-            });
-        }
-
-        return root;
-    }
 
     // 构建内存浏览快照JSON
     json buildViewerSnapshotJson(const MemViewer &viewer)
@@ -663,38 +562,12 @@ namespace
 
         for (std::size_t i = 0; i < returnedCount; ++i)
         {
-            const auto addr = static_cast<std::uint64_t>(matches[i]);
             root["matches"].push_back({
-                {"addr", std::format("0x{:X}", addr)},
+                {"addr", std::format("0x{:X}", matches[i])},
             });
         }
 
         return root;
-    }
-
-    // 发送完整响应数据
-    bool sendAll(int fd, std::string_view data)
-    {
-        std::size_t sentTotal = 0;
-        while (sentTotal < data.size())
-        {
-            const ssize_t sent = send(fd, data.data() + sentTotal, data.size() - sentTotal, MSG_NOSIGNAL);
-            if (sent < 0)
-            {
-                if (errno == EINTR)
-                {
-                    continue;
-                }
-                return false;
-            }
-
-            if (sent == 0)
-            {
-                return false;
-            }
-            sentTotal += static_cast<std::size_t>(sent);
-        }
-        return true;
     }
 
     bool sendHttpResponse(int fd, int statusCode, std::string_view statusText, std::string_view body)
@@ -708,7 +581,15 @@ namespace
                                                  "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
                                                  "\r\n{}",
                                                  statusCode, statusText, body.size(), body);
-        return sendAll(fd, response);
+        std::size_t sentTotal = 0;
+        while (sentTotal < response.size())
+        {
+            const ssize_t sent = send(fd, response.data() + sentTotal, response.size() - sentTotal, MSG_NOSIGNAL);
+            if (sent < 0 && errno == EINTR) continue;
+            if (sent <= 0) return false;
+            sentTotal += static_cast<std::size_t>(sent);
+        }
+        return true;
     }
 
     bool receiveHttpRequest(int fd, std::string *method, std::string *path, std::string *body, int *errorStatus)
@@ -833,7 +714,7 @@ namespace
             return it->get<std::string>();
         }
 
-        if (it->is_boolean() || it->is_number_integer() || it->is_number_unsigned() || it->is_number_float())
+        if (it->is_boolean() || it->is_number())
         {
             return it->dump();
         }
@@ -844,109 +725,13 @@ namespace
     json dispatchStructuredOperationDirect(ApplicationRuntime &application, std::string_view operation, const json &params)
     {
         auto &runtime = application.resources();
-        const std::string op(operation);
+        const std::string_view op = operation;
 
-        auto finalize = [&](json out) -> json
-        {
-            out["operation"] = op;
-            return out;
-        };
-
-        auto fail = [&](std::string_view message) -> json { return finalize(makeProtocolError(message)); };
-
-        auto ok = [&]() -> json { return finalize(json{{"ok", true}}); };
+        auto fail = [&](std::string_view message) -> json { return {{"ok", false}, {"operation", op}, {"error", message}}; };
 
         auto okData = [&](json data) -> json
         {
-            json out = ok();
-            out["data"] = std::move(data);
-            return out;
-        };
-
-        using BreakpointPointsResult = std::variant<std::vector<Driver::bp_point>, json>;
-        auto parseBreakpointPoints = [&]() -> BreakpointPointsResult
-        {
-            const auto pointsIt = params.find("points");
-            if (pointsIt == params.end() || !pointsIt->is_array() || pointsIt->empty()) return BreakpointPointsResult{std::in_place_index<1>, fail(std::format("operation={} 缺少参数 points", op))};
-
-            auto parseUInt64Value = [](const json &value) -> std::optional<std::uint64_t>
-            {
-                if (value.is_number_unsigned()) return value.get<std::uint64_t>();
-                if (value.is_number_integer())
-                {
-                    const auto signedValue = value.get<std::int64_t>();
-                    return signedValue >= 0 ? std::optional<std::uint64_t>(static_cast<std::uint64_t>(signedValue)) : std::nullopt;
-                }
-                if (value.is_string()) return MemUtils::ParseUInt64(value.get<std::string>());
-                return std::nullopt;
-            };
-            auto parseIntValue = [](const json &value) -> std::optional<int>
-            {
-                if (value.is_number_unsigned())
-                {
-                    const auto raw = value.get<std::uint64_t>();
-                    return raw <= static_cast<std::uint64_t>(std::numeric_limits<int>::max()) ? std::optional<int>(static_cast<int>(raw)) : std::nullopt;
-                }
-                if (value.is_number_integer())
-                {
-                    const auto raw = value.get<std::int64_t>();
-                    return raw >= std::numeric_limits<int>::min() && raw <= std::numeric_limits<int>::max() ? std::optional<int>(static_cast<int>(raw)) : std::nullopt;
-                }
-                if (value.is_string()) return parseInt(value.get<std::string>());
-                return std::nullopt;
-            };
-            auto parseStringValue = [](const json &value) -> std::optional<std::string>
-            {
-                if (value.is_string()) return value.get<std::string>();
-                if (value.is_number_integer()) return std::format("{}", value.get<std::int64_t>());
-                if (value.is_number_unsigned()) return std::format("{}", value.get<std::uint64_t>());
-                return std::nullopt;
-            };
-
-            std::vector<Driver::bp_point> points;
-            if (pointsIt->size() > BP_CONFIG_MAX) return BreakpointPointsResult{std::in_place_index<1>, fail(std::format("points 最多 {} 个", BP_CONFIG_MAX))};
-            points.reserve(pointsIt->size());
-            for (const auto &pointJson : *pointsIt)
-            {
-                if (!pointJson.is_object()) return BreakpointPointsResult{std::in_place_index<1>, fail("points 中存在无效断点配置")};
-                const auto addressIt = pointJson.find("address");
-                const auto typeIt = pointJson.find("bp_type");
-                const auto scopeIt = pointJson.find("bp_scope");
-                const auto lengthIt = pointJson.find("length");
-                if (addressIt == pointJson.end() || typeIt == pointJson.end() || scopeIt == pointJson.end() || lengthIt == pointJson.end()) return BreakpointPointsResult{std::in_place_index<1>, fail("points 中每个断点都需要 address/bp_type/bp_scope/length")};
-
-                const auto address = parseUInt64Value(*addressIt);
-                const auto typeToken = parseStringValue(*typeIt);
-                const auto scopeToken = parseStringValue(*scopeIt);
-                const auto lengthValue = parseIntValue(*lengthIt);
-                if (!address || *address == 0 || !typeToken || !scopeToken || !lengthValue) return BreakpointPointsResult{std::in_place_index<1>, fail("points 中存在无效断点参数")};
-
-                const auto bpType = parseBpTypeToken(*typeToken);
-                const auto bpScope = parseBpScopeToken(*scopeToken);
-                if (*lengthValue < 1 || *lengthValue > 8) return BreakpointPointsResult{std::in_place_index<1>, fail("points 中存在无效断点参数，长度范围为 1-8")};
-                const auto bpLength = parseBpLengthValue(*lengthValue);
-                if (!bpType || !bpScope || !bpLength) return BreakpointPointsResult{std::in_place_index<1>, fail("points 中存在无效断点参数，长度范围为 1-8")};
-
-                Driver::bp_point point{};
-                point.hit_addr = *address;
-                point.bt = *bpType;
-                point.bl = *bpLength;
-                point.bs = *bpScope;
-                points.push_back(point);
-            }
-            return BreakpointPointsResult{std::in_place_index<0>, std::move(points)};
-        };
-
-        auto breakpointSetResult = [&](int status, std::string_view mode, const std::vector<Driver::bp_point> &points) -> json
-        {
-            runtime.hwbpMode = mode;
-
-            json outPoints = json::array();
-            for (std::size_t index = 0; index < points.size(); ++index)
-            {
-                outPoints.push_back({{"index", index}, {"address", std::format("0x{:X}", points[index].hit_addr)}, {"type", std::string(bpTypeToToken(points[index].bt))}, {"scope", std::string(bpScopeToToken(points[index].bs))}, {"length", static_cast<int>(points[index].bl)}});
-            }
-            return okData({{"status", status}, {"mode", mode}, {"point_count", points.size()}, {"points", std::move(outPoints)}});
+            return {{"ok", true}, {"operation", op}, {"data", std::move(data)}};
         };
 
         auto requiredString = [&](std::string_view key, std::string_view desc) -> std::variant<std::string, json>
@@ -975,12 +760,11 @@ namespace
 
         auto requiredInt = [&](std::string_view key, std::string_view desc) -> std::variant<int, json> { return requiredParsed.template operator()<int>(key, desc, parseInt); };
 
-        auto requiredInt64 = [&](std::string_view key, std::string_view desc) -> std::variant<std::int64_t, json> { return requiredParsed.template operator()<std::int64_t>(key, desc, parseInt64); };
-
         auto scannerStateJson = [&]() -> json
         {
             const auto state = runtime.scanner.state();
             return {
+                {"alignment", state.alignment},
                 {"scanning", state.scanning}, {"progress", state.progress}, {"count", state.count}, {"string_scan", state.stringScan}, {"value_type", state.stringScan ? "string" : state.dataType.has_value() ? Types::Labels::TYPE[static_cast<size_t>(*state.dataType)] : ""}, {"mode", fuzzyModeToken(state.mode)}, {"value_format", state.mode == Types::FuzzyMode::Pointer ? "hex_address" : state.mode == Types::FuzzyMode::String ? "text" : "number"},
             };
         };
@@ -1041,7 +825,7 @@ namespace
         {
             const int pid = dr->GetGlobalPid();
             if (pid <= 0) return fail("全局PID未设置，请先执行 target.select 或 target.attach");
-            const int status = op == "syscall.start" ? runtime.startSyscallMonitor() : runtime.stopSyscallMonitor();
+            const int status = op == "syscall.start" ? runtime.startSyscallMonitor() : runtime.syscallMonitor.stop();
             if (status != 0) return fail(std::format("系统调用监听请求失败，状态={}", status));
             return okData({{"pid", pid}, {"active", op == "syscall.start"}, {"status", status}});
         }
@@ -1056,7 +840,7 @@ namespace
         {
             const int pid = dr->GetGlobalPid();
             if (pid <= 0) return fail("全局PID未设置，请先执行 target.select 或 target.attach");
-            const int status = op == "cntvct.start" ? runtime.startCntvctMonitor() : runtime.stopCntvctMonitor();
+            const int status = op == "cntvct.start" ? runtime.startCntvctMonitor() : runtime.cntvctMonitor.stop();
             if (status != 0) return fail(std::format("CNTVCT 监听请求失败，状态={}", status));
             return okData({{"pid", pid}, {"active", op == "cntvct.start"}, {"status", status}});
         }
@@ -1101,7 +885,50 @@ namespace
         if (op == "memory.map")
         {
             const std::unique_ptr<Driver::virtual_memory> info(new Driver::virtual_memory(dr->GetMemoryInfo()));
-            return okData(buildMemoryInfoJson(0, *info));
+            json root;
+            const int moduleCount = std::clamp(info->module_count, 0, MAX_MODULES);
+            const int regionCount = std::clamp(info->region_count, 0, MAX_SCAN_REGIONS);
+
+            root["status"] = 0;
+            root["module_count"] = moduleCount;
+            root["region_count"] = regionCount;
+            root["modules"] = json::array();
+            root["regions"] = json::array();
+
+            for (int i = 0; i < moduleCount; ++i)
+            {
+                const auto &mod = info->modules[i];
+                const int segCount = std::clamp(mod.seg_count, 0, MAX_SEGS_PER_MODULE);
+
+                json moduleItem;
+                moduleItem["name"] = std::string(mod.name);
+                moduleItem["seg_count"] = segCount;
+                moduleItem["segs"] = json::array();
+
+                for (int j = 0; j < segCount; ++j)
+                {
+                    const auto &seg = mod.segs[j];
+                    moduleItem["segs"].push_back({
+                        {"index", seg.index},
+                        {"prot", static_cast<int>(seg.prot)},
+                        {"start", std::format("0x{:X}", seg.start)},
+                        {"end", std::format("0x{:X}", seg.end)},
+                    });
+                }
+
+                root["modules"].push_back(std::move(moduleItem));
+            }
+
+            for (int i = 0; i < regionCount; ++i)
+            {
+                const auto &region = info->regions[i];
+                root["regions"].push_back({
+                    {"start", std::format("0x{:X}", region.start)},
+                    {"end", std::format("0x{:X}", region.end)},
+                });
+            }
+
+            return okData(std::move(root));
         }
 
         if (op == "module.resolve")
@@ -1144,6 +971,13 @@ namespace
 
             const bool isFirst = (op == "scan.start");
             const std::string valueToken = optionalString("value");
+            size_t alignment = 0;
+            if (params.contains("alignment"))
+            {
+                const auto parsedAlignment = parseInt(optionalString("alignment"));
+                if (!parsedAlignment || (*parsedAlignment != 0 && *parsedAlignment != 1 && *parsedAlignment != 2 && *parsedAlignment != 4 && *parsedAlignment != 8)) return fail("alignment 必须是 0/1/2/4/8；0 为默认，1 为逐字节扫描");
+                alignment = static_cast<size_t>(*parsedAlignment);
+            }
             if (*fuzzyMode == Types::FuzzyMode::String)
             {
                 if (valueToken.empty()) return fail("string 模式需要 value 参数");
@@ -1163,7 +997,7 @@ namespace
                 const auto parsed = MemUtils::ParseUInt64(valueToken, 16);
                 if (!parsed) return fail("value 参数不是有效的十六进制地址");
                 const auto target = static_cast<int64_t>(MemUtils::Normalize(static_cast<uintptr_t>(*parsed)));
-                if (!runtime.scanner.startAsync<int64_t>(pid, target, Types::DataType::I64, *fuzzyMode, isFirst)) return fail("扫描请求被拒绝，请检查任务状态、数据类型和扫描模式");
+                if (!runtime.scanner.startAsync<int64_t>(pid, target, Types::DataType::I64, *fuzzyMode, isFirst, int64_t{}, {}, MemUtils::FloatRounding::Rounded, alignment)) return fail("扫描请求被拒绝，请检查任务状态、数据类型和扫描模式");
                 return okData(scannerStateJson());
             }
 
@@ -1172,12 +1006,19 @@ namespace
             const std::string rangeToken = optionalString("range_max");
             if (*fuzzyMode == Types::FuzzyMode::Range && rangeToken.empty()) return fail("range 模式需要 range_max 参数");
 
+            MemUtils::FloatRounding rounding = MemUtils::FloatRounding::Rounded;
+            const std::string roundingToken = toLowerAscii(optionalString("rounding"));
+            if (roundingToken == "truncated") rounding = MemUtils::FloatRounding::Truncated;
+            else if (roundingToken == "extreme") rounding = MemUtils::FloatRounding::Extreme;
+            else if (roundingToken == "exact") rounding = MemUtils::FloatRounding::Exact;
+            else if (!roundingToken.empty() && roundingToken != "rounded") return fail("rounding 无效，支持: rounded/truncated/extreme/exact");
+
             return MemUtils::DispatchType(*dataType,
                                           [&]<typename T>() -> json
                                           {
                                               if (*fuzzyMode == Types::FuzzyMode::Unknown || (*fuzzyMode >= Types::FuzzyMode::Increased && *fuzzyMode <= Types::FuzzyMode::Unchanged))
                                               {
-                                                  if (!runtime.scanner.startAsync<T>(pid, T{}, *dataType, *fuzzyMode, isFirst)) return fail("扫描请求被拒绝，请检查任务状态、数据类型和扫描模式");
+                                                  if (!runtime.scanner.startAsync<T>(pid, T{}, *dataType, *fuzzyMode, isFirst, T{}, {}, rounding, alignment)) return fail("扫描请求被拒绝，请检查任务状态、数据类型和扫描模式");
                                                   return okData(scannerStateJson());
                                               }
 
@@ -1192,7 +1033,7 @@ namespace
                                                   rangeMax = *parsedRange;
                                               }
 
-                                              if (!runtime.scanner.startAsync<T>(pid, *target, *dataType, *fuzzyMode, isFirst, rangeMax)) return fail("扫描请求被拒绝，请检查任务状态、数据类型和扫描模式");
+                                              if (!runtime.scanner.startAsync<T>(pid, *target, *dataType, *fuzzyMode, isFirst, rangeMax, valueToken, rounding, alignment)) return fail("扫描请求被拒绝，请检查任务状态、数据类型和扫描模式");
                                               return okData(scannerStateJson());
                                           });
         }
@@ -1355,8 +1196,7 @@ namespace
 
         if (op == "breakpoint.get")
         {
-            auto &info = dr->GetBreakpointInfo();
-            return okData({{"mode", runtime.hwbpMode}, {"bp_info", buildBreakpointDataJson(info)}});
+            return okData({{"mode", runtime.hwbpMode}, {"bp_info", buildBreakpointDataJson(dr->GetBreakpointInfo())}});
         }
 
         if (op == "breakpoint.set")
@@ -1370,25 +1210,52 @@ namespace
             const int pid = dr->GetGlobalPid();
             if (pid <= 0) return fail("全局PID未设置，请先执行 target.select 或 target.attach");
 
-            auto parsedPoints = parseBreakpointPoints();
-            if (std::holds_alternative<json>(parsedPoints)) return std::get<json>(parsedPoints);
-            auto points = std::move(std::get<std::vector<Driver::bp_point>>(parsedPoints));
+            const auto pointsIt = params.find("points");
+            if (pointsIt == params.end() || !pointsIt->is_array() || pointsIt->empty()) return fail(std::format("operation={} 缺少参数 points", op));
+            if (pointsIt->size() > BP_CONFIG_MAX) return fail(std::format("points 最多 {} 个", BP_CONFIG_MAX));
+            std::vector<Driver::bp_point> points;
+            points.reserve(pointsIt->size());
+            for (const auto &pointJson : *pointsIt)
+            {
+                if (!pointJson.is_object()) return fail("points 中存在无效断点配置");
+                const auto addressText = getRequiredStringParam(pointJson, "address");
+                const auto typeText = getRequiredStringParam(pointJson, "bp_type");
+                const auto scopeText = getRequiredStringParam(pointJson, "bp_scope");
+                const auto lengthText = getRequiredStringParam(pointJson, "length");
+                if (!addressText || !typeText || !scopeText || !lengthText) return fail("points 中每个断点都需要 address/bp_type/bp_scope/length");
+                const auto address = MemUtils::ParseUInt64(*addressText);
+                const auto bpType = parseBpTypeToken(*typeText);
+                const auto bpScope = parseBpScopeToken(*scopeText);
+                const auto length = parseInt(*lengthText);
+                if (!address || *address == 0 || !bpType || !bpScope || !length) return fail("points 中存在无效断点参数");
+                const auto bpLength = parseBpLengthValue(*length);
+                if (!bpLength) return fail("points 中存在无效断点参数，长度范围为 1-8");
+                Driver::bp_point point{};
+                point.hit_addr = *address;
+                point.bt = *bpType;
+                point.bl = *bpLength;
+                point.bs = *bpScope;
+                points.push_back(point);
+            }
 
             const auto pointSpan = std::span<const Driver::bp_point>(points.data(), points.size());
             const int status = modeName == "hwbp" ? dr->SetProcessHwbpRef(pointSpan) : (modeName == "stepbp" ? dr->SetProcessStepbpRef(pointSpan) : dr->SetProcessPtebpRef(pointSpan));
             if (status != 0) return fail(std::format("设置 {} 失败 status={}", modeName, status));
-            return breakpointSetResult(status, modeName, points);
+            runtime.hwbpMode = modeName;
+            json outPoints = json::array();
+            for (std::size_t index = 0; index < points.size(); ++index)
+                outPoints.push_back({{"index", index}, {"address", std::format("0x{:X}", points[index].hit_addr)}, {"type", std::string(bpTypeToToken(points[index].bt))}, {"scope", std::string(bpScopeToToken(points[index].bs))}, {"length", static_cast<int>(points[index].bl)}});
+            return okData({{"status", status}, {"mode", modeName}, {"point_count", points.size()}, {"points", std::move(outPoints)}});
         }
 
         if (op == "breakpoint.clear")
         {
-            auto &activeMode = runtime.hwbpMode;
-            if (activeMode.empty()) return okData({{"mode", ""}, {"cleared", false}});
+            if (runtime.hwbpMode.empty()) return okData({{"mode", ""}, {"cleared", false}});
 
-            if (activeMode == "hwbp") dr->RemoveProcessHwbpRef();
-            else if (activeMode == "stepbp") dr->RemoveProcessStepbpRef();
+            if (runtime.hwbpMode == "hwbp") dr->RemoveProcessHwbpRef();
+            else if (runtime.hwbpMode == "stepbp") dr->RemoveProcessStepbpRef();
             else dr->RemoveProcessPtebpRef();
-            activeMode.clear();
+            runtime.hwbpMode.clear();
             return okData({{"mode", ""}, {"cleared", true}});
         }
 
@@ -1443,13 +1310,11 @@ namespace
 
         if (op == "signature.match")
         {
-            const auto rangeOffset = requiredInt64("range_offset", "range_offset");
+            const auto rangeOffset = requiredInt("range_offset", "range_offset");
             const auto pattern = requiredString("pattern", "pattern");
             if (std::holds_alternative<json>(rangeOffset)) return std::get<json>(rangeOffset);
             if (std::holds_alternative<json>(pattern)) return std::get<json>(pattern);
-            if (std::get<std::int64_t>(rangeOffset) < static_cast<std::int64_t>(std::numeric_limits<int>::min()) || std::get<std::int64_t>(rangeOffset) > static_cast<std::int64_t>(std::numeric_limits<int>::max())) return fail("range_offset 无效");
-            const auto matches = SignatureScanner::ScanSignature(std::get<std::string>(pattern).c_str(), static_cast<int>(std::get<std::int64_t>(rangeOffset)));
-            return okData(buildSignatureMatchesJson(matches, std::get<std::int64_t>(rangeOffset), std::get<std::string>(pattern)));
+            return okData(buildSignatureMatchesJson(SignatureScanner::ScanSignature(std::get<std::string>(pattern).c_str(), std::get<int>(rangeOffset)), std::get<int>(rangeOffset), std::get<std::string>(pattern)));
         }
 
         if (op == "signature.filter")
@@ -1473,8 +1338,7 @@ namespace
             const auto dataType = parseDataTypeToken(std::get<std::string>(valueType));
             if (!dataType.has_value()) return fail("value_type 无效");
 
-            const std::string kindText = optionalString("value_kind");
-            const auto kind = parseSavedValueKindToken(kindText);
+            const auto kind = parseSavedValueKindToken(optionalString("value_kind"));
             if (!kind.has_value()) return fail("value_kind 无效");
             if (*kind == Types::SavedValueKind::Pointer && *dataType != Types::DataType::I64) return fail("pointer 保存项必须使用 i64");
             if (*kind == Types::SavedValueKind::Text && *dataType != Types::DataType::I8) return fail("text 保存项必须使用 i8");
@@ -1487,11 +1351,10 @@ namespace
                 textLength = static_cast<size_t>(*parsed);
             }
 
-            auto &saved = runtime.saved;
             const uintptr_t savedAddress = static_cast<uintptr_t>(std::get<std::uint64_t>(address));
-            const bool created = saved.add(savedAddress, *dataType, *kind, textLength);
-            if (!created && !saved.contains(savedAddress)) return fail("保存地址失败");
-            if (const std::string note = optionalString("note"); !note.empty() && !saved.setNote(savedAddress, note)) return fail("设置备注失败");
+            const bool created = runtime.saved.add(savedAddress, *dataType, *kind, textLength);
+            if (!created && !runtime.saved.contains(savedAddress)) return fail("保存地址失败");
+            if (const std::string note = optionalString("note"); !note.empty() && !runtime.saved.setNote(savedAddress, note)) return fail("设置备注失败");
             json data = savedStatesJson();
             data["created"] = created;
             return okData(std::move(data));
@@ -1579,7 +1442,7 @@ namespace
             if (std::holds_alternative<json>(address)) return std::get<json>(address);
             if (std::holds_alternative<json>(dataHex)) return std::get<json>(dataHex);
             auto bytes = parseHexBytes(std::get<std::string>(dataHex));
-            if (!bytes.has_value() || bytes->empty()) return fail("data_hex 无效");
+            if (!bytes) return fail("data_hex 无效");
             constexpr size_t MAX_TRANSFER_SIZE = 1024 * 1024;
             if (bytes->size() > MAX_TRANSFER_SIZE) return fail("data_hex 最大 1048576 字节");
             const int writeBytes = dr->Write(std::get<std::uint64_t>(address), bytes->data(), bytes->size());
@@ -1638,53 +1501,6 @@ namespace
         return makeProtocolError("请求缺少 operation 字段").dump();
     }
 
-    void HandleClientConnection(ApplicationRuntime &application, int clientFd, sockaddr_in clientAddr)
-    {
-        char clientIp[INET_ADDRSTRLEN]{};
-        if (inet_ntop(AF_INET, &clientAddr.sin_addr, clientIp, sizeof(clientIp)) == nullptr)
-        {
-            std::strncpy(clientIp, "未知地址", sizeof(clientIp) - 1);
-            clientIp[sizeof(clientIp) - 1] = '\0';
-        }
-
-        const auto clientPort = ntohs(clientAddr.sin_port);
-        std::string method;
-        std::string path;
-        std::string body;
-        int errorStatus = 0;
-        if (!receiveHttpRequest(clientFd, &method, &path, &body, &errorStatus))
-        {
-            if (errorStatus == 413) sendHttpResponse(clientFd, 413, "Payload Too Large", R"({"ok":false,"error":"请求体过大"})");
-            else if (errorStatus == 431) sendHttpResponse(clientFd, 431, "Request Header Fields Too Large", R"({"ok":false,"error":"请求头过大"})");
-            else if (errorStatus != 0) sendHttpResponse(clientFd, 400, "Bad Request", R"({"ok":false,"error":"HTTP 请求格式无效"})");
-            close(clientFd);
-            return;
-        }
-
-        LS_LOGD_TAG_FMT("HTTP", "收到请求: {}:{} {} {}", clientIp, clientPort, method, path);
-        if (method == "OPTIONS")
-        {
-            sendHttpResponse(clientFd, 204, "No Content", "");
-        }
-        else if (method == "GET" && path == "/health")
-        {
-            sendHttpResponse(clientFd, 200, "OK", R"({"ok":true,"service":"LS_KTool","transport":"http"})");
-        }
-        else if (method == "POST" && path == "/api/rpc")
-        {
-            const std::string response = DispatchCommandUnified(application, body);
-            if (!sendHttpResponse(clientFd, 200, "OK", response)) printErrno("发送 HTTP 回复失败");
-        }
-        else if (method != "GET" && method != "POST")
-        {
-            sendHttpResponse(clientFd, 405, "Method Not Allowed", R"({"ok":false,"error":"不支持的 HTTP 方法"})");
-        }
-        else
-        {
-            sendHttpResponse(clientFd, 404, "Not Found", R"({"ok":false,"error":"接口不存在"})");
-        }
-        close(clientFd);
-    }
 } // namespace
 
 // 程序入口：初始化 HTTP 服务并处理客户端请求。
@@ -1739,6 +1555,51 @@ int http_server(ApplicationRuntime &application)
             continue;
         }
 
-        Config::ActiveThreadPools().client().detach_task([&application, clientFd, clientAddr] { HandleClientConnection(application, clientFd, clientAddr); });
+        Config::ActiveThreadPools().client().detach_task([&application, clientFd, clientAddr] {
+            char clientIp[INET_ADDRSTRLEN]{};
+            if (inet_ntop(AF_INET, &clientAddr.sin_addr, clientIp, sizeof(clientIp)) == nullptr)
+            {
+                std::strncpy(clientIp, "未知地址", sizeof(clientIp) - 1);
+                clientIp[sizeof(clientIp) - 1] = '\0';
+            }
+
+            const auto clientPort = ntohs(clientAddr.sin_port);
+            std::string method;
+            std::string path;
+            std::string body;
+            int errorStatus = 0;
+            if (!receiveHttpRequest(clientFd, &method, &path, &body, &errorStatus))
+            {
+                if (errorStatus == 413) sendHttpResponse(clientFd, 413, "Payload Too Large", R"({"ok":false,"error":"请求体过大"})");
+                else if (errorStatus == 431) sendHttpResponse(clientFd, 431, "Request Header Fields Too Large", R"({"ok":false,"error":"请求头过大"})");
+                else if (errorStatus != 0) sendHttpResponse(clientFd, 400, "Bad Request", R"({"ok":false,"error":"HTTP 请求格式无效"})");
+                close(clientFd);
+                return;
+            }
+
+            LS_LOGD_TAG_FMT("HTTP", "收到请求: {}:{} {} {}", clientIp, clientPort, method, path);
+            if (method == "OPTIONS")
+            {
+                sendHttpResponse(clientFd, 204, "No Content", "");
+            }
+            else if (method == "GET" && path == "/health")
+            {
+                sendHttpResponse(clientFd, 200, "OK", R"({"ok":true,"service":"LS_KTool","transport":"http"})");
+            }
+            else if (method == "POST" && path == "/api/rpc")
+            {
+                const std::string response = DispatchCommandUnified(application, body);
+                if (!sendHttpResponse(clientFd, 200, "OK", response)) printErrno("发送 HTTP 回复失败");
+            }
+            else if (method != "GET" && method != "POST")
+            {
+                sendHttpResponse(clientFd, 405, "Method Not Allowed", R"({"ok":false,"error":"不支持的 HTTP 方法"})");
+            }
+            else
+            {
+                sendHttpResponse(clientFd, 404, "Not Found", R"({"ok":false,"error":"接口不存在"})");
+            }
+            close(clientFd);
+        });
     }
 }

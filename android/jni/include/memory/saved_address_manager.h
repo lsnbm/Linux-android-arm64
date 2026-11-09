@@ -67,25 +67,22 @@ private:
         return MemUtils::WriteFromString(addr, type, value);
     }
 
-    // 后台循环写入被锁定的内存项。
-    void writeLoop()
-    {
-        while (!writeStop_.load(std::memory_order_acquire) && Config::g_Running)
-        {
-            std::vector<LockItem> snapshot;
-            {
-                std::lock_guard lock(mutex_);
-                snapshot.assign(locks_.begin(), locks_.end());
-            }
-            for (const auto &item : snapshot) writeValue(item.addr, item.type, item.kind, item.value);
-            std::this_thread::sleep_for(std::chrono::milliseconds(20));
-        }
-    }
-
 public:
     SavedAddressManager()
     {
-        writeTask_ = Config::IoThreadPool().submit_task([this] { writeLoop(); });
+        writeTask_ = Config::IoThreadPool().submit_task([this]
+        {
+            while (!writeStop_.load(std::memory_order_acquire) && Config::g_Running)
+            {
+                std::vector<LockItem> snapshot;
+                {
+                    std::lock_guard lock(mutex_);
+                    snapshot.assign(locks_.begin(), locks_.end());
+                }
+                for (const auto &item : snapshot) writeValue(item.addr, item.type, item.kind, item.value);
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            }
+        });
     }
 
     ~SavedAddressManager()
@@ -195,15 +192,14 @@ public:
         std::lock_guard lk(mutex_);
         for (const auto &state : states)
         {
-            const auto &item = state.item;
             if (lockItems)
             {
-                const auto saved = findSaved(item.address);
-                if (saved != items_.end() && find(item.address) == locks_.end()) locks_.push_back({saved->address, saved->type, saved->kind, readValue(*saved)});
+                const auto saved = findSaved(state.item.address);
+                if (saved != items_.end() && find(state.item.address) == locks_.end()) locks_.push_back({saved->address, saved->type, saved->kind, readValue(*saved)});
             }
             else
             {
-                std::erase_if(locks_, [&](const auto &locked) { return locked.addr == item.address; });
+                std::erase_if(locks_, [&](const auto &locked) { return locked.addr == state.item.address; });
             }
         }
     }
