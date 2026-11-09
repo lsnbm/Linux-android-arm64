@@ -17,15 +17,7 @@ inline void DoGyroSweep(const char *name, int start, int end, int step, int axis
 
     for (int value = start; dir > 0 ? value <= end : value >= end; value += step)
     {
-        int x = 0;
-        int y = 0;
-        int z = 0;
-
-        if (axis == 0) x = value;
-        else if (axis == 1) y = value;
-        else z = value;
-
-        dr->GyroReport(x, y, z);
+        dr->GyroReport(axis == 0 ? value : 0, axis == 1 ? value : 0, axis != 0 && axis != 1 ? value : 0);
         std::this_thread::sleep_for(std::chrono::milliseconds(30));
     }
 }

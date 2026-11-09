@@ -18,17 +18,12 @@
 #include "../../driver/driver.h"
 #include "config.h"
 #include "types.h"
+#include "scan_value.h"
 
 namespace MemUtils
 {
     using namespace Types;
     using namespace Config;
-
-    // 去除0xb40000高位标签
-    constexpr uintptr_t Normalize(uintptr_t addr) noexcept
-    {
-        return addr & ~(0xFFULL << 56);
-    }
 
     inline std::string_view BaseName(std::string_view path) noexcept
     {
@@ -51,52 +46,16 @@ namespace MemUtils
         return static_cast<std::uint64_t>(value);
     }
 
-    template <typename T> std::optional<T> ParseScanValue(std::string_view text)
-    {
-        static_assert(std::is_arithmetic_v<T> && (std::is_floating_point_v<T> || std::is_signed_v<T>));
-        if (text.empty()) return std::nullopt;
-
-        std::string temp(text);
-        char *end = nullptr;
-        errno = 0;
-
-        if constexpr (std::is_floating_point_v<T>)
-        {
-            const long double value = std::strtold(temp.c_str(), &end);
-            if (errno == ERANGE || end == temp.c_str() || *end != '\0' || !std::isfinite(value)) return std::nullopt;
-            if (value < static_cast<long double>(std::numeric_limits<T>::lowest()) || value > static_cast<long double>(std::numeric_limits<T>::max())) return std::nullopt;
-            const T converted = static_cast<T>(value);
-            if (!std::isfinite(converted) || (value != 0.0L && converted == T{})) return std::nullopt;
-            return converted;
-        }
-        else
-        {
-            const long long value = std::strtoll(temp.c_str(), &end, 10);
-            if (errno == ERANGE || end == temp.c_str() || *end != '\0') return std::nullopt;
-            if (value < static_cast<long long>(std::numeric_limits<T>::min()) || value > static_cast<long long>(std::numeric_limits<T>::max())) return std::nullopt;
-            return static_cast<T>(value);
-        }
-    }
-
     inline std::optional<__uint128_t> ParseUInt128(std::string_view text, int base = 0)
     {
         if (text.empty()) return std::nullopt;
 
-        if (base == 0)
+        if ((base == 0 || base == 16) && text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X'))
         {
-            base = 10;
-            if (text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X'))
-            {
-                base = 16;
-                text.remove_prefix(2);
-            }
-        }
-        else if (base == 16 && text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X'))
-        {
+            base = 16;
             text.remove_prefix(2);
         }
-
-        if (text.empty()) return std::nullopt;
+        if (base == 0) base = 10;
 
         const auto baseValue = static_cast<__uint128_t>(base);
         __uint128_t value = 0;
@@ -139,21 +98,6 @@ namespace MemUtils
         return a > Constants::ADDR_MIN && a < Constants::ADDR_MAX;
     }
 
-    // 验证浮点数合法性
-    template <typename T> constexpr bool IsValidFloat(T value) noexcept
-    {
-        if constexpr (std::is_floating_point_v<T>)
-        {
-            return !std::isnan(value) && !std::isinf(value);
-        }
-        return true;
-    }
-
-    inline void HwbpRequestRead(Driver::bp_record &record, int reg)
-    {
-        if (reg >= 0 && reg < Driver::MAX_REG_COUNT && BP_GET_MASK(&record, reg) != BP_OP_WRITE) BP_SET_MASK(&record, reg, BP_OP_READ);
-    }
-
     inline void HwbpRequestAll(Driver::bp_record &record)
     {
         for (int reg = Driver::IDX_PC; reg < Driver::MAX_REG_COUNT; ++reg)
@@ -165,7 +109,7 @@ namespace MemUtils
 
     inline __uint128_t HwbpReadRegisterValue(Driver::bp_record &record, int reg)
     {
-        HwbpRequestRead(record, reg);
+        if (reg >= 0 && reg < Driver::MAX_REG_COUNT && BP_GET_MASK(&record, reg) != BP_OP_WRITE) BP_SET_MASK(&record, reg, BP_OP_READ);
         switch (reg)
         {
         case Driver::IDX_PC:
@@ -282,20 +226,6 @@ namespace MemUtils
         return std::nullopt;
     }
 
-    inline std::optional<int> HwbpMaskByteIndexFromToken(std::string_view fieldToken)
-    {
-        std::string token(fieldToken);
-        if (!token.starts_with("mask")) return std::nullopt;
-
-        token.erase(0, 4);
-        if (!token.empty() && (token.front() == '.' || token.front() == '_' || token.front() == '[')) token.erase(0, 1);
-        if (!token.empty() && token.back() == ']') token.pop_back();
-
-        const auto index = HwbpParseInt(token);
-        if (!index || *index < 0 || *index >= 18) return std::nullopt;
-        return *index;
-    }
-
     inline bool AssignHwbpRecordField(Driver::bp_record &record, std::string_view fieldToken, __uint128_t value)
     {
         std::string token(fieldToken);
@@ -304,11 +234,17 @@ namespace MemUtils
             if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch - 'A' + 'a');
         }
 
-        if (const auto maskIndex = HwbpMaskByteIndexFromToken(token))
+        if (token.starts_with("mask"))
         {
-            if (value > std::numeric_limits<std::uint8_t>::max()) return false;
-            record.mask[*maskIndex] = static_cast<std::uint8_t>(value);
-            return true;
+            std::string_view indexText(token.data() + 4, token.size() - 4);
+            if (!indexText.empty() && (indexText.front() == '.' || indexText.front() == '_' || indexText.front() == '[')) indexText.remove_prefix(1);
+            if (!indexText.empty() && indexText.back() == ']') indexText.remove_suffix(1);
+            if (const auto maskIndex = HwbpParseInt(indexText); maskIndex && *maskIndex >= 0 && *maskIndex < 18)
+            {
+                if (value > std::numeric_limits<std::uint8_t>::max()) return false;
+                record.mask[*maskIndex] = static_cast<std::uint8_t>(value);
+                return true;
+            }
         }
 
         if (token.starts_with("op.") || token.starts_with("mask."))
@@ -327,40 +263,6 @@ namespace MemUtils
         return HwbpWriteRegisterValue(record, *regIndex, value);
     }
 
-    // 统一的类型分发
-    template <typename F> decltype(auto) DispatchType(DataType type, F &&fn)
-    {
-        switch (type)
-        {
-        case DataType::I8:
-            return fn.template operator()<int8_t>();
-        case DataType::I16:
-            return fn.template operator()<int16_t>();
-        case DataType::I32:
-            return fn.template operator()<int32_t>();
-        case DataType::I64:
-            return fn.template operator()<int64_t>();
-        case DataType::Float:
-            return fn.template operator()<float>();
-        case DataType::Double:
-            return fn.template operator()<double>();
-        default:
-            return fn.template operator()<int32_t>();
-        }
-    }
-
-    // 值的字符串转换
-    namespace detail
-    {
-        // 把数值按类型格式化为字符串。
-        template <typename T> std::string ValueToString(T val)
-        {
-            if constexpr (std::is_floating_point_v<T>) return std::format("{:.11f}", val);
-            else if constexpr (sizeof(T) <= 4) return std::to_string(static_cast<int>(val));
-            else return std::to_string(static_cast<long long>(val));
-        }
-    } // namespace detail
-
     // 按指定类型读取内存并转为字符串。
     inline std::string ReadAsString(uintptr_t addr, DataType type)
     {
@@ -370,14 +272,15 @@ namespace MemUtils
                             {
                                 T value{};
                                 if (dr->Read(addr, &value, sizeof(T)) != static_cast<int>(sizeof(T))) return "??";
-                                return detail::ValueToString(value);
+                                if constexpr (std::is_floating_point_v<T>) return std::format("{:.{}g}", value, std::numeric_limits<T>::max_digits10);
+                                else return std::to_string(value);
                             });
     }
 
     // 把字符串按指定类型写入目标地址。
     inline bool WriteFromString(uintptr_t addr, DataType type, std::string_view str)
     {
-        if (!addr || str.empty()) return false;
+        if (!addr) return false;
         return DispatchType(type,
                             [&]<typename T>() -> bool
                             {
@@ -421,80 +324,9 @@ namespace MemUtils
     // 把十六进制文本解析后写入指针值。
     inline bool WritePointerFromString(uintptr_t addr, std::string_view str)
     {
-        if (!addr || str.empty()) return false;
+        if (!addr) return false;
         const auto parsed = ParseUInt64(str, 16);
-        if (!parsed) return false;
-        const int64_t value = static_cast<int64_t>(*parsed);
-        return dr->Write<int64_t>(addr, value) == static_cast<int>(sizeof(value));
-    }
-
-    //  按扫描模式比较当前值与目标值。
-    template <typename T> bool Compare(T value, T target, FuzzyMode mode, T lastValue, T rangeMax = T{})
-    {
-        auto compare = [](T lhs, T rhs)
-        {
-            if constexpr (std::is_floating_point_v<T>)
-            {
-                constexpr long double absEpsilon = std::is_same_v<T, float> ? 1e-4L : 1e-8L;
-                constexpr long double relEpsilon = static_cast<long double>(std::numeric_limits<T>::epsilon());
-                const long double left = static_cast<long double>(lhs);
-                const long double right = static_cast<long double>(rhs);
-                const long double tolerance = std::max(absEpsilon, std::max(std::abs(left), std::abs(right)) * relEpsilon);
-                const long double delta = left - right;
-                if (delta > tolerance) return 1;
-                if (delta < -tolerance) return -1;
-                return 0;
-            }
-            else
-            {
-                if (lhs > rhs) return 1;
-                if (lhs < rhs) return -1;
-                return 0;
-            }
-        };
-
-        if constexpr (std::is_floating_point_v<T>)
-        {
-            if (!IsValidFloat(value)) return false;
-            if ((mode == FuzzyMode::Equal || mode == FuzzyMode::Greater || mode == FuzzyMode::Less) && !IsValidFloat(target)) return false;
-            if ((mode == FuzzyMode::Increased || mode == FuzzyMode::Decreased || mode == FuzzyMode::Changed || mode == FuzzyMode::Unchanged) && !IsValidFloat(lastValue)) return false;
-            if (mode == FuzzyMode::Range && (!IsValidFloat(target) || !IsValidFloat(rangeMax))) return false;
-        }
-
-        switch (mode)
-        {
-        case FuzzyMode::Equal:
-            return compare(value, target) == 0;
-        case FuzzyMode::Greater:
-            return compare(value, target) > 0;
-        case FuzzyMode::Less:
-            return compare(value, target) < 0;
-        case FuzzyMode::Increased:
-            return compare(value, lastValue) > 0;
-        case FuzzyMode::Decreased:
-            return compare(value, lastValue) < 0;
-        case FuzzyMode::Changed:
-            return compare(value, lastValue) != 0;
-        case FuzzyMode::Unchanged:
-            return compare(value, lastValue) == 0;
-        case FuzzyMode::Range:
-        {
-            T lo = target, hi = rangeMax;
-            if (lo > hi) std::swap(lo, hi);
-            return compare(value, lo) >= 0 && compare(value, hi) <= 0;
-        }
-        case FuzzyMode::Pointer:
-        {
-            if constexpr (std::is_integral_v<T>)
-            {
-                using U = std::make_unsigned_t<T>;
-                return Normalize(static_cast<uintptr_t>(static_cast<U>(value))) == Normalize(static_cast<uintptr_t>(static_cast<U>(target)));
-            }
-            return false;
-        }
-        default:
-            return false;
-        }
+        return parsed && dr->Write<int64_t>(addr, static_cast<int64_t>(*parsed)) == static_cast<int>(sizeof(int64_t));
     }
 
     // ── HEX 偏移解析 ──

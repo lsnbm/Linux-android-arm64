@@ -26,9 +26,7 @@ inline void DoSwipeTest(int slot, int x1, int y1, int x2, int y2, int screenW, i
     std::this_thread::sleep_for(std::chrono::milliseconds(30));
     for (int i = 1; i <= steps; ++i)
     {
-        int x = x1 + (x2 - x1) * i / steps;
-        int y = y1 + (y2 - y1) * i / steps;
-        dr->TouchMove(slot, x, y, screenW, screenH);
+        dr->TouchMove(slot, x1 + (x2 - x1) * i / steps, y1 + (y2 - y1) * i / steps, screenW, screenH);
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
     dr->TouchUp(slot);
@@ -75,10 +73,7 @@ inline int RunTouchTest()
     if (FILE *pipe = popen("wm size", "r"))
     {
         char line[128] = {};
-        if (fgets(line, sizeof(line), pipe))
-        {
-            if (sscanf(line, "Physical size: %dx%d", &screenW, &screenH) != 2) sscanf(line, "Override size: %dx%d", &screenW, &screenH);
-        }
+        if (fgets(line, sizeof(line), pipe) && sscanf(line, "Physical size: %dx%d", &screenW, &screenH) != 2) sscanf(line, "Override size: %dx%d", &screenW, &screenH);
         pclose(pipe);
     }
 
