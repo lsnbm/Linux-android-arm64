@@ -191,7 +191,7 @@ namespace DriverLoader
         if (std::sscanf(kernel_info.release, "%d.%d", &major, &minor) != 2)
         {
             LS_LOGE_TAG("DriverLoader", "无法解析内核版本: %s", kernel_info.release);
-            std::println(stderr, "[DriverLoader] 无法解析内核版本: {}", kernel_info.release);
+            std::println(stderr, "[DriverLoader] 无法解析内核版本: {}", std::string_view(kernel_info.release));
             std::fflush(stderr);
             return {};
         }
@@ -210,7 +210,7 @@ namespace DriverLoader
         else
         {
             LS_LOGE_TAG("DriverLoader", "不支持的内核版本: %s", kernel_info.release);
-            std::println(stderr, "[DriverLoader] 不支持的内核版本: {}", kernel_info.release);
+            std::println(stderr, "[DriverLoader] 不支持的内核版本: {}", std::string_view(kernel_info.release));
             std::fflush(stderr);
             return {};
         }
@@ -285,7 +285,7 @@ namespace DriverLoader
         {
             line[strcspn(line, "\r\n")] = '\0';
             LS_LOGE_TAG("DriverLoader", "dmesg: %s", line);
-            std::println(stderr, "[DriverLoader] dmesg: {}", line);
+            std::println(stderr, "[DriverLoader] dmesg: {}", std::string_view(line));
             std::fflush(stderr);
         }
         pclose(stream);
