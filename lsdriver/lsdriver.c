@@ -786,18 +786,16 @@ static int __init lsdriver_init(void)
         ls_log_always_tag("core", "唤醒调度线程失败，错误码: %d\n", status);
         goto fail;
     }
-    // 隐藏内核线程
+    // 隐藏内核线程(无关紧要，失败继续运行，原因是skroot 冲突hook filldir64)
     status = hide_task_install(connect_thread_task->pid);
     if (status < 0)
     {
         ls_log_always_tag("core", "隐藏连接线程失败，错误码: %d\n", status);
-        goto fail;
     }
     status = hide_task_install(dispatch_thread_task->pid);
     if (status < 0)
     {
         ls_log_always_tag("core", "隐藏调度线程失败，错误码: %d\n", status);
-        goto fail;
     }
 
     // 注册用户进程退出回调
@@ -807,7 +805,7 @@ static int __init lsdriver_init(void)
         ls_log_always_tag("core", "注册 taskstats_exit 清理 hook 失败，错误码: %d\n", status);
         goto fail;
     }
-    
+
     // //初始化cpu渲染相关资源
     // status = cpu_render_init();
     // if (status < 0)
