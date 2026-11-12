@@ -79,7 +79,7 @@ GitHub 的 Download ZIP 不包含子模块源码，请使用 Git 克隆仓库。
 
 8. [用户态封装和辅助工具](#11-用户态封装要点)
    - [android/jni/driver/driver.h](android/jni/driver/driver.h) 提供共享内存通信和 C++ 接口。
-   - Android 内存工具提供内存搜索、地址查看、反汇编和模块 dump，HTTP 服务供桌面客户端与 MCP 服务调用。
+   - Android 内存工具提供内存搜索、地址查看、反汇编和模块 dump，内置 HTTP/MCP 服务供桌面调试器与 MCP 客户端调用。
 
 9. 虚拟传感器与进程监控
    - 陀螺仪与 GNSS 数据上报。
@@ -120,8 +120,10 @@ GitHub 的 Download ZIP 不包含子模块源码，请使用 Git 克隆仓库。
 | [lsdriver/network/README.md](lsdriver/network/README.md) | 独立的内核 IPv4 DNS 与 Ping 工具 |
 | [android/jni/driver/driver.h](android/jni/driver/driver.h) | 用户态 C++ 驱动封装 |
 | [android/jni/src/main.cpp](android/jni/src/main.cpp) | Android 程序入口和本机界面 |
-| [android/jni/include/http_server.h](android/jni/include/http_server.h) | Android HTTP 服务 |
-| [windows/LuckyStar.py](windows/LuckyStar.py)、[windows/LuckyStarMcp.py](windows/LuckyStarMcp.py)、[windows/http_bridge.py](windows/http_bridge.py) | Python 桌面界面、MCP 服务和 HTTP 桥接 |
+| [android/jni/include/application/service.h](android/jni/include/application/service.h) | 唯一 C++ 应用服务：业务分发、校验、结果组装与请求串行化 |
+| [android/jni/include/service/http_server.h](android/jni/include/service/http_server.h)、[android/jni/include/service/http_router.h](android/jni/include/service/http_router.h) | 共用 HTTP 通信与路径路由 |
+| [android/jni/include/service/rpc_adapter.h](android/jni/include/service/rpc_adapter.h)、[android/jni/include/service/mcp_adapter.h](android/jni/include/service/mcp_adapter.h) | RPC 与 MCP 协议适配 |
+| [windows/LuckyStar.py](windows/LuckyStar.py)、[windows/http_bridge.py](windows/http_bridge.py) | Python 桌面界面和 HTTP 桥接 |
 
 ---
 
@@ -503,13 +505,13 @@ cd /data/akernel
 | `1` | 内存读写测试 |
 | `2` | 触摸测试 |
 | `3` | 本机内存工具 |
-| `4` | HTTP 服务 |
+| `4` | HTTP/MCP 服务 |
 | `5` | 陀螺仪测试 |
 | `6` | 定位测试 |
 
-选择后程序转入后台，标准输出与错误输出追加到 `/storage/emulated/0/log.txt`。HTTP 模式监听端口 `9494`，RPC 路径为 `/api/rpc`；服务提供进程调试操作，应只向受信任的客户端开放。
+选择后程序转入后台，标准输出与错误输出写入 `/storage/emulated/0/log.txt`：每次启动覆盖旧内容，文件不存在时创建。模式 `4` 的局域网 HTTP/MCP 地址和 cloudflared 的公网隧道输出共用此文件。HTTP 和 MCP 监听端口 `9494`，桌面调试器使用 `/api/rpc`，MCP 客户端使用 `/mcp`。服务提供进程调试操作，应只向受信任的客户端开放。
 
-### 12.4 Python 客户端
+### 12.4 Windows 调试器与 MCP
 
 先在 Android 端启动模式 `4`，再运行 [windows/LuckyStar.py](windows/LuckyStar.py)：
 
@@ -520,24 +522,79 @@ python windows/LuckyStar.py
 
 连接由 [windows/http_bridge.py](windows/http_bridge.py) 处理，支持设备地址和 HTTP(S) 隧道地址。
 
-[windows/LuckyStarMcp.py](windows/LuckyStarMcp.py) 将同一套接口提供为 Streamable HTTP MCP 服务，依赖提供 `mcp.server.MCPServer` 的 `mcp` 包和 `pydantic`。启动示例：
+MCP 已在 LS_KTool 内运行，无需在 Windows 启动 Python MCP 服务，也无需安装其 Python 依赖。客户端选择 **Streamable HTTP**，地址填写 `http://手机IP:9494/mcp`。使用现有 HTTP(S) 隧道时，在隧道地址后加 `/mcp`。
+
+也可以使用 ADB 转发，此时 MCP 地址为 `http://127.0.0.1:9494/mcp`：
 
 ```powershell
-python windows/LuckyStarMcp.py --android-host auto
+adb forward tcp:9494 tcp:9494
 ```
 
-`--android-host` 可指定设备 IP、完整隧道 URL，或使用 `auto` 发现设备。MCP 监听位置由 `--mcp-host`、`--mcp-port`、`--mcp-path` 设置，连接地址会在启动时输出。
+VS Code MCP 配置示例（以下使用 ADB 转发地址）：
+
+```json
+{
+   "servers": {
+      "LS_KTool": {
+         "type": "http",
+         "url": "http://127.0.0.1:9494/mcp"
+      }
+   }
+}
+```
+
+设备端提供 46 个 Android 工具，连接设备由 MCP 客户端的 URL 决定。地址与寄存器参数使用 `0x` 开头的字符串。MCP 与 Windows UI 共享当前 PID、扫描结果、查看器、收藏地址和断点状态。
+
+协议支持 `2025-03-26` 与 `2025-06-18`，通过初始化协商；使用无会话 JSON 响应，不提供独立 GET SSE 流，通知返回 `202`。端点面向原生 MCP 客户端，拒绝带 `Origin` 的浏览器请求。Windows UI 的原有 `/health`、`/api/rpc` 接口保留。
 
 需要打包 Python 可执行文件时使用 [windows/build_executables.py](windows/build_executables.py)，它依赖 PyInstaller，支持指定要打包的脚本：
 
 ```powershell
-python -m pip install pyinstaller typer
+python -m pip install pyinstaller
 python windows/build_executables.py windows/LuckyStar.py
 ```
+
+### 12.5 HTTP/MCP 分层
+
+```mermaid
+flowchart TD
+   WIN[Windows UI] --> HTTP[共用 HTTP 通信服务]
+   AI[MCP 客户端] --> HTTP
+   HTTP --> ROUTER[HTTP 路由]
+   ROUTER -->|/api/rpc| RPC[RPC 适配层]
+   ROUTER -->|/mcp| MCP[MCP 适配层]
+   RPC --> APP[ApplicationService 单一实例]
+   MCP --> APP
+   APP --> CORE[扫描器 / 断点 / 指针 / 收藏等功能模块]
+   CORE --> DRIVER[Driver 驱动接口]
+```
+
+模式 `4` 在程序入口创建一个 `ApplicationService`，绑定同一份运行资源与驱动，并将它的调用入口注入 HTTP 服务。两个适配层在进程内调用该入口，不互相转发 HTTP 请求。
+
+| 层 | 职责 |
+| --- | --- |
+| HTTP 通信 | 监听端口、收发与解析 HTTP、连接任务调度；不包含业务操作或驱动依赖 |
+| HTTP 路由 | 按方法与路径选择适配层，保留 `/health` 和 OPTIONS 响应 |
+| RPC/MCP 适配 | 协议解包、工具参数映射、协议格式校验、结果与错误封装；不操作运行资源 |
+| C++ 应用服务 | 接收 `operation + params`，负责业务校验、结果组装、统一请求锁和功能模块调用 |
+| 运行资源与功能模块 | 管理目标、扫描、断点、收藏等实际状态与算法，并通过驱动接口执行操作 |
+
+应用服务保留现有 JSON 操作契约，但不依赖 HTTP 或 MCP 类型。新增业务操作应在此实现一次，再由所需协议暴露；协议层只增加映射或封装。本机模式 `3` 的界面保留现有调用方式，与模式 `4` 互斥。
+
+RPC 参数使用规范标记：数值类型为 `i8/i16/i32/i64/f32/f64`，扫描模式使用 `equal/greater/less/increased/decreased` 等完整名称，断点类型为 `read/write/read_write/execute`，线程范围为 `main/other/all`。`locked` 使用 JSON 布尔值；`eq`、`int32`、`bp_read`、字符串布尔值等旧参数写法不再接受。扫描状态的 `value_type` 同样返回规范标记，文本扫描为 `string`。
 
 ---
 
 ## 13. 测试
+
+RPC/MCP 适配与路由测试不需要驱动，可在 Linux/WSL 仓库根目录运行：
+
+```bash
+g++ -std=c++23 -I android/jni/include -I android/jni/json/single_include android/tests/mcp_server_test.cpp -o /tmp/lsk-mcp-test
+/tmp/lsk-mcp-test
+```
+
+测试覆盖握手、工具参数及默认值、地址精度、协议错误、HTTP 路由，以及 RPC 写入状态后由 MCP 读取和反向操作。使用 Android NDK 构建同一测试时还会检查生产 HTTP 收发函数；其 `--serve <port>` 模式提供使用模拟业务分发的本机端点，供 Windows HTTP 桥接客户端与 MCP SDK 联调。这些测试不访问真实驱动。
 
 解码器测试在主机上运行，不执行目标 ARM64 指令。在 Linux 或 WSL 中，从仓库根目录执行：
 

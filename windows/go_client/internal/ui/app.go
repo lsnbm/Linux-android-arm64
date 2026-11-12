@@ -13,7 +13,6 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"luckystar/internal/bridge"
-	"luckystar/internal/mcp"
 )
 
 const applicationName = "LuckyStar"
@@ -22,7 +21,7 @@ type App struct {
 	Win fyne.Window
 	Br  *bridge.Bridge
 
-	tabs  *container.AppTabs
+	tabs   *container.AppTabs
 	header *HeaderPanel
 
 	memoryPage  *MemoryPage
@@ -38,8 +37,6 @@ type App struct {
 	statusLabel *widget.Label
 	logView     *TextArea
 
-	mcpServer *mcp.Server
-
 	generation atomic.Int64
 	closing    atomic.Bool
 	live       *LiveRefresher
@@ -49,10 +46,6 @@ type App struct {
 func (a *App) Shutdown() {
 	a.closing.Store(true)
 	a.live.Stop()
-	if a.mcpServer != nil {
-		a.mcpServer.Stop()
-		a.mcpServer = nil
-	}
 	a.Br.Disconnect()
 }
 

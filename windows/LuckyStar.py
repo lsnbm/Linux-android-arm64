@@ -19,7 +19,6 @@ from http_bridge import (
     DEFAULT_ANDROID_PORT,
     DEFAULT_ANDROID_TIMEOUT_SECONDS,
     SCAN_HISTORY_MODES,
-    SCAN_MODE_ALIASES,
     SCAN_VALUE_MODES,
     build_saved_add_params,
     build_scan_params,
@@ -617,23 +616,7 @@ class HttpBridgeWindow(QWidget):
     @staticmethod
     def _normalize_scan_type_token(value: object) -> str | None:
         token = str(value or "").strip().lower()
-        return {
-            "i8": "i8",
-            "int8": "i8",
-            "i16": "i16",
-            "int16": "i16",
-            "i32": "i32",
-            "int32": "i32",
-            "i64": "i64",
-            "int64": "i64",
-            "float": "f32",
-            "f32": "f32",
-            "double": "f64",
-            "f64": "f64",
-            "str": "string",
-            "string": "string",
-            "text": "string",
-        }.get(token)
+        return token if token in {"i8", "i16", "i32", "i64", "f32", "f64", "string"} else None
 
     def _scan_result_type_token(self) -> str:
         return self.scan_session_type or self._selected_scan_type_token()
@@ -646,8 +629,7 @@ class HttpBridgeWindow(QWidget):
             self.scan_type_combo.setCurrentIndex(index)
 
     def _set_scan_mode_combo(self, mode_token: str) -> None:
-        normalized = SCAN_MODE_ALIASES.get(mode_token.strip().lower(), mode_token.strip().lower())
-        index = self.scan_mode_combo.findData(normalized)
+        index = self.scan_mode_combo.findData(mode_token.strip().lower())
         if index >= 0 and index != self.scan_mode_combo.currentIndex():
             self.scan_mode_combo.setCurrentIndex(index)
 

@@ -13,7 +13,6 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"luckystar/internal/bridge"
-	"luckystar/internal/mcp"
 )
 
 type HeaderPanel struct {
@@ -26,11 +25,6 @@ type HeaderPanel struct {
 	scanDevBtn *widget.Button
 	connectBtn *widget.Button
 	syncBtn    *widget.Button
-
-	mcpBtn     *widget.Button
-	mcpPort    *widget.Entry
-	mcpLabel   *widget.Label
-	mcpRunning bool
 
 	badge     *canvas.Text
 	pidLabel  *widget.Label
@@ -86,70 +80,9 @@ func newHeaderPanel(a *App) *HeaderPanel {
 		fixWidth(h.statusRow, 620),
 	)
 
-	// row 4: MCP service control
-	h.mcpPort = widget.NewEntry()
-	h.mcpPort.SetText(strconv.Itoa(mcp.DefaultBindPort))
-	h.mcpPort.SetPlaceHolder("端口")
-	h.mcpLabel = widget.NewLabel("MCP 服务: 未启动")
-	h.mcpBtn = widget.NewButton("启动 MCP 服务", h.onToggleMCP)
-	row4 := container.NewHBox(
-		h.mcpBtn,
-		widget.NewLabel("MCP 端口"),
-		fixWidth(h.mcpPort, 110),
-		fixWidth(h.mcpLabel, 420),
-	)
-
-	header := container.NewVBox(row1, row2, row3, row4)
+	header := container.NewVBox(row1, row2, row3)
 	h.content = widget.NewCard("连接", "", header)
 	return h
-}
-
-// onToggleMCP starts or stops the embedded MCP server.
-func (h *HeaderPanel) onToggleMCP() {
-	a := h.app
-	if h.mcpRunning {
-		if a.mcpServer != nil {
-			a.mcpServer.Stop()
-			a.mcpServer = nil
-		}
-		h.mcpRunning = false
-		h.mcpBtn.SetText("启动 MCP 服务")
-		h.mcpLabel.SetText("MCP 服务: 未启动")
-		a.setStatus("MCP 服务已停止")
-		return
-	}
-	port, err := strconv.Atoi(strings.TrimSpace(h.mcpPort.Text))
-	if err != nil || port < 1 || port > 65535 {
-		a.warn("输入提示", "MCP 端口必须是 1..65535 之间的整数。")
-		return
-	}
-	h.mcpBtn.Disable()
-	h.mcpBtn.SetText("正在启动...")
-	go func() {
-		srv, err := mcp.Start(mcp.Config{
-			BindHost:       "127.0.0.1",
-			BindPort:       port,
-			Path:           mcp.DefaultPath,
-			AndroidHost:    "auto",
-			AndroidPort:    bridge.DefaultPort,
-			AndroidTimeout: bridge.DefaultTimeoutSeconds,
-		})
-		fyne.Do(func() {
-			h.mcpBtn.Enable()
-			if err != nil {
-				h.mcpLabel.SetText("MCP 服务: 启动失败")
-				a.warn("MCP 启动失败", err.Error())
-				a.setStatus("MCP 服务启动失败：" + err.Error())
-				return
-			}
-			a.mcpServer = srv
-			h.mcpRunning = true
-			h.mcpBtn.SetText("停止 MCP 服务")
-			h.mcpLabel.SetText("MCP 服务: " + srv.URL())
-			a.setStatus("MCP 服务已启动: " + srv.URL())
-			a.log("MCP 服务已启动: " + srv.URL())
-		})
-	}()
 }
 
 func (h *HeaderPanel) Content() fyne.CanvasObject { return h.content }
