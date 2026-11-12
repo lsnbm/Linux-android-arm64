@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-"""Unified Windows-side bridge facade used by MCP and the desktop UI."""
+"""HTTP transport and operation mapping for the Windows desktop debugger."""
 
 import concurrent.futures
 import http.client
@@ -16,7 +16,6 @@ import urllib.parse
 from dataclasses import dataclass, field
 from typing import Any
 
-DEFAULT_ANDROID_HOST = os.getenv("ANDROID_HTTP_HOST", "auto").strip() or "auto"
 DEFAULT_ANDROID_PORT = int(os.getenv("ANDROID_HTTP_PORT", "9494"))
 DEFAULT_ANDROID_TIMEOUT_SECONDS = float(os.getenv("ANDROID_HTTP_TIMEOUT", "4"))
 SIGNATURE_TIMEOUT_SECONDS = 20.0
@@ -24,35 +23,9 @@ MIN_HTTPS_TIMEOUT_SECONDS = 15.0
 LAN_DISCOVERY_MAX_WORKERS = 24
 LAN_DISCOVERY_PING_TIMEOUT_MS = 150
 MAX_HTTP_RESPONSE_BYTES = 16 * 1024 * 1024
-AUTO_HOST_TOKENS = {"", "auto", "*"}
 VIEWER_FORMAT_TOKENS = {"hexadecimal", "hex", "i8", "i16", "i32", "i64", "f32", "f64", "disasm"}
 SCAN_HISTORY_MODES = {"increased", "decreased", "changed", "unchanged"}
 SCAN_VALUE_MODES = {"equal", "greater", "less", "range", "pointer", "string"}
-SCAN_MODE_ALIASES = {
-    "eq": "equal",
-    "gt": "greater",
-    "lt": "less",
-    "inc": "increased",
-    "dec": "decreased",
-    "chg": "changed",
-    "unchg": "unchanged",
-    "ptr": "pointer",
-    "str": "string",
-}
-VALUE_TYPE_ALIASES = {
-    "i8": "i8",
-    "int8": "i8",
-    "i16": "i16",
-    "int16": "i16",
-    "i32": "i32",
-    "int32": "i32",
-    "i64": "i64",
-    "int64": "i64",
-    "f32": "f32",
-    "float": "f32",
-    "f64": "f64",
-    "double": "f64",
-}
 VALUE_TYPE_LABELS = {
     "i8": "I8",
     "i16": "I16",
@@ -84,9 +57,6 @@ class BridgeProtocolError(BridgeError):
 class LanDevice:
     host: str
     mac: str
-
-    def to_dict(self) -> dict[str, str]:
-        return {"host": self.host, "mac": self.mac}
 
 
 @dataclass(frozen=True)
@@ -142,39 +112,18 @@ def normalize_view_format(view_format: str) -> str:
     return token
 
 
-def normalize_scan_mode(mode: str) -> str:
-    token = str(mode).strip().lower()
-    return SCAN_MODE_ALIASES.get(token, token)
-
-
 def normalize_value_type(value_type: str) -> str:
     token = str(value_type).strip().lower()
-    normalized = VALUE_TYPE_ALIASES.get(token)
-    if normalized is None:
+    if token not in VALUE_TYPE_LABELS:
         raise ValueError("value_type must be one of: i8, i16, i32, i64, f32, f64")
-    return normalized
+    return token
 
 
 def normalize_saved_kind(value_kind: str) -> str:
     token = str(value_kind or "numeric").strip().lower()
-    aliases = {"number": "numeric", "ptr": "pointer", "string": "text"}
-    token = aliases.get(token, token)
     if token not in SAVED_VALUE_KINDS:
         raise ValueError("value_kind must be one of: numeric, pointer, text")
     return token
-
-
-def parse_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return value != 0
-    token = str(value).strip().lower()
-    if token in {"true", "1", "yes", "on"}:
-        return True
-    if token in {"false", "0", "no", "off", ""}:
-        return False
-    raise ValueError(f"invalid boolean value: {value}")
 
 
 def build_saved_add_params(
@@ -204,7 +153,9 @@ def build_saved_add_params(
 
 
 def build_scan_params(value_type: str, mode: str, value: str = "", range_max: str = "", *, is_first: bool) -> dict[str, Any]:
-    mode_token = normalize_scan_mode(mode)
+    mode_token = str(mode).strip().lower()
+    if mode_token not in SCAN_HISTORY_MODES | SCAN_VALUE_MODES | {"unknown"}:
+        raise ValueError("invalid scan mode")
     value_token = str(value).strip()
     range_token = str(range_max).strip()
     if is_first and mode_token in SCAN_HISTORY_MODES:
@@ -267,6 +218,9 @@ class SavedAddressState:
         value_type = normalize_value_type(str(payload.get("value_type", "")))
         value_kind = normalize_saved_kind(str(payload.get("value_kind", "numeric")))
         address = int(str(payload.get("address", "0x0")), 0)
+        locked = payload.get("locked", False)
+        if not isinstance(locked, bool):
+            raise ValueError("saved lock state must be a boolean")
         return cls(
             address=address,
             address_text=format_address(address),
@@ -276,7 +230,7 @@ class SavedAddressState:
             text_length=max(1, min(256, int(payload.get("text_length", 64)))),
             note=str(payload.get("note", "")),
             value=str(payload.get("value", "")),
-            locked=parse_bool(payload.get("locked", False)),
+            locked=locked,
             lock_value=str(payload.get("lock_value", "")),
         )
 
@@ -286,94 +240,6 @@ def parse_saved_states(data: dict[str, Any]) -> list[SavedAddressState]:
     if not isinstance(raw_items, list):
         raise ValueError("saved state response items must be a list")
     return [SavedAddressState.from_dict(item) for item in raw_items if isinstance(item, dict)]
-
-
-class AndroidProtocolMixin:
-    def scan_start(self, value_type: str, mode: str, value: str = "", range_max: str = "") -> BridgeResponse:
-        return self.call_operation("scan.start", build_scan_params(value_type, mode, value, range_max, is_first=True))
-
-    def scan_refine(self, value_type: str, mode: str, value: str = "", range_max: str = "") -> BridgeResponse:
-        return self.call_operation("scan.refine", build_scan_params(value_type, mode, value, range_max, is_first=False))
-
-    def breakpoint_set(self, mode: str, points: list[dict[str, Any]]) -> BridgeResponse:
-        mode_token = str(mode).strip().lower()
-        if mode_token not in {"hwbp", "ptebp", "stepbp"}:
-            raise ValueError("mode must be one of: hwbp, ptebp, stepbp")
-        return self.call_operation("breakpoint.set", {"mode": mode_token, "points": normalize_breakpoint_points(points)})
-
-    def saved_list(self) -> BridgeResponse:
-        return self.call_operation("saved.list")
-
-    def saved_add(
-        self,
-        address: int | str,
-        value_type: str,
-        *,
-        value_kind: str = "numeric",
-        text_length: int = 64,
-        note: str = "",
-    ) -> BridgeResponse:
-        return self.call_operation(
-            "saved.add",
-            build_saved_add_params(
-                address,
-                value_type,
-                value_kind=value_kind,
-                text_length=text_length,
-                note=note,
-            ),
-        )
-
-    def saved_remove(self, address: int | str) -> BridgeResponse:
-        return self.call_operation("saved.remove", {"address": format_address(address)})
-
-    def saved_write(self, address: int | str, value: str) -> BridgeResponse:
-        return self.call_operation("saved.write", {"address": format_address(address), "value": str(value)})
-
-    def saved_set_note(self, address: int | str, note: str) -> BridgeResponse:
-        return self.call_operation("saved.note.set", {"address": format_address(address), "note": str(note)})
-
-    def saved_set_locked(self, address: int | str, locked: bool, value: str = "") -> BridgeResponse:
-        params: dict[str, Any] = {
-            "address": format_address(address),
-            "locked": bool(locked),
-            "value": str(value).strip() if locked else "",
-        }
-        return self.call_operation("saved.lock.set", params)
-
-    def saved_offset(self, offset: str) -> BridgeResponse:
-        return self.call_operation("saved.offset", {"offset": str(offset).strip()})
-
-    def saved_clear(self) -> BridgeResponse:
-        return self.call_operation("saved.clear")
-
-    def viewer_open(self, address: int | str, view_format: str = "hexadecimal") -> BridgeResponse:
-        return self.call_operation(
-            "viewer.open",
-            {"address": format_address(address), "view_format": normalize_view_format(view_format)},
-        )
-
-
-def normalize_bridge_host(host: str | None) -> str:
-    normalized = "" if host is None else str(host).strip()
-    return normalized or "auto"
-
-
-def is_auto_bridge_host(host: str) -> bool:
-    return str(host).strip().lower() in AUTO_HOST_TOKENS
-
-
-def _unique_hosts(*groups: list[str]) -> list[str]:
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for group in groups:
-        for host in group:
-            host_text = str(host).strip()
-            if not host_text or host_text in seen:
-                continue
-            seen.add(host_text)
-            ordered.append(host_text)
-    return ordered
 
 
 def _collect_local_ipv4() -> list[str]:
@@ -485,28 +351,7 @@ def discover_lan_devices() -> list[LanDevice]:
     return devices
 
 
-def _coerce_bridge_response(
-    response_obj: dict[str, Any],
-    *,
-    fallback_operation: str = "",
-    connection: dict[str, Any] | None = None,
-) -> BridgeResponse:
-    if not isinstance(response_obj, dict):
-        raise BridgeProtocolError("android HTTP response is not a JSON object")
-
-    ok = bool(response_obj.get("ok", False))
-    operation = str(response_obj.get("operation") or fallback_operation)
-    error = str(response_obj.get("error", "")) if not ok else ""
-    return BridgeResponse(
-        ok=ok,
-        operation=operation,
-        data=response_obj.get("data"),
-        error=error,
-        connection=connection or {},
-    )
-
-
-class AndroidHttpBridge(AndroidProtocolMixin):
+class AndroidHttpBridge:
     """HTTP endpoint used by interactive clients such as the Windows UI."""
 
     def __init__(
@@ -628,9 +473,13 @@ class AndroidHttpBridge(AndroidProtocolMixin):
                 error_text = str(response_obj.get("error", response.reason)) if isinstance(response_obj, dict) else response.reason
                 raise BridgeConnectionError(f"android HTTP request failed with status {response.status}: {error_text}")
 
-            return _coerce_bridge_response(
-                response_obj,
-                fallback_operation=str(request_obj.get("operation") or ""),
+            if not isinstance(response_obj, dict) or not isinstance(response_obj.get("ok"), bool):
+                raise BridgeProtocolError("android HTTP response must be an object with a boolean ok field")
+            return BridgeResponse(
+                ok=response_obj["ok"],
+                operation=str(response_obj.get("operation") or operation),
+                data=response_obj.get("data"),
+                error=str(response_obj.get("error", "")) if not response_obj["ok"] else "",
                 connection={
                     "host": endpoint.display_url,
                     "resolved_host": endpoint.host,
@@ -643,155 +492,54 @@ class AndroidHttpBridge(AndroidProtocolMixin):
     def call_operation(self, operation: str, params: dict[str, Any] | None = None) -> BridgeResponse:
         return self.request({"operation": operation.strip(), "params": params or {}})
 
+    def scan_start(self, value_type: str, mode: str, value: str = "", range_max: str = "") -> BridgeResponse:
+        return self.call_operation("scan.start", build_scan_params(value_type, mode, value, range_max, is_first=True))
 
-class AndroidHttpClient(AndroidProtocolMixin):
-    """Configurable HTTP client used by MCP, scripts, and non-interactive flows."""
+    def scan_refine(self, value_type: str, mode: str, value: str = "", range_max: str = "") -> BridgeResponse:
+        return self.call_operation("scan.refine", build_scan_params(value_type, mode, value, range_max, is_first=False))
 
-    def __init__(
+    def breakpoint_set(self, mode: str, points: list[dict[str, Any]]) -> BridgeResponse:
+        mode_token = str(mode).strip().lower()
+        if mode_token not in {"hwbp", "ptebp", "stepbp"}:
+            raise ValueError("mode must be one of: hwbp, ptebp, stepbp")
+        return self.call_operation("breakpoint.set", {"mode": mode_token, "points": normalize_breakpoint_points(points)})
+
+    def saved_list(self) -> BridgeResponse:
+        return self.call_operation("saved.list")
+
+    def saved_add(
         self,
+        address: int | str,
+        value_type: str,
         *,
-        host: str = DEFAULT_ANDROID_HOST,
-        port: int = DEFAULT_ANDROID_PORT,
-        timeout_seconds: float = DEFAULT_ANDROID_TIMEOUT_SECONDS,
-    ) -> None:
-        self._lock = threading.RLock()
-        self._host = normalize_bridge_host(host)
-        self._port = int(port)
-        self._timeout_seconds = float(timeout_seconds)
-        self._last_host = ""
-        self._devices: list[LanDevice] = []
-        self._target_pid: int | None = None
-        self._target_host: str | None = None
-
-    def connection_state(self) -> dict[str, Any]:
-        with self._lock:
-            return self._snapshot_locked()
-
-    def _snapshot_locked(self) -> dict[str, Any]:
-        return {
-            "host": self._host,
-            "port": self._port,
-            "timeout_seconds": self._timeout_seconds,
-            "last_connected_host": self._last_host,
-            "last_discovered_devices": [device.to_dict() for device in self._devices],
-            "auto_discover": is_auto_bridge_host(self._host),
-            "resolved_host": self._last_host or None,
-            "target_pid": self._target_pid,
-            "target_host": self._target_host,
-        }
-
-    def configure(
-        self,
-        *,
-        host: str | None = None,
-        port: int | None = None,
-        timeout_seconds: float | None = None,
-    ) -> dict[str, Any]:
-        with self._lock:
-            if host is not None:
-                normalized_host = normalize_bridge_host(host)
-                if normalized_host != self._host:
-                    self._host = normalized_host
-                    self._last_host = ""
-                    self._devices = []
-                    self._target_pid = None
-                    self._target_host = None
-            if port is not None:
-                if port <= 0 or port > 65535:
-                    raise ValueError("port must be in 1..65535")
-                if int(port) != self._port:
-                    self._port = int(port)
-                    self._target_pid = None
-                    self._target_host = None
-            if timeout_seconds is not None:
-                if timeout_seconds <= 0:
-                    raise ValueError("timeout_seconds must be > 0")
-                self._timeout_seconds = float(timeout_seconds)
-            return self._snapshot_locked()
-
-    def discover(self) -> dict[str, Any]:
-        with self._lock:
-            host = self._host
-            last_host = self._last_host
-        auto_discover = is_auto_bridge_host(host)
-        devices = discover_lan_devices() if auto_discover else []
-        with self._lock:
-            self._devices = devices
-            snapshot = self._snapshot_locked()
-        snapshot["candidates"] = _unique_hosts([last_host], [device.host for device in devices]) if auto_discover else [host]
-        return snapshot
-
-    def call_operation(self, operation: str, params: dict[str, Any] | None = None) -> BridgeResponse:
-        op = operation.strip()
-        request = {"operation": op, "params": params or {}}
-        with self._lock:
-            configured_host = self._host
-            port = self._port
-            timeout_seconds = self._timeout_seconds
-            last_host = self._last_host
-
-        auto_discover = is_auto_bridge_host(configured_host)
-        hosts = _unique_hosts([last_host]) if auto_discover else [configured_host]
-        errors: list[str] = []
-
-        def try_hosts(candidates: list[str]) -> BridgeResponse | None:
-            for candidate in candidates:
-                try:
-                    response = self._request_host(candidate, port, timeout_seconds, configured_host, request)
-                    with self._lock:
-                        self._last_host = candidate
-                    return response
-                except BridgeRequestOutcomeUnknown:
-                    raise
-                except BridgeConnectionError as exc:
-                    errors.append(f"{candidate}:{port} -> {exc}")
-            return None
-
-        response = try_hosts(hosts)
-        if response is not None:
-            return response
-
-        if auto_discover:
-            devices = discover_lan_devices()
-            with self._lock:
-                self._devices = devices
-            response = try_hosts([device.host for device in devices if device.host not in set(hosts)])
-            if response is not None:
-                return response
-
-        if errors:
-            raise BridgeConnectionError("failed to reach Android HTTP bridge candidates: " + "; ".join(errors))
-        raise BridgeConnectionError("failed to discover any Android HTTP bridge candidates")
-
-    def _request_host(
-        self,
-        host: str,
-        port: int,
-        timeout_seconds: float,
-        configured_host: str,
-        request: dict[str, Any],
+        value_kind: str = "numeric",
+        text_length: int = 64,
+        note: str = "",
     ) -> BridgeResponse:
-        with self._lock:
-            operation = str(request.get("operation") or "")
-            if self._target_pid is not None and self._target_host not in {None, host}:
-                previous_host = self._target_host
-                self._target_pid = None
-                self._target_host = None
-                if operation not in {"bridge.ping", "target.find", "target.select", "target.attach", "target.get"}:
-                    raise BridgeError(
-                        f"resolved Android device changed from {previous_host} to {host}; "
-                        "please set or attach the target again"
-                    )
+        return self.call_operation(
+            "saved.add",
+            build_saved_add_params(address, value_type, value_kind=value_kind, text_length=text_length, note=note),
+        )
 
-            bridge = AndroidHttpBridge(timeout_seconds=timeout_seconds)
-            bridge.connect(host, port)
-            response = bridge.request(request)
-            response.connection.update(host=configured_host, url=bridge.url, auto_discover=is_auto_bridge_host(configured_host))
-            if response.ok and operation in {"target.select", "target.attach", "target.get"} and isinstance(response.data, dict) and "pid" in response.data:
-                try:
-                    self._target_pid = int(str(response.data["pid"]), 0)
-                    self._target_host = host
-                except (TypeError, ValueError):
-                    pass
-            response.connection["target_pid"] = self._target_pid
-            return response
+    def saved_remove(self, address: int | str) -> BridgeResponse:
+        return self.call_operation("saved.remove", {"address": format_address(address)})
+
+    def saved_write(self, address: int | str, value: str) -> BridgeResponse:
+        return self.call_operation("saved.write", {"address": format_address(address), "value": str(value)})
+
+    def saved_set_note(self, address: int | str, note: str) -> BridgeResponse:
+        return self.call_operation("saved.note.set", {"address": format_address(address), "note": str(note)})
+
+    def saved_set_locked(self, address: int | str, locked: bool, value: str = "") -> BridgeResponse:
+        return self.call_operation("saved.lock.set", {
+            "address": format_address(address), "locked": bool(locked), "value": str(value).strip() if locked else "",
+        })
+
+    def saved_offset(self, offset: str) -> BridgeResponse:
+        return self.call_operation("saved.offset", {"offset": str(offset).strip()})
+
+    def saved_clear(self) -> BridgeResponse:
+        return self.call_operation("saved.clear")
+
+    def viewer_open(self, address: int | str, view_format: str = "hexadecimal") -> BridgeResponse:
+        return self.call_operation("viewer.open", {"address": format_address(address), "view_format": normalize_view_format(view_format)})

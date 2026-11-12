@@ -17,6 +17,7 @@
 #include <span>
 
 #include "application/runtime.h"
+#include "application/service.h"
 #include "memory/signature_scanner.h"
 #include "base/system_log.h"
 #include "driver.h"
@@ -978,8 +979,7 @@ private:
         }
     }
 
-    template <typename Start, typename Stop>
-    void drawMonitorTab(const char *title, const char *logTag, const char *hint, const char *childId, const char *emptyText, ApplicationRuntime::ProcessMonitor &monitor, MonitorParams &params, Start start, Stop stop)
+    template <typename Start, typename Stop> void drawMonitorTab(const char *title, const char *logTag, const char *hint, const char *childId, const char *emptyText, ApplicationRuntime::ProcessMonitor &monitor, MonitorParams &params, Start start, Stop stop)
     {
         const float w = ImGui::GetContentRegionAvail().x;
         const int targetPid = dr->GetGlobalPid();
@@ -2033,22 +2033,43 @@ public:
                 const float contentWidth = ImGui::GetContentRegionAvail().x;
                 drawTopBar(contentWidth, S(55));
                 UI::Space(S(4));
-                UI::ColorChild("Content", {contentWidth, ImGui::GetContentRegionAvail().y - S(64)}, Colors::BG_MID, [&]
-                {
-                    switch (state_.tab)
-                    {
-                    case 0: drawScanTab(); break;
-                    case 1: drawSavedTab(); break;
-                    case 2: drawViewerTab(); break;
-                    case 3: drawModuleTab(); break;
-                    case 4: drawPointerTab(); break;
-                    case 5: drawSignatureTab(); break;
-                    case 6: drawBreakpointTab(); break;
-                    case 7: drawMonitorTab("━━ 系统调用监控 ━━", "sysmon", "实时筛选包含 lsdriver 的内核日志", "SyscallLog", "暂无系统调用日志", runtime_.syscallMonitor, syscallParams_, [this] { return runtime_.startSyscallMonitor(); }, [this] { return runtime_.syscallMonitor.stop(); }); break;
-                    case 8: drawMonitorTab("━━ CNTVCT_EL0 读取监控 ━━", "cntvct", "实时筛选 cntvct 标签的内核日志", "CntvctLog", "暂无 CNTVCT 读取日志", runtime_.cntvctMonitor, cntvctParams_, [this] { return runtime_.startCntvctMonitor(); }, [this] { return runtime_.cntvctMonitor.stop(); }); break;
-                    case 9: drawEnvTab(); break;
-                    }
-                });
+                UI::ColorChild("Content", {contentWidth, ImGui::GetContentRegionAvail().y - S(64)}, Colors::BG_MID,
+                               [&]
+                               {
+                                   switch (state_.tab)
+                                   {
+                                   case 0:
+                                       drawScanTab();
+                                       break;
+                                   case 1:
+                                       drawSavedTab();
+                                       break;
+                                   case 2:
+                                       drawViewerTab();
+                                       break;
+                                   case 3:
+                                       drawModuleTab();
+                                       break;
+                                   case 4:
+                                       drawPointerTab();
+                                       break;
+                                   case 5:
+                                       drawSignatureTab();
+                                       break;
+                                   case 6:
+                                       drawBreakpointTab();
+                                       break;
+                                   case 7:
+                                       drawMonitorTab("━━ 系统调用监控 ━━", "sysmon", "实时筛选包含 lsdriver 的内核日志", "SyscallLog", "暂无系统调用日志", runtime_.syscallMonitor, syscallParams_, [this] { return runtime_.startSyscallMonitor(); }, [this] { return runtime_.syscallMonitor.stop(); });
+                                       break;
+                                   case 8:
+                                       drawMonitorTab("━━ CNTVCT_EL0 读取监控 ━━", "cntvct", "实时筛选 cntvct 标签的内核日志", "CntvctLog", "暂无 CNTVCT 读取日志", runtime_.cntvctMonitor, cntvctParams_, [this] { return runtime_.startCntvctMonitor(); }, [this] { return runtime_.cntvctMonitor.stop(); });
+                                       break;
+                                   case 9:
+                                       drawEnvTab();
+                                       break;
+                                   }
+                               });
                 UI::Space(S(4));
                 drawTabs(contentWidth, S(60));
             }
@@ -2128,7 +2149,7 @@ static bool daemonize(const char *log_path)
     //  切换工作目录（防止占用卸载的分区）
     chdir("/");
 
-    //  重定向标准输入、输出、错误
+    // 标准输入重定向到空设备，脱离终端输入。
     int devnull = open("/dev/null", O_RDONLY);
     if (devnull != -1)
     {
@@ -2136,16 +2157,25 @@ static bool daemonize(const char *log_path)
         if (devnull > STDERR_FILENO) close(devnull);
     }
 
+    // 创建或清空日志文件，将标准输出和标准错误重定向到该文件。
     int fd = open(log_path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-    if (fd != -1)
+    if (fd == -1)
     {
-        // 将标准输出 (1) 定向到 fd
-        dup2(fd, STDOUT_FILENO);
-        // 将标准错误 (2) 定向到 fd
-        dup2(fd, STDERR_FILENO);
-
-        if (fd > STDERR_FILENO) close(fd);
+        std::perror("打开启动日志失败");
+        return false;
     }
+    //将标准输出 (1) 定向到 fd;       // 将标准错误 (2) 定向到 fd
+    if (dup2(fd, STDOUT_FILENO) == -1 || dup2(fd, STDERR_FILENO) == -1)
+    {
+        const int error = errno;
+        if (fd > STDERR_FILENO) close(fd);
+        errno = error;
+        std::perror("重定向启动日志失败");
+        return false;
+    }
+    if (fd > STDERR_FILENO) close(fd);
+    setvbuf(stdout, nullptr, _IONBF, 0);
+    setvbuf(stderr, nullptr, _IONBF, 0);
     return true;
 }
 
@@ -2156,7 +2186,7 @@ int main()
     std::println(stdout, "  1) 读写测试");
     std::println(stdout, "  2) 触摸测试");
     std::println(stdout, "  3) 内存工具");
-    std::println(stdout, "  4) HTTP服务器");
+    std::println(stdout, "  4) HTTP/MCP服务器");
     std::println(stdout, "  5) 陀螺仪测试");
     std::println(stdout, "  6) 定位测试");
     std::print(stdout, "请输入 [0/1/2/3/4/5/6]: ");
@@ -2231,8 +2261,11 @@ int main()
             rc = RunMemoryTool(application);
             break;
         case 4:
-            rc = http_server(application);
+        {
+            ApplicationService service(application.resources(), *dr);
+            rc = http_server([&service](std::string_view operation, const nlohmann::json &params) { return service.execute(operation, params); }, Config::ActiveThreadPools().client());
             break;
+        }
         case 5:
             rc = RunGyroTest();
             break;

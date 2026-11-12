@@ -27,19 +27,12 @@ GUI_MARKERS = (
     "QApplication(",
 )
 
-MCP_MARKERS = (
-    "from mcp.server import MCPServer",
-    "import mcp",
-    "from mcp.",
-)
-
-
 def _ensure_pyinstaller() -> None:
     try:
         import PyInstaller.__main__  # noqa: F401
     except ImportError as exc:  # pragma: no cover - depends on local env
         raise SystemExit(
-            "PyInstaller is not installed. Run: python -m pip install pyinstaller typer"
+            "PyInstaller is not installed. Run: python -m pip install pyinstaller"
         ) from exc
 
 
@@ -186,18 +179,6 @@ def _build_script(
     if any(marker in script_text for marker in GUI_MARKERS):
         cmd.extend(["--add-data", f"{DEFAULT_ICON_PATH}{os.pathsep}."])
         cmd.append("--windowed")
-
-    if any(marker in script_text for marker in MCP_MARKERS):
-        cmd.extend(
-            [
-                "--collect-all",
-                "mcp",
-                "--hidden-import",
-                "uvicorn",
-                "--hidden-import",
-                "starlette",
-            ]
-        )
 
     if clean:
         cmd.append("--clean")
