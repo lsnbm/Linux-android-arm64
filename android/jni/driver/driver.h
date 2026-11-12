@@ -47,22 +47,17 @@ public: // 共有结构体和锁
     public:
         __always_inline void lock() noexcept
         {
-            uint32_t scratch;
-            uint32_t value;
-            asm volatile(".arch_extension lse\n"
-                         "mov %w[value], #1\n"
-                         // 原子争抢，失败立即重试，成功即退出。
-                         "1:\n"
-                         "swpab %w[value], %w[scratch], [%[address]]\n"
-                         "cbnz %w[scratch], 1b\n"
-                         : [scratch] "=&r"(scratch), [value] "=&r"(value)
-                         : [address] "r"(&locked)
-                         : "memory");
+            while (__atomic_exchange_n(&locked, 1, __ATOMIC_ACQUIRE))
+            {
+                while (__atomic_load_n(&locked, __ATOMIC_RELAXED))
+                {
+                }
+            }
         }
 
         __always_inline void unlock() noexcept
         {
-            asm volatile("stlrb wzr, [%[address]]" : : [address] "r"(&locked) : "memory");
+            __atomic_store_n(&locked, 0, __ATOMIC_RELEASE);
         }
     };
 
