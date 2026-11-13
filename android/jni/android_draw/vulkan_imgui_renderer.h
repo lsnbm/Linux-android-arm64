@@ -420,7 +420,11 @@ namespace RenderVK
         const int w = displayInfo.width;
         const int h = displayInfo.height;
         const int max_side = (h > w ? h : w);
-        native_window = android::SurfaceControlManager::Create("ScreenDecorOverlay", max_side, max_side, !allowCapture, 2024);
+
+        //系统中的 Accessibility Overlays 是 窗口管理器为无障碍覆盖内容创建的容器层，用于挂载辅助标记、提示等图层。它自身没有图像缓冲，内容由子图层绘制；
+        //因此即使没有显示无障碍界面，也可能在 Surface 列表中看到它。
+        //我现在创建的是一个同名的独立绘制层，不会自动挂到系统原有容器下，也不会因此成为无障碍服务。
+        native_window = android::SurfaceControlManager::Create("Accessibility Overlays", max_side, max_side, !allowCapture, 2024);
         if (native_window == nullptr)
         {
             LS_LOGE_TAG("RenderVK", "创建 ANativeWindow 失败");
