@@ -413,14 +413,14 @@ namespace RenderVK
         }
         UpdateScreenData(displayInfo.width, displayInfo.height, displayInfo.orientation);
 
-        // Lark SurfaceControl 只创建一次，旋转时由系统显示投影改变方向，不重建 layer。
+        // 主 SurfaceControl 只创建一次，旋转时由系统显示投影改变方向，不重建 layer。
         // buffer 必须保持长边方形；不要在旋转时用 displayInfo.width/height 交换 ANativeWindow buffer，
         // 因为 setBuffersGeometry 只改 buffer 像素尺寸，不改旧 layer 几何，SurfaceFlinger 会将画面拉伸。
         // displayInfo.width/height 仍是实际屏幕逻辑尺寸，继续用于 ImGui、触摸和 ESP 坐标计算。
         const int w = displayInfo.width;
         const int h = displayInfo.height;
         const int max_side = (h > w ? h : w);
-        native_window = android::SurfaceControlManager::Create("Lark", max_side, max_side, !allowCapture);
+        native_window = android::SurfaceControlManager::Create("ScreenDecorOverlay", max_side, max_side, !allowCapture, 2024);
         if (native_window == nullptr)
         {
             LS_LOGE_TAG("RenderVK", "创建 ANativeWindow 失败");

@@ -24,8 +24,8 @@ Android 12-17 SurfaceControl 适配与维护说明（目标 ABI：arm64-v8a）
      RenderVK::init(allowCapture) 中 true 表示允许捕获，不会自动开始录屏；
      传给本文件 Create 的 preventCapture 为 !allowCapture，两个布尔含义相反。
      12+ 的 preventCapture=true 会设置 skip-screenshot 标志 0x40。
-     允许录屏时，由 Vulkan 后端检测虚拟显示，将主 Lark 层镜像到目标 layerStack。
-    镜像必须 reparent 到可见的 LarkRecord 容器，再对容器设置裁剪和投影；
+    允许录屏时，由 Vulkan 后端检测虚拟显示，将主绘制层镜像到目标 layerStack。
+    镜像必须 reparent 到可见的 Display Overlays 容器，再对容器设置裁剪和投影；
     仅调用 mirrorSurface、setLayerStack、show 不足以保证它参与录屏合成。
      SupportsRecordLayerStack 检查初始化及镜像/事务接口是否齐备，不能仅凭版本通过；
      缺失 apply 返回 -ENOSYS。FindRecordDisplay 当前依赖 dumpsys display 的字段，
@@ -98,6 +98,28 @@ Android 12-17 SurfaceControl 适配与维护说明（目标 ABI：arm64-v8a）
          源裁剪 2376x1080、输出可见区域 1080x2376，与系统录屏变换一致；
          最后检查保存视频并确认完整显示、方向正常
     后续回归也应按“接口、层级、合成、成片”分别取证，镜像句柄非空或事务返回成功不等同于录屏正常。
+
+六、系统图层描述匹配
+     主绘制层以现有同名系统层为参考，读取 windowType、ownerUID、ownerPID；
+    参考层同时核对实际创建 UID、父层与存活 SystemUI 进程，排除独立同名副本。
+     创建时写入根层，getSurface 后通过 getParentingLayer 和 setMetadata 同步缓冲子层。
+    录屏参考在主层初始化时读取并按窗口缓存，镜像重建不再执行 SurfaceFlinger dump。
+    仅复制系统层实际存在的描述字段；读取失败时保留原有创建参数。
+     metadata 不等同于 Binder 调用身份；图层 ID、父子关系和实际创建 UID 仍由系统维护。
+     RMX3888 Android 14 已验证尺寸、截图开关、无输入通道/空触摸区域及镜像创建和投影；
+     系统录屏成片与完整应用触摸交互仍需分别回归。
+
+七、Android 12-17 描述匹配兼容（2026-11-13）
+    12/12L-14 默认 proto 文本由 LayerProtoParser 生成，包含 UID 和 metadata；
+    解析支持 Layer、BufferStateLayer、BufferQueueLayer、ContainerLayer、ColorLayer、EffectLayer。
+    LayerDebugInfo 的文本没有这些字段，但不能据此判断默认 SurfaceFlinger dump 缺失字段。
+    15-17 前端快照使用 Layer Hierarchy，按树形缩进读取名称、PID/UID，并验证主屏父层；
+    镜像、相对层级、离屏树、失效 handle 及身份不匹配记录不能作为参考。
+    新格式不提供完整 metadata，windowType 保留调用方配置，owner 描述来自已验证的层级身份；
+    Display Overlays 不补造缺失字段。旧格式和快照格式按内容识别，不强制按 SDK 选择。
+    Parcel、getParentingLayer 或 setMetadata 缺失时只停用子层描述同步，保留基础绘制能力。
+    21 项格式/反例回放、56 项 SDK 31-37 模拟导出/缺失分支测试通过；
+    Android 14 真机回归通过，12/13/15/16/17 及其他厂商 ROM 尚未逐台实测。
 */
 
 #ifndef SURFACE_CONTROL_MANAGER_H
@@ -116,6 +138,7 @@ Android 12-17 SurfaceControl 适配与维护说明（目标 ABI：arm64-v8a）
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <unordered_map>
 #include <string>
 #include <string_view>
@@ -279,6 +302,10 @@ namespace android
             void (*LayerMetadata__Constructor)(void *thiz) = nullptr;
             void (*LayerMetadata__setInt32)(void *thiz, uint32_t key, int32_t value) = nullptr;
 
+            void (*Parcel__Constructor)(void *thiz) = nullptr;
+            void (*Parcel__Destructor)(void *thiz) = nullptr;
+            int32_t (*Parcel__WriteInt32)(void *thiz, int32_t value) = nullptr;
+
             void (*SurfaceComposerClient__Constructor)(void *thiz) = nullptr;
             StrongPointer<void> (*SurfaceComposerClient__CreateSurface)(void *thiz, void *name, uint32_t w, uint32_t h, int32_t format, uint32_t flags, void *parentHandle, void *layerMetadata, uint32_t *outTransformHint) = nullptr;
             StrongPointer<void> (*SurfaceComposerClient__CreateSurfaceWithMetadataRef)(void *thiz, void *name, uint32_t w, uint32_t h, int32_t format, int32_t flags, void *parentHandle, const void *layerMetadata, uint32_t *outTransformHint) = nullptr;
@@ -302,10 +329,12 @@ namespace android
             void *(*SurfaceComposerClient__Transaction__SetMatrix)(void *thiz, StrongPointer<void> &surfaceControl, float dsdx, float dtdx, float dtdy, float dsdy) = nullptr;
             void *(*SurfaceComposerClient__Transaction__SetPosition)(void *thiz, StrongPointer<void> &surfaceControl, float x, float y) = nullptr;
             void *(*SurfaceComposerClient__Transaction__SetCrop)(void *thiz, StrongPointer<void> &surfaceControl, const ui::Rect &crop) = nullptr;
+            void *(*SurfaceComposerClient__Transaction__SetMetadata)(void *thiz, const StrongPointer<void> &surfaceControl, uint32_t key, const void *parcel) = nullptr;
             int32_t (*SurfaceComposerClient__Transaction__ApplyLegacy)(void *thiz, bool synchronous) = nullptr;
             int32_t (*SurfaceComposerClient__Transaction__Apply)(void *thiz, bool synchronous, bool oneWay) = nullptr;
 
             StrongPointer<Surface> (*SurfaceControl__GetSurface)(void *thiz) = nullptr;
+            StrongPointer<void> (*SurfaceControl__GetParentingLayer)(void *thiz) = nullptr;
             void (*SurfaceControl__DisConnect)(void *thiz) = nullptr;
 
             Functionals(const SymbolMethod &symbolMethod)
@@ -375,6 +404,23 @@ namespace android
                 libguiHandle = libgui;
                 libutilsHandle = libutils;
 
+                if (systemVersion >= 12)
+                {
+#ifdef __LP64__
+                    auto libbinder = symbolMethod.Open("/system/lib64/libbinder.so", RTLD_LAZY);
+#else
+                    auto libbinder = symbolMethod.Open("/system/lib/libbinder.so", RTLD_LAZY);
+#endif
+                    if (libbinder)
+                    {
+                        ResolveMethod(Parcel, Constructor, libbinder, "_ZN7android6ParcelC1Ev");
+                        ResolveMethod(Parcel, Destructor, libbinder, "_ZN7android6ParcelD1Ev");
+                        ResolveMethod(Parcel, WriteInt32, libbinder, "_ZN7android6Parcel10writeInt32Ei");
+                    }
+                    ResolveMethod(SurfaceControl, GetParentingLayer, libgui, "_ZN7android14SurfaceControl17getParentingLayerEv");
+                    ResolveMethod(SurfaceComposerClient__Transaction, SetMetadata, libgui, "_ZN7android21SurfaceComposerClient11Transaction11setMetadataERKNS_2spINS_14SurfaceControlEEEjRKNS_6ParcelE");
+                }
+
                 ResolveMethod(RefBase, IncStrong, libutils, "_ZNK7android7RefBase9incStrongEPKv");
                 ResolveMethod(RefBase, DecStrong, libutils, "_ZNK7android7RefBase9decStrongEPKv");
 
@@ -389,11 +435,13 @@ namespace android
                     if (SurfaceComposerClient__CreateSurfaceWithMetadataRef || SurfaceComposerClient__CreateSurface)
                     {
                         ResolveMethod(LayerMetadata, Constructor, libgui, "_ZN7android3gui13LayerMetadataC2Ev");
+                        ResolveMethod(LayerMetadata, setInt32, libgui, "_ZN7android3gui13LayerMetadata8setInt32Eji");
                     }
                     else
                     {
                         ResolveMethod(SurfaceComposerClient, CreateSurface, libgui, "_ZN7android21SurfaceComposerClient13createSurfaceERKNS_7String8EjjijRKNS_2spINS_7IBinderEEENS_13LayerMetadataEPj");
                         ResolveMethod(LayerMetadata, Constructor, libgui, "_ZN7android13LayerMetadataC2Ev");
+                        ResolveMethod(LayerMetadata, setInt32, libgui, "_ZN7android13LayerMetadata8setInt32Eji");
                     }
                 }
                 else
@@ -464,6 +512,13 @@ namespace android
                 if (!initSuccess) LS_LOGE_TAG("Surface", "SurfaceComposerClient 必需符号不完整");
             }
 
+            bool SupportsLayerDescription() const
+            {
+                return initSuccess && systemVersion >= 12 && SurfaceControl__GetParentingLayer &&
+                    SurfaceComposerClient__Transaction__SetMetadata && Parcel__Constructor &&
+                    Parcel__Destructor && Parcel__WriteInt32 && RefBase__DecStrong;
+            }
+
             static const Functionals &GetInstance(const SymbolMethod &symbolMethod = {.Open = dlopen, .Find = dlsym, .Close = dlclose})
             {
                 static Functionals functionals(symbolMethod);
@@ -509,6 +564,15 @@ namespace android
                     f.LayerMetadata__Constructor(data);
                     valid = true;
                 }
+            }
+            LayerMetadata(const LayerMetadata &) = delete;
+            LayerMetadata &operator=(const LayerMetadata &) = delete;
+            ~LayerMetadata()
+            {
+                if (!valid) return;
+                void **virtualTable = nullptr;
+                std::memcpy(&virtualTable, data, sizeof(virtualTable));
+                reinterpret_cast<void (*)(void *)>(virtualTable[0])(data);
             }
             void setInt32(uint32_t key, int32_t value)
             {
@@ -649,6 +713,18 @@ namespace android
                 if (!valid) return nullptr;
                 SAFE_CALL_RET(Functionals::GetInstance().SurfaceComposerClient__Transaction__SetCrop, nullptr, data, surfaceControl, crop);
             }
+
+            bool SetMetadata(const StrongPointer<void> &surfaceControl, uint32_t key, int32_t value)
+            {
+                const auto &functions = Functionals::GetInstance();
+                if (!valid || !functions.Parcel__Constructor || !functions.Parcel__Destructor || !functions.Parcel__WriteInt32 || !functions.SurfaceComposerClient__Transaction__SetMetadata) return false;
+                alignas(std::max_align_t) char parcel[1024]{};
+                functions.Parcel__Constructor(parcel);
+                bool success = functions.Parcel__WriteInt32(parcel, value) == 0;
+                if (success) success = functions.SurfaceComposerClient__Transaction__SetMetadata(data, surfaceControl, key, parcel) != nullptr;
+                functions.Parcel__Destructor(parcel);
+                return success;
+            }
         };
 
         struct SurfaceComposerClient
@@ -670,7 +746,7 @@ namespace android
                 valid = true;
             }
 
-            SurfaceControl CreateSurface(const char *name, int32_t width, int32_t height, bool skipScrenshot, uint32_t windowFlags = 0, bool trustedOverlay = true, int64_t layerStack = -1)
+            SurfaceControl CreateSurface(const char *name, int32_t width, int32_t height, bool skipScrenshot, uint32_t windowFlags = 0, bool trustedOverlay = true, int64_t layerStack = -1, int32_t windowType = -1, int32_t ownerUid = -1, int32_t ownerPid = -1)
             {
                 if (!valid) return SurfaceControl(nullptr);
 
@@ -679,6 +755,12 @@ namespace android
                 String8 windowName(name);
                 LayerMetadata layerMetadata;
 
+                if (f.systemVersion >= 10 && f.LayerMetadata__setInt32)
+                {
+                    if (ownerUid >= 0) layerMetadata.setInt32(1u, ownerUid);
+                    if (windowType >= 0) layerMetadata.setInt32(2u, windowType);
+                    if (ownerPid >= 0) layerMetadata.setInt32(6u, ownerPid);
+                }
                 if (skipScrenshot && (f.systemVersion == 10 || f.systemVersion == 11))
                 {
                     if (!f.LayerMetadata__setInt32) return SurfaceControl(nullptr);
@@ -702,8 +784,6 @@ namespace android
                 // 修复：移除 SAFE_CALL_RET，改用显式判断，因为返回类型不同 (StrongPointer -> SurfaceControl)
                 if (f.systemVersion == 9)
                 {
-                    int32_t windowType = -1;
-                    int32_t ownerUid = -1;
                     if (skipScrenshot) windowType = 441731;
 
                     if (f.SurfaceComposerClient__CreateSurface_and9)
@@ -1019,7 +1099,246 @@ namespace android
             return local_displayInfo;
         }
 
-        static ANativeWindow *Create(const char *name, int32_t width, int32_t height, bool preventCapture)
+        struct LayerDescription
+        {
+            int32_t windowType = -1;
+            int32_t ownerUid = -1;
+            int32_t ownerPid = -1;
+        };
+
+        static bool IsSystemUiProcess(int32_t processId, int32_t userId)
+        {
+            if (processId <= 0 || userId < 0) return false;
+            char path[64]{};
+            std::snprintf(path, sizeof(path), "/proc/%d/cmdline", processId);
+            FILE *file = std::fopen(path, "r");
+            if (!file) return false;
+            char command[128]{};
+            const size_t length = std::fread(command, 1, sizeof(command) - 1, file);
+            std::fclose(file);
+            if (length == 0 || std::strcmp(command, "com.android.systemui") != 0) return false;
+            std::snprintf(path, sizeof(path), "/proc/%d/status", processId);
+            file = std::fopen(path, "r");
+            if (!file) return false;
+            char line[256]{};
+            unsigned realUid = 0, effectiveUid = 0;
+            bool matched = false;
+            while (std::fgets(line, sizeof(line), file))
+            {
+                if (std::sscanf(line, "Uid: %u %u", &realUid, &effectiveUid) != 2) continue;
+                matched = realUid == static_cast<unsigned>(userId) && effectiveUid == realUid;
+                break;
+            }
+            std::fclose(file);
+            return matched;
+        }
+
+        static bool ParseSystemLayerDescription(FILE *pipe, const char *name, LayerDescription *description)
+        {
+            if (!pipe || !name || !description) return false;
+            const std::string prefix = std::string("(") + name + "#";
+            const std::string windowParent = std::string(" ") + name + "#";
+            const bool displayContainer = std::strcmp(name, "Display Overlays") == 0;
+            struct HierarchyNode
+            {
+                size_t depth;
+                std::string name;
+                int32_t uid;
+                bool valid;
+            };
+            std::vector<HierarchyNode> hierarchy;
+            bool inHierarchy = false;
+            char buffer[8192]{};
+            bool selected = false;
+            bool parentMatches = false;
+            bool found = false;
+            int32_t actualUid = -1;
+            LayerDescription parsed;
+            const int32_t expectedWindowType = description->windowType;
+            auto readInteger = [](const char *text, const char *field, int32_t *result)
+            {
+                const char *position = std::strstr(text, field);
+                if (!position) return;
+                position += std::strlen(field);
+                char *end = nullptr;
+                errno = 0;
+                long value = std::strtol(position, &end, 10);
+                if (errno == 0 && end != position && value >= 0 && value <= INT_MAX &&
+                    (*end == ',' || *end == '}' || *end == ' ' || *end == '\r' || *end == '\n' || *end == '\0'))
+                    *result = static_cast<int32_t>(value);
+            };
+            while (fgets(buffer, sizeof(buffer), pipe))
+            {
+                std::string_view trimmed(buffer);
+                const auto first = trimmed.find_first_not_of(" \t\r\n");
+                if (first == std::string_view::npos) continue;
+                trimmed.remove_prefix(first);
+                trimmed = trimmed.substr(0, trimmed.find_last_not_of(" \t\r\n") + 1);
+                if (trimmed == "Layer Hierarchy")
+                {
+                    inHierarchy = true;
+                    hierarchy.clear();
+                    selected = false;
+                    continue;
+                }
+                if (trimmed == "Offscreen Hierarchy" || trimmed == "Offscreen Layers")
+                {
+                    inHierarchy = false;
+                    hierarchy.clear();
+                    selected = false;
+                    continue;
+                }
+                if (inHierarchy)
+                {
+                    const char *cursor = buffer;
+                    size_t indentation = 0;
+                    while (*cursor == ' ' || std::strncmp(cursor, "\xe2\x94\x82", 3) == 0)
+                    {
+                        cursor += *cursor == ' ' ? 1 : 3;
+                        ++indentation;
+                    }
+                    if (std::strncmp(cursor, "\xe2\x94\x94\xe2\x94\x80 ", 7) != 0 &&
+                        std::strncmp(cursor, "\xe2\x94\x9c\xe2\x94\x80 ", 7) != 0) continue;
+                    if (indentation % 3 != 0 || indentation > 384)
+                    {
+                        hierarchy.clear();
+                        continue;
+                    }
+                    const size_t depth = indentation / 3;
+                    cursor += 7;
+                    while (!hierarchy.empty() && hierarchy.back().depth >= depth) hierarchy.pop_back();
+                    const char *identity = std::strstr(cursor, " pid=");
+                    const std::string_view entry(cursor, identity ? static_cast<size_t>(identity - cursor) : std::strlen(cursor));
+                    const size_t suffix = entry.rfind('#');
+                    size_t end = suffix == std::string_view::npos ? 0 : suffix + 1;
+                    while (end < entry.size() && entry[end] >= '0' && entry[end] <= '9') ++end;
+                    const bool named = suffix != std::string_view::npos && end > suffix + 1 &&
+                        (end == entry.size() || entry[end] == ' ');
+                    int32_t processId = -1, userId = -1;
+                    if (identity)
+                    {
+                        readInteger(identity, " pid=", &processId);
+                        readInteger(identity, " uid=", &userId);
+                    }
+                    const bool ancestorValid = hierarchy.empty() ? depth == 0 :
+                        hierarchy.back().valid && hierarchy.back().depth + 1 == depth;
+                    const bool valid = named && identity && processId > 0 && userId >= 0 && ancestorValid &&
+                        cursor[0] != '(' && entry.find("handleNotAlive") == std::string_view::npos;
+                    const std::string layerName = named ? std::string(entry.substr(0, end)) : std::string{};
+                    bool matchesParent = false;
+                    if (valid && !hierarchy.empty())
+                    {
+                        const auto &parent = hierarchy.back();
+                        matchesParent = parent.uid == 1000 && (displayContainer ?
+                            parent.name.compare(0, 15, "Display 0 name=") == 0 :
+                            parent.name.find(windowParent) != std::string::npos);
+                    }
+                    if (valid && matchesParent && entry.substr(0, suffix) == name)
+                    {
+                        if (displayContainer && userId == 1000)
+                        {
+                            parsed = {};
+                            found = true;
+                        }
+                        else if (!displayContainer && IsSystemUiProcess(processId, userId))
+                        {
+                            parsed = {expectedWindowType, userId, processId};
+                            actualUid = userId;
+                            found = true;
+                        }
+                        if (found) break;
+                    }
+                    hierarchy.push_back({depth, layerName, userId, valid});
+                    continue;
+                }
+                if (std::strncmp(buffer, "+ ", 2) == 0)
+                {
+                    parsed = {};
+                    actualUid = -1;
+                    parentMatches = false;
+                    const char *recordName = std::strchr(buffer + 2, '(');
+                    const std::string_view layerType = recordName && recordName > buffer + 2 ?
+                        std::string_view(buffer + 2, static_cast<size_t>(recordName - buffer - 3)) : std::string_view{};
+                    const bool supportedType = layerType == "Layer" || layerType == "BufferStateLayer" ||
+                        layerType == "BufferQueueLayer" || layerType == "ContainerLayer" ||
+                        layerType == "ColorLayer" || layerType == "EffectLayer";
+                    selected = supportedType && std::strncmp(recordName, prefix.c_str(), prefix.size()) == 0;
+                    if (selected)
+                    {
+                        const char *suffix = recordName + prefix.size();
+                        while (*suffix >= '0' && *suffix <= '9') ++suffix;
+                        selected = suffix != recordName + prefix.size() && std::strncmp(suffix, ") uid=", 6) == 0;
+                        if (selected) readInteger(suffix, " uid=", &actualUid);
+                    }
+                }
+                if (!selected) continue;
+                if (const char *parent = std::strstr(buffer, "parent="))
+                {
+                    parent += 7;
+                    parentMatches = displayContainer ? std::strncmp(parent, "Display 0 name=", 15) == 0 : std::strstr(parent, windowParent.c_str()) != nullptr;
+                }
+                const char *metadata = std::strstr(buffer, "metadata={");
+                if (!metadata) continue;
+                readInteger(metadata, "ownerUID:", &parsed.ownerUid);
+                readInteger(metadata, "ownerPID:", &parsed.ownerPid);
+                readInteger(metadata, "windowType:", &parsed.windowType);
+                if (!parentMatches) continue;
+                if (displayContainer)
+                    found = actualUid == 1000 && (parsed.ownerUid < 0 || parsed.ownerUid == 1000);
+                else
+                    found = actualUid >= 0 && actualUid == parsed.ownerUid &&
+                            (expectedWindowType < 0 || parsed.windowType == expectedWindowType) &&
+                            IsSystemUiProcess(parsed.ownerPid, actualUid);
+                if (found) break;
+            }
+            if (!found) return false;
+            if (!displayContainer && !IsSystemUiProcess(parsed.ownerPid, actualUid)) return false;
+            *description = parsed;
+            return true;
+        }
+
+        static bool ReadSystemLayerDescription(const char *name, LayerDescription *description)
+        {
+            if (!name || !description) return false;
+            FILE *pipe = popen("dumpsys -t 3 SurfaceFlinger", "r");
+            if (!pipe) return false;
+            auto parsed = *description;
+            const bool found = ParseSystemLayerDescription(pipe, name, &parsed);
+            char buffer[8192]{};
+            while (fgets(buffer, sizeof(buffer), pipe)) {}
+            const int status = pclose(pipe);
+            if (!found || status != 0) return false;
+            *description = parsed;
+            return true;
+        }
+
+        static bool ApplyLayerDescription(detail::SurfaceControl &control, const LayerDescription &description)
+        {
+            if (!control.data) return false;
+            const auto &functions = detail::Functionals::GetInstance();
+            if (functions.systemVersion < 12) return true;
+            if (!functions.SupportsLayerDescription()) return false;
+            auto child = functions.SurfaceControl__GetParentingLayer(control.data);
+            if (!child.pointer) return false;
+            static detail::SurfaceComposerClientTransaction transaction;
+            auto setFields = [&](const detail::StrongPointer<void> &target)
+            {
+                bool success = true;
+                if (description.ownerUid >= 0) success &= transaction.SetMetadata(target, 1u, description.ownerUid);
+                if (description.windowType >= 0) success &= transaction.SetMetadata(target, 2u, description.windowType);
+                if (description.ownerPid >= 0) success &= transaction.SetMetadata(target, 6u, description.ownerPid);
+                return success;
+            };
+            detail::StrongPointer<void> root;
+            root.pointer = control.data;
+            bool success = setFields(root);
+            if (child.pointer != control.data) success &= setFields(child);
+            const int status = transaction.Apply(false, true);
+            functions.RefBase__DecStrong(child.pointer, &child);
+            return success && status == 0;
+        }
+
+        static ANativeWindow *Create(const char *name, int32_t width, int32_t height, bool preventCapture, int32_t windowType = -1)
         {
             auto &surfaceComposerClient = GetComposerInstance();
 
@@ -1037,7 +1356,13 @@ namespace android
             if (width <= 0) width = 1080;
             if (height <= 0) height = 2340;
 
-            auto surfaceControl = surfaceComposerClient.CreateSurface(name, width, height, preventCapture, 0, true);
+            LayerDescription description{windowType};
+            if (windowType >= 0 && !ReadSystemLayerDescription(name, &description))
+                LS_LOGE_TAG("Surface", "System layer description unavailable: %s", name);
+            LayerDescription recordDescription;
+            if (!preventCapture && windowType >= 0 && !ReadSystemLayerDescription("Display Overlays", &recordDescription))
+                LS_LOGE_TAG("Surface", "System recording layer description unavailable");
+            auto surfaceControl = surfaceComposerClient.CreateSurface(name, width, height, preventCapture, 0, true, -1, description.windowType, description.ownerUid, description.ownerPid);
 
             // 修复：指明 Surface 的命名空间 detail::Surface
             detail::Surface *rawSurface = surfaceControl.GetSurface();
@@ -1047,8 +1372,11 @@ namespace android
                 return nullptr;
             }
 
+            if (windowType >= 0 && !ApplyLayerDescription(surfaceControl, description))
+                LS_LOGE_TAG("Surface", "Layer description update failed: %s", name);
             auto nativeWindow = reinterpret_cast<ANativeWindow *>(rawSurface);
             m_cachedSurfaceControl.emplace(nativeWindow, std::move(surfaceControl));
+            m_cachedRecordDescriptions.emplace(nativeWindow, recordDescription);
             return nativeWindow;
         }
 
@@ -1120,7 +1448,9 @@ namespace android
 
             auto &functions = detail::Functionals::GetInstance();
             constexpr uint32_t containerFlags = 0x00080000;
-            auto root = GetComposerInstance().CreateSurface("LarkRecord", 0, 0, false, containerFlags, false);
+            const auto descriptionIt = m_cachedRecordDescriptions.find(sourceWindow);
+            const LayerDescription description = descriptionIt != m_cachedRecordDescriptions.end() ? descriptionIt->second : LayerDescription{};
+            auto root = GetComposerInstance().CreateSurface("Display Overlays", 0, 0, false, containerFlags, false, -1, description.windowType, description.ownerUid, description.ownerPid);
             if (!root.data) return false;
             auto mirrored = functions.SurfaceComposerClient__MirrorSurface ? functions.SurfaceComposerClient__MirrorSurface(GetComposerInstance().data, sourceIt->second.data) : functions.SurfaceComposerClient__MirrorSurfaceWithBounds(GetComposerInstance().data, sourceIt->second.data, nullptr, nullptr);
             if (!mirrored.pointer)
@@ -1190,6 +1520,7 @@ namespace android
 
             m_cachedSurfaceControl[nativeWindow].DestroySurface(reinterpret_cast<detail::Surface *>(nativeWindow));
             m_cachedSurfaceControl.erase(nativeWindow);
+            m_cachedRecordDescriptions.erase(nativeWindow);
         }
 
     private:
@@ -1200,6 +1531,7 @@ namespace android
         };
 
         inline static std::unordered_map<ANativeWindow *, detail::SurfaceControl> m_cachedSurfaceControl;
+        inline static std::unordered_map<ANativeWindow *, LayerDescription> m_cachedRecordDescriptions;
         inline static std::unordered_map<ANativeWindow *, RecordMirror> m_cachedMirrors;
     };
 } // namespace android
