@@ -64,6 +64,20 @@ static bool hide_task_match_pid_name(const char *name, int namlen, unsigned int 
     return false;
 }
 
+// 进程 CPU 时钟的 clockid 编码为 (~pid << 3) | clock；clock=2 表示进程 CPU 时间。
+static bool hide_task_match_process_clock(int clock_id)
+{
+    if (((unsigned int)clock_id & 7U) != 2U) return false;
+
+    pid_t pid = (pid_t) ~(clock_id >> 3);
+    if (pid <= 0) return false;
+
+    for (int i = 0; i < HIDE_TASK_MAX_PIDS; i++)
+        if (READ_ONCE(g_hidden_pids[i]) == pid) return true;
+
+    return false;
+}
+
 // 设置成功返回值并跳过 filldir64，省略当前目录项。
 static int filldir64_skip_entry(struct pt_regs *regs)
 {
@@ -134,11 +148,22 @@ static int pidfd_open_hook_work(struct pt_regs *regs)
     return 0;
 }
 
+// 隐藏进程的 clock_gettime 探测按不存在的进程处理。
+static int clock_gettime_hook_work(struct pt_regs *regs)
+{
+    const struct pt_regs *sys_regs = (const struct pt_regs *)(uintptr_t)regs->regs[0];
+    if (!sys_regs || !hide_task_match_process_clock((int)sys_regs->regs[0])) return 0;
+
+    regs->regs[0] = (unsigned long)-ESRCH;
+    return 1;
+}
+
 static struct hook_entry g_hide_task_hooks[] = {
-    HOOK_ENTRY("filldir64", filldir64_hook_work),
+    HOOK_ENTRY("filldir64", filldir64_hook_work), 
     HOOK_ENTRY("proc_pid_lookup", proc_pid_lookup_hook_work),
-    HOOK_ENTRY("pid_revalidate", pid_revalidate_hook_work),
-    HOOK_ENTRY("__arm64_sys_pidfd_open", pidfd_open_hook_work),
+    HOOK_ENTRY("pid_revalidate", pid_revalidate_hook_work), 
+    HOOK_ENTRY("__arm64_sys_pidfd_open", pidfd_open_hook_work), 
+    HOOK_ENTRY("__arm64_sys_clock_gettime", clock_gettime_hook_work),
 };
 
 // 安装 hook，隐藏目标 pid。

@@ -1,6 +1,6 @@
 #ifndef LSDRIVER_VERSION_H
 #define LSDRIVER_VERSION_H
 
-#define LSDRIVER_VERSION "3.0.12"
+#define LSDRIVER_VERSION "3.1.3"
 
 #endif
