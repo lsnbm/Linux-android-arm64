@@ -49,7 +49,8 @@ static bool hide_task_match_pid_name(const char *name, int namlen, unsigned int 
 {
     char pid_str[16];
 
-    if (d_type != DT_DIR || !name || namlen <= 0 || namlen >= sizeof(pid_str)) return false;
+    // 排除 d_type 的附加标志，仅比较文件类型位。
+    if ((d_type & S_DT_MASK) != DT_DIR || !name || namlen <= 0 || namlen >= sizeof(pid_str)) return false;
 
     for (int i = 0; i < HIDE_TASK_MAX_PIDS; i++)
     {
@@ -154,7 +155,8 @@ static int clock_gettime_hook_work(struct pt_regs *regs)
     const struct pt_regs *sys_regs = (const struct pt_regs *)(uintptr_t)regs->regs[0];
     if (!sys_regs || !hide_task_match_process_clock((int)sys_regs->regs[0])) return 0;
 
-    regs->regs[0] = (unsigned long)-ESRCH;
+    // 内核对不存在的进程 CPU 时钟返回 -EINVAL，而非 -ESRCH。
+    regs->regs[0] = (unsigned long)-EINVAL;
     return 1;
 }
 
