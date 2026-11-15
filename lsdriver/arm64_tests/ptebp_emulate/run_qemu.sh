@@ -20,7 +20,7 @@ INIT="${WORK_DIR}/init"
 MODULE="${BUILD_ROOT}/ptebp_emulate_test_module.ko"
 RUNNER="${BUILD_ROOT}/ptebp_emulate_test_runner"
 INSTRUCTIONS="${BUILD_ROOT}/instruction.txt"
-LOG="${BUILD_ROOT}/qemu.log"
+LOG="${QEMU_LOG:-${BUILD_ROOT}/qemu.log}"
 
 if [[ ! -f "$KERNEL_IMAGE" ]]; then
     KERNEL_IMAGE="$(find "${KERNEL_DIR}/out/bazel/output_user_root" -type f -path '*/bazel-out/*/bin/common/kernel_aarch64/Image' -print -quit 2>/dev/null || true)"
@@ -33,8 +33,12 @@ command -v "$QEMU" >/dev/null || { echo "missing QEMU: $QEMU" >&2; exit 1; }
 
 rm -rf "$WORK_DIR"
 mkdir -p "$ROOTFS_DIR/dev" "$ROOTFS_DIR/proc"
+INIT_FLAGS=()
+if [[ "${FILE_READ_ONLY:-0}" == 1 ]]; then
+    INIT_FLAGS+=(-DPTEBP_FILE_READ_ONLY)
+fi
 "${CLANG_DIR}/bin/clang" --target=aarch64-linux-gnu -c -nostdlib \
-    -o "$WORK_DIR/qemu_init.o" "$BUILD_ROOT/qemu_init.S"
+    "${INIT_FLAGS[@]}" -o "$WORK_DIR/qemu_init.o" "$BUILD_ROOT/qemu_init.S"
 "${CLANG_DIR}/bin/ld.lld" -m aarch64elf -e _start \
     -o "$INIT" "$WORK_DIR/qemu_init.o"
 chmod 0755 "$INIT"
@@ -43,6 +47,8 @@ cp "$MODULE" "$ROOTFS_DIR/ptebp_emulate_test_module.ko"
 cp "$RUNNER" "$ROOTFS_DIR/ptebp_emulate_test_runner"
 cp "$INSTRUCTIONS" "$ROOTFS_DIR/instruction.txt"
 mknod -m 0600 "$ROOTFS_DIR/dev/console" c 5 1
+mknod -m 0666 "$ROOTFS_DIR/dev/null" c 1 3
+mknod -m 0666 "$ROOTFS_DIR/dev/urandom" c 1 9
 (
     cd "$ROOTFS_DIR"
     find . -print0 | cpio --null --create --format=newc > "$INITRAMFS"
@@ -73,7 +79,12 @@ if [[ "$qemu_status" -ne 0 ]]; then
     echo "PTEBP_TEST_QEMU_FAILED status=$qemu_status" >&2
     exit "$qemu_status"
 fi
-grep -q '^PTEBP_TEST_QEMU_PASS$' "$LOG"
+grep -Eq $'^PTEBP_TEST_QEMU_PASS\r?$' "$LOG"
+grep -q '^ptebp file read test passed checks=' "$LOG"
+if [[ "${FILE_READ_ONLY:-0}" != 1 ]]; then
+    grep -q '^ptebp emulator test passed cases=' "$LOG"
+    grep -q '^case_counts=compared=' "$LOG"
+fi
 if grep -Eq 'Kernel panic|Internal error:|BUG:|WARNING:|PTEBP_TEST_.*FAIL' "$LOG"; then
     echo "PTEBP_TEST_QEMU_GUEST_FAILED" >&2
     exit 1

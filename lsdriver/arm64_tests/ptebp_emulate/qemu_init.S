@@ -168,6 +168,8 @@ run_runner:
     adrp x1, wait_status
     add x1, x1, :lo12:wait_status
     ldr w0, [x1]
+    tst w0, #0x7f
+    b.ne runner_failed
     lsr w0, w0, #8
     and w0, w0, #0xff
     ret
@@ -183,16 +185,23 @@ runner_child:
     cmp x0, #0
     b.lt runner_exec
     mov x20, x0
+    cmp x20, #1
+    b.eq runner_stderr
     mov x0, x20
     mov x1, #1
     mov x2, #0
     mov x8, #SYS_DUP3
     svc #0
+runner_stderr:
+    cmp x20, #2
+    b.eq runner_exec
     mov x0, x20
     mov x1, #2
     mov x2, #0
     mov x8, #SYS_DUP3
     svc #0
+    cmp x20, #2
+    b.le runner_exec
     mov x0, x20
     mov x8, #SYS_CLOSE
     svc #0
@@ -246,7 +255,11 @@ dev_path: .asciz "/dev"
 module_path: .asciz "/ptebp_emulate_test_module.ko"
 module_name: .asciz "ptebp_emulate_test_module"
 runner_path: .asciz "/ptebp_emulate_test_runner"
+#ifdef PTEBP_FILE_READ_ONLY
+instruction_path: .asciz "--file-read-only"
+#else
 instruction_path: .asciz "/instruction.txt"
+#endif
 device_path: .asciz "/proc/ptebp_emulate_test"
 proc_source: .asciz "proc"
 proc_type: .asciz "proc"

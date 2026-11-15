@@ -24,4 +24,17 @@ ptebp_emulate_test_module-objs := ptebp_emulate_test.o \
 	../../arm64_decode/arm64_decode_branch.o \
 	../../arm64_decode/arm64_decode_simd.o \
 	../../arm64_decode/arm64_decode_sve.o \
-	../../arm64_decode/arm64_decode_sme.o
+	../../arm64_decode/arm64_decode_sme.o \
+	../../arm64_emulate/emulate_inst.o \
+	../../arm64_emulate/arm64_emulate_branch.o \
+	../../arm64_emulate/arm64_emulate_ldst.o \
+	../../arm64_emulate/arm64_emulate_simd.o \
+	../../arm64_emulate/arm64_emulate_immediate.o \
+	../../arm64_emulate/arm64_emulate_register.o
+
+CFLAGS_REMOVE_../../arm64_emulate/emulate_inst.o += -mgeneral-regs-only
+CFLAGS_REMOVE_../../arm64_emulate/arm64_emulate_branch.o += -mgeneral-regs-only
+CFLAGS_REMOVE_../../arm64_emulate/arm64_emulate_ldst.o += -mgeneral-regs-only
+CFLAGS_REMOVE_../../arm64_emulate/arm64_emulate_simd.o += -mgeneral-regs-only
+CFLAGS_REMOVE_../../arm64_emulate/arm64_emulate_immediate.o += -mgeneral-regs-only
+CFLAGS_REMOVE_../../arm64_emulate/arm64_emulate_register.o += -mgeneral-regs-only

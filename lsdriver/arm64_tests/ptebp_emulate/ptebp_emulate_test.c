@@ -24,6 +24,70 @@ struct ptebp_emulate_pending
 static DEFINE_MUTEX(ptebp_emulate_lock);
 static struct ptebp_emulate_pending *ptebp_emulate_pending;
 static struct proc_dir_entry *ptebp_emulate_proc_entry;
+static struct break_point *ptebp_file_info;
+static int ptebp_file_hits;
+
+static void ptebp_file_hit(void *regs, void *fp_regs, void *point)
+{
+    ((struct pt_regs *)regs)->pc += sizeof(uint32_t);
+    ptebp_file_hits++;
+}
+
+static int ptebp_file_start(uint64_t address)
+{
+    if (ptebp_emulate_pending || ptebp_file_info) return -EBUSY;
+    if (address & ~PAGE_MASK) return -EINVAL;
+
+    if (!fn_aarch64_insn_patch_text)
+        fn_aarch64_insn_patch_text = (void *)generic_kallsyms_lookup_name("aarch64_insn_patch_text");
+    if (!fn_aarch64_insn_patch_text) return -ENOENT;
+
+    ptebp_file_info = kvzalloc(sizeof(*ptebp_file_info), GFP_KERNEL);
+    if (!ptebp_file_info) return -ENOMEM;
+
+    ptebp_file_hits = 0;
+    ptebp_file_info->tgid = current->tgid;
+    const size_t offsets[] = {0, PAGE_SIZE - sizeof(uint32_t), PAGE_SIZE};
+    for (size_t index = 0; index < ARRAY_SIZE(offsets); index++)
+    {
+        ptebp_file_info->points[index].hit_addr = address + offsets[index];
+        ptebp_file_info->points[index].bt = BP_BREAKPOINT_X;
+        ptebp_file_info->points[index].on_hit = ptebp_file_hit;
+    }
+    return start_ptebp_monitor(ptebp_file_info);
+}
+
+static int ptebp_file_check(void)
+{
+    if (!ptebp_file_info || !ptebp_context_valid() ||
+        g_ptebp_current.info != ptebp_file_info ||
+        g_ptebp_current.remote_read_refs) return -EINVAL;
+
+    for (size_t index = 0; index < 3; index++)
+    {
+        const struct ptebp_slot *slot = &g_ptebp_current.slots[index];
+        pteval_t value;
+        if (READ_ONCE(*(uint32_t *)phys_to_virt(slot->paddr)) != 0 ||
+            read_user_pte_value(g_ptebp_current.mm, slot->page_vaddr, &value) ||
+            value != ptebp_make_data_guard_pte(pte_val(slot->orig_pte))) return -ESTALE;
+    }
+    return ptebp_file_hits;
+}
+
+static int ptebp_file_stop(void)
+{
+    if (!ptebp_file_info) return 0;
+
+    mutex_lock(&g_ptebp_control_lock);
+    int status = ptebp_stop_locked();
+    mutex_unlock(&g_ptebp_control_lock);
+    if (!status)
+    {
+        kvfree(ptebp_file_info);
+        ptebp_file_info = NULL;
+    }
+    return status;
+}
 
 static void ptebp_emulate_clear_slots(void)
 {
@@ -118,8 +182,25 @@ static long ptebp_emulate_ioctl(struct file *file, unsigned int command,
         return -ENOTTY;
 
     mutex_lock(&ptebp_emulate_lock);
+    if (command == PTEBP_EMULATE_FILE_START)
+    {
+        uint64_t address;
+        status = copy_from_user(&address, (void __user *)argument, sizeof(address)) ?
+                     -EFAULT : ptebp_file_start(address);
+        goto out;
+    }
+    if (command == PTEBP_EMULATE_FILE_CHECK)
+    {
+        status = ptebp_file_check();
+        goto out;
+    }
     if (command == PTEBP_EMULATE_PREPARE)
     {
+        if (ptebp_file_info)
+        {
+            status = -EBUSY;
+            goto out;
+        }
         request = kzalloc(sizeof(*request), GFP_KERNEL);
         if (!request)
         {
@@ -175,8 +256,8 @@ static long ptebp_emulate_ioctl(struct file *file, unsigned int command,
     }
     if (command == PTEBP_EMULATE_RESET)
     {
-        ptebp_emulate_release_pending();
-        status = 0;
+        status = ptebp_file_stop();
+        if (!status) ptebp_emulate_release_pending();
         goto out;
     }
     status = -ENOTTY;
@@ -320,6 +401,7 @@ static int __init ptebp_emulate_init(void)
 static void __exit ptebp_emulate_exit(void)
 {
     mutex_lock(&ptebp_emulate_lock);
+    ptebp_file_stop();
     ptebp_emulate_release_pending();
     mutex_unlock(&ptebp_emulate_lock);
     if (ptebp_emulate_proc_entry)

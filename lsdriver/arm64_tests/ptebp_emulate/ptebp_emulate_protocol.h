@@ -56,5 +56,8 @@ struct ptebp_emulate_completion
 #define PTEBP_EMULATE_COMPLETE \
     _IOWR(PTEBP_EMULATE_IOC_MAGIC, 0x02, struct ptebp_emulate_completion)
 #define PTEBP_EMULATE_RESET _IO(PTEBP_EMULATE_IOC_MAGIC, 0x03)
+#define PTEBP_EMULATE_FILE_START \
+    _IOW(PTEBP_EMULATE_IOC_MAGIC, 0x04, __u64)
+#define PTEBP_EMULATE_FILE_CHECK _IO(PTEBP_EMULATE_IOC_MAGIC, 0x05)
 
 #endif
