@@ -162,11 +162,11 @@ static int DispatchThreadFunction(void *data)
                 case request_op_stepbp_remove:
                     remove_process_stepbp();
                     break;
-                case request_op_dptdbg_set:
-                    __atomic_store_n(&req->status, set_process_dptdbg(&req->bp_info), __ATOMIC_RELAXED);
+                case request_op_dptbp_set:
+                    __atomic_store_n(&req->status, set_process_dptbp(&req->bp_info), __ATOMIC_RELAXED);
                     break;
-                case request_op_dptdbg_remove:
-                    remove_process_dptdbg();
+                case request_op_dptbp_remove:
+                    remove_process_dptbp();
                     break;
                 case request_op_syscall_monitor_set:
                     __atomic_store_n(&req->status, syscall_monitor_install(req->tgid), __ATOMIC_RELAXED);
@@ -588,7 +588,7 @@ static int taskstats_exit_hook_work(struct pt_regs *regs)
         v_gyro_destroy();                 // 清理陀螺仪
         remove_process_hwbp();            // 清理硬件断点
         remove_process_ptebp();           // 清理 PTEBP
-        remove_process_dptdbg();          // 清理 DPTDBG
+        remove_process_dptbp();          // 清理 DPTBP
         remove_process_stepbp();          // 清理单步断点
         syscall_monitor_remove_all();     // 清理全部系统调用监控目标
         cntvct_monitor_remove_all();      // 清理全部 CNTVCT_EL0 读取监控
@@ -921,6 +921,8 @@ MODULE_VERSION(LSDRIVER_VERSION);
 	内核死机日志是有的，常规的标准路径/sys/fs/pstore没有，不同的厂商有不同的转储路径
 	adb shell su -c 'getprop | grep -iE "boot.reason|bootreason|panic|ramdump|pstore|reboot"'
 	这个命令即可看到厂商的ramdump是启用的
+    
+    !!!!!!也可通过当前项目的panic_reserve_dump程序直接导出厂商设备崩溃转储日志,转储路径为/storage/emulated/0/dump整个文件夹!!!!!!
 KMI:
     Kernel Module Interface，内核模块接口，独有的Android GKI 概念
     GKI 核心内核镜像由 Google 统一发布；各个厂商的硬件驱动编译成独立.ko模块，只能调用 KMI 符号列表内导出的函数 / 全局变量。

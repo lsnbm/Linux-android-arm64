@@ -93,8 +93,8 @@ namespace Mcp
             const json point = object({{"address", address}, {"bp_type", options({"read", "write", "read_write", "execute"})},
                 {"bp_scope", options({"main", "other", "all"})}, {"length", integer(1, 8)}}, {"address", "bp_type", "bp_scope", "length"});
             add("android_breakpoint_get", "breakpoint.get", "Read breakpoints and registers as exact hexadecimal strings.");
-            add("android_breakpoint_set", "breakpoint.set", "Set 1..16 breakpoints with nonzero hexadecimal addresses.",
-                {{"mode", options({"hwbp", "ptebp", "stepbp"})}, {"points", {{"type", "array"}, {"items", point}, {"minItems", 1}, {"maxItems", 16}}}}, {"mode", "points"});
+            add("android_breakpoint_set", "breakpoint.set", "Set 1..16 breakpoints with nonzero hexadecimal addresses. DPTBP only monitors main-thread execution; addresses must be 4-byte aligned.",
+                {{"mode", options({"hwbp", "ptebp", "dptbp", "stepbp"})}, {"points", {{"type", "array"}, {"items", point}, {"minItems", 1}, {"maxItems", 16}}}}, {"mode", "points"});
             add("android_breakpoint_clear", "breakpoint.clear", "Clear the active breakpoint mode.");
             add("android_breakpoint_record_update", "breakpoint_record.update", "Patch a register, mask or op.<register>; value is a 64/128-bit hexadecimal string.",
                 {{"index", integer(0, 2147483647)}, {"field", {{"type", "string"}, {"maxLength", 32}, {"pattern", "^(?:(?:op\\.|mask\\.)?(?:pc|hit_count|lr|sp|orig_x0|syscallno|pstate|fpsr|fpcr|x(?:[0-9]|[12][0-9])|q(?:[0-9]|[12][0-9]|3[01]))|mask(?:[0-9]|1[0-7])|mask\\[(?:[0-9]|1[0-7])\\])$"}}},

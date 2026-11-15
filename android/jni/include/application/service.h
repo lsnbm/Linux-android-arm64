@@ -909,7 +909,7 @@ public:
             const auto mode = requiredString("mode", "mode");
             if (std::holds_alternative<json>(mode)) return std::get<json>(mode);
             const std::string modeName = toLowerAscii(std::get<std::string>(mode));
-            if (modeName != "hwbp" && modeName != "ptebp" && modeName != "stepbp") return fail("mode 无效，支持: hwbp/ptebp/stepbp");
+            if (modeName != "hwbp" && modeName != "ptebp" && modeName != "dptbp" && modeName != "stepbp") return fail("mode 无效，支持: hwbp/ptebp/dptbp/stepbp");
             if (!runtime_.hwbpMode.empty()) return fail(std::format("{} 设置前请先移除当前断点", modeName));
 
             const int pid = driver_.GetGlobalPid();
@@ -944,7 +944,11 @@ public:
             }
 
             const auto pointSpan = std::span<const Driver::bp_point>(points.data(), points.size());
-            const int status = modeName == "hwbp" ? driver_.SetProcessHwbpRef(pointSpan) : (modeName == "stepbp" ? driver_.SetProcessStepbpRef(pointSpan) : driver_.SetProcessPtebpRef(pointSpan));
+            int status = 0;
+            if (modeName == "hwbp") status = driver_.SetProcessHwbpRef(pointSpan);
+            else if (modeName == "ptebp") status = driver_.SetProcessPtebpRef(pointSpan);
+            else if (modeName == "dptbp") status = driver_.SetProcessDptbpRef(pointSpan);
+            else status = driver_.SetProcessStepbpRef(pointSpan);
             if (status != 0) return fail(std::format("设置 {} 失败 status={}", modeName, status));
             runtime_.hwbpMode = modeName;
             json outPoints = json::array();
@@ -959,6 +963,7 @@ public:
 
             if (runtime_.hwbpMode == "hwbp") driver_.RemoveProcessHwbpRef();
             else if (runtime_.hwbpMode == "stepbp") driver_.RemoveProcessStepbpRef();
+            else if (runtime_.hwbpMode == "dptbp") driver_.RemoveProcessDptbpRef();
             else driver_.RemoveProcessPtebpRef();
             runtime_.hwbpMode.clear();
             return okData({{"mode", ""}, {"cleared", true}});

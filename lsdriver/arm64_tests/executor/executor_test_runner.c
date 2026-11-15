@@ -213,7 +213,7 @@ static void prepare_common_input(struct arm64_executor_case *test_case)
     if ((decoded.instruction == ARM64_INST_BR ||
          decoded.instruction == ARM64_INST_BLR ||
          decoded.instruction == ARM64_INST_RET) && decoded.rn < 31U)
-        test_case->initial.regs[decoded.rn] = test_case->initial.pc;
+        test_case->initial.regs[decoded.rn] = test_case->initial.pc + 8U;
     if (decoded.instruction_class != ARM64_INSTRUCTION_CLASS_LOAD_STORE)
         return;
     switch (decoded.instruction)

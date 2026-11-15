@@ -183,7 +183,7 @@ bool emulate_inst(struct pt_regs *regs, struct fp_regs *fp_regs, uint32_t specif
     uaccess_disable_privileged();
     if (regs->pc == pc_before)
     {
-        ls_log_always_tag("emulate_inst", "Execution failed; the PTE for the page containing the target address range is not writable. pc=0x%llx inst=0x%08x\n", (unsigned long long)regs->pc, specified_inst);
+        ls_log_always_tag("emulate_inst", "Execution failed; this may be because the PTEs corresponding to the pages containing the target address range are not writable. pc=0x%llx inst=0x%08x\n", (unsigned long long)regs->pc, specified_inst);
         return false;
     }
 

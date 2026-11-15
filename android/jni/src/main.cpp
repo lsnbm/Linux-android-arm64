@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fcntl.h>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <sys/stat.h>
@@ -1731,6 +1732,7 @@ private:
         ImGui::SameLine();
         UI::LabelValue(Colors::ADDR_CYAN, "  访问断点寄存器: ", Colors::ADDR_GREEN, "%llu", (unsigned long long)snapshot.num_wrps);
         UI::Text(activeMode == "ptebp" ? Colors::OK : Colors::HINT, activeMode == "ptebp" ? "PTEBP: 已激活" : "PTEBP: 未激活");
+        UI::Text(activeMode == "dptbp" ? Colors::OK : Colors::HINT, activeMode == "dptbp" ? "DPTBP: 已激活" : "DPTBP: 未激活");
         UI::Text(activeMode == "stepbp" ? Colors::OK : Colors::HINT, activeMode == "stepbp" ? "STEPBP: 已激活" : "STEPBP: 未激活");
 
         UI::Space(S(6));
@@ -1835,12 +1837,19 @@ private:
         ImGui::SameLine();
         removeBp("移除PTEBP", activeMode != "ptebp", [&] { dr->RemoveProcessPtebpRef(); });
         UI::Space(S(6));
+        setBp("设置DPTBP", Colors::BTN_TEAL, "dptbp", [&](auto points) { return dr->SetProcessDptbpRef(points); });
+        ImGui::SameLine();
+        removeBp("移除DPTBP", activeMode != "dptbp", [&] { dr->RemoveProcessDptbpRef(); });
+        UI::Space(S(6));
         setBp("设置STEPBP", Colors::BTN_BLUE, "stepbp", [&](auto points) { return dr->SetProcessStepbpRef(points); });
         ImGui::SameLine();
         removeBp("移除STEPBP", activeMode != "stepbp", [&] { dr->RemoveProcessStepbpRef(); });
 
         UI::Space(S(8));
-        const char *activeModeLabel = activeMode == "stepbp" ? "STEPBP" : (activeMode == "ptebp" ? "PTEBP" : "HWBP");
+        const char *activeModeLabel = "HWBP";
+        if (activeMode == "ptebp") activeModeLabel = "PTEBP";
+        else if (activeMode == "dptbp") activeModeLabel = "DPTBP";
+        else if (activeMode == "stepbp") activeModeLabel = "STEPBP";
         anyBpActive ? UI::Text(Colors::OK, "● 断点已激活  地址数: %d  首地址: 0x%lX  模式: %s", activePointCount, firstAddress, activeModeLabel) : UI::Text(Colors::HINT, "○ 断点未激活");
         for (const auto &point : snapshot.points)
         {
@@ -2206,6 +2215,18 @@ int main()
         return rc;
     }
 
+    std::filesystem::path startupDirectory;
+    if (mode == 4)
+    {
+        std::error_code error;
+        startupDirectory = std::filesystem::current_path(error);
+        if (error)
+        {
+            std::println(stderr, "[HTTP] 获取启动目录失败: {}", error.message());
+            return rc;
+        }
+    }
+
     if (!daemonize("/storage/emulated/0/log.txt"))
     {
         std::println(stderr, "[错误] 后台化失败。");
@@ -2263,7 +2284,7 @@ int main()
         case 4:
         {
             ApplicationService service(application.resources(), *dr);
-            rc = http_server([&service](std::string_view operation, const nlohmann::json &params) { return service.execute(operation, params); }, Config::ActiveThreadPools().client());
+            rc = http_server([&service](std::string_view operation, const nlohmann::json &params) { return service.execute(operation, params); }, Config::ActiveThreadPools().client(), startupDirectory);
             break;
         }
         case 5:

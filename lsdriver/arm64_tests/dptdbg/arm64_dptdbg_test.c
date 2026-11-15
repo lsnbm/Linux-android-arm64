@@ -3,60 +3,148 @@
 #include <linux/module.h>
 #include <linux/types.h>
 
+#include "../../arm64_reg.h"
 #include "../../break_point.h"
 #include "../../arm64_dptdbg.h"
 
-static struct break_point g_dptdbg_test_info;
-static atomic64_t g_dptdbg_test_hits = ATOMIC64_INIT(0);
+static struct break_point g_dptbp_test_info;
+static atomic64_t g_dptbp_test_hits = ATOMIC64_INIT(0);
 
-static void dptdbg_test_on_hit(void *regs, void *fp_regs, void *hit_point)
+static void dptbp_test_on_hit(void *regs, void *fp_regs, void *hit_point)
 {
-    (void)regs;
-    (void)fp_regs;
     (void)hit_point;
-    atomic64_inc(&g_dptdbg_test_hits);
+    struct pt_regs *user_regs = regs;
+    struct fp_regs *user_fp_regs = fp_regs;
+
+    user_regs->regs[15] = 0x1234;
+    user_fp_regs->q[8] = ((__uint128_t)0x99aabbccddeeff00ULL << 64) | 0x1122334455667788ULL;
+    user_fp_regs->q[31] = ((__uint128_t)0x0123456789abcdefULL << 64) | 0xfedcba9876543210ULL;
+    user_fp_regs->fpcr = 0x00400000;
+    user_fp_regs->fpsr = 1;
+    atomic64_inc(&g_dptbp_test_hits);
+}
+
+static bool dptbp_test_state_empty(void)
+{
+    if (dptbp_context_valid() || g_dptbp_current.mm || g_dptbp_current.info || g_dptbp_current.shadow_pgd || g_dptbp_current.mmu_notifier.ops) return false;
+    if (g_dptbp_current.restoring || g_dptbp_current.sync_refs || g_dptbp_current.switch_refs || g_dptbp_current.notifier_refs) return false;
+    for (size_t index = 0; index < ARRAY_SIZE(g_dptbp_current.slots); index++)
+    {
+        if (g_dptbp_current.slots[index].hook_addr || g_dptbp_current.slots[index].shadow_page) return false;
+    }
+    for (size_t index = 0; index < ARRAY_SIZE(g_dptbp_current.table_pages); index++)
+    {
+        if (g_dptbp_current.table_pages[index]) return false;
+    }
+    for (size_t index = 0; index < ARRAY_SIZE(g_dptbp_hooks); index++)
+    {
+        if (g_dptbp_hooks[index][0].installed) return false;
+    }
+    return true;
 }
 
 static int __init arm64_dptdbg_test_init(void)
 {
-    size_t inst_index;
     uint64_t composed_ttbr;
     int status;
 
     bypass_cfi();
 
-    if (!dptdbg_get_inst_index(PAGE_SIZE, PAGE_SIZE + sizeof(uint32_t), &inst_index) || inst_index != 1) return -EINVAL;
-    if (dptdbg_get_inst_index(PAGE_SIZE, PAGE_SIZE + 2, &inst_index)) return -EINVAL;
+    for (enum dptbp_ref_type ref_type = DPTBP_REF_SYNC; ref_type < DPTBP_REF_NONE; ref_type++)
+    {
+        if (dptbp_try_get_ref(ref_type) || *dptbp_context_refs(ref_type)) return -EINVAL;
+        __atomic_store_n(&g_dptbp_current.valid, 1, __ATOMIC_SEQ_CST);
+        if (!dptbp_try_get_ref(ref_type) || *dptbp_context_refs(ref_type) != 1) return -EINVAL;
+        __atomic_store_n(&g_dptbp_current.valid, 0, __ATOMIC_SEQ_CST);
+        if (dptbp_try_get_ref(ref_type) || *dptbp_context_refs(ref_type) != 1) return -EINVAL;
+        dptbp_put_ref(ref_type);
+    }
+    dptbp_wait_refs();
+    if (dptbp_try_get_ref(DPTBP_REF_NONE)) return -EINVAL;
+    if (!dptbp_begin_restore() || dptbp_begin_restore()) return -EINVAL;
+    __atomic_store_n(&g_dptbp_current.restoring, 0, __ATOMIC_SEQ_CST);
 
-    composed_ttbr = dptdbg_compose_ttbr0(0xffff000000123456ULL, 0xabc000, true);
+    composed_ttbr = dptbp_compose_ttbr0(0xffff000000123456ULL, 0xabc000, true);
     if (composed_ttbr & TTBR_CNP_BIT) return -EINVAL;
+    if ((composed_ttbr & GENMASK_ULL(63, 48)) != 0xffff000000000000ULL) return -EINVAL;
 
-    g_dptdbg_test_info.tgid = current->tgid;
-    g_dptdbg_test_info.num_brps = 1;
-    g_dptdbg_test_info.points[0].on_hit = dptdbg_test_on_hit;
-    g_dptdbg_test_info.points[0].bt = BP_BREAKPOINT_X;
-    g_dptdbg_test_info.points[0].bl = BP_BREAKPOINT_LEN_4;
-    g_dptdbg_test_info.points[0].bs = BP_SCOPE_MAIN_THREAD;
-    g_dptdbg_test_info.points[0].hit_addr = 0x40000000ULL;
+    uint64_t address_mask = phys_to_ttbr(PHYS_MASK) & ~TTBR_CNP_BIT;
+    phys_addr_t normal_pgd = 0x12344040;
+    phys_addr_t shadow_pgd = 0x40000000;
+    uint64_t original_ttbr = 0xabcd000000000000ULL | phys_to_ttbr(normal_pgd) | TTBR_CNP_BIT;
+    composed_ttbr = dptbp_compose_ttbr0(original_ttbr, shadow_pgd, true);
+    if ((composed_ttbr & address_mask) != phys_to_ttbr(shadow_pgd)) return -EINVAL;
+    composed_ttbr = dptbp_compose_ttbr0(composed_ttbr, normal_pgd, false);
+    if ((composed_ttbr & address_mask) != phys_to_ttbr(normal_pgd)) return -EINVAL;
+    if ((composed_ttbr & GENMASK_ULL(63, 48)) != (original_ttbr & GENMASK_ULL(63, 48))) return -EINVAL;
 
-    status = dptdbg_start_monitor(&g_dptdbg_test_info);
+    g_dptbp_test_info.tgid = current->tgid;
+    g_dptbp_test_info.num_brps = 1;
+    g_dptbp_test_info.points[0].on_hit = dptbp_test_on_hit;
+    g_dptbp_test_info.points[0].bt = BP_BREAKPOINT_X;
+    g_dptbp_test_info.points[0].bl = BP_BREAKPOINT_LEN_4;
+    g_dptbp_test_info.points[0].bs = BP_SCOPE_MAIN_THREAD;
+    g_dptbp_test_info.points[0].hit_addr = 0x40000000ULL;
+
+    g_dptbp_test_info.points[1] = g_dptbp_test_info.points[0];
+    g_dptbp_test_info.num_brps = 2;
+    if (start_dptbp_monitor(&g_dptbp_test_info) != -EEXIST || !dptbp_test_state_empty()) goto failed;
+    g_dptbp_test_info.points[1].hit_addr += 2;
+    if (start_dptbp_monitor(&g_dptbp_test_info) != -EINVAL || !dptbp_test_state_empty()) goto failed;
+    g_dptbp_test_info.points[1].hit_addr = 0x40000008ULL;
+    if (start_dptbp_monitor(&g_dptbp_test_info) != -ESTALE || !dptbp_test_state_empty()) goto failed;
+    g_dptbp_test_info.points[1].hit_addr = 0x40000004ULL;
+
+    for (unsigned int cycle = 0; cycle < 2; cycle++)
+    {
+        status = start_dptbp_monitor(&g_dptbp_test_info);
+        if (status) goto failed;
+        if (!dptbp_context_valid() || !dptbp_task_uses_shadow(current)) goto failed;
+        if (g_dptbp_current.slots[0].shadow_page != g_dptbp_current.slots[1].shadow_page) goto failed;
+        if (g_dptbp_current.slots[0].orig_inst != 0x91000400U || g_dptbp_current.slots[1].orig_inst != 0xd65f03c0U) goto failed;
+        if (READ_ONCE(((uint32_t *)g_dptbp_current.slots[0].shadow_page)[0]) || READ_ONCE(((uint32_t *)g_dptbp_current.slots[0].shadow_page)[1])) goto failed;
+        pteval_t orig_value;
+        if (read_user_pte_value(current->mm, 0x40000000ULL, &orig_value)) goto failed;
+        if (pte_pfn(__pte(orig_value)) != pte_pfn(g_dptbp_current.slots[0].orig_pte)) goto failed;
+
+        struct mmu_notifier_range range = {
+            .mm = current->mm,
+            .start = 0x40000000UL,
+            .end = 0x40001000UL,
+        };
+        if (dptbp_mmu_notifier_invalidate_range_start(&g_dptbp_current.mmu_notifier, &range) != -EAGAIN) goto failed;
+        if (!dptbp_task_uses_shadow(current)) goto failed;
+        range.flags = MMU_NOTIFIER_RANGE_BLOCKABLE;
+        if (dptbp_mmu_notifier_invalidate_range_start(&g_dptbp_current.mmu_notifier, &range)) goto failed;
+        if (dptbp_task_uses_shadow(current) || !dptbp_context_valid() || !g_dptbp_current.info || !g_dptbp_current.mm) goto failed;
+        stop_dptbp_monitor();
+        stop_dptbp_monitor();
+        if (!dptbp_test_state_empty()) goto failed;
+    }
+
+    status = start_dptbp_monitor(&g_dptbp_test_info);
     if (status)
     {
         pr_err("DPTDBG_TEST_MONITOR_FAILED status=%d\n", status);
         return status;
     }
 
-    pr_info("DPTDBG_TEST_MONITOR_STARTED tgid=%d addr=0x%llx\n", g_dptdbg_test_info.tgid, g_dptdbg_test_info.points[0].hit_addr);
+    pr_info("DPTDBG_TEST_MONITOR_STARTED tgid=%d addr=0x%llx\n", g_dptbp_test_info.tgid, g_dptbp_test_info.points[0].hit_addr);
     return 0;
+
+failed:
+    stop_dptbp_monitor();
+    pr_err("DPTDBG_TEST_LIFECYCLE_FAILED\n");
+    return -EINVAL;
 }
 
 static void __exit arm64_dptdbg_test_exit(void)
 {
     int64_t hits;
 
-    dptdbg_stop_monitor();
-    hits = atomic64_read(&g_dptdbg_test_hits);
-    if (hits == 3) pr_info("DPTDBG_TEST_FUNCTION_PASS hits=%lld\n", (long long)hits);
+    stop_dptbp_monitor();
+    hits = atomic64_read(&g_dptbp_test_hits);
+    if (hits == 6 && dptbp_test_state_empty()) pr_info("DPTDBG_TEST_FUNCTION_PASS hits=%lld\n", (long long)hits);
     else pr_err("DPTDBG_TEST_FUNCTION_FAILED hits=%lld\n", (long long)hits);
     pr_info("DPTDBG_TEST_UNLOAD_OK\n");
 }

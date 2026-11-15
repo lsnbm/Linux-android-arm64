@@ -309,8 +309,8 @@ public: // 公共类型定义
         request_op_stepbp_set,    // 设置单步 PC breakpoint
         request_op_stepbp_remove, // 删除单步 PC breakpoint
 
-        request_op_dptdbg_set,    // 设置主线程 UDF shadow-PGD breakpoint
-        request_op_dptdbg_remove, // 删除主线程 UDF shadow-PGD breakpoint
+        request_op_dptbp_set,    // 设置主线程 UDF shadow-PGD breakpoint
+        request_op_dptbp_remove, // 删除主线程 UDF shadow-PGD breakpoint
 
         request_op_syscall_monitor_set,    // 监控指定进程的系统调用
         request_op_syscall_monitor_remove, // 取消指定进程的系统调用监控
@@ -816,13 +816,13 @@ public: // 外部断点接口
     {
         HandleStepbpEvent(request_op_stepbp_remove);
     }
-    int SetProcessDptdbgRef(std::span<const bp_point> points)
+    int SetProcessDptbpRef(std::span<const bp_point> points)
     {
-        return HandleDptdbgEvent(request_op_dptdbg_set, points);
+        return HandleDptbpEvent(request_op_dptbp_set, points);
     }
-    void RemoveProcessDptdbgRef()
+    void RemoveProcessDptbpRef()
     {
-        HandleDptdbgEvent(request_op_dptdbg_remove);
+        HandleDptbpEvent(request_op_dptbp_remove);
     }
 
 public: // 外部系统调用监控接口
@@ -1175,17 +1175,17 @@ private: // 私有实现，外部无需关系
         return LoadRequestStatus();
     }
 
-    // DPTDBG 复用 bp_info.points 和 records 存储命中现场
-    int HandleDptdbgEvent(request_op op, std::span<const bp_point> points = {})
+    // DPTBP 复用 bp_info.points 和 records 存储命中现场
+    int HandleDptbpEvent(request_op op, std::span<const bp_point> points = {})
     {
-        if (op != request_op_dptdbg_set && op != request_op_dptdbg_remove) return -1;
+        if (op != request_op_dptbp_set && op != request_op_dptbp_remove) return -1;
         const int tgid = GetGlobalPid();
         const size_t count = std::min(points.size(), static_cast<size_t>(BP_CONFIG_MAX));
 
         std::scoped_lock lock(request_lock);
         StoreRequestOp(op);
         StoreRequestStatus(0);
-        if (op == request_op_dptdbg_set)
+        if (op == request_op_dptbp_set)
         {
             req->tgid = tgid;
             req->bp_info.tgid = tgid;

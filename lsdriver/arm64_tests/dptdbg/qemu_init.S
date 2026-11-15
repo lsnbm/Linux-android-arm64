@@ -11,6 +11,8 @@
 .equ __NR_mprotect, 226
 .equ __NR_write, 64
 .equ __NR_exit, 93
+.equ __NR_futex, 98
+.equ __NR_clone, 220
 .equ __NR_delete_module, 106
 .equ __NR_reboot, 142
 .equ __NR_finit_module, 273
@@ -37,8 +39,44 @@ _start:
     mov x2, #message_load_ok_len
     bl write_message
 
+    bl run_worker_thread
+    cbnz x0, test_function_failed
+
+    mov x15, #0
+    movi v8.16b, #0
+    movi v31.16b, #0
+    msr fpcr, xzr
+    msr fpsr, xzr
     bl run_test_function
     cbnz x0, test_function_failed
+
+    mov x9, #0x1234
+    cmp x15, x9
+    b.ne test_function_failed
+    sub sp, sp, #32
+    stp q8, q31, [sp]
+    ldp x9, x10, [sp]
+    ldp x11, x12, [sp, #16]
+    add sp, sp, #32
+    adrp x13, expected_fp
+    add x13, x13, :lo12:expected_fp
+    ldp x14, x15, [x13]
+    cmp x9, x14
+    b.ne test_function_failed
+    cmp x10, x15
+    b.ne test_function_failed
+    ldp x14, x15, [x13, #16]
+    cmp x11, x14
+    b.ne test_function_failed
+    cmp x12, x15
+    b.ne test_function_failed
+    mrs x9, fpcr
+    mov x10, #0x00400000
+    cmp x9, x10
+    b.ne test_function_failed
+    mrs x9, fpsr
+    cmp x9, #1
+    b.ne test_function_failed
 
     adrp x1, message_result_ok
     add x1, x1, :lo12:message_result_ok
@@ -135,6 +173,10 @@ map_test_page:
     svc #0
     cmp x0, #0
     b.lt map_failed
+    adrp x6, worker_tid
+    add x6, x6, :lo12:worker_tid
+    mov w7, #1
+    str w7, [x6]
     mov x0, #0
     ret
 
@@ -160,6 +202,46 @@ run_test_function_loop:
 test_function_result_failed:
     mov x0, #1
     ret
+
+run_worker_thread:
+    movz x0, #0x0f00
+    movk x0, #0x21, lsl #16
+    adrp x1, worker_stack_top
+    add x1, x1, :lo12:worker_stack_top
+    mov x2, #0
+    mov x3, #0
+    adrp x4, worker_tid
+    add x4, x4, :lo12:worker_tid
+    mov x8, #__NR_clone
+    svc #0
+    cmp x0, #0
+    b.lt test_function_result_failed
+    b.eq worker_entry
+worker_wait:
+    adrp x0, worker_tid
+    add x0, x0, :lo12:worker_tid
+    ldar w2, [x0]
+    cbz w2, worker_complete
+    mov x1, #0
+    mov x3, #0
+    mov x4, #0
+    mov x5, #0
+    mov x8, #__NR_futex
+    svc #0
+    b worker_wait
+worker_complete:
+    adrp x0, worker_result
+    add x0, x0, :lo12:worker_result
+    ldar w0, [x0]
+    ret
+worker_entry:
+    bl run_test_function
+    adrp x1, worker_result
+    add x1, x1, :lo12:worker_result
+    stlr w0, [x1]
+    mov x8, #__NR_exit
+    svc #0
+    b .
 
 load_module:
     mov x0, #AT_FDCWD
@@ -225,6 +307,9 @@ power_off:
 
 .section .rodata
 .align 3
+expected_fp:
+    .quad 0x1122334455667788, 0x99aabbccddeeff00
+    .quad 0xfedcba9876543210, 0x0123456789abcdef
 console_path:
     .asciz "/dev/console"
 module_path:
@@ -260,3 +345,14 @@ message_unload_failed:
 message_pass:
     .ascii "DPTDBG_TEST_PASS\n"
 .equ message_pass_len, . - message_pass
+
+.section .bss
+.balign 16
+worker_tid:
+    .skip 4
+worker_result:
+    .skip 4
+.balign 16
+worker_stack:
+    .skip 65536
+worker_stack_top:

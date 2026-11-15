@@ -500,8 +500,8 @@ class AndroidHttpBridge:
 
     def breakpoint_set(self, mode: str, points: list[dict[str, Any]]) -> BridgeResponse:
         mode_token = str(mode).strip().lower()
-        if mode_token not in {"hwbp", "ptebp", "stepbp"}:
-            raise ValueError("mode must be one of: hwbp, ptebp, stepbp")
+        if mode_token not in {"hwbp", "ptebp", "dptbp", "stepbp"}:
+            raise ValueError("mode must be one of: hwbp, ptebp, dptbp, stepbp")
         return self.call_operation("breakpoint.set", {"mode": mode_token, "points": normalize_breakpoint_points(points)})
 
     def saved_list(self) -> BridgeResponse:

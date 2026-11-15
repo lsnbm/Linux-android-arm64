@@ -116,6 +116,7 @@ public:
 
             if (hwbpMode == "hwbp") driver_.RemoveProcessHwbpRef();
             else if (hwbpMode == "ptebp") driver_.RemoveProcessPtebpRef();
+            else if (hwbpMode == "dptbp") driver_.RemoveProcessDptbpRef();
             else if (hwbpMode == "stepbp") driver_.RemoveProcessStepbpRef();
 
             hwbpMode.clear();

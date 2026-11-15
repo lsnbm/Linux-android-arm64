@@ -94,7 +94,7 @@ GitHub 的 Download ZIP 不包含子模块源码，请使用 Git 克隆仓库。
 - `GetMemoryInfo` / `GetModuleAddress` / `GetScanRegions`
 - `DumpMemory`，按模块名或 `start-end` 地址范围导出内存到 `.bin` 文件
 - `GetBreakpointInfo` / `SetProcessHwbpRef` / `RemoveProcessHwbpRef`
-- `SetProcessPtebpRef` / `SetProcessStepbpRef` / `SetProcessDptdbgRef`，以及对应的 `RemoveProcess...Ref`
+- `SetProcessPtebpRef` / `SetProcessStepbpRef` / `SetProcessDptbpRef`，以及对应的 `RemoveProcess...Ref`
 - `TouchDown` / `TouchMove` / `TouchUp` / `GyroReport` / `GnssReport`
 - `StartSyscallMonitor` / `StopSyscallMonitor` / `StartCntvctMonitor` / `StopCntvctMonitor`
 - `GetEnvParams` / `GetEnvParamsRef`
@@ -184,7 +184,7 @@ GitHub 的 Download ZIP 不包含子模块源码，请使用 Git 克隆仓库。
 | `request_op_hwbp_set` / `request_op_hwbp_remove` | 设置与移除硬件断点 |
 | `request_op_ptebp_set` / `request_op_ptebp_remove` | 设置与移除 PTE 断点 |
 | `request_op_stepbp_set` / `request_op_stepbp_remove` | 设置与移除单步断点 |
-| `request_op_dptdbg_set` / `request_op_dptdbg_remove` | 设置与移除 DPT 调试 |
+| `request_op_dptbp_set` / `request_op_dptbp_remove` | 设置与移除 DPT 调试 |
 | `request_op_syscall_monitor_set` / `request_op_syscall_monitor_remove` | 启停系统调用监控 |
 | `request_op_cntvct_monitor_set` / `request_op_cntvct_monitor_remove` | 启停 CNTVCT_EL0 读取监控 |
 | `request_op_env_get_params` | 查询线程环境参数 |
@@ -361,7 +361,7 @@ BSS 区段的 `index` 固定为 `-1`，后续不会参与普通连续 index 编�
 | --- | --- | --- |
 | PTE | `SetProcessPtebpRef` / `RemoveProcessPtebpRef` | [lsdriver/arm64_ptedbg.h](lsdriver/arm64_ptedbg.h) |
 | 单步 PC | `SetProcessStepbpRef` / `RemoveProcessStepbpRef` | [lsdriver/arm64_stepdbg.h](lsdriver/arm64_stepdbg.h) |
-| 主线程 UDF shadow-PGD | `SetProcessDptdbgRef` / `RemoveProcessDptdbgRef` | [lsdriver/arm64_dptdbg.h](lsdriver/arm64_dptdbg.h) |
+| 主线程 UDF shadow-PGD | `SetProcessDptbpRef` / `RemoveProcessDptbpRef` | [lsdriver/arm64_dptdbg.h](lsdriver/arm64_dptdbg.h) |
 
 这些接口复用同一块 `bp_info` 配置和记录。切换断点方式前先移除上一种配置，再设置新的配置。
 
@@ -584,39 +584,3 @@ flowchart TD
 RPC 参数使用规范标记：数值类型为 `i8/i16/i32/i64/f32/f64`，扫描模式使用 `equal/greater/less/increased/decreased` 等完整名称，断点类型为 `read/write/read_write/execute`，线程范围为 `main/other/all`。`locked` 使用 JSON 布尔值；`eq`、`int32`、`bp_read`、字符串布尔值等旧参数写法不再接受。扫描状态的 `value_type` 同样返回规范标记，文本扫描为 `string`。
 
 ---
-
-## 13. 测试
-
-RPC/MCP 适配与路由测试不需要驱动，可在 Linux/WSL 仓库根目录运行：
-
-```bash
-g++ -std=c++23 -I android/jni/include -I android/jni/json/single_include android/tests/mcp_server_test.cpp -o /tmp/lsk-mcp-test
-/tmp/lsk-mcp-test
-```
-
-测试覆盖握手、工具参数及默认值、地址精度、协议错误、HTTP 路由，以及 RPC 写入状态后由 MCP 读取和反向操作。使用 Android NDK 构建同一测试时还会检查生产 HTTP 收发函数；其 `--serve <port>` 模式提供使用模拟业务分发的本机端点，供 Windows HTTP 桥接客户端与 MCP SDK 联调。这些测试不访问真实驱动。
-
-解码器测试在主机上运行，不执行目标 ARM64 指令。在 Linux 或 WSL 中，从仓库根目录执行：
-
-```bash
-make -C lsdriver/arm64_tests/decoder contract-test
-make -C lsdriver/arm64_tests/decoder strict-test
-make -C lsdriver/arm64_tests/encoder contract-test
-```
-
-decoder 的 `contract-test` 检查输出契约和 CAS/CASP 组合，`strict-test` 使用 Android clang-r487747c / LLVM 17.0.2 做逐项审计；encoder 的 `contract-test` 检查生产编码器的机器字、范围错误和跳板序列。默认工具链位置及固定语料基线见 [lsdriver/arm64_tests/decoder/Makefile](lsdriver/arm64_tests/decoder/Makefile)，判定规则见 [lsdriver/arm64_tests/decoder/VALIDATION.md](lsdriver/arm64_tests/decoder/VALIDATION.md) 和 [lsdriver/arm64_tests/encoder/VALIDATION.md](lsdriver/arm64_tests/encoder/VALIDATION.md)。
-
-模拟执行器测试需要实体 ARM64 设备、root 和匹配内核的测试模块。先在 Linux 或 WSL 中构建：
-
-```bash
-make -C lsdriver/arm64_tests/executor VERSION=6.1-Android14 module
-make -C lsdriver/arm64_tests/executor device-binaries
-```
-
-再在 Windows PowerShell 中运行：
-
-```powershell
-.\lsdriver\arm64_tests\run-arm64-executor-test-device.ps1
-```
-
-脚本支持用 `-Serial` 选择设备。对拍、跳过项目和清理结果的判定见 [lsdriver/arm64_tests/executor/KERNEL_EXECUTOR_VALIDATION.md](lsdriver/arm64_tests/executor/KERNEL_EXECUTOR_VALIDATION.md)。修改共享指令语料后，需要重新构建测试模块和 runner。

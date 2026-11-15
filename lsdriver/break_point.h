@@ -656,20 +656,20 @@ static void remove_process_ptebp(void)
 }
 
 #include "arm64_dptdbg.h"
-static int set_process_dptdbg(struct break_point *info)
+static int set_process_dptbp(struct break_point *info)
 {
     if (!info) return -EINVAL;
 
     prepare_break_point_handlers(info);
 
-    return dptdbg_start_monitor(info);
+    return start_dptbp_monitor(info);
 }
 
-static void remove_process_dptdbg(void)
+static void remove_process_dptbp(void)
 {
-    struct break_point *info = READ_ONCE(g_dptdbg.info);
+    struct break_point *info = READ_ONCE(g_dptbp_current.info);
 
-    dptdbg_stop_monitor();
+    stop_dptbp_monitor();
     if (info) __builtin_memset(info, 0, sizeof(*info));
 }
 

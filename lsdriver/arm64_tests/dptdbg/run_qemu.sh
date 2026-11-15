@@ -78,9 +78,11 @@ fi
 grep -q '^DPTDBG_TEST_LOAD_OK' "${LOG}"
 grep -q 'DPTDBG_TEST_MONITOR_STARTED' "${LOG}"
 grep -q '^DPTDBG_TEST_RESULT_OK' "${LOG}"
-grep -q 'DPTDBG_TEST_FUNCTION_PASS hits=3' "${LOG}"
+grep -q 'DPTDBG_TEST_FUNCTION_PASS hits=6' "${LOG}"
 grep -q 'DPTDBG_TEST_UNLOAD_OK' "${LOG}"
 if grep -Eq 'Kernel panic|Internal error:|BUG:|WARNING:|DPTDBG_TEST_.*FAILED' "${LOG}"; then
     echo "DPTDBG_TEST_GUEST_FAILED" >&2
     exit 1
 fi
+
+echo "DPTDBG_TEST_SUITE_PASS"

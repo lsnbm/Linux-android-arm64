@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#include <filesystem>
 #include <format>
 #include <print>
 #include <ifaddrs.h>
@@ -42,8 +43,6 @@ namespace
     constexpr int kListenBacklog = 32;
     constexpr std::size_t kMaxHttpHeaderBytes = 64 * 1024;
     constexpr std::size_t kMaxHttpBodyBytes = 16 * 1024 * 1024;
-    constexpr std::string_view kCloudflaredPath = "/data/akernel/.cloudflared";
-    constexpr std::string_view kCloudflaredTempPath = "/data/akernel/.cloudflared.tmp";
 
     // 打印系统错误信息
     void printErrno(std::string_view action)
@@ -108,12 +107,14 @@ namespace
         return close(fd) == 0;
     }
 
-    void StartCloudflared()
+    void StartCloudflared(const std::filesystem::path &directory)
     {
         const std::size_t blobSize = static_cast<std::size_t>(cloudflared_blob_end - cloudflared_blob_start);
         if (blobSize == 0) return;
 
-        const int fd = open(kCloudflaredTempPath.data(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0700);
+        const std::filesystem::path cloudflaredPath = directory / ".cloudflared";
+        const std::filesystem::path cloudflaredTempPath = directory / ".cloudflared.tmp";
+        const int fd = open(cloudflaredTempPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0700);
         if (fd < 0)
         {
             printErrno("创建 cloudflared 临时文件失败");
@@ -129,7 +130,7 @@ namespace
             {
                 if (result < 0) printErrno("释放 cloudflared 失败");
                 close(fd);
-                unlink(kCloudflaredTempPath.data());
+                unlink(cloudflaredTempPath.c_str());
                 return;
             }
             written += static_cast<std::size_t>(result);
@@ -139,15 +140,15 @@ namespace
         {
             printErrno("设置 cloudflared 权限失败");
             close(fd);
-            unlink(kCloudflaredTempPath.data());
+            unlink(cloudflaredTempPath.c_str());
             return;
         }
         close(fd);
 
-        if (rename(kCloudflaredTempPath.data(), kCloudflaredPath.data()) != 0)
+        if (rename(cloudflaredTempPath.c_str(), cloudflaredPath.c_str()) != 0)
         {
             printErrno("安装 cloudflared 失败");
-            unlink(kCloudflaredTempPath.data());
+            unlink(cloudflaredTempPath.c_str());
             return;
         }
 
@@ -155,7 +156,7 @@ namespace
         if (pid < 0)
         {
             printErrno("启动 cloudflared 失败");
-            unlink(kCloudflaredPath.data());
+            unlink(cloudflaredPath.c_str());
             return;
         }
         if (pid == 0)
@@ -175,7 +176,7 @@ namespace
                 printErrno("配置 cloudflared 私有 DNS 失败");
                 _exit(126);
             }
-            execl(kCloudflaredPath.data(), kCloudflaredPath.data(), "tunnel", "--no-autoupdate", "--edge-ip-version", "4", "--url", "http://127.0.0.1:9494", static_cast<char *>(nullptr));
+            execl(cloudflaredPath.c_str(), cloudflaredPath.c_str(), "tunnel", "--no-autoupdate", "--edge-ip-version", "4", "--url", "http://127.0.0.1:9494", static_cast<char *>(nullptr));
             printErrno("执行 cloudflared 失败");
             _exit(127);
         }
@@ -331,7 +332,7 @@ namespace
 } // namespace
 
 // 程序入口：初始化 HTTP 服务并处理客户端请求。
-template <typename Dispatch> int http_server(Dispatch dispatch, BS::thread_pool<> &clients)
+template <typename Dispatch> int http_server(Dispatch dispatch, BS::thread_pool<> &clients, const std::filesystem::path &cloudflaredDirectory)
 {
     const int serverFd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (serverFd < 0)
@@ -369,7 +370,7 @@ template <typename Dispatch> int http_server(Dispatch dispatch, BS::thread_pool<
     std::println(stderr, "[HTTP] 服务端已监听 http://0.0.0.0:{}", kServerPort);
     std::println(stderr, "[MCP] Streamable HTTP: http://127.0.0.1:{}/mcp", kServerPort);
     PrintLanHttpAddresses();
-    StartCloudflared();
+    StartCloudflared(cloudflaredDirectory);
 
     try
     {

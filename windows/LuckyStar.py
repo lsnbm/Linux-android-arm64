@@ -912,6 +912,14 @@ class HttpBridgeWindow(QWidget):
         self.ptebp_remove_button.clicked.connect(self.on_ptebp_remove_all)
         action_row.addWidget(self.ptebp_remove_button)
 
+        self.dptbp_set_button = QPushButton("设置DPTBP")
+        self.dptbp_set_button.clicked.connect(self.on_dptbp_set)
+        action_row.addWidget(self.dptbp_set_button)
+
+        self.dptbp_remove_button = QPushButton("移除DPTBP")
+        self.dptbp_remove_button.clicked.connect(self.on_dptbp_remove_all)
+        action_row.addWidget(self.dptbp_remove_button)
+
         self.stepbp_set_button = QPushButton("设置STEPBP")
         self.stepbp_set_button.clicked.connect(self.on_stepbp_set)
         action_row.addWidget(self.stepbp_set_button)
@@ -2219,6 +2227,10 @@ class HttpBridgeWindow(QWidget):
             self.ptebp_set_button.setEnabled(not active)
         if hasattr(self, "ptebp_remove_button"):
             self.ptebp_remove_button.setEnabled(self.breakpoint_mode == "ptebp")
+        if hasattr(self, "dptbp_set_button"):
+            self.dptbp_set_button.setEnabled(not active)
+        if hasattr(self, "dptbp_remove_button"):
+            self.dptbp_remove_button.setEnabled(self.breakpoint_mode == "dptbp")
         if hasattr(self, "stepbp_set_button"):
             self.stepbp_set_button.setEnabled(not active)
         if hasattr(self, "stepbp_remove_button"):
@@ -3603,6 +3615,12 @@ class HttpBridgeWindow(QWidget):
 
     def on_ptebp_remove_all(self) -> None:
         self._remove_breakpoint_mode("ptebp", "PTEBP")
+
+    def on_dptbp_set(self) -> None:
+        self._set_breakpoint_mode("dptbp", "DPTBP")
+
+    def on_dptbp_remove_all(self) -> None:
+        self._remove_breakpoint_mode("dptbp", "DPTBP")
 
     def on_stepbp_set(self) -> None:
         self._set_breakpoint_mode("stepbp", "STEPBP")
