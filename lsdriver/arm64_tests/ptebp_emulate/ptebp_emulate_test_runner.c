@@ -531,6 +531,7 @@ static int test_file_reads(int device)
     uint64_t address = (uintptr_t)(mapping + page_size);
     if (ioctl(device, PTEBP_EMULATE_FILE_START, &address) < 0) goto out;
     if (ioctl(device, PTEBP_EMULATE_FILE_CHECK) != 0) goto out;
+    if (mprotect(mapping + page_size, 2 * page_size, PROT_READ | PROT_WRITE | PROT_EXEC)) goto out;
 
     for (int method = 0; method < 2; method++)
     {
@@ -554,6 +555,14 @@ static int test_file_reads(int device)
         if (check_file_bytes(memory_fd, selected_stream, (uintptr_t)mapping,
                               expected, buffer, offset, length, method ? 8 : 1)) goto out;
         checks++;
+        for (offset = 0; offset < total; offset++)
+        {
+            if (buffer[offset + 1] != *(const volatile uint8_t *)(mapping + offset))
+            {
+                fprintf(stderr, "file_pointer_mismatch api=%s offset=%zu\n", method ? "fread" : "read", offset);
+                goto out;
+            }
+        }
 
         ((void (*)(void))(uintptr_t)address)();
         if (ioctl(device, PTEBP_EMULATE_FILE_CHECK) != method + 1) goto out;
@@ -576,6 +585,37 @@ static int test_file_reads(int device)
     errno = 0;
     if (fread(buffer, 1, 1, stream) || !ferror(stream) || errno != EIO) goto out;
     clearerr(stream);
+    struct iovec local_vecs[] = {
+        {.iov_base = buffer + 1, .iov_len = 1},
+        {.iov_base = NULL, .iov_len = 0},
+        {.iov_base = buffer + 2, .iov_len = page_size},
+        {.iov_base = buffer + page_size + 2, .iov_len = page_size},
+    };
+    struct iovec remote_vecs[] = {
+        {.iov_base = mapping + page_size - 1, .iov_len = 3},
+        {.iov_base = mapping + page_size + 2, .iov_len = page_size - 2},
+        {.iov_base = mapping + 2 * page_size, .iov_len = page_size},
+    };
+    if (process_vm_readv(getpid(), local_vecs, 4, remote_vecs, 3, 0) != (ssize_t)(2 * page_size + 1) ||
+        memcmp(buffer + 1, expected + page_size - 1, 2 * page_size + 1)) goto out;
+
+    local_vecs[0] = (struct iovec){.iov_base = buffer, .iov_len = 7};
+    local_vecs[1] = (struct iovec){.iov_base = NULL, .iov_len = 1};
+    remote_vecs[0] = (struct iovec){.iov_base = mapping + page_size, .iov_len = 8};
+    if (process_vm_readv(getpid(), local_vecs, 2, remote_vecs, 1, 0) != 7 ||
+        memcmp(buffer, expected + page_size, 7)) goto out;
+
+    local_vecs[0].iov_len = 8;
+    remote_vecs[0].iov_len = 7;
+    remote_vecs[1] = (struct iovec){.iov_base = NULL, .iov_len = 1};
+    if (process_vm_readv(getpid(), local_vecs, 1, remote_vecs, 2, 0) != 7 ||
+        memcmp(buffer, expected + page_size, 7)) goto out;
+    if (mprotect(mapping + page_size, page_size, PROT_NONE)) goto out;
+    errno = 0;
+    if (process_vm_readv(getpid(), local_vecs, 1, remote_vecs, 1, 0) != -1 || errno != EFAULT) goto out;
+    if (mprotect(mapping + page_size, page_size, PROT_READ | PROT_WRITE | PROT_EXEC)) goto out;
+
+    if (mprotect(mapping + page_size, 2 * page_size, PROT_READ | PROT_EXEC)) goto out;
     if (ioctl(device, PTEBP_EMULATE_FILE_CHECK) != 2) goto out;
     if (ioctl(device, PTEBP_EMULATE_RESET) < 0 || memcmp(mapping, expected, total)) goto out;
 
@@ -585,7 +625,18 @@ static int test_file_reads(int device)
         ioctl(device, PTEBP_EMULATE_FILE_CHECK) != 0 ||
         ioctl(device, PTEBP_EMULATE_RESET) < 0 || memcmp(mapping, expected, total)) goto out;
 
-    printf("ptebp file read test passed checks=%zu hits=2 restart=PASS short_read=PASS errors=PASS\n", checks);
+    if (mprotect(mapping + page_size, page_size, PROT_READ | PROT_WRITE | PROT_EXEC) ||
+        ioctl(device, PTEBP_EMULATE_FILE_START, &address) < 0) goto out;
+    local_vecs[0] = (struct iovec){.iov_base = mapping + page_size + 128, .iov_len = 8};
+    remote_vecs[0] = (struct iovec){.iov_base = mapping + page_size, .iov_len = 8};
+    if (process_vm_readv(getpid(), local_vecs, 1, remote_vecs, 1, 0) != 8) goto out;
+    if (ioctl(device, PTEBP_EMULATE_FILE_CHECK) >= 0 ||
+        ioctl(device, PTEBP_EMULATE_RESET) < 0) goto out;
+    memcpy(expected + page_size + 128, expected + page_size, 8);
+    if (memcmp(mapping, expected, total)) goto out;
+    printf("ptebp process_vm test passed iovec=PASS partial=PASS permissions=PASS guarded_destination=PASS\n");
+
+    printf("ptebp file read test passed checks=%zu hits=2 restart=PASS short_read=PASS errors=PASS rwx=PASS pointer_view=PASS\n", checks);
     fflush(stdout);
     status = 0;
 out:

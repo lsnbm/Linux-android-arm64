@@ -26,6 +26,41 @@ static struct ptebp_emulate_pending *ptebp_emulate_pending;
 static struct proc_dir_entry *ptebp_emulate_proc_entry;
 static struct break_point *ptebp_file_info;
 static int ptebp_file_hits;
+static int target_tgid;
+static unsigned long target_address;
+static unsigned long target_hits;
+
+module_param(target_tgid, int, 0400);
+module_param(target_address, ulong, 0400);
+module_param(target_hits, ulong, 0400);
+module_param_named(target_active, g_ptebp_current.valid, int, 0400);
+
+static void ptebp_target_hit(void *regs, void *fp_regs, void *point)
+{
+    __atomic_add_fetch(&target_hits, 1, __ATOMIC_RELAXED);
+}
+
+static int ptebp_target_start(void)
+{
+    if (target_tgid <= 0 || !target_address || (target_address & 3)) return -EINVAL;
+
+    fn_aarch64_insn_patch_text = (void *)generic_kallsyms_lookup_name("aarch64_insn_patch_text");
+    if (!fn_aarch64_insn_patch_text) return -ENOENT;
+
+    ptebp_file_info = kvzalloc(sizeof(*ptebp_file_info), GFP_KERNEL);
+    if (!ptebp_file_info) return -ENOMEM;
+    ptebp_file_info->tgid = target_tgid;
+    ptebp_file_info->points[0].hit_addr = target_address;
+    ptebp_file_info->points[0].bt = BP_BREAKPOINT_X;
+    ptebp_file_info->points[0].on_hit = ptebp_target_hit;
+    int status = start_ptebp_monitor(ptebp_file_info);
+    if (status)
+    {
+        kvfree(ptebp_file_info);
+        ptebp_file_info = NULL;
+    }
+    return status;
+}
 
 static void ptebp_file_hit(void *regs, void *fp_regs, void *point)
 {
@@ -379,6 +414,8 @@ out:
 
 static int __init ptebp_emulate_init(void)
 {
+    if (target_tgid || target_address) return ptebp_target_start();
+
     int status = ptebp_emulate_abort_selftest();
 
     if (status)
@@ -404,6 +441,7 @@ static void __exit ptebp_emulate_exit(void)
     ptebp_file_stop();
     ptebp_emulate_release_pending();
     mutex_unlock(&ptebp_emulate_lock);
+    if (target_tgid) return;
     if (ptebp_emulate_proc_entry)
         proc_remove(ptebp_emulate_proc_entry);
     misc_deregister(&ptebp_emulate_device);

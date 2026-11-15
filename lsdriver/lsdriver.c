@@ -343,7 +343,7 @@ static inline unsigned long exit_strip_kernel_pac(unsigned long address)
 static const char *exit_watch_process_name(const char *comm)
 {
     static const char *const process_names[] = {
-        "LS", "system_server", "surfaceflinger", "com.tencent.tmgp.dfm", "com.tencent.tmgp.sgame", "com.pi.czrxdfirst", "com.bwxrk.yqmy.gz", "me.hd.ggtutorial",
+        "LS", "com.tencent.tmgp.dfm", "com.tencent.tmgp.sgame", "com.pi.czrxdfirst", "com.bwxrk.yqmy.gz", "me.hd.ggtutorial",
     };
 
     for (int i = 0; i < ARRAY_SIZE(process_names); i++)
@@ -588,7 +588,7 @@ static int taskstats_exit_hook_work(struct pt_regs *regs)
         v_gyro_destroy();                 // 清理陀螺仪
         remove_process_hwbp();            // 清理硬件断点
         remove_process_ptebp();           // 清理 PTEBP
-        remove_process_dptbp();          // 清理 DPTBP
+        remove_process_dptbp();           // 清理 DPTBP
         remove_process_stepbp();          // 清理单步断点
         syscall_monitor_remove_all();     // 清理全部系统调用监控目标
         cntvct_monitor_remove_all();      // 清理全部 CNTVCT_EL0 读取监控

@@ -48,6 +48,25 @@ _start:
     mov x2, #message_load_ok_len
     bl write_message
 
+    mov x25, #0x40000000
+    add x26, x25, #0x2000
+protect_test_pages:
+    mov x0, x25
+    mov x1, #0x1000
+    mov x2, #7
+    mov x8, #__NR_mprotect
+    svc #0
+    cbnz x0, test_function_failed
+    mov x0, x25
+    mov x1, #0x1000
+    mov x2, #5
+    mov x8, #__NR_mprotect
+    svc #0
+    cbnz x0, test_function_failed
+    add x25, x25, #0x1000
+    cmp x25, x26
+    b.lo protect_test_pages
+
     bl run_worker_thread
     cbnz x0, test_function_failed
 
@@ -163,7 +182,7 @@ write_message:
 
 map_test_page:
     mov x0, #0x40000000
-    mov x1, #0x1000
+    mov x1, #0x2000
     mov x2, #7
     mov x3, #0x32
     mov x4, #-1
@@ -180,9 +199,10 @@ map_test_page:
     movz w6, #0x03c0
     movk w6, #0xd65f, lsl #16
     str w6, [x0, #4]
+    str xzr, [x0, #0x1000]
 
     mov x0, #0x40000000
-    mov x1, #0x1000
+    mov x1, #0x2000
     mov x2, #5
     mov x8, #__NR_mprotect
     svc #0

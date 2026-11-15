@@ -27,7 +27,7 @@ static void dptbp_test_on_hit(void *regs, void *fp_regs, void *hit_point)
 static bool dptbp_test_state_empty(void)
 {
     if (dptbp_context_valid() || g_dptbp_current.mm || g_dptbp_current.info || g_dptbp_current.shadow_pgd || g_dptbp_current.mmu_notifier.ops) return false;
-    if (g_dptbp_current.restoring || g_dptbp_current.sync_refs || g_dptbp_current.switch_refs || g_dptbp_current.notifier_refs) return false;
+    if (g_dptbp_current.restoring || g_dptbp_current.sync_refs || g_dptbp_current.switch_refs || g_dptbp_current.notifier_refs || g_dptbp_current.mprotect_refs || g_dptbp_current.split_task || g_dptbp_current.mapping_updates) return false;
     for (size_t index = 0; index < ARRAY_SIZE(g_dptbp_current.slots); index++)
     {
         if (g_dptbp_current.slots[index].hook_addr || g_dptbp_current.slots[index].shadow_page) return false;
@@ -107,11 +107,63 @@ static int __init arm64_dptdbg_test_init(void)
         if (read_user_pte_value(current->mm, 0x40000000ULL, &orig_value)) goto failed;
         if (pte_pfn(__pte(orig_value)) != pte_pfn(g_dptbp_current.slots[0].orig_pte)) goto failed;
 
+        const unsigned long protections[] = {PROT_NONE, PROT_READ | PROT_WRITE | PROT_EXEC, PROT_READ | PROT_EXEC};
+        for (size_t protection_index = 0; protection_index < ARRAY_SIZE(protections); protection_index++)
+        {
+            struct pt_regs sys_regs = {};
+            struct pt_regs hook_regs = {};
+            sys_regs.regs[0] = 0x40000000;
+            sys_regs.regs[1] = PAGE_SIZE;
+            sys_regs.regs[2] = protections[protection_index];
+            hook_regs.regs[0] = (uint64_t)&sys_regs;
+            if (dptbp_handle_mprotect(&hook_regs) != 1 || hook_regs.regs[0]) goto failed;
+            if (!dptbp_task_uses_shadow(current)) goto failed;
+            pte_t *normal_ptep = get_user_pte(current->mm, 0x40000000);
+            pte_t *shadow_ptep = dptbp_get_shadow_pte(0x40000000);
+            if (!normal_ptep || !shadow_ptep) goto failed;
+            pteval_t normal_value = READ_ONCE(pte_val(*normal_ptep));
+            pteval_t shadow_value = READ_ONCE(pte_val(*shadow_ptep));
+            pteval_t pfn_mask = __phys_to_pte_val(PHYS_MASK & PAGE_MASK);
+            if ((normal_value & pfn_mask) != (orig_value & pfn_mask)) goto failed;
+            if ((shadow_value & pfn_mask) != __phys_to_pte_val(virt_to_phys(g_dptbp_current.slots[0].shadow_page))) goto failed;
+            if ((normal_value & ~pfn_mask) != (shadow_value & ~pfn_mask)) goto failed;
+            if (pte_val(g_dptbp_current.slots[0].orig_pte) != normal_value || pte_val(g_dptbp_current.slots[1].orig_pte) != normal_value) goto failed;
+
+            sys_regs.regs[0] = 0x40001000;
+            hook_regs.regs[0] = (uint64_t)&sys_regs;
+            if (dptbp_handle_mprotect(&hook_regs) != 1 || hook_regs.regs[0]) goto failed;
+            if (!dptbp_task_uses_shadow(current)) goto failed;
+            normal_ptep = get_user_pte(current->mm, 0x40001000);
+            shadow_ptep = dptbp_get_shadow_pte(0x40001000);
+            if (!normal_ptep || !shadow_ptep || normal_ptep == shadow_ptep) goto failed;
+            if (READ_ONCE(pte_val(*normal_ptep)) != READ_ONCE(pte_val(*shadow_ptep))) goto failed;
+        }
+
         struct mmu_notifier_range range = {
             .mm = current->mm,
-            .start = 0x40000000UL,
-            .end = 0x40001000UL,
+            .start = current->mm->start_stack & PGDIR_MASK,
+            .end = (current->mm->start_stack & PGDIR_MASK) + PAGE_SIZE,
+            .event = MMU_NOTIFY_UNMAP,
         };
+        if (dptbp_mmu_notifier_invalidate_range_start(&g_dptbp_current.mmu_notifier, &range)) goto failed;
+        if (!dptbp_task_uses_shadow(current)) goto failed;
+        range.flags = MMU_NOTIFIER_RANGE_BLOCKABLE;
+        if (dptbp_mmu_notifier_invalidate_range_start(&g_dptbp_current.mmu_notifier, &range)) goto failed;
+        if (!dptbp_task_uses_shadow(current)) goto failed;
+        range.end = range.start + PGDIR_SIZE;
+        if (dptbp_unmap_uses_shared_tables(&range)) goto failed;
+        range.start = 0x40000000UL;
+        range.end = 0x40001000UL;
+        WRITE_ONCE(g_dptbp_current.split_task, current);
+        range.event = MMU_NOTIFY_CLEAR;
+        range.flags = MMU_NOTIFIER_RANGE_BLOCKABLE;
+        if (dptbp_mmu_notifier_invalidate_range_start(&g_dptbp_current.mmu_notifier, &range)) goto failed;
+        if (g_dptbp_current.mapping_updates != 1 || dptbp_task_uses_shadow(current)) goto failed;
+        dptbp_mmu_notifier_invalidate_range_end(&g_dptbp_current.mmu_notifier, &range);
+        WRITE_ONCE(g_dptbp_current.split_task, NULL);
+        if (g_dptbp_current.mapping_updates || !dptbp_task_uses_shadow(current)) goto failed;
+        range.event = MMU_NOTIFY_UNMAP;
+        range.flags = 0;
         if (dptbp_mmu_notifier_invalidate_range_start(&g_dptbp_current.mmu_notifier, &range) != -EAGAIN) goto failed;
         if (!dptbp_task_uses_shadow(current)) goto failed;
         range.flags = MMU_NOTIFIER_RANGE_BLOCKABLE;

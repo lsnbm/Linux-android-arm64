@@ -4,11 +4,12 @@
 /*
 为每个受管代码页创建含 UDF 断点的执行副本，同页断点槽位共享这一页。
 私有 PGD 只复制受管地址经过的页表路径，将对应叶子 PTE 指向执行副本。
-目标主线程切入私有页表，其他线程使用普通页表；普通用户页表和原始指令不被修改。
+目标主线程切入私有页表，其他线程使用普通页表；原始指令不被修改。
+私有 PTE 表覆盖范围内的 mprotect 同步普通页表与执行副本权限，保留各自物理页和断点。
 
 资源分工：
 安装函数创建 slot、执行副本和私有页表，注册 hook 与 notifier 后发布资源。
-异常、任务切换和 notifier 先增加分类引用，再检查 valid，持引用使用 context。
+异常、任务切换、mprotect 和 notifier 先增加分类引用，再检查 valid，持引用使用 context。
 异常回退只发布撤销意图并恢复当前线程视图，控制卸载统一回收页、mm 和 hook。
 
 运行状态：
@@ -16,6 +17,7 @@ valid=1、restoring=0：资源已发布，允许目标主线程进入断点视�
 valid=1、restoring=1：停止切入断点视图，仍允许处理已触发的 UDF 并返回普通页重试。
 valid=0：拒绝新引用访问资源，控制面等待已有引用退出后释放资源。
 restoring 在完整卸载结束时清零；异常回退不会立即关闭 valid 或清空 info。
+mapping_updates 非零时暂停执行视图；受控 VMA 拆分结束校验并同步 PTE 后恢复。
 
 卸载顺序：停止切入并移除切换 hook，恢复线程视图，注销 notifier，关闭 valid，
 等待三类引用排空，再移除异常 hook、释放私有页表和执行副本，最后归还 mm 引用。
@@ -24,6 +26,7 @@ restoring 在完整卸载结束时清零；异常回退不会立即关闭 valid 
 #include <linux/errno.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
+#include <linux/mman.h>
 #include <linux/mmu_notifier.h>
 #include <linux/mutex.h>
 #include <linux/rcupdate.h>
@@ -60,6 +63,7 @@ enum dptbp_ref_type
     DPTBP_REF_SYNC, // EL0 同步异常路径
     DPTBP_REF_SWITCH, // 任务切换路径
     DPTBP_REF_NOTIFIER, // MMU notifier 回调路径
+    DPTBP_REF_MPROTECT,
     DPTBP_REF_NONE, // 不对应任何引用计数
 };
 
@@ -76,6 +80,9 @@ struct dptbp_context
     int sync_refs; // 同步异常使用者数量，通过原子操作增减
     int switch_refs; // 任务切换使用者数量
     int notifier_refs; // 映射失效回调使用者数量
+    int mprotect_refs;
+    struct task_struct *split_task;
+    int mapping_updates;
     int valid; // 非零允许新引用访问已发布资源，不单独表示断点视图仍然启用
     int restoring; // 非零禁止继续切入断点视图，保持到完整卸载结束
 };
@@ -101,6 +108,8 @@ static inline int *dptbp_context_refs(enum dptbp_ref_type ref_type)
         return &g_dptbp_current.switch_refs;
     case DPTBP_REF_NOTIFIER:
         return &g_dptbp_current.notifier_refs;
+    case DPTBP_REF_MPROTECT:
+        return &g_dptbp_current.mprotect_refs;
     default:
         return NULL;
     }
@@ -127,10 +136,10 @@ static inline bool dptbp_try_get_ref(enum dptbp_ref_type ref_type)
     return false;
 }
 
-// 控制面关闭 valid 后等待三类引用排空；此函数可能调度，不能从持引用的异常路径调用。
+// 控制面关闭 valid 后等待各类引用排空；此函数可能调度，不能从持引用的异常路径调用。
 static inline void dptbp_wait_refs(void)
 {
-    while (__atomic_load_n(&g_dptbp_current.sync_refs, __ATOMIC_SEQ_CST) || __atomic_load_n(&g_dptbp_current.switch_refs, __ATOMIC_SEQ_CST) || __atomic_load_n(&g_dptbp_current.notifier_refs, __ATOMIC_SEQ_CST)) cond_resched();
+    while (__atomic_load_n(&g_dptbp_current.sync_refs, __ATOMIC_SEQ_CST) || __atomic_load_n(&g_dptbp_current.switch_refs, __ATOMIC_SEQ_CST) || __atomic_load_n(&g_dptbp_current.notifier_refs, __ATOMIC_SEQ_CST) || __atomic_load_n(&g_dptbp_current.mprotect_refs, __ATOMIC_SEQ_CST)) cond_resched();
 }
 
 // 原子发布停止切入标志；返回值仅表示本次是否首次置位，不关闭 valid 或释放资源。
@@ -147,7 +156,7 @@ static inline bool dptbp_begin_restore(void)
 // 调用方需持资源引用或控制锁；restoring 置位后不再读取 info 中的线程条件。
 static inline bool dptbp_task_uses_shadow(struct task_struct *task)
 {
-    return !__atomic_load_n(&g_dptbp_current.restoring, __ATOMIC_SEQ_CST) && task->mm == g_dptbp_current.mm && task->tgid == READ_ONCE(g_dptbp_current.info->tgid) && thread_group_leader(task) && !(READ_ONCE(task->flags) & PF_EXITING);
+    return !__atomic_load_n(&g_dptbp_current.restoring, __ATOMIC_SEQ_CST) && !__atomic_load_n(&g_dptbp_current.mapping_updates, __ATOMIC_SEQ_CST) && task->mm == g_dptbp_current.mm && task->tgid == READ_ONCE(g_dptbp_current.info->tgid) && thread_group_leader(task) && !(READ_ONCE(task->flags) & PF_EXITING);
 }
 
 // 替换 TTBR0 的页表基址并保留 ASID 等其他位；私有页表清除 CnP 共享提示。
@@ -209,7 +218,7 @@ static void dptbp_apply_current_view(void *unused)
     if (changed) flush_tlb_all();
 }
 
-// 调用前已置位 restoring：先恢复保存的线程视图，再同步各 CPU 当前视图并刷新 TLB。
+// 按 restoring 和 mapping_updates 同步线程保存视图与各 CPU 当前视图，并刷新 TLB。
 // 包含同步跨 CPU 调用，由控制路径或可阻塞 notifier 调用。
 static void dptbp_restore_thread_views(void)
 {
@@ -253,36 +262,25 @@ static int dptbp_handle_switch(struct pt_regs *hook_regs)
         bool changed = dptbp_write_task_view(next, dptbp_task_uses_shadow(next));
 
         // 补检选择视图到写入之间是否开始撤销；若已撤销，将刚写入的视图改回普通根页。
-        if (__atomic_load_n(&g_dptbp_current.restoring, __ATOMIC_SEQ_CST)) changed |= dptbp_write_task_view(next, false);
+        if (__atomic_load_n(&g_dptbp_current.restoring, __ATOMIC_SEQ_CST) || __atomic_load_n(&g_dptbp_current.mapping_updates, __ATOMIC_SEQ_CST)) changed |= dptbp_write_task_view(next, false);
         if (changed) flush_tlb_all();
     }
     dptbp_put_ref(DPTBP_REF_SWITCH);
     return 0;
 }
 
-// 处理目标 mm 的 EL0 同步异常：UDF 精确匹配槽位，取指或数据异常则触发视图回退。
+// 只接管目标 mm 中 PC 精确匹配断点槽位的 EL0 UDF，其余异常交回内核。
 static int dptbp_handle_undef_sync(struct pt_regs *hook_regs)
 {
-    if (unlikely(!hook_regs || !dptbp_try_get_ref(DPTBP_REF_SYNC))) return 0;
+    if (unlikely(!hook_regs)) return 0;
+    uint64_t esr = read_sysreg(esr_el1);
+    if (unlikely(ESR_ELx_EC(esr) != ESR_ELx_EC_UNKNOWN)) return 0;
+    if (unlikely(!dptbp_try_get_ref(DPTBP_REF_SYNC))) return 0;
     int result = 0;
     struct pt_regs *regs = (struct pt_regs *)(uintptr_t)hook_regs->regs[0];
 
     // hook_regs 是函数入口现场，参数 0 指向真正的用户异常寄存器现场。
     if (unlikely(!regs || !user_mode(regs) || current->mm != g_dptbp_current.mm)) goto out;
-    uint64_t esr = read_sysreg(esr_el1);
-    unsigned int exception_class = ESR_ELx_EC(esr);
-    if (exception_class != ESR_ELx_EC_UNKNOWN)
-    {
-        // 取指/数据异常回退后仍交给内核处理；其他同步异常不由本模块接管。
-        if (exception_class == ESR_ELx_EC_IABT_LOW || exception_class == ESR_ELx_EC_DABT_LOW)
-        {
-            uint64_t far = read_sysreg(far_el1);
-
-            if (dptbp_drop_all_monitors())
-                ls_log_always_tag("dptbp", "monitor cancelled source=%s tgid=%d tid=%d pc=0x%llx esr=0x%llx far=0x%llx\n", exception_class == ESR_ELx_EC_IABT_LOW ? "instruction-abort" : "data-abort", current->tgid, current->pid, (unsigned long long)regs->pc, (unsigned long long)esr, (unsigned long long)far);
-        }
-        goto out;
-    }
 
     uint64_t pc = regs->pc;
     for (size_t index = 0; index < ARRAY_SIZE(g_dptbp_current.slots); index++)
@@ -333,6 +331,167 @@ out:
     return result;
 }
 
+static pte_t *dptbp_get_shadow_pte(unsigned long addr)
+{
+    pgd_t *pgd = g_dptbp_current.shadow_pgd + pgd_index(addr);
+    if (pgd_none(*pgd) || pgd_bad(*pgd)) return NULL;
+    p4d_t *p4d = p4d_offset(pgd, addr);
+    if (p4d_none(*p4d) || p4d_bad(*p4d)) return NULL;
+    pud_t *pud = pud_offset(p4d, addr);
+    if (pud_none(*pud) || pud_leaf(*pud) || pud_bad(*pud)) return NULL;
+    pmd_t *pmd = pmd_offset(pud, addr);
+    if (pmd_none(*pmd) || pmd_leaf(*pmd) || pmd_bad(*pmd)) return NULL;
+    return pte_offset_kernel(pmd, addr);
+}
+
+__attribute__((no_sanitize("cfi", "kcfi"))) static int dptbp_split_vma(struct vm_area_struct *vma, unsigned long addr, int new_below)
+{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
+    static int (*fn_split_vma)(struct vma_iterator *, struct vm_area_struct *, unsigned long, int);
+#else
+    static int (*fn_split_vma)(struct mm_struct *, struct vm_area_struct *, unsigned long, int);
+#endif
+    if (!fn_split_vma) fn_split_vma = (typeof(fn_split_vma))generic_kallsyms_lookup_name("split_vma");
+    if (!fn_split_vma) return -ENOSYS;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
+    VMA_ITERATOR(vmi, vma->vm_mm, vma->vm_start);
+    if (vma_next(&vmi) != vma) return -ESTALE;
+    WRITE_ONCE(g_dptbp_current.split_task, current);
+    int status = fn_split_vma(&vmi, vma, addr, new_below);
+#else
+    WRITE_ONCE(g_dptbp_current.split_task, current);
+    int status = fn_split_vma(vma->vm_mm, vma, addr, new_below);
+#endif
+    WRITE_ONCE(g_dptbp_current.split_task, NULL);
+    return status;
+}
+
+__attribute__((no_sanitize("cfi", "kcfi"))) static int dptbp_handle_mprotect(struct pt_regs *hook_regs)
+{
+    static void (*fn_vma_set_page_prot)(struct vm_area_struct *);
+    int status = 0;
+    bool is_covered = false;
+
+    if (unlikely(!hook_regs || !dptbp_try_get_ref(DPTBP_REF_MPROTECT))) return 0;
+    if (unlikely(g_dptbp_current.mm != current->mm || __atomic_load_n(&g_dptbp_current.restoring, __ATOMIC_SEQ_CST))) goto unhandled;
+    struct pt_regs *sys_regs = (struct pt_regs *)hook_regs->regs[0];
+    if (!sys_regs) goto unhandled;
+    unsigned long start = untagged_addr(sys_regs->regs[0]);
+    if (!IS_ALIGNED(start, PAGE_SIZE) || !sys_regs->regs[1]) goto unhandled;
+    unsigned long len = PAGE_ALIGN(sys_regs->regs[1]);
+    if (!len || start + len < start) goto unhandled;
+    unsigned long end = start + len;
+    unsigned long prot = sys_regs->regs[2];
+    if (prot & ~(PROT_READ | PROT_WRITE | PROT_EXEC)) goto unhandled;
+
+    for (size_t index = 0; index < ARRAY_SIZE(g_dptbp_current.slots); index++)
+    {
+        const struct dptbp_slot *slot = &g_dptbp_current.slots[index];
+        unsigned long table_start = slot->page_vaddr & PMD_MASK;
+        if (slot->hook_addr && table_start < end && table_start + PMD_SIZE > start)
+        {
+            is_covered = true;
+            break;
+        }
+    }
+    if (!is_covered) goto unhandled;
+    if (unlikely(!fn_vma_set_page_prot))
+    {
+        fn_vma_set_page_prot = (typeof(fn_vma_set_page_prot))generic_kallsyms_lookup_name("vma_set_page_prot");
+        if (!fn_vma_set_page_prot)
+        {
+            status = -ENOSYS;
+            goto handled;
+        }
+    }
+    if (mmap_write_lock_killable(current->mm))
+    {
+        status = -EINTR;
+        goto handled;
+    }
+    if (__atomic_load_n(&g_dptbp_current.restoring, __ATOMIC_SEQ_CST))
+    {
+        mmap_write_unlock(current->mm);
+        goto unhandled;
+    }
+
+    unsigned long cursor = start;
+    while (cursor < end)
+    {
+        struct vm_area_struct *vma = find_vma(current->mm, cursor);
+        unsigned long eff_prot = prot;
+
+        if (!vma || vma->vm_start > cursor)
+        {
+            status = -ENOMEM;
+            break;
+        }
+        if (cursor != vma->vm_start)
+        {
+            status = dptbp_split_vma(vma, cursor, 1);
+            if (status) break;
+            vma = find_vma(current->mm, cursor);
+            if (!vma || vma->vm_start != cursor)
+            {
+                status = -ENOMEM;
+                break;
+            }
+        }
+        unsigned long seg_end = min_t(unsigned long, vma->vm_end, end);
+        if (seg_end != vma->vm_end)
+        {
+            status = dptbp_split_vma(vma, seg_end, 0);
+            if (status) break;
+        }
+        if ((current->personality & READ_IMPLIES_EXEC) && (eff_prot & PROT_READ) && (vma->vm_flags & VM_MAYEXEC)) eff_prot |= PROT_EXEC;
+        unsigned long newflags = calc_vm_prot_bits(eff_prot, -1) | (vma->vm_flags & ~(VM_READ | VM_WRITE | VM_EXEC | VM_FLAGS_CLEAR));
+        if ((newflags & ~(newflags >> 4)) & VM_ACCESS_FLAGS)
+        {
+            status = -EACCES;
+            break;
+        }
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+        vm_flags_reset(vma, newflags);
+#else
+        WRITE_ONCE(vma->vm_flags, newflags);
+#endif
+        fn_vma_set_page_prot(vma);
+
+        for (unsigned long page = cursor; page < seg_end; page += PAGE_SIZE)
+        {
+            pte_t *ptep = get_user_pte(current->mm, page);
+            pte_t *shadow_ptep = dptbp_get_shadow_pte(page);
+            if (ptep)
+            {
+                pte_t old_pte = __pte(READ_ONCE(pte_val(*ptep)));
+                if (pte_present(old_pte)) set_pte(ptep, pte_modify(old_pte, vma->vm_page_prot));
+            }
+            if (shadow_ptep && shadow_ptep != ptep)
+            {
+                pte_t old_pte = __pte(READ_ONCE(pte_val(*shadow_ptep)));
+                if (pte_present(old_pte)) set_pte(shadow_ptep, pte_modify(old_pte, vma->vm_page_prot));
+            }
+            for (size_t index = 0; index < ARRAY_SIZE(g_dptbp_current.slots); index++)
+            {
+                struct dptbp_slot *slot = &g_dptbp_current.slots[index];
+                if (slot->hook_addr && slot->page_vaddr == page)
+                    WRITE_ONCE(slot->orig_pte, pte_modify(slot->orig_pte, vma->vm_page_prot));
+            }
+        }
+        flush_tlb_range_all_asid_all_cpus(cursor, seg_end);
+        cursor = seg_end;
+    }
+    mmap_write_unlock(current->mm);
+handled:
+    if (status) ls_log_always_tag("dptbp", "mprotect failed tgid=%d start=0x%lx end=0x%lx prot=0x%lx status=%d\n", current->tgid, start, end, prot, status);
+    hook_regs->regs[0] = status;
+    dptbp_put_ref(DPTBP_REF_MPROTECT);
+    return 1;
+unhandled:
+    dptbp_put_ref(DPTBP_REF_MPROTECT);
+    return 0;
+}
+
 // ======================== 映射失效通知 ========================
 
 // notifier 释放回调只撤销视图；注销订阅和释放 mm、私有页表仍由控制面完成。
@@ -349,17 +508,51 @@ static void dptbp_mmu_notifier_release(struct mmu_notifier *notifier, struct mm_
     dptbp_put_ref(DPTBP_REF_NOTIFIER);
 }
 
-// 目标 mm 任意范围失效均撤销整组监控，防止继续使用复制后已陈旧的页表路径。
+static bool dptbp_unmap_uses_shared_tables(const struct mmu_notifier_range *range)
+{
+    if (range->event != MMU_NOTIFY_UNMAP || range->start >= range->end || range->end > range->mm->task_size) return false;
+    if ((CONFIG_PGTABLE_LEVELS == 5 && mm_p4d_folded(range->mm)) || (CONFIG_PGTABLE_LEVELS == 4 && mm_pud_folded(range->mm))) return false;
+
+    for (unsigned long addr = range->start; addr < range->end; addr = pgd_addr_end(addr, range->end))
+    {
+        pgd_t source_pgd = __pgd(READ_ONCE(pgd_val(*pgd_offset(range->mm, addr))));
+        pgd_t shadow_pgd = __pgd(READ_ONCE(pgd_val(g_dptbp_current.shadow_pgd[pgd_index(addr)])));
+        if (pgd_none(source_pgd) || pgd_bad(source_pgd) || pgd_val(source_pgd) != pgd_val(shadow_pgd)) return false;
+
+        unsigned long entry_start = addr & PGDIR_MASK;
+        unsigned long entry_end = entry_start + PGDIR_SIZE;
+        bool retained = false;
+        if (entry_start < range->start)
+        {
+            struct vm_area_struct *vma = find_vma(range->mm, entry_start);
+            retained = vma && vma->vm_start < range->start && vma->vm_start < entry_end;
+        }
+        if (!retained && range->end < entry_end)
+        {
+            struct vm_area_struct *vma = find_vma(range->mm, range->end);
+            retained = vma && vma->vm_start < entry_end;
+        }
+        if (!retained) return false;
+    }
+    return true;
+}
+
+// 共享根表仍由其他 VMA 保留时，无关 UNMAP 不影响私有路径；其他失效保留撤销保护。
 static int dptbp_mmu_notifier_invalidate_range_start(struct mmu_notifier *notifier, const struct mmu_notifier_range *range)
 {
     (void)notifier;
     if (!dptbp_try_get_ref(DPTBP_REF_NOTIFIER)) return 0;
     int status = 0;
 
-    if (range->mm == g_dptbp_current.mm)
+    if (range->mm == g_dptbp_current.mm && !dptbp_unmap_uses_shared_tables(range))
     {
         // 全 CPU 视图恢复需要可阻塞上下文；非阻塞通知返回 -EAGAIN 交由上层处理。
         if (!mmu_notifier_range_blockable(range)) status = -EAGAIN;
+        else if (READ_ONCE(g_dptbp_current.split_task) == current && range->event == MMU_NOTIFY_CLEAR)
+        {
+            __atomic_add_fetch(&g_dptbp_current.mapping_updates, 1, __ATOMIC_SEQ_CST);
+            dptbp_restore_thread_views();
+        }
         else
         {
             if (dptbp_drop_all_monitors())
@@ -371,19 +564,58 @@ static int dptbp_mmu_notifier_invalidate_range_start(struct mmu_notifier *notifi
     return status;
 }
 
+static void dptbp_mmu_notifier_invalidate_range_end(struct mmu_notifier *notifier, const struct mmu_notifier_range *range)
+{
+    (void)notifier;
+    if (!dptbp_try_get_ref(DPTBP_REF_NOTIFIER)) return;
+    if (range->mm != g_dptbp_current.mm || READ_ONCE(g_dptbp_current.split_task) != current || range->event != MMU_NOTIFY_CLEAR) goto out;
+    if (!__atomic_load_n(&g_dptbp_current.mapping_updates, __ATOMIC_SEQ_CST)) goto out;
+
+    for (unsigned long page = range->start & PAGE_MASK; page < range->end; page += PAGE_SIZE)
+    {
+        pte_t *source_ptep = get_user_pte(range->mm, page);
+        pte_t *shadow_ptep = dptbp_get_shadow_pte(page);
+        pte_t source_pte = source_ptep ? __pte(READ_ONCE(pte_val(*source_ptep))) : __pte(0);
+        pte_t shadow_pte = source_pte;
+
+        for (size_t index = 0; index < ARRAY_SIZE(g_dptbp_current.slots); index++)
+        {
+            struct dptbp_slot *slot = &g_dptbp_current.slots[index];
+            if (!slot->hook_addr || slot->page_vaddr != page) continue;
+            if (!shadow_ptep || shadow_ptep == source_ptep || !pte_present(source_pte) || pte_pfn(source_pte) != pte_pfn(slot->orig_pte) || (pte_val(source_pte) & PTE_CONT))
+            {
+                if (dptbp_drop_all_monitors())
+                    ls_log_always_tag("dptbp", "monitor cancelled source=vma-split tgid=%d page=0x%lx status=%d\n", READ_ONCE(g_dptbp_current.info->tgid), page, -ESTALE);
+                goto finish;
+            }
+            WRITE_ONCE(slot->orig_pte, source_pte);
+            shadow_pte = __pte((pte_val(source_pte) & ~__phys_to_pte_val(PHYS_MASK & PAGE_MASK)) | __phys_to_pte_val(virt_to_phys(slot->shadow_page)));
+        }
+        if (shadow_ptep && shadow_ptep != source_ptep) set_pte(shadow_ptep, shadow_pte);
+    }
+finish:
+    dsb(ishst);
+    __atomic_sub_fetch(&g_dptbp_current.mapping_updates, 1, __ATOMIC_SEQ_CST);
+    dptbp_restore_thread_views();
+out:
+    dptbp_put_ref(DPTBP_REF_NOTIFIER);
+}
+
 // 地址空间释放和映射失效共用视图撤销流程。
 static const struct mmu_notifier_ops dptbp_mmu_notifier_ops = {
     .release = dptbp_mmu_notifier_release,
     .invalidate_range_start = dptbp_mmu_notifier_invalidate_range_start,
+    .invalidate_range_end = dptbp_mmu_notifier_invalidate_range_end,
 };
 
 // ======================== hook 与控制面资源回收 ========================
 
-// 两个 EL0 同步入口按内核可用符号择一安装，任务切换入口单独安装。
+// 两个 EL0 同步入口择一安装，另外安装任务切换与受管 mprotect 入口。
 static struct hook_entry g_dptbp_hooks[][1] = {
     {HOOK_ENTRY("el0t_64_sync_handler", dptbp_handle_undef_sync)},
     {HOOK_ENTRY("el0_sync_handler", dptbp_handle_undef_sync)},
     {HOOK_ENTRY("__switch_to", dptbp_handle_switch)},
+    {HOOK_ENTRY("__arm64_sys_mprotect", dptbp_handle_mprotect)},
 };
 
 // 先安装异常入口，再安装任务切换入口；安装失败由 start 的统一停止路径清理。
@@ -393,7 +625,9 @@ static int dptbp_install_hooks(void)
 
     if (status) status = inline_hook_install(g_dptbp_hooks[1]);
     if (status) return status;
-    return inline_hook_install(g_dptbp_hooks[2]);
+    status = inline_hook_install(g_dptbp_hooks[2]);
+    if (status) return status;
+    return inline_hook_install(g_dptbp_hooks[3]);
 }
 
 // 控制面回收共享执行副本和私有页表；已发布资源必须先退出所有视图并排空引用。
@@ -424,8 +658,8 @@ static void dptbp_release_shadow_pages(void)
 
 /*
 调用方持有控制锁，统一处理正常停止和安装失败清理。
-先停止新的视图切入并恢复已有视图，此时 valid 仍允许在途 UDF 进入回退分支。
-注销 notifier 后再关闭资源准入，等待三类引用排空，最后释放 hook、页和 mm。
+先停止 mprotect 和新的视图切入并恢复已有视图，valid 仍允许在途 UDF 进入回退分支。
+注销 notifier 后再关闭资源准入，等待各类引用排空，最后释放 hook、页和 mm。
 未发布成功的安装也走此路径，按实际已取得的资源逐项清理。
 */
 __attribute__((no_sanitize("cfi"))) static void dptbp_stop_monitor_locked(void)
@@ -434,8 +668,9 @@ __attribute__((no_sanitize("cfi"))) static void dptbp_stop_monitor_locked(void)
 
     // 阶段一：停止视图切入，等已有切换入口退出，再恢复保存视图和各 CPU 当前视图。
     __atomic_store_n(&g_dptbp_current.restoring, 1, __ATOMIC_SEQ_CST);
+    inline_hook_remove(g_dptbp_hooks[3]);
     inline_hook_remove(g_dptbp_hooks[2]);
-    while (__atomic_load_n(&g_dptbp_current.switch_refs, __ATOMIC_SEQ_CST)) cond_resched();
+    while (__atomic_load_n(&g_dptbp_current.switch_refs, __ATOMIC_SEQ_CST) || __atomic_load_n(&g_dptbp_current.mprotect_refs, __ATOMIC_SEQ_CST)) cond_resched();
     if (dptbp_context_valid()) dptbp_restore_thread_views();
 
     // 阶段二：注销 notifier，使后续资源回收不再与映射失效回调交错。
