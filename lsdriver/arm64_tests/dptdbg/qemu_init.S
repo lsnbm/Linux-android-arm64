@@ -11,16 +11,24 @@
 .equ __NR_mprotect, 226
 .equ __NR_write, 64
 .equ __NR_exit, 93
+.equ __NR_exit_group, 94
 .equ __NR_futex, 98
 .equ __NR_clone, 220
 .equ __NR_delete_module, 106
 .equ __NR_reboot, 142
+.equ __NR_getpid, 172
 .equ __NR_finit_module, 273
 .equ LINUX_REBOOT_MAGIC1, 0xfee1dead
 .equ LINUX_REBOOT_MAGIC2, 0x28121969
 .equ LINUX_REBOOT_CMD_POWER_OFF, 0x4321fedc
 
 _start:
+    mov x22, #1
+    mov x23, #0
+    mov x8, #__NR_getpid
+    svc #0
+    cmp x0, #1
+    cset x24, eq
     bl open_console
 
     adrp x1, message_begin
@@ -33,6 +41,7 @@ _start:
 
     bl load_module
     cbnz x0, module_load_failed
+    mov x23, #1
 
     adrp x1, message_load_ok
     add x1, x1, :lo12:message_load_ok
@@ -85,6 +94,7 @@ _start:
 
     bl unload_module
     cbnz x0, module_unload_failed
+    mov x23, #0
 
     adrp x1, message_unload_ok
     add x1, x1, :lo12:message_unload_ok
@@ -95,37 +105,42 @@ _start:
     add x1, x1, :lo12:message_pass
     mov x2, #message_pass_len
     bl write_message
-    b power_off
+    mov x22, #0
+    b test_exit
 
 test_page_failed:
     adrp x1, message_page_failed
     add x1, x1, :lo12:message_page_failed
     mov x2, #message_page_failed_len
     bl write_message
-    b power_off
+    b test_exit
 
 module_load_failed:
     adrp x1, message_load_failed
     add x1, x1, :lo12:message_load_failed
     mov x2, #message_load_failed_len
     bl write_message
-    b power_off
+    b test_exit
 
 module_unload_failed:
     adrp x1, message_unload_failed
     add x1, x1, :lo12:message_unload_failed
     mov x2, #message_unload_failed_len
     bl write_message
-    b power_off
+    b test_exit
 
 test_function_failed:
     adrp x1, message_result_failed
     add x1, x1, :lo12:message_result_failed
     mov x2, #message_result_failed_len
     bl write_message
-    b power_off
+    b test_exit
 
 open_console:
+    cbnz x24, open_init_console
+    mov x19, #1
+    ret
+open_init_console:
     mov x0, #AT_FDCWD
     adrp x1, console_path
     add x1, x1, :lo12:console_path
@@ -290,6 +305,15 @@ unload_failed:
     mov x0, #1
     ret
 
+test_exit:
+    cbz x23, finish_process
+    bl unload_module
+finish_process:
+    cbnz x24, power_off
+    mov x0, x22
+    mov x8, #__NR_exit_group
+    svc #0
+    b .
 power_off:
     movz x0, #0xdead
     movk x0, #0xfee1, lsl #16
@@ -313,7 +337,7 @@ expected_fp:
 console_path:
     .asciz "/dev/console"
 module_path:
-    .asciz "/arm64_dptdbg_test_module.ko"
+    .asciz "./arm64_dptdbg_test_module.ko"
 module_name:
     .asciz "arm64_dptdbg_test_module"
 empty_params:

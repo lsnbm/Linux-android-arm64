@@ -116,6 +116,7 @@ static int __init arm64_dptdbg_test_init(void)
         if (!dptbp_task_uses_shadow(current)) goto failed;
         range.flags = MMU_NOTIFIER_RANGE_BLOCKABLE;
         if (dptbp_mmu_notifier_invalidate_range_start(&g_dptbp_current.mmu_notifier, &range)) goto failed;
+        if (dptbp_mmu_notifier_invalidate_range_start(&g_dptbp_current.mmu_notifier, &range)) goto failed;
         if (dptbp_task_uses_shadow(current) || !dptbp_context_valid() || !g_dptbp_current.info || !g_dptbp_current.mm) goto failed;
         stop_dptbp_monitor();
         stop_dptbp_monitor();

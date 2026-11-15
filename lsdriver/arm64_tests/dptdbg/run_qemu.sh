@@ -7,12 +7,11 @@ KERNELS_ROOT="${KERNELS_ROOT:-/root}"
 VERSION="${VERSION:-6.1-Android14}"
 KERNEL_DIR="${KERNELS_ROOT}/${VERSION}"
 KERNEL_BUILD="${KERNEL_BUILD:-$(readlink -f "${KERNEL_DIR}/bazel-bin/common/kernel_aarch64")}"
-CLANG_DIR="${CLANG_DIR:-${KERNEL_DIR}/prebuilts/clang/host/linux-x86/clang-r487747c}"
 QEMU="${QEMU:-qemu-system-aarch64}"
 WORK_DIR="${WORK_DIR:-/tmp/lsdriver-dptdbg-qemu}"
 ROOTFS_DIR="${WORK_DIR}/rootfs"
 INITRAMFS="${WORK_DIR}/initramfs.cpio"
-INIT="${WORK_DIR}/init"
+RUNNER="${BUILD_ROOT}/dptdbg_runner"
 MODULE="${BUILD_ROOT}/arm64_dptdbg_test_module.ko"
 LOG="${BUILD_ROOT}/qemu.log"
 
@@ -24,8 +23,8 @@ test -f "${KERNEL_BUILD}/Image" || {
     echo "missing kernel Image: ${KERNEL_BUILD}/Image" >&2
     exit 1
 }
-test -x "${CLANG_DIR}/bin/clang" || {
-    echo "missing clang: ${CLANG_DIR}/bin/clang" >&2
+test -x "${RUNNER}" || {
+    echo "missing runner: ${RUNNER}; run make device-binaries" >&2
     exit 1
 }
 command -v "${QEMU}" >/dev/null || {
@@ -36,10 +35,7 @@ command -v "${QEMU}" >/dev/null || {
 rm -rf "${WORK_DIR}"
 mkdir -p "${ROOTFS_DIR}/dev"
 
-"${CLANG_DIR}/bin/clang" --target=aarch64-linux-gnu -c -nostdlib -o "${WORK_DIR}/qemu_init.o" "${BUILD_ROOT}/qemu_init.S"
-"${CLANG_DIR}/bin/ld.lld" -m aarch64elf -e _start -o "${INIT}" "${WORK_DIR}/qemu_init.o"
-chmod 0755 "${INIT}"
-cp "${INIT}" "${ROOTFS_DIR}/init"
+cp "${RUNNER}" "${ROOTFS_DIR}/init"
 cp "${MODULE}" "${ROOTFS_DIR}/arm64_dptdbg_test_module.ko"
 mknod -m 0600 "${ROOTFS_DIR}/dev/console" c 5 1
 
