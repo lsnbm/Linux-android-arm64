@@ -145,10 +145,9 @@ static int cntvct_monitor_read_hook_work(struct pt_regs *hook_regs)
     struct pt_regs *regs = (struct pt_regs *)(uintptr_t)hook_regs->regs[1];
     if (!regs || !user_mode(regs)) return 0;
 
-    uint64_t hit_pc = regs->pc;
-    if ((hit_pc & 0x3) || hit_pc < CNTVCT_MONITOR_SCAN_RADIUS_INSTRUCTIONS * sizeof(uint32_t)) return 0;
+    if (regs->pc < CNTVCT_MONITOR_SCAN_RADIUS_INSTRUCTIONS * sizeof(uint32_t)) return 0;
 
-    uint64_t scan_start_pc = hit_pc - CNTVCT_MONITOR_SCAN_RADIUS_INSTRUCTIONS * sizeof(uint32_t);
+    uint64_t scan_start_pc = regs->pc - CNTVCT_MONITOR_SCAN_RADIUS_INSTRUCTIONS * sizeof(uint32_t);
     uint32_t insts[CNTVCT_MONITOR_SCAN_INSTRUCTIONS];
     if (copy_from_user_inatomic_nofault(insts, (const void __user *)(uintptr_t)scan_start_pc, sizeof(insts))) return 0;
     if (insts[CNTVCT_MONITOR_SCAN_RADIUS_INSTRUCTIONS - 1] != CNTVCT_MONITOR_ISB_INST || !cntvct_monitor_is_mrs_cntvct(insts[CNTVCT_MONITOR_SCAN_RADIUS_INSTRUCTIONS])) return 0;
@@ -157,7 +156,7 @@ static int cntvct_monitor_read_hook_work(struct pt_regs *hook_regs)
     {
         unsigned int start_mrs = CNTVCT_MONITOR_SCAN_RADIUS_INSTRUCTIONS - distance;
         if (insts[start_mrs - 1] != CNTVCT_MONITOR_ISB_INST || !cntvct_monitor_is_mrs_cntvct(insts[start_mrs])) continue;
-        cntvct_monitor_record_range(scan_start_pc + start_mrs * sizeof(uint32_t), hit_pc);
+        cntvct_monitor_record_range(scan_start_pc + start_mrs * sizeof(uint32_t), regs->pc);
         return 0;
     }
     return 0;

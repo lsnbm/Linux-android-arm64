@@ -275,7 +275,7 @@ static int dptbp_handle_undef_sync(struct pt_regs *hook_regs)
         goto out;
     }
 
-    uint64_t pc = untagged_addr(regs->pc);
+    uint64_t pc = regs->pc;
     for (size_t index = 0; index < ARRAY_SIZE(g_dptbp_current.slots); index++)
     {
         const struct dptbp_slot *slot = &g_dptbp_current.slots[index];

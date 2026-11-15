@@ -239,14 +239,13 @@ static bool ptebp_get_patch_overlap(uint64_t patch_addr, size_t patch_size, uint
 }
 
 // 读取 EL0 故障指令。PC 不必位于受管页，统一手动遍历目标 mm 页表后读取线性映射。
-static int ptebp_read_user_inst(uint64_t raw_pc, uint32_t *inst)
+static int ptebp_read_user_inst(uint64_t pc, uint32_t *inst)
 {
-    uint64_t pc = untagged_addr(raw_pc);
     phys_addr_t paddr;
     unsigned long flags;
     int status;
 
-    if (!inst || !current->mm || !IS_ALIGNED(pc, sizeof(*inst)) || pc >= READ_ONCE(current->mm->task_size) || READ_ONCE(current->mm->task_size) - pc < sizeof(*inst)) return -EFAULT;
+    if (!inst || !current->mm || pc >= READ_ONCE(current->mm->task_size) || READ_ONCE(current->mm->task_size) - pc < sizeof(*inst)) return -EFAULT;
 
     spin_lock_irqsave(&g_ptebp_lock, flags);
     if (!ptebp_monitor_active_locked(current->mm) || g_ptebp_stopping || !ptebp_all_slots_valid_locked(current->mm))
@@ -368,7 +367,6 @@ static bool ptebp_emulate_load_store(struct pt_regs *regs, uint32_t raw_inst)
 {
     struct arm64_decoded_instruction decoded_result __attribute__((__uninitialized__));
     const struct arm64_decoded_instruction *decoded = &decoded_result;
-    uint64_t pc = regs->pc;
     uint64_t base, address;
 
     if (arm64_decode_instruction(raw_inst, &decoded_result) != ARM64_DECODE_OK) return false;
@@ -380,7 +378,7 @@ static bool ptebp_emulate_load_store(struct pt_regs *regs, uint32_t raw_inst)
     case ARM64_INST_PRFUM:
     case ARM64_INST_PRFM_REGISTER_OFFSET:
     case ARM64_INST_PRFM_UNSIGNED_OFFSET:
-        regs->pc = pc + 4;
+        regs->pc += 4;
         return true;
     default:
         break;
@@ -422,7 +420,7 @@ static bool ptebp_emulate_load_store(struct pt_regs *regs, uint32_t raw_inst)
             address = owner == 0x38 && mode == 1 ? base : base + decoded->offset;
         }
 
-        ls_log_always_tag("ptebp", "emulate pc=0x%llx inst=0x%08x type=%d bytes=%u addr=0x%llx\n", (unsigned long long)pc, raw_inst, (int)decoded->instruction, (unsigned int)bytes, (unsigned long long)address);
+        ls_log_always_tag("ptebp", "emulate pc=0x%llx inst=0x%08x type=%d bytes=%u addr=0x%llx\n", (unsigned long long)regs->pc, raw_inst, (int)decoded->instruction, (unsigned int)bytes, (unsigned long long)address);
         if (opc == 0)
         {
             if (ptebp_emu_write_mem(address, bytes, reg_read(regs, decoded->rt))) return false;
@@ -434,7 +432,7 @@ static bool ptebp_emulate_load_store(struct pt_regs *regs, uint32_t raw_inst)
         }
 
         if (owner == 0x38 && !register_offset && (mode == 1 || mode == 3)) addr_reg_write(regs, decoded->rn, base + decoded->offset);
-        regs->pc = pc + 4;
+        regs->pc += 4;
         return true;
     }
 
@@ -447,7 +445,7 @@ static bool ptebp_emulate_load_store(struct pt_regs *regs, uint32_t raw_inst)
     case ARM64_INST_LDRD_LITERAL_FP_SIMD:
     case ARM64_INST_LDRQ_LITERAL_FP_SIMD:
     case ARM64_INST_PRFM_LITERAL:
-        address = pc + decoded->offset;
+        address = regs->pc + decoded->offset;
         base = 0;
         break;
     case ARM64_INST_STR_GPR_POST_INDEX:
@@ -803,7 +801,7 @@ static bool ptebp_emulate_load_store(struct pt_regs *regs, uint32_t raw_inst)
         break;
     }
 
-    regs->pc = pc + 4;
+    regs->pc += 4;
     return true;
 }
 //撤销整组 BRK/PTE 监控。
@@ -962,7 +960,7 @@ static int ptebp_handle_brk(struct pt_regs *hook_regs)
 
     if (!ptebp_marker_slot_from_comment(hook_regs->regs[1] & ESR_ELx_BRK64_ISS_COMMENT_MASK, &point_slot)) return 0;
 
-    pc = untagged_addr(regs->pc) & ~0x3ULL;
+    pc = regs->pc;
 
     //  锁内校验目标 mm 与 PC，提取断点信息
     spin_lock_irqsave(&g_ptebp_lock, flags);

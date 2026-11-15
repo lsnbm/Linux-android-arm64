@@ -937,11 +937,11 @@ private: // 私有实现，外部无需关系
         LS_LOGI_TAG("Driver", "分配虚拟地址成功: 地址=%p 大小=%zu", req, sizeof(request_obj));
         LS_LOGI_TAG("Driver", "当前进程 PID=%d，等待驱动握手", getpid());
 
-        //获取单调时钟+5秒
-        const auto handshake_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        //获取单调时钟+3秒
+        const auto handshake_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
         while (!__atomic_load_n(&req->user, __ATOMIC_ACQUIRE))
         {
-            //判断是否已近为5秒后了，超时抛异常
+            //达到握手截止时间后抛异常
             if (std::chrono::steady_clock::now() >= handshake_deadline)
             {
                 munmap(req, sizeof(request_obj));

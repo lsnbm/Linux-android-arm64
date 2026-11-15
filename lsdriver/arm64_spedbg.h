@@ -92,7 +92,6 @@ static int work_trampoline_spe_irq(struct pt_regs *hook_regs)
 
     // hook_regs 即为硬件中断打断时的上下文现场
     struct pt_regs *regs = hook_regs;
-    uint64_t current_pc = untagged_addr(regs->pc) & ~0x3ULL;
 
     struct fp_regs fp_regs __attribute__((__uninitialized__));
     read_all_q_regs(&fp_regs);
@@ -107,10 +106,10 @@ static int work_trampoline_spe_irq(struct pt_regs *hook_regs)
         uint64_t target_pc = untagged_addr(point->hit_addr) & ~0x3ULL;
 
         // 核心改动：允许滑步范围判定，且只读模式
-        if (current_pc >= target_pc && current_pc <= (target_pc + SPE_SKID_WINDOW_BYTES))
+        if (regs->pc >= target_pc && regs->pc <= (target_pc + SPE_SKID_WINDOW_BYTES))
         {
             hit = true;
-            ls_log_always_tag("spe-hit", "SPE Hit! target=0x%llx actual_pc=0x%llx (skid=+%lld bytes)\n", target_pc, current_pc, current_pc - target_pc);
+            ls_log_always_tag("spe-hit", "SPE Hit! target=0x%llx actual_pc=0x%llx (skid=+%lld bytes)\n", target_pc, regs->pc, regs->pc - target_pc);
 
             // 触发用户的只读监控回调
             if (point->on_hit)

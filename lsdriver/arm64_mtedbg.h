@@ -238,14 +238,13 @@ static bool mtebp_get_patch_overlap(uint64_t patch_addr, size_t patch_size, uint
 如果 PC 正好是本模块写入 UDF 的地址，则把物理内存中的 marker 替换为槽位保存的 orig_inst，
 让 load/store 模拟器看到程序原本要执行的指令。
 */
-static int mtebp_read_user_inst(uint64_t raw_pc, uint32_t *inst)
+static int mtebp_read_user_inst(uint64_t pc, uint32_t *inst)
 {
-    uint64_t pc = untagged_addr(raw_pc);
     phys_addr_t paddr;
     unsigned long flags;
     int status;
 
-    if (!inst || !current->mm || !IS_ALIGNED(pc, sizeof(*inst)) || pc >= READ_ONCE(current->mm->task_size) || READ_ONCE(current->mm->task_size) - pc < sizeof(*inst)) return -EFAULT;
+    if (!inst || !current->mm || pc >= READ_ONCE(current->mm->task_size) || READ_ONCE(current->mm->task_size) - pc < sizeof(*inst)) return -EFAULT;
 
     spin_lock_irqsave(&g_mtebp_lock, flags);
     if (!mtebp_monitor_active_locked(current->mm) || g_mtebp_stopping || !mtebp_all_slots_valid_locked(current->mm))
@@ -392,7 +391,6 @@ static bool mtebp_emulate_load_store(struct pt_regs *regs, uint32_t raw_inst)
 {
     struct arm64_decoded_instruction decoded_result __attribute__((__uninitialized__));
     const struct arm64_decoded_instruction *decoded = &decoded_result;
-    uint64_t pc = regs->pc;
     uint64_t base, address;
 
     if ((raw_inst & MTEBP_IC_IVAU_MASK) == MTEBP_IC_IVAU_INST)
@@ -407,7 +405,7 @@ static bool mtebp_emulate_load_store(struct pt_regs *regs, uint32_t raw_inst)
         // 使用同一物理位置的内核线性别名完成 D-cache 清理和 I-cache 失效，避免异常路径再次触发用户 tag check。
         if (arm64_sync_insn_fast(phys_to_virt(paddr), address, 1)) goto emulate_failed;
 
-        regs->pc = pc + 4;
+        regs->pc += 4;
         return true;
     }
 
@@ -420,7 +418,7 @@ static bool mtebp_emulate_load_store(struct pt_regs *regs, uint32_t raw_inst)
     case ARM64_INST_PRFUM:
     case ARM64_INST_PRFM_REGISTER_OFFSET:
     case ARM64_INST_PRFM_UNSIGNED_OFFSET:
-        regs->pc = pc + 4;
+        regs->pc += 4;
         return true;
     default:
         break;
@@ -462,7 +460,7 @@ static bool mtebp_emulate_load_store(struct pt_regs *regs, uint32_t raw_inst)
             address = owner == 0x38 && mode == 1 ? base : base + decoded->offset;
         }
 
-        ls_log_always_tag("mtebp", "emulate pc=0x%llx inst=0x%08x type=%d bytes=%u addr=0x%llx\n", (unsigned long long)pc, raw_inst, (int)decoded->instruction, (unsigned int)bytes, (unsigned long long)address);
+        ls_log_always_tag("mtebp", "emulate pc=0x%llx inst=0x%08x type=%d bytes=%u addr=0x%llx\n", (unsigned long long)regs->pc, raw_inst, (int)decoded->instruction, (unsigned int)bytes, (unsigned long long)address);
         if (opc == 0)
         {
             if (mtebp_emu_write_mem(address, bytes, reg_read(regs, decoded->rt))) goto emulate_failed;
@@ -474,7 +472,7 @@ static bool mtebp_emulate_load_store(struct pt_regs *regs, uint32_t raw_inst)
         }
 
         if (owner == 0x38 && !register_offset && (mode == 1 || mode == 3)) addr_reg_write(regs, decoded->rn, base + decoded->offset);
-        regs->pc = pc + 4;
+        regs->pc += 4;
         return true;
     }
 
@@ -487,7 +485,7 @@ static bool mtebp_emulate_load_store(struct pt_regs *regs, uint32_t raw_inst)
     case ARM64_INST_LDRD_LITERAL_FP_SIMD:
     case ARM64_INST_LDRQ_LITERAL_FP_SIMD:
     case ARM64_INST_PRFM_LITERAL:
-        address = pc + decoded->offset;
+        address = regs->pc + decoded->offset;
         base = 0;
         break;
     case ARM64_INST_STR_GPR_POST_INDEX:
@@ -556,7 +554,7 @@ static bool mtebp_emulate_load_store(struct pt_regs *regs, uint32_t raw_inst)
     }
 
     // 当前 PC 和原始指令在这里仍然成对可用；后续读写、寄存器写回和寻址更新都由 decoder 结果驱动。
-    ls_log_always_tag("mtebp", "emulate pc=0x%llx inst=0x%08x type=%d bytes=%u addr=0x%llx\n", (unsigned long long)pc, raw_inst, (int)decoded->instruction, (unsigned int)mtebp_instruction_bytes(decoded), (unsigned long long)address);
+    ls_log_always_tag("mtebp", "emulate pc=0x%llx inst=0x%08x type=%d bytes=%u addr=0x%llx\n", (unsigned long long)regs->pc, raw_inst, (int)decoded->instruction, (unsigned int)mtebp_instruction_bytes(decoded), (unsigned long long)address);
 
     // 按指令类别执行数据读写；成功分支汇聚到尾部统一推进 PC，无法安全模拟则返回 SKIP。
     switch (decoded->instruction)
@@ -846,11 +844,11 @@ static bool mtebp_emulate_load_store(struct pt_regs *regs, uint32_t raw_inst)
         break;
     }
 
-    regs->pc = pc + 4;
+    regs->pc += 4;
     return true;
 
 emulate_failed:
-    ls_log_always_tag("mtebp", "emulate skip pc=0x%llx inst=0x%08x\n", (unsigned long long)pc, raw_inst);
+    ls_log_always_tag("mtebp", "emulate skip pc=0x%llx inst=0x%08x\n", (unsigned long long)regs->pc, raw_inst);
     return false;
 }
 /*
@@ -1033,7 +1031,7 @@ static int mtebp_handle_undef_sync(struct pt_regs *hook_regs)
     regs = (struct pt_regs *)(uintptr_t)hook_regs->regs[0];
     if (!regs || !current->mm || !user_mode(regs) || (current->flags & PF_EXITING)) return 0;
 
-    pc = untagged_addr(regs->pc);
+    pc = regs->pc;
 
     // 锁内确认目标 mm 仍有活动监控，并按异常 PC 查找对应断点槽位。
     spin_lock_irqsave(&g_mtebp_lock, flags);

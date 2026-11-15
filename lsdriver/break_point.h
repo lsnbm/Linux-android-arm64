@@ -7,6 +7,22 @@
 #include <asm/ptrace.h>
 
 #include "io_version/io_struct.h"
+/*
+
+PC 必须四字节对齐
+
+A64 指令固定为 4 字节，硬件要求指令地址的低两位为 00。
+跳到不对齐的地址会触发 PC alignment fault，无法执行那条访存指令，
+
+
+PC 不会保留 类似0xb400... 这种标签
+
+根据 TCR_EL1 的 TBI/TBID 规则，分两种情况：
+允许取指忽略顶字节时:跳转目标写入 PC 前，硬件会把顶字节规范化为 0x00 或 0xff；
+不允许取指忽略顶字节时: 这种带标签的目标会在取指阶段产生异常，无法正常执行到访存阶段。
+
+而通用寄存器中的数据指针可以保留标签。例如执行 ldr x0, [x1] 时，x1 可以是 0xb400...，PC 则是这条 ldr 的正常代码地址。
+*/
 
 // 校验断点配置存在，并且目标线程组 ID 有效。
 static inline bool bp_info_is_valid(const struct break_point *info)
@@ -154,13 +170,10 @@ static inline struct bp_point *bp_info_find_point_by_pc(struct break_point *info
     return NULL;
 }
 
-// 按规范化 PC 查找线程作用域覆盖目标任务的执行断点配置。
-static inline struct bp_point *bp_info_find_point_by_pc_for_task(struct break_point *info, uint64_t raw_pc, struct task_struct *task)
+// 按 PC 查找线程作用域覆盖目标任务的执行断点配置。
+static inline struct bp_point *bp_info_find_point_by_pc_for_task(struct break_point *info, uint64_t pc, struct task_struct *task)
 {
-    uint64_t pc;
-
     if (!bp_info_targets_task(info, task)) return NULL;
-    pc = untagged_addr(raw_pc) & ~0x3ULL;
 
     for (size_t slot = 0; slot < BP_CONFIG_MAX; slot++)
     {

@@ -203,9 +203,106 @@ static struct miscdevice ptebp_emulate_device = {
     .mode = 0600,
 };
 
+static int ptebp_emulate_abort_selftest(void)
+{
+    static const struct
+    {
+        uint32_t raw;
+        uint64_t expected;
+    } cases[] = {
+        {0x385ff820, 0x80ULL},
+        {0x785ff820, 0x8080ULL},
+        {0xb85ff820, 0x80808080ULL},
+        {0xf85ff820, 0x8080808080808080ULL},
+        {0x38dff820, 0xffffff80ULL},
+        {0x389ff820, 0xffffffffffffff80ULL},
+        {0x78dff820, 0xffff8080ULL},
+        {0x789ff820, 0xffffffffffff8080ULL},
+        {0xb89ff820, 0xffffffff80808080ULL},
+    };
+    void *shadow = kmalloc(PAGE_SIZE, GFP_KERNEL);
+    if (!shadow) return -ENOMEM;
+
+    memset(shadow, 0x80, PAGE_SIZE);
+    *(uint32_t *)shadow = 0xf9400020;
+    g_ptebp_current.mm = current->mm;
+    g_ptebp_current.slots[0] = (struct ptebp_slot){
+        .page_vaddr = PTEBP_EMULATE_DATA_ADDRESS,
+        .hook_addr = PTEBP_EMULATE_DATA_ADDRESS,
+        .shadow_page = shadow,
+    };
+    g_ptebp_current.valid = 1;
+
+    struct pt_regs regs = {};
+    struct pt_regs hook_regs = {};
+    hook_regs.regs[0] = PTEBP_EMULATE_DATA_ADDRESS + 32;
+    hook_regs.regs[1] = (ESR_ELx_EC_DABT_CUR << ESR_ELx_EC_SHIFT) | ESR_ELx_FSC_PERM | ESR_ELx_FSC_LEVEL;
+    hook_regs.regs[2] = (unsigned long)&regs;
+    int status = 0;
+
+    kernel_neon_begin();
+    for (size_t index = 0; index < ARRAY_SIZE(cases); index++)
+    {
+        regs = (struct pt_regs){.pc = (unsigned long)&cases[index].raw, .pstate = PSR_MODE_EL1h};
+        regs.regs[1] = PTEBP_EMULATE_DATA_ADDRESS + 33;
+        hook_regs.regs[0] = PTEBP_EMULATE_DATA_ADDRESS + 32;
+        if (ptebp_handle_data_abort(&hook_regs) != 1 ||
+            regs.regs[0] != cases[index].expected ||
+            regs.regs[1] != PTEBP_EMULATE_DATA_ADDRESS + 33 ||
+            regs.pc != (unsigned long)&cases[index].raw + 4 ||
+            g_ptebp_current.data_abort_refs || !g_ptebp_current.valid)
+        {
+            status = -EINVAL;
+            goto out;
+        }
+    }
+
+    regs = (struct pt_regs){.pc = PTEBP_EMULATE_DATA_ADDRESS, .pstate = PSR_MODE_EL0t};
+    regs.regs[1] = PTEBP_EMULATE_DATA_ADDRESS + 32;
+    hook_regs.regs[0] = PTEBP_EMULATE_DATA_ADDRESS + 32;
+    hook_regs.regs[1] = (ESR_ELx_EC_DABT_LOW << ESR_ELx_EC_SHIFT) | ESR_ELx_FSC_PERM | ESR_ELx_FSC_LEVEL;
+    if (ptebp_handle_data_abort(&hook_regs) != 1 ||
+        regs.regs[0] != 0x8080808080808080ULL ||
+        regs.pc != PTEBP_EMULATE_DATA_ADDRESS + 4 || g_ptebp_current.data_abort_refs)
+    {
+        status = -EINVAL;
+        goto out;
+    }
+
+    regs = (struct pt_regs){.pc = (unsigned long)&cases[0].raw, .pstate = PSR_MODE_EL1h};
+    hook_regs.regs[0] = PTEBP_EMULATE_DATA_ADDRESS + 32;
+    hook_regs.regs[1] = (ESR_ELx_EC_DABT_CUR << ESR_ELx_EC_SHIFT) | ESR_ELx_FSC_PERM | ESR_ELx_FSC_LEVEL | ESR_ELx_FnV;
+    if (ptebp_handle_data_abort(&hook_regs) || regs.pc != (unsigned long)&cases[0].raw || g_ptebp_current.data_abort_refs)
+    {
+        status = -EINVAL;
+        goto out;
+    }
+
+    regs.pc = ~0ULL & PAGE_MASK;
+    hook_regs.regs[1] &= ~ESR_ELx_FnV;
+    pagefault_disable();
+    int disabled_before = current->pagefault_disabled;
+    int handled = ptebp_handle_data_abort(&hook_regs);
+    if (handled != 1 || regs.pc != (~0ULL & PAGE_MASK) ||
+        current->pagefault_disabled != disabled_before || g_ptebp_current.data_abort_refs)
+        status = -EINVAL;
+    pagefault_enable();
+
+out:
+    kernel_neon_end();
+    memset(&g_ptebp_current, 0, sizeof(g_ptebp_current));
+    kfree(shadow);
+    if (status) ls_log_always_tag("test", "PTEBP abort selftest failed pc=0x%llx x0=0x%llx\n", regs.pc, regs.regs[0]);
+    return status;
+}
+
 static int __init ptebp_emulate_init(void)
 {
-    int status = misc_register(&ptebp_emulate_device);
+    int status = ptebp_emulate_abort_selftest();
+
+    if (status)
+        return status;
+    status = misc_register(&ptebp_emulate_device);
 
     if (status)
         return status;

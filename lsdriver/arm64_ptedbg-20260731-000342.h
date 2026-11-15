@@ -215,8 +215,7 @@ static int ptebp_handle_exec_fault(struct pt_regs *hook_regs)
     //PTEBP 只管理有用户 mm 的 EL0 执行现场，不能接管内核线程或 EL1 取指异常。
     if (!regs || !current->mm || !user_mode(regs)) goto out_leave;
 
-    // 移除MTE标签 清除低2位标记 ，得到4字节对齐、纯净的指令虚拟地址
-    uint64_t source_pc = untagged_addr(regs->pc) & ~0x3ULL;
+    uint64_t source_pc = regs->pc;
 
     // FAR 与异常 PC 必须落在同一个 4 KiB 页内，否则这次权限异常不属于当前 PC 所在源页。
     if ((untagged_addr(hook_regs->regs[0]) & PAGE_MASK) != (source_pc & PAGE_MASK)) goto out_leave;
@@ -306,8 +305,7 @@ static int ptebp_handle_brk(struct pt_regs *hook_regs)
     //PTEBP 只接管拥有用户地址空间、并且确实来自 EL0 的 BRK 异常。
     if (!regs || !current->mm || !user_mode(regs)) goto out_leave;
 
-    // 移除MTE标签 清除低2位标记 ，得到4字节对齐、纯净的指令虚拟地址
-    uint64_t ghost_pc = untagged_addr(regs->pc) & ~0x3ULL;
+    uint64_t ghost_pc = regs->pc;
 
     /*
     这些值都在锁内从当前 PTEBP 状态中解析出来，解锁后只使用局部副本：
@@ -388,7 +386,7 @@ static int ptebp_handle_brk(struct pt_regs *hook_regs)
     bool pass_to_original = false;
 
     // 只有回调没有修改源 PC 时，才执行或传递被 BRK 替换位置原本的那条指令。
-    if ((untagged_addr(regs->pc) & ~0x3ULL) == source_pc)
+    if (regs->pc == source_pc)
     {
         if (ptebp_is_brk(orig_inst))
         {
