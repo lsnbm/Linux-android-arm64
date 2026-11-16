@@ -1,1 +1,3 @@
 *.sh text eol=lf
+/panic/** -text
+/panic/dump/*.7z.* binary -delta

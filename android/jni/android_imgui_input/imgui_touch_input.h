@@ -23,9 +23,9 @@
 #define MAX_PENDING_TOUCH_EVENTS 2048
 
 // 全局状态变量
-static std::atomic<uint32_t> orientation{0};
-static std::atomic<float> screenHeight{0}, screenWidth{0};
-static std::atomic<bool> Touch_initialized{false};
+inline std::atomic<uint32_t> orientation{0};
+inline std::atomic<float> screenHeight{0}, screenWidth{0};
+inline std::atomic<bool> Touch_initialized{false};
 
 // 触摸点对象结构
 struct TouchPoint
@@ -61,18 +61,18 @@ struct DeviceConfig
 };
 
 // 全局变量
-static TouchPoint fingers[MAX_DEVICES][MAX_FINGERS];
-static std::vector<DeviceConfig> devices;
-static std::vector<TouchInputEvent> pendingTouchEvents;
-static std::mutex touch_mutex; // 全局触摸数据锁
+inline TouchPoint fingers[MAX_DEVICES][MAX_FINGERS];
+inline std::vector<DeviceConfig> devices;
+inline std::vector<TouchInputEvent> pendingTouchEvents;
+inline std::mutex touch_mutex; // 全局触摸数据锁
 
-static void enqueueTouchEvent(const TouchInputEvent &event)
+inline void enqueueTouchEvent(const TouchInputEvent &event)
 {
     if (pendingTouchEvents.size() >= MAX_PENDING_TOUCH_EVENTS) pendingTouchEvents.clear();
     pendingTouchEvents.push_back(event);
 }
 
-static bool testInputBit(int bit, const uint8_t *array)
+inline bool testInputBit(int bit, const uint8_t *array)
 {
     return (array[bit / 8] & (1u << (bit % 8))) != 0;
 }
@@ -86,7 +86,7 @@ inline void UpdateScreenData(int w, int h, uint32_t orientation_)
 }
 
 // 触摸事件处理线程。参数按值传入，避免 devices 扩容或清理后留下悬空指针。
-static void deviceHandlerThread(int deviceIndex, int fd, int maxX, int maxY)
+inline void deviceHandlerThread(int deviceIndex, int fd, int maxX, int maxY)
 {
     float hwMaxX = (float)(maxX > 0 ? maxX : 1);
     float hwMaxY = (float)(maxY > 0 ? maxY : 1);
@@ -250,7 +250,7 @@ static void deviceHandlerThread(int deviceIndex, int fd, int maxX, int maxY)
 }
 
 // 需在你的主循环中调用 (ImGui::NewFrame 之前)
-void Touch_UpdateImGui()
+inline void Touch_UpdateImGui()
 {
     if (!Touch_initialized.load(std::memory_order_acquire)) return;
 
@@ -270,7 +270,7 @@ void Touch_UpdateImGui()
     }
 }
 
-bool Touch_Init()
+inline bool Touch_Init()
 {
     if (Touch_initialized.load(std::memory_order_acquire)) return true;
 
@@ -392,7 +392,7 @@ bool Touch_Init()
 }
 
 // 1启用独占，0取消独占
-void SetInputBlocking(bool block)
+inline void SetInputBlocking(bool block)
 {
     for (const auto &dev : devices)
     {
@@ -401,7 +401,7 @@ void SetInputBlocking(bool block)
 }
 
 // 检测是否有手指在矩形区域内
-bool IsUserTouchingRect(float rx, float ry, float rw, float rh)
+inline bool IsUserTouchingRect(float rx, float ry, float rw, float rh)
 {
     std::lock_guard<std::mutex> lock(touch_mutex);
     for (size_t d = 0; d < devices.size(); ++d)
@@ -423,7 +423,7 @@ bool IsUserTouchingRect(float rx, float ry, float rw, float rh)
     return false;
 }
 
-void Touch_Shutdown()
+inline void Touch_Shutdown()
 {
     if (!Touch_initialized.load(std::memory_order_acquire)) return;
 
