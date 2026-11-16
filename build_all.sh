@@ -24,9 +24,6 @@ KERNELS_ROOT="/root"
 DRIVER_SRC="/mnt/e/1.CodeRepository/Android/Kernel/lsdriver"
 VERSION_HEADER="$DRIVER_SRC/io_version/version.h"
 
-# 强制不剥离符号的版本列表 (剥离后无法加载)
-NO_STRIP_VERSIONS=("6.18-Android17" "6.12-Android16" "6.6-Android15")
-
 # 编译外部模块时不导入内核导出的 Module.symvers，生成空 __versions 的版本列表。
 # 这样 ko 的 vermagic 仍然带 modversions，但不会携带具体符号 CRC
 NO_CRC_VERSIONS=(
@@ -161,6 +158,7 @@ clean_driver_build() {
         -name '*.order' -o \
         -name '*.symvers' -o \
         -name '*.cmd' -o \
+        -name '*.lds' -o \
         -name '*.usyms' \
     \) -delete
 
@@ -189,16 +187,7 @@ handle_output() {
         return 1
     fi
 
-    # 检查是否属于强制不剥离版本
-    local force_no_strip=false
-    if contains_version "$version" "${NO_STRIP_VERSIONS[@]}"; then
-        force_no_strip=true
-    fi
-
-    if [[ "$force_no_strip" == "true" ]]; then
-        log_warn "注意: 版本 $version 强制保留符号 (剥离后无法加载)"
-        cp "$source_ko" "$target_ko"
-    elif [[ "$STRIP_CHOICE" == "y" || "$STRIP_CHOICE" == "Y" ]]; then
+    if [[ "$STRIP_CHOICE" == "y" || "$STRIP_CHOICE" == "Y" ]]; then
         # 确定 strip 工具路径
         local strip_cmd=""
         if [[ -n "$clang_path" && -x "$clang_path/bin/llvm-strip" ]]; then
@@ -212,8 +201,12 @@ handle_output() {
             log_info "生成完成: $target_ko"
             return 0
         fi
-        log_info "正在剥离符号..."
-        "$strip_cmd" --strip-debug -o "$target_ko" "$source_ko"
+        log_info "正在剥离非必要符号并清理元数据..."
+        "$strip_cmd" --strip-unneeded \
+            --remove-section=.BTF \
+            --remove-section=.comment \
+            --remove-section=.note.gnu.build-id \
+            -o "$target_ko" "$source_ko"
     else
         log_info "保留符号，创建副本..."
         cp "$source_ko" "$target_ko"
@@ -505,8 +498,8 @@ main() {
     trap cleanup_driver_build_on_exit EXIT
 
     log_warn "是否需要剥离(strip)符号？"
-    echo -e "  输入 ${GREEN}'y'${NC} 进行剥离 (减小体积)"
-    echo -e "  输入 ${GREEN}'n'${NC} 不剥离 (保留调试符号)"
+    echo -e "  输入 ${GREEN}'y'${NC} 剥离非必要符号并清理元数据 (减小体积)"
+    echo -e "  输入 ${GREEN}'n'${NC} 原样保留符号和元数据"
     read -rp "请输入 (y/n): " STRIP_CHOICE
 
 

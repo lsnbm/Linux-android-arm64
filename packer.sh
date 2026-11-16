@@ -7,6 +7,8 @@ BYTE_STREAM_DIR="$KO_DIR/byte_stream"
 
 mkdir -p "$BYTE_STREAM_DIR"
 
+rm -f -- "$KO_DIR/lsdriver.ko" "$BYTE_STREAM_DIR/lsdriver.ko"
+
 mapfile -t ko_files < <(find "$KO_DIR" -maxdepth 1 -type f -name '*.ko' -print)
 
 if [[ ${#ko_files[@]} -eq 0 ]]; then

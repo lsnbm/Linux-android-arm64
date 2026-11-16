@@ -10,6 +10,7 @@
 #include <linux/uinput.h>
 #include <poll.h> // 引入 poll 机制
 #include "imgui/imgui.h"
+#include <array>
 #include <atomic>
 #include <thread>
 #include <vector>
@@ -65,6 +66,17 @@ inline TouchPoint fingers[MAX_DEVICES][MAX_FINGERS];
 inline std::vector<DeviceConfig> devices;
 inline std::vector<TouchInputEvent> pendingTouchEvents;
 inline std::mutex touch_mutex; // 全局触摸数据锁
+
+inline std::array<std::array<TouchPoint, MAX_FINGERS>, MAX_DEVICES> Touch_GetSnapshot()
+{
+    std::array<std::array<TouchPoint, MAX_FINGERS>, MAX_DEVICES> snapshot{};
+    std::lock_guard<std::mutex> lock(touch_mutex);
+    for (size_t deviceIndex = 0; deviceIndex < snapshot.size(); ++deviceIndex)
+    {
+        std::copy_n(fingers[deviceIndex], MAX_FINGERS, snapshot[deviceIndex].begin());
+    }
+    return snapshot;
+}
 
 inline void enqueueTouchEvent(const TouchInputEvent &event)
 {

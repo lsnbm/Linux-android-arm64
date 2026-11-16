@@ -34,9 +34,10 @@ windows/__pycache__/
 # VS Code settings in subdirectories
 **/.vscode/
 
-# Keep the complete ARM64 test tree, including generated test artifacts
+# Keep ARM64 test files except kernel modules
 !lsdriver/arm64_tests/
 !lsdriver/arm64_tests/**
+lsdriver/arm64_tests/**/*.[kK][oO]
 
 # Android Studio / Gradle / NDK outputs
 .gradle/
@@ -68,3 +69,6 @@ android/jni/assets/cloudflared-linux-arm64
 !/panic/
 !/panic/**
 /panic/obj/
+
+# Local symbol maps
+*.symbols.map
