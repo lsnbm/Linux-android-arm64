@@ -24,6 +24,10 @@ lsdriver-y := lsdriver_main.o \
 $(obj)/lsdriver_main.o: $(src)/lsdriver.c FORCE
 	$(call if_changed_dep,cc_o_c)
 
+# 在内核配置加载后、内联函数展开前关闭 PAGE_PINNER，
+# 避免引入设备未导出的page_pinner_inited、__page_pinner_put_page调试符号。
+ccflags-y += -include $(src)/page_pinner_override.h
+
 #O3优化:启用更积极的内联、循环变换、指令调度和常量传播。
 ccflags-y += -O3
 
