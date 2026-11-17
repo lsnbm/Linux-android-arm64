@@ -72,6 +72,12 @@ paciasp              // 既可作为 BTI landing pad，又用 SP 给 LR 签名
 stp x29, x30, [sp, #-...]! //不能直接patch为ret
 ...
 
+入口指令	满足 BTI 入口检查	给返回地址签名
+PACIASP	        可以	            会
+BTI c	        可以	            不会
+LDR X16, ...	不可以	            不会
+所以 PACIASP 一条指令承担了两种作用：返回地址签名，以及充当合法入口。
+
 */
 
 /*

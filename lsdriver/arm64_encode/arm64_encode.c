@@ -104,6 +104,13 @@ int arm64_encode_bti_c(uint32_t *instruction)
     return 0;
 }
 
+int arm64_encode_bti_jc(uint32_t *instruction)
+{
+    if (!instruction) return -EINVAL;
+    *instruction = 0xD50324DFU;
+    return 0;
+}
+
 int arm64_encode_udf(uint32_t immediate, uint32_t *instruction)
 {
     if (!instruction) return -EINVAL;
@@ -392,4 +399,13 @@ int arm64_emit_abs_jump(uint64_t target, uint8_t scratch, uint32_t *output, size
     if (status) return status;
     __builtin_memcpy(&output[2], &target, sizeof(target));
     return 0;
+}
+
+int arm64_emit_bti_abs_jump(uint64_t target, uint8_t scratch, uint32_t *output, size_t word_count)
+{
+    if (!output || word_count < 5) return -EINVAL;
+
+    int status = arm64_emit_abs_jump(target, scratch, output + 1, word_count - 1);
+    if (status) return status;
+    return arm64_encode_bti_jc(&output[0]);
 }

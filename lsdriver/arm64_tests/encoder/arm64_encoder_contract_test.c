@@ -36,6 +36,9 @@ static int check_fixed_instructions(void)
     failures += expect_word("nop", instruction, 0xD503201FU);
     failures += expect_status("bti c", arm64_encode_bti_c(&instruction), 0);
     failures += expect_word("bti c", instruction, 0xD503245FU);
+    failures += expect_status("bti jc", arm64_encode_bti_jc(&instruction), 0);
+    failures += expect_word("bti jc", instruction, 0xD50324DFU);
+    failures += expect_status("bti jc null", arm64_encode_bti_jc(NULL), -EINVAL);
     failures += expect_status("udf #0", arm64_encode_udf(0, &instruction), 0);
     failures += expect_word("udf #0", instruction, 0x00000000U);
     failures += expect_status("udf #0xffff", arm64_encode_udf(0xFFFFU, &instruction), 0);
@@ -194,6 +197,32 @@ static int check_system_and_sequences(void)
     return failures;
 }
 
+static int check_bti_absolute_jump(void)
+{
+    int failures = 0;
+    uint32_t output[7] = {0};
+    const uint32_t expected_minimum[7] = {0xD50324DFU, 0x58000050U, 0xD65F0200U, 0x9ABCDEF0U, 0x12345678U, 0, 0};
+    const uint32_t expected_padded[7] = {0xD50324DFU, 0x58000050U, 0xD65F0200U, 0x9ABCDEF0U, 0x12345678U, 0xD503201FU, 0xD503201FU};
+    const uint32_t expected_x17[5] = {0xD50324DFU, 0x58000051U, 0xD65F0220U, 0xFFFF0000U, 0xFFFF8000U};
+
+    failures += expect_status("bti jump minimum", arm64_emit_bti_abs_jump(0x123456789ABCDEF0ULL, 16, output, 5), 0);
+    failures += expect_words("bti jump minimum and guards", output, expected_minimum, 7);
+    failures += expect_status("bti jump null", arm64_emit_bti_abs_jump(0, 16, NULL, 5), -EINVAL);
+    failures += expect_status("bti jump empty buffer", arm64_emit_bti_abs_jump(0, 16, output, 0), -EINVAL);
+    failures += expect_words("bti jump empty unchanged", output, expected_minimum, 7);
+    failures += expect_status("bti jump short buffer", arm64_emit_bti_abs_jump(0, 16, output, 4), -EINVAL);
+    failures += expect_words("bti jump short unchanged", output, expected_minimum, 7);
+    failures += expect_status("bti jump scratch 31", arm64_emit_bti_abs_jump(0, 31, output, 7), -EINVAL);
+    failures += expect_words("bti jump scratch 31 unchanged", output, expected_minimum, 7);
+    failures += expect_status("bti jump scratch 32", arm64_emit_bti_abs_jump(0, 32, output, 7), -EINVAL);
+    failures += expect_words("bti jump scratch 32 unchanged", output, expected_minimum, 7);
+    failures += expect_status("bti jump padded", arm64_emit_bti_abs_jump(0x123456789ABCDEF0ULL, 16, output, 7), 0);
+    failures += expect_words("bti jump padded", output, expected_padded, 7);
+    failures += expect_status("bti jump x17", arm64_emit_bti_abs_jump(0xFFFF8000FFFF0000ULL, 17, output, 5), 0);
+    failures += expect_words("bti jump x17", output, expected_x17, 5);
+    return failures;
+}
+
 int main(void)
 {
     int failures = 0;
@@ -204,12 +233,13 @@ int main(void)
     failures += check_load_store_instructions();
     failures += check_literal_instructions();
     failures += check_system_and_sequences();
+    failures += check_bti_absolute_jump();
     if (failures)
     {
         fprintf(stderr, "encoder contracts: FAIL; failures=%d\n", failures);
         return 1;
     }
 
-    puts("encoder contracts: PASS; groups=7");
+    puts("encoder contracts: PASS; groups=8");
     return 0;
 }
