@@ -72,11 +72,7 @@ paciasp              // 既可作为 BTI landing pad，又用 SP 给 LR 签名
 stp x29, x30, [sp, #-...]! //不能直接patch为ret
 ...
 
-入口指令	满足 BTI 入口检查	给返回地址签名
-PACIASP	        可以	            会
-BTI c	        可以	            不会
-LDR X16, ...	不可以	            不会
-所以 PACIASP 一条指令承担了两种作用：返回地址签名，以及充当合法入口。
+PACIASP 承担了两种作用：返回地址签名，以及充当合法入口。
 
 */
 
@@ -128,20 +124,20 @@ __attribute__((no_sanitize("cfi", "kcfi"))) static inline int bypass_cfi(void)
     };
 
     /*
-      2026/7/25 22:23实机测试 修复
-      不同cfi函数不同序言
-      统一把入口patch 为
-      bti c
-      ret
-      消除bti c 和pac认证的2者差异
+    2026/7/25 22:23实机测试 修复
+    不同cfi函数不同序言
+    统一把入口patch 为
+    bti jc
+    ret
+    消除bti c 和pac认证的2者差异
     */
     void *patch_addrs[ARRAY_SIZE(cfi_symbols) * 2];
     uint32_t patch_insts[ARRAY_SIZE(cfi_symbols) * 2];
-    uint32_t bti_c_inst;
+    uint32_t bti_jc_inst;
     uint32_t ret_inst;
     int patch_count = 0;
 
-    status = arm64_encode_bti_c(&bti_c_inst);
+    status = arm64_encode_bti_jc(&bti_jc_inst);
     if (status < 0) return status;
 
     status = arm64_encode_ret(30, &ret_inst);
@@ -154,7 +150,7 @@ __attribute__((no_sanitize("cfi", "kcfi"))) static inline int bypass_cfi(void)
         if (!cfi_addr) continue;
 
         patch_addrs[patch_count] = (void *)cfi_addr;                      // 补丁地址：CFI 函数入口。
-        patch_insts[patch_count++] = bti_c_inst;                          // 补丁指令：BTI C；记录完成后 patch_count 加 1。
+        patch_insts[patch_count++] = bti_jc_inst;                         // 补丁指令：BTI JC；记录完成后 patch_count 加 1。
         patch_addrs[patch_count] = (void *)(cfi_addr + sizeof(uint32_t)); // 补丁地址：函数入口后的下一条 ARM64 指令，即入口加 4 字节。
         patch_insts[patch_count++] = ret_inst;                            // 补丁指令：RET X30；记录完成后 patch_count 加 1。
     }

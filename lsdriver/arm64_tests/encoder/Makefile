@@ -4,7 +4,8 @@ SHELL := /bin/bash
 
 TEST_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 DRIVER_DIR := $(abspath $(TEST_DIR)/../..)
-CC ?= gcc
+LLVM_TOOLCHAIN ?= /root/6.1-Android14/prebuilts/clang/host/linux-x86/clang-r487747c
+CC = $(LLVM_TOOLCHAIN)/bin/clang
 
 ENCODER_CFLAGS := -std=gnu11 -O2 -Wall -Wextra -Werror
 ENCODER_SOURCES := \

@@ -4,12 +4,13 @@ SHELL := /bin/bash
 
 TEST_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 DRIVER_DIR := $(abspath $(TEST_DIR)/../..)
-CC ?= gcc
 PYTHON ?= python3
 LLVM_TOOLCHAIN ?= /root/6.1-Android14/prebuilts/clang/host/linux-x86/clang-r487747c
-override EXPECTED_ROWS := 5119
-override EXPECTED_UNIQUE_WORDS := 1844
-override EXPECTED_INPUT_SHA256 := DC34125CC5138E4BE854997714824A24EAB349701B10D555BDD7A29D04C8D763
+CC = $(LLVM_TOOLCHAIN)/bin/clang
+override EXPECTED_ROWS := 6143
+override EXPECTED_UNIQUE_WORDS := 2491
+override EXPECTED_INPUT_SHA256 := 4369185D869CD3E4D6B8C9A968DF1BC9E753B7607E4D39BDDD152972D661F1E2
+override EXPECTED_INPUT_SHA256_CRLF := C2196291220CFBABFD5D7EC95E550D9CDA216075A968A084178DA4E951C1CC52
 LLVM_SOURCE_REVISION := d9f89f4d16663d5012e5c09495f3b30ece3d2362
 
 DECODER_CFLAGS := -std=gnu11 -O2 -Wall -Wextra -Wno-unused-parameter -Werror
@@ -43,7 +44,8 @@ strict-test test:
 		exit 1
 	fi
 	input_sha256="$$(sha256sum "$$instruction_file" | awk '{print toupper($$1)}')"
-	if [[ "$$input_sha256" != '$(EXPECTED_INPUT_SHA256)' ]]; then
+	if [[ "$$input_sha256" != '$(EXPECTED_INPUT_SHA256)' && \
+	      "$$input_sha256" != '$(EXPECTED_INPUT_SHA256_CRLF)' ]]; then
 		echo "unexpected instruction.txt SHA-256: $$input_sha256" >&2
 		exit 1
 	fi

@@ -8,6 +8,12 @@
 make -C lsdriver/arm64_tests/encoder contract-test
 ```
 
+默认 C 编译器为 `$(LLVM_TOOLCHAIN)/bin/clang`，与解码器测试使用同一套 Android
+clang-r487747c / LLVM 17.0.2。`LLVM_TOOLCHAIN` 默认指向
+`/root/6.1-Android14/prebuilts/clang/host/linux-x86/clang-r487747c`，可通过环境或 Make
+命令行指定工具链位置；显式传入 `CC=...` 仍可覆盖 C 编译器。
+构建产物位于临时目录，退出时由 trap 清理。
+
 测试直接链接生产 [arm64_encode.c](../../arm64_encode/arm64_encode.c)，覆盖：
 
 - 固定系统指令、BTI C/JC、BRK、BR/BLR/RET；

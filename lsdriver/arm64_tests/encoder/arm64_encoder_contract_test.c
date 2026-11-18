@@ -41,8 +41,10 @@ static int check_fixed_instructions(void)
     failures += expect_status("bti jc null", arm64_encode_bti_jc(NULL), -EINVAL);
     failures += expect_status("udf #0", arm64_encode_udf(0, &instruction), 0);
     failures += expect_word("udf #0", instruction, 0x00000000U);
+    failures += expect_status("udf #1", arm64_encode_udf(1, &instruction), 0);
+    failures += expect_word("udf #1", instruction, 0x00000001U);
     failures += expect_status("udf #0xffff", arm64_encode_udf(0xFFFFU, &instruction), 0);
-    failures += expect_word("udf #0xffff", instruction, 0x001FFFE0U);
+    failures += expect_word("udf #0xffff", instruction, 0x0000FFFFU);
     failures += expect_status("udf range", arm64_encode_udf(0x10000U, &instruction), -ERANGE);
     failures += expect_status("brk #0xffff", arm64_encode_brk(0xFFFFU, &instruction), 0);
     failures += expect_word("brk #0xffff", instruction, 0xD43FFFE0U);
