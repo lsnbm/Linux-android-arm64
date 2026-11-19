@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <thread>
 
+#include "../../android_surface/surface_control_manager.h"
 #include "../../driver/driver.h"
 
 // 单点连击测试：在 (x,y) 连续点击 taps 次
@@ -67,14 +68,28 @@ inline void DoPinchTest(int screenW, int screenH)
     dr->TouchUp(1);
 }
 
+inline bool GetTouchScreenSize(int &width, int &height)
+{
+    android::detail::ui::DisplayState display{};
+    if (!android::SurfaceControlManager::GetComposerInstance().GetDisplayInfo(&display)) return false;
+    const int orientation = static_cast<int>(display.orientation);
+    if (orientation < 0 || orientation > 3 || display.layerStackSpaceRect.width <= 0 || display.layerStackSpaceRect.height <= 0) return false;
+
+    // 保持测试的自然方向坐标；直接读取有效逻辑尺寸，也能反映分辨率覆盖设置。
+    // 不按长短边排序，以免把自然横屏设备强制当成竖屏。
+    width = display.layerStackSpaceRect.width;
+    height = display.layerStackSpaceRect.height;
+    if (orientation == 1 || orientation == 3) std::swap(width, height);
+    return true;
+}
+
 inline int RunTouchTest()
 {
-    int screenW = 1080, screenH = 2340;
-    if (FILE *pipe = popen("wm size", "r"))
+    int screenW = 0, screenH = 0;
+    if (!GetTouchScreenSize(screenW, screenH))
     {
-        char line[128] = {};
-        if (fgets(line, sizeof(line), pipe) && sscanf(line, "Physical size: %dx%d", &screenW, &screenH) != 2) sscanf(line, "Override size: %dx%d", &screenW, &screenH);
-        pclose(pipe);
+        LS_LOGE_TAG("TouchTest", "读取屏幕尺寸失败，取消触摸测试");
+        return -EIO;
     }
 
     LS_LOGI_TAG("TouchTest", "屏幕逻辑尺寸: %dx%d", screenW, screenH);

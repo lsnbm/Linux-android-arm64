@@ -1,798 +1,286 @@
 #pragma once
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
-#include <climits>
-#include <cmath>
-#include <cstdlib>
-#include <utility>
+#include <cstdint>
+#include <optional>
 #include <vector>
 
 #include <android/native_window.h>
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_android.h>
 
-// Android/ImGui 依赖
-#include "imgui/backends/imgui_impl_android.h"
-#include "imgui/backends/imgui_impl_vulkan.h"
-#include "imgui/imgui.h"
-#include "imgui/imgui_internal.h"
 #include "android_imgui_input/imgui_touch_input.h"
 #include "android_surface/surface_control_manager.h"
 #include "font/oppo_font.h"
+#include "imgui/backends/imgui_impl_android.h"
+#include "imgui/backends/imgui_impl_vulkan.h"
+#include "imgui/imgui.h"
+#include "logger/logger.h"
 
-// Vulkan 后端实现
 namespace RenderVK
 {
-    const int MAX_FRAMES_IN_FLIGHT = 2;
-
     static VkInstance g_Instance = VK_NULL_HANDLE;
     static VkPhysicalDevice g_PhysicalDevice = VK_NULL_HANDLE;
     static VkDevice g_Device = VK_NULL_HANDLE;
-    static uint32_t g_QueueFamily = (uint32_t)-1;
     static VkQueue g_Queue = VK_NULL_HANDLE;
     static VkSurfaceKHR g_Surface = VK_NULL_HANDLE;
     static VkSwapchainKHR g_Swapchain = VK_NULL_HANDLE;
+    static VkFormat g_SwapchainFormat = VK_FORMAT_UNDEFINED;
+    static VkExtent2D g_SwapchainExtent{};
     static VkRenderPass g_RenderPass = VK_NULL_HANDLE;
     static VkCommandPool g_CommandPool = VK_NULL_HANDLE;
     static VkDescriptorPool g_DescriptorPool = VK_NULL_HANDLE;
 
-    static VkFormat g_SwapchainFormat = VK_FORMAT_UNDEFINED;
-    static VkPresentModeKHR g_PresentMode = VK_PRESENT_MODE_FIFO_KHR;
-    static VkExtent2D g_SwapchainExtent = {};
-    static std::vector<VkImage> g_SwapchainImages;
-    static std::vector<VkImageView> g_SwapchainImageViews;
-    static std::vector<VkFramebuffer> g_Framebuffers;
+    struct SwapchainImage
+    {
+        VkImageView view = VK_NULL_HANDLE;
+        VkFramebuffer framebuffer = VK_NULL_HANDLE;
+        VkSemaphore renderFinished = VK_NULL_HANDLE;
+    };
+    static std::vector<SwapchainImage> g_SwapchainImages;
 
-    static std::vector<VkCommandBuffer> g_CommandBuffers;
-    static std::vector<VkSemaphore> g_ImageAvailableSemaphores;
-    static std::vector<VkSemaphore> g_RenderFinishedSemaphores;
-    static std::vector<VkFence> g_InFlightFences;
-
+    static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
+    static VkCommandBuffer g_CommandBuffers[MAX_FRAMES_IN_FLIGHT]{};
+    static VkSemaphore g_ImageAvailableSemaphores[MAX_FRAMES_IN_FLIGHT]{};
+    static VkFence g_InFlightFences[MAX_FRAMES_IN_FLIGHT]{};
     static uint32_t g_CurrentFrame = 0;
     static bool g_SwapChainRebuild = false;
+    static bool g_FirstFrame = true;
     static bool imgui_context_created = false;
     static bool android_backend_initialized = false;
     static bool vulkan_backend_initialized = false;
     static ANativeWindow *native_window = nullptr;
     static android::SurfaceControlManager::DisplayInfo displayInfo{};
     static std::chrono::steady_clock::time_point s_lastDisplayInfoQuery{};
-    static bool s_allowCapture = false;
 
-    struct RecordSurfaceState
+    inline void CleanupSwapchain()
     {
-        bool mirrorReady = false;
-        uint32_t layerStack = 0;
-        android::SurfaceControlManager::RecordDisplayInfo display{};
-        android::SurfaceControlManager::DisplayInfo source{};
-    };
-
-    static RecordSurfaceState s_recordSurface;
-    static android::SurfaceControlManager::RecordDisplayInfo s_cachedRecordDisplay{};
-    static android::SurfaceControlManager::RecordDisplayInfo s_pendingRecordDisplay{};
-    static bool s_hasCachedRecordDisplay = false;
-    static bool s_hasPendingRecordDisplay = false;
-    static int s_pendingRecordDisplayHits = 0;
-    static int s_recordDisplayMisses = 0;
-    static std::chrono::steady_clock::time_point s_lastRecordDisplayScan{};
-
-    inline bool SameRecordDisplay(const android::SurfaceControlManager::RecordDisplayInfo &lhs, const android::SurfaceControlManager::RecordDisplayInfo &rhs)
-    {
-        return lhs.layerStack == rhs.layerStack && lhs.orientation == rhs.orientation && lhs.layerStackRect == rhs.layerStackRect && lhs.displayRect == rhs.displayRect;
-    }
-
-    inline void shutdown();
-
-#define VK_CHECK(x)                                                                   \
-    do                                                                                \
-    {                                                                                 \
-        VkResult err = x;                                                             \
-        if (err)                                                                      \
-        {                                                                             \
-            LS_LOGE_TAG("RenderVK", "VkResult=%d at %s:%d", err, __FILE__, __LINE__); \
-            abort();                                                                  \
-        }                                                                             \
-    } while (0)
-
-    inline void CleanupSwapchain(bool destroySwapchain = true)
-    {
-        if (g_Device == VK_NULL_HANDLE)
+        for (const auto &image : g_SwapchainImages)
         {
-            g_Framebuffers.clear();
-            g_SwapchainImageViews.clear();
-            return;
+            vkDestroyFramebuffer(g_Device, image.framebuffer, nullptr);
+            vkDestroyImageView(g_Device, image.view, nullptr);
+            vkDestroySemaphore(g_Device, image.renderFinished, nullptr);
         }
-
-        for (auto fb : g_Framebuffers) vkDestroyFramebuffer(g_Device, fb, nullptr);
-        g_Framebuffers.clear();
-
-        for (auto iv : g_SwapchainImageViews) vkDestroyImageView(g_Device, iv, nullptr);
-        g_SwapchainImageViews.clear();
-
-        // 仅在允许销毁时释放，防止底层断开连接
-        if (destroySwapchain && g_Swapchain != VK_NULL_HANDLE)
-        {
-            vkDestroySwapchainKHR(g_Device, g_Swapchain, nullptr);
-            g_Swapchain = VK_NULL_HANDLE;
-        }
+        g_SwapchainImages.clear();
+        vkDestroySwapchainKHR(g_Device, g_Swapchain, nullptr);
+        g_Swapchain = VK_NULL_HANDLE;
     }
 
-    inline void DestroyRenderFinishedSemaphores()
+    inline int CreateSwapchain()
     {
-        for (auto semaphore : g_RenderFinishedSemaphores)
-            if (semaphore != VK_NULL_HANDLE) vkDestroySemaphore(g_Device, semaphore, nullptr);
-        g_RenderFinishedSemaphores.clear();
-    }
-
-    inline bool CreateRenderFinishedSemaphores()
-    {
-        g_RenderFinishedSemaphores.resize(g_SwapchainImages.size(), VK_NULL_HANDLE);
-        VkSemaphoreCreateInfo semaphoreInfo{};
-        semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-        for (auto &semaphore : g_RenderFinishedSemaphores)
-        {
-            if (vkCreateSemaphore(g_Device, &semaphoreInfo, nullptr, &semaphore) == VK_SUCCESS) continue;
-            DestroyRenderFinishedSemaphores();
-            return false;
-        }
-        return !g_RenderFinishedSemaphores.empty();
-    }
-
-    inline bool CreateSwapchain(VkSwapchainKHR oldSwapchain = VK_NULL_HANDLE)
-    {
+        int status = 0;
         VkSurfaceCapabilitiesKHR capabilities{};
-        if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_PhysicalDevice, g_Surface, &capabilities) != VK_SUCCESS) return false;
+        status = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_PhysicalDevice, g_Surface, &capabilities);
+        if (status != VK_SUCCESS) return status;
 
         uint32_t formatCount = 0;
-        if (vkGetPhysicalDeviceSurfaceFormatsKHR(g_PhysicalDevice, g_Surface, &formatCount, nullptr) != VK_SUCCESS || formatCount == 0) return false;
-        std::vector<VkSurfaceFormatKHR> formats(formatCount);
-        if (vkGetPhysicalDeviceSurfaceFormatsKHR(g_PhysicalDevice, g_Surface, &formatCount, formats.data()) != VK_SUCCESS || formatCount == 0) return false;
-
-        VkSurfaceFormatKHR surfaceFormat = formats[0];
-        if (surfaceFormat.format == VK_FORMAT_UNDEFINED) surfaceFormat = {VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
-        for (const auto &availableFormat : formats)
+        status = vkGetPhysicalDeviceSurfaceFormatsKHR(g_PhysicalDevice, g_Surface, &formatCount, nullptr);
+        if (status != VK_SUCCESS) return status;
+        if (formatCount == 0)
         {
-            if (availableFormat.format == VK_FORMAT_R8G8B8A8_UNORM || availableFormat.format == VK_FORMAT_B8G8R8A8_UNORM)
+            status = VK_ERROR_FORMAT_NOT_SUPPORTED;
+            return status;
+        }
+        std::vector<VkSurfaceFormatKHR> formats(formatCount);
+        status = vkGetPhysicalDeviceSurfaceFormatsKHR(g_PhysicalDevice, g_Surface, &formatCount, formats.data());
+        if (status != VK_SUCCESS) return status;
+        formats.resize(formatCount);
+
+        // 重建时继续使用 ImGui 图形管线对应的 render pass 格式。
+        VkSurfaceFormatKHR surfaceFormat{};
+        for (const auto &format : formats)
+        {
+            if (format.format == VK_FORMAT_UNDEFINED)
             {
-                surfaceFormat = availableFormat;
+                surfaceFormat = {g_RenderPass ? g_SwapchainFormat : VK_FORMAT_R8G8B8A8_UNORM, format.colorSpace};
+                break;
+            }
+            if (g_RenderPass && format.format != g_SwapchainFormat) continue;
+            if (surfaceFormat.format == VK_FORMAT_UNDEFINED) surfaceFormat = format;
+            if (g_RenderPass || format.format == VK_FORMAT_R8G8B8A8_UNORM || format.format == VK_FORMAT_B8G8R8A8_UNORM)
+            {
+                surfaceFormat = format;
                 break;
             }
         }
-        g_SwapchainFormat = surfaceFormat.format;
-
-        if (capabilities.currentExtent.width != 0xFFFFFFFF) g_SwapchainExtent = capabilities.currentExtent;
-        else g_SwapchainExtent = {(uint32_t)displayInfo.width, (uint32_t)displayInfo.height};
-        if (g_SwapchainExtent.width == 0 || g_SwapchainExtent.height == 0) return false;
-
-        const VkPresentModeKHR requestedPresentModes[] = {VK_PRESENT_MODE_FIFO_KHR};
-
-        //  const VkPresentModeKHR requestedPresentModes[] = {VK_PRESENT_MODE_MAILBOX_KHR, VK_PRESENT_MODE_IMMEDIATE_KHR, VK_PRESENT_MODE_FIFO_KHR};
-        g_PresentMode = ImGui_ImplVulkanH_SelectPresentMode(g_PhysicalDevice, g_Surface, requestedPresentModes, IM_ARRAYSIZE(requestedPresentModes));
-
-        uint32_t imageCount = capabilities.minImageCount + 1;
-        if (g_PresentMode == VK_PRESENT_MODE_MAILBOX_KHR && imageCount < 3) imageCount = 3;
-        if (capabilities.maxImageCount > 0 && imageCount > capabilities.maxImageCount) imageCount = capabilities.maxImageCount;
+        if (surfaceFormat.format == VK_FORMAT_UNDEFINED)
+        {
+            status = VK_ERROR_FORMAT_NOT_SUPPORTED;
+            return status;
+        }
 
         VkSwapchainCreateInfoKHR createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
         createInfo.surface = g_Surface;
-        createInfo.minImageCount = imageCount;
+        createInfo.minImageCount = capabilities.minImageCount + 1;
+        if (capabilities.maxImageCount) createInfo.minImageCount = std::min(createInfo.minImageCount, capabilities.maxImageCount);
         createInfo.imageFormat = surfaceFormat.format;
         createInfo.imageColorSpace = surfaceFormat.colorSpace;
-        createInfo.imageExtent = g_SwapchainExtent;
+        createInfo.imageExtent = capabilities.currentExtent;
+        if (createInfo.imageExtent.width == UINT32_MAX)
+        {
+            createInfo.imageExtent.width = std::clamp(static_cast<uint32_t>(displayInfo.width), capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
+            createInfo.imageExtent.height = std::clamp(static_cast<uint32_t>(displayInfo.height), capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
+        }
+        if (!createInfo.imageExtent.width || !createInfo.imageExtent.height)
+        {
+            status = VK_ERROR_OUT_OF_DATE_KHR;
+            return status;
+        }
         createInfo.imageArrayLayers = 1;
         createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
         createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        // 保持 Identity Transform，显示方向由系统显示投影处理。
-        if (capabilities.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) createInfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
-        else createInfo.preTransform = capabilities.currentTransform;
-
-        if (capabilities.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR) createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-        else if (capabilities.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR) createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
-        else if (capabilities.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR) createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR;
-        else if (capabilities.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR) createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR;
-        else return false;
-        createInfo.presentMode = g_PresentMode;
-        createInfo.clipped = VK_TRUE;
-
-        // 传入旧交换链给 Android 底层，实现无缝过渡
-        createInfo.oldSwapchain = oldSwapchain;
-
-        VkSwapchainKHR newSwapchain = VK_NULL_HANDLE;
-        if (vkCreateSwapchainKHR(g_Device, &createInfo, nullptr, &newSwapchain) != VK_SUCCESS) return false;
-
-        uint32_t newImageCount = 0;
-        if (vkGetSwapchainImagesKHR(g_Device, newSwapchain, &newImageCount, nullptr) != VK_SUCCESS || newImageCount < 2)
+        createInfo.preTransform = capabilities.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR ? VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR : capabilities.currentTransform;
+        for (auto alpha : {VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR, VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR, VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR, VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR})
         {
-            vkDestroySwapchainKHR(g_Device, newSwapchain, nullptr);
-            return false;
-        }
-
-        std::vector<VkImage> newImages(newImageCount);
-        if (vkGetSwapchainImagesKHR(g_Device, newSwapchain, &newImageCount, newImages.data()) != VK_SUCCESS)
-        {
-            vkDestroySwapchainKHR(g_Device, newSwapchain, nullptr);
-            return false;
-        }
-
-        std::vector<VkImageView> newImageViews(newImageCount, VK_NULL_HANDLE);
-        for (size_t i = 0; i < newImages.size(); i++)
-        {
-            VkImageViewCreateInfo viewInfo{};
-            viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-            viewInfo.image = newImages[i];
-            viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-            viewInfo.format = g_SwapchainFormat;
-            viewInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-            viewInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-            viewInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-            viewInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-            viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            viewInfo.subresourceRange.baseMipLevel = 0;
-            viewInfo.subresourceRange.levelCount = 1;
-            viewInfo.subresourceRange.baseArrayLayer = 0;
-            viewInfo.subresourceRange.layerCount = 1;
-            if (vkCreateImageView(g_Device, &viewInfo, nullptr, &newImageViews[i]) != VK_SUCCESS)
+            if (capabilities.supportedCompositeAlpha & alpha)
             {
-                for (auto imageView : newImageViews)
-                    if (imageView != VK_NULL_HANDLE) vkDestroyImageView(g_Device, imageView, nullptr);
-                vkDestroySwapchainKHR(g_Device, newSwapchain, nullptr);
-                return false;
-            }
-        }
-
-        if (oldSwapchain != VK_NULL_HANDLE) vkDestroySwapchainKHR(g_Device, oldSwapchain, nullptr);
-        g_Swapchain = newSwapchain;
-        g_SwapchainImages = std::move(newImages);
-        g_SwapchainImageViews = std::move(newImageViews);
-        return true;
-    }
-    inline bool RecreateSwapchain()
-    {
-        vkDeviceWaitIdle(g_Device);
-        DestroyRenderFinishedSemaphores();
-
-        // 提取当前的交换链
-        VkSwapchainKHR oldSwapchain = g_Swapchain;
-
-        // 销毁 Framebuffer / ImageView，但保留 g_Swapchain (传 false)
-        CleanupSwapchain(false);
-
-        // 携带旧链进行重建
-        if (!CreateSwapchain(oldSwapchain))
-        {
-            if (g_Swapchain != VK_NULL_HANDLE)
-            {
-                vkDestroySwapchainKHR(g_Device, g_Swapchain, nullptr);
-                g_Swapchain = VK_NULL_HANDLE;
-            }
-            g_SwapchainImages.clear();
-            return false;
-        }
-
-        g_Framebuffers.resize(g_SwapchainImageViews.size());
-        for (size_t i = 0; i < g_SwapchainImageViews.size(); i++)
-        {
-            VkImageView attachments[] = {g_SwapchainImageViews[i]};
-            VkFramebufferCreateInfo framebufferInfo{};
-            framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-            framebufferInfo.renderPass = g_RenderPass;
-            framebufferInfo.attachmentCount = 1;
-            framebufferInfo.pAttachments = attachments;
-            framebufferInfo.width = g_SwapchainExtent.width;
-            framebufferInfo.height = g_SwapchainExtent.height;
-            framebufferInfo.layers = 1;
-            if (vkCreateFramebuffer(g_Device, &framebufferInfo, nullptr, &g_Framebuffers[i]) != VK_SUCCESS)
-            {
-                CleanupSwapchain();
-                return false;
-            }
-        }
-        if (!CreateRenderFinishedSemaphores())
-        {
-            CleanupSwapchain();
-            return false;
-        }
-        if (vulkan_backend_initialized) ImGui_ImplVulkan_SetMinImageCount(static_cast<uint32_t>(g_SwapchainImages.size()));
-        return true;
-    }
-
-    inline void CleanupRecordSurface()
-    {
-        if (s_recordSurface.mirrorReady)
-        {
-            android::SurfaceControlManager::DestroyMirrorOnLayerStack(native_window);
-        }
-        s_recordSurface.mirrorReady = false;
-        s_recordSurface = {};
-    }
-
-    inline bool EnsureRecordSurface()
-    {
-        if (!s_allowCapture)
-        {
-            if (s_recordSurface.mirrorReady) CleanupRecordSurface();
-            s_hasCachedRecordDisplay = false;
-            s_hasPendingRecordDisplay = false;
-            s_pendingRecordDisplayHits = 0;
-            s_recordDisplayMisses = 0;
-            return false;
-        }
-
-        // 检测 Oplus/AOSP 录屏的目标 layerStack，并把主 Lark Surface 镜像到该显示。
-        auto now = std::chrono::steady_clock::now();
-        bool shouldScan = s_lastRecordDisplayScan == std::chrono::steady_clock::time_point{} || (now - s_lastRecordDisplayScan) >= std::chrono::seconds(2);
-        if (shouldScan)
-        {
-            s_lastRecordDisplayScan = now;
-            android::SurfaceControlManager::RecordDisplayInfo scannedTarget{};
-            bool foundRecordDisplay = android::SurfaceControlManager::FindRecordDisplay(&scannedTarget, displayInfo.width, displayInfo.height);
-            if (!foundRecordDisplay)
-            {
-                s_hasPendingRecordDisplay = false;
-                s_pendingRecordDisplayHits = 0;
-                if (++s_recordDisplayMisses >= 2) s_hasCachedRecordDisplay = false;
-            }
-            else
-            {
-                s_recordDisplayMisses = 0;
-                if (!s_hasCachedRecordDisplay || !s_recordSurface.mirrorReady || SameRecordDisplay(scannedTarget, s_cachedRecordDisplay))
-                {
-                    s_cachedRecordDisplay = scannedTarget;
-                    s_hasCachedRecordDisplay = true;
-                    s_hasPendingRecordDisplay = false;
-                    s_pendingRecordDisplayHits = 0;
-                }
-                else if (scannedTarget.layerStack == s_cachedRecordDisplay.layerStack)
-                {
-                    s_cachedRecordDisplay = scannedTarget;
-                    s_hasPendingRecordDisplay = false;
-                    s_pendingRecordDisplayHits = 0;
-                }
-                else if (!s_hasPendingRecordDisplay || !SameRecordDisplay(scannedTarget, s_pendingRecordDisplay))
-                {
-                    s_pendingRecordDisplay = scannedTarget;
-                    s_hasPendingRecordDisplay = true;
-                    s_pendingRecordDisplayHits = 1;
-                }
-                else if (++s_pendingRecordDisplayHits >= 2)
-                {
-                    s_cachedRecordDisplay = scannedTarget;
-                    s_hasCachedRecordDisplay = true;
-                    s_hasPendingRecordDisplay = false;
-                    s_pendingRecordDisplayHits = 0;
-                }
-            }
-        }
-
-        if (!s_hasCachedRecordDisplay)
-        {
-            if (s_recordSurface.mirrorReady) CleanupRecordSurface();
-            return false;
-        }
-
-        const auto &target = s_cachedRecordDisplay;
-        const int32_t sourceWidth = displayInfo.width;
-        const int32_t sourceHeight = displayInfo.height;
-        if (sourceWidth <= 0 || sourceHeight <= 0) return false;
-
-        if (s_recordSurface.mirrorReady && s_recordSurface.layerStack == target.layerStack && SameRecordDisplay(s_recordSurface.display, target) && s_recordSurface.source.orientation == displayInfo.orientation && s_recordSurface.source.width == sourceWidth && s_recordSurface.source.height == sourceHeight) return true;
-
-        if (!s_recordSurface.mirrorReady || s_recordSurface.layerStack != target.layerStack)
-        {
-            CleanupRecordSurface();
-            if (!android::SurfaceControlManager::CreateMirrorOnLayerStack(native_window, target.layerStack)) return false;
-        }
-        if (!android::SurfaceControlManager::ConfigureMirrorProjection(native_window, displayInfo, target))
-        {
-            android::SurfaceControlManager::DestroyMirrorOnLayerStack(native_window);
-            s_recordSurface = {};
-            return false;
-        }
-
-        s_recordSurface.mirrorReady = true;
-        s_recordSurface.layerStack = target.layerStack;
-        s_recordSurface.display = target;
-        s_recordSurface.source = displayInfo;
-        LS_LOGI_TAG_FMT("RenderVK", "录屏镜像层就绪 layerStack={} orientation={} stackRect=({},{}-{},{}), displayRect=({},{}-{},{}), source={}x{}", target.layerStack, target.orientation, target.layerStackRect.left, target.layerStackRect.top, target.layerStackRect.right, target.layerStackRect.bottom, target.displayRect.left, target.displayRect.top, target.displayRect.right, target.displayRect.bottom, sourceWidth, sourceHeight);
-        return true;
-    }
-
-    inline bool init(bool allowCapture)
-    {
-        if (imgui_context_created) return true;
-
-        s_allowCapture = allowCapture;
-        displayInfo = android::SurfaceControlManager::GetDisplayInfo();
-        if (displayInfo.width == 0 || displayInfo.height == 0)
-        {
-            displayInfo.width = 1080;
-            displayInfo.height = 2340;
-            displayInfo.orientation = 0;
-        }
-        UpdateScreenData(displayInfo.width, displayInfo.height, displayInfo.orientation);
-
-        // 主 SurfaceControl 只创建一次，旋转时由系统显示投影改变方向，不重建 layer。
-        // buffer 必须保持长边方形；不要在旋转时用 displayInfo.width/height 交换 ANativeWindow buffer，
-        // 因为 setBuffersGeometry 只改 buffer 像素尺寸，不改旧 layer 几何，SurfaceFlinger 会将画面拉伸。
-        // displayInfo.width/height 仍是实际屏幕逻辑尺寸，继续用于 ImGui、触摸和 ESP 坐标计算。
-        const int w = displayInfo.width;
-        const int h = displayInfo.height;
-        const int max_side = (h > w ? h : w);
-
-        //系统中的 Accessibility Overlays 是 窗口管理器为无障碍覆盖内容创建的容器层，用于挂载辅助标记、提示等图层。它自身没有图像缓冲，内容由子图层绘制；
-        //因此即使没有显示无障碍界面，也可能在 Surface 列表中看到它。
-        //我现在创建的是一个同名的独立绘制层，不会自动挂到系统原有容器下，也不会因此成为无障碍服务。
-        native_window = android::SurfaceControlManager::Create("Accessibility Overlays", max_side, max_side, !allowCapture, 2024);
-        if (native_window == nullptr)
-        {
-            LS_LOGE_TAG("RenderVK", "创建 ANativeWindow 失败");
-            return false;
-        }
-        LS_LOGI_TAG_FMT("RenderVK", "录屏策略 allowCapture={}", allowCapture);
-        ANativeWindow_acquire(native_window);
-
-        const char *instance_extensions[] = {"VK_KHR_surface", "VK_KHR_android_surface"};
-        VkInstanceCreateInfo create_info{};
-        create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-        create_info.enabledExtensionCount = 2;
-        create_info.ppEnabledExtensionNames = instance_extensions;
-        VK_CHECK(vkCreateInstance(&create_info, nullptr, &g_Instance));
-
-        VkAndroidSurfaceCreateInfoKHR surface_info{};
-        surface_info.sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR;
-        surface_info.window = native_window;
-        VK_CHECK(vkCreateAndroidSurfaceKHR(g_Instance, &surface_info, nullptr, &g_Surface));
-
-        uint32_t gpu_count = 0;
-        VK_CHECK(vkEnumeratePhysicalDevices(g_Instance, &gpu_count, nullptr));
-        if (gpu_count == 0)
-        {
-            shutdown();
-            return false;
-        }
-        std::vector<VkPhysicalDevice> gpus(gpu_count);
-        VK_CHECK(vkEnumeratePhysicalDevices(g_Instance, &gpu_count, gpus.data()));
-        g_PhysicalDevice = gpus[0];
-
-        uint32_t queueFamilyCount = 0;
-        vkGetPhysicalDeviceQueueFamilyProperties(g_PhysicalDevice, &queueFamilyCount, nullptr);
-        std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
-        vkGetPhysicalDeviceQueueFamilyProperties(g_PhysicalDevice, &queueFamilyCount, queueFamilies.data());
-        for (uint32_t i = 0; i < queueFamilyCount; i++)
-        {
-            VkBool32 presentSupport = false;
-            vkGetPhysicalDeviceSurfaceSupportKHR(g_PhysicalDevice, i, g_Surface, &presentSupport);
-            if (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT && presentSupport)
-            {
-                g_QueueFamily = i;
+                createInfo.compositeAlpha = alpha;
                 break;
             }
         }
-        if (g_QueueFamily == (uint32_t)-1)
+        createInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+        createInfo.clipped = VK_TRUE;
+        createInfo.oldSwapchain = g_Swapchain;
+        VkSwapchainKHR newSwapchain = VK_NULL_HANDLE;
+        status = vkCreateSwapchainKHR(g_Device, &createInfo, nullptr, &newSwapchain);
+        // 按 vkCreateSwapchainKHR 的 oldSwapchain 约定，即便创建失败，旧链也已退役。
+        CleanupSwapchain();
+        if (status != VK_SUCCESS) return status;
+        g_Swapchain = newSwapchain;
+        g_SwapchainExtent = createInfo.imageExtent;
+
+        if (!g_RenderPass)
         {
-            LS_LOGE_TAG("RenderVK", "没有找到同时支持图形和呈现的队列族");
-            shutdown();
-            return false;
+            VkAttachmentDescription color{};
+            color.format = surfaceFormat.format;
+            color.samples = VK_SAMPLE_COUNT_1_BIT;
+            color.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+            color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            color.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+            color.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+            color.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+            VkAttachmentReference colorRef{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+            VkSubpassDescription subpass{};
+            subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+            subpass.colorAttachmentCount = 1;
+            subpass.pColorAttachments = &colorRef;
+            VkSubpassDependency dependency{};
+            dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+            dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+            dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+            dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+            VkRenderPassCreateInfo renderPassInfo{};
+            renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+            renderPassInfo.attachmentCount = 1;
+            renderPassInfo.pAttachments = &color;
+            renderPassInfo.subpassCount = 1;
+            renderPassInfo.pSubpasses = &subpass;
+            renderPassInfo.dependencyCount = 1;
+            renderPassInfo.pDependencies = &dependency;
+            status = vkCreateRenderPass(g_Device, &renderPassInfo, nullptr, &g_RenderPass);
+            if (status != VK_SUCCESS)
+            {
+                g_RenderPass = VK_NULL_HANDLE;
+                CleanupSwapchain();
+                return status;
+            }
+            g_SwapchainFormat = surfaceFormat.format;
         }
 
-        const char *device_extensions[] = {"VK_KHR_swapchain"};
-        float queuePriority = 1.0f;
-        VkDeviceQueueCreateInfo queueCreateInfo{};
-        queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-        queueCreateInfo.queueFamilyIndex = g_QueueFamily;
-        queueCreateInfo.queueCount = 1;
-        queueCreateInfo.pQueuePriorities = &queuePriority;
-
-        VkDeviceCreateInfo deviceCreateInfo{};
-        deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-        deviceCreateInfo.pQueueCreateInfos = &queueCreateInfo;
-        deviceCreateInfo.queueCreateInfoCount = 1;
-        deviceCreateInfo.enabledExtensionCount = 1;
-        deviceCreateInfo.ppEnabledExtensionNames = device_extensions;
-        VK_CHECK(vkCreateDevice(g_PhysicalDevice, &deviceCreateInfo, nullptr, &g_Device));
-        vkGetDeviceQueue(g_Device, g_QueueFamily, 0, &g_Queue);
-
-        if (!CreateSwapchain())
+        uint32_t imageCount = 0;
+        status = vkGetSwapchainImagesKHR(g_Device, g_Swapchain, &imageCount, nullptr);
+        if (status == VK_SUCCESS && imageCount < 2) status = VK_ERROR_INITIALIZATION_FAILED;
+        if (status != VK_SUCCESS)
         {
-            LS_LOGE_TAG("RenderVK", "创建主交换链失败");
-            shutdown();
-            return false;
+            CleanupSwapchain();
+            return status;
+        }
+        std::vector<VkImage> images(imageCount);
+        status = vkGetSwapchainImagesKHR(g_Device, g_Swapchain, &imageCount, images.data());
+        if (status != VK_SUCCESS)
+        {
+            CleanupSwapchain();
+            return status;
         }
 
-        VkAttachmentDescription colorAttachment{};
-        colorAttachment.format = g_SwapchainFormat;
-        colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-        colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-
-        VkAttachmentReference colorAttachmentRef{};
-        colorAttachmentRef.attachment = 0;
-        colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-        VkSubpassDescription subpass{};
-        subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-        subpass.colorAttachmentCount = 1;
-        subpass.pColorAttachments = &colorAttachmentRef;
-
-        VkSubpassDependency dependency{};
-        dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-        dependency.dstSubpass = 0;
-        dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-
-        VkRenderPassCreateInfo renderPassInfo{};
-        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-        renderPassInfo.attachmentCount = 1;
-        renderPassInfo.pAttachments = &colorAttachment;
-        renderPassInfo.subpassCount = 1;
-        renderPassInfo.pSubpasses = &subpass;
-        renderPassInfo.dependencyCount = 1;
-        renderPassInfo.pDependencies = &dependency;
-        VK_CHECK(vkCreateRenderPass(g_Device, &renderPassInfo, nullptr, &g_RenderPass));
-
-        g_Framebuffers.resize(g_SwapchainImageViews.size());
-        for (size_t i = 0; i < g_SwapchainImageViews.size(); i++)
-        {
-            VkImageView attachments[] = {g_SwapchainImageViews[i]};
-            VkFramebufferCreateInfo framebufferInfo{};
-            framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-            framebufferInfo.renderPass = g_RenderPass;
-            framebufferInfo.attachmentCount = 1;
-            framebufferInfo.pAttachments = attachments;
-            framebufferInfo.width = g_SwapchainExtent.width;
-            framebufferInfo.height = g_SwapchainExtent.height;
-            framebufferInfo.layers = 1;
-            VK_CHECK(vkCreateFramebuffer(g_Device, &framebufferInfo, nullptr, &g_Framebuffers[i]));
-        }
-
-        VkCommandPoolCreateInfo poolInfo{};
-        poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-        poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        poolInfo.queueFamilyIndex = g_QueueFamily;
-        VK_CHECK(vkCreateCommandPool(g_Device, &poolInfo, nullptr, &g_CommandPool));
-
-        g_CommandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
-        VkCommandBufferAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        allocInfo.commandPool = g_CommandPool;
-        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        allocInfo.commandBufferCount = (uint32_t)g_CommandBuffers.size();
-        VK_CHECK(vkAllocateCommandBuffers(g_Device, &allocInfo, g_CommandBuffers.data()));
-
-        g_ImageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
-        g_InFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
-
+        VkImageViewCreateInfo viewInfo{};
+        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.format = surfaceFormat.format;
+        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        viewInfo.subresourceRange.levelCount = 1;
+        viewInfo.subresourceRange.layerCount = 1;
+        VkFramebufferCreateInfo framebufferInfo{};
+        framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        framebufferInfo.renderPass = g_RenderPass;
+        framebufferInfo.attachmentCount = 1;
+        framebufferInfo.width = g_SwapchainExtent.width;
+        framebufferInfo.height = g_SwapchainExtent.height;
+        framebufferInfo.layers = 1;
         VkSemaphoreCreateInfo semaphoreInfo{};
         semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-        VkFenceCreateInfo fenceInfo{};
-        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        g_SwapchainImages.resize(imageCount);
+        for (uint32_t i = 0; i < imageCount; ++i)
         {
-            VK_CHECK(vkCreateSemaphore(g_Device, &semaphoreInfo, nullptr, &g_ImageAvailableSemaphores[i]));
-            VK_CHECK(vkCreateFence(g_Device, &fenceInfo, nullptr, &g_InFlightFences[i]));
-        }
-        if (!CreateRenderFinishedSemaphores())
-        {
-            LS_LOGE_TAG("RenderVK", "创建主呈现信号量失败");
-            shutdown();
-            return false;
-        }
-
-        VkDescriptorPoolSize pool_sizes[] = {{VK_DESCRIPTOR_TYPE_SAMPLER, 1000}, {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000}, {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000}, {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000}, {VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000}, {VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000}, {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000}, {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000}, {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000}, {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000}, {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000}};
-        VkDescriptorPoolCreateInfo descPoolInfo{};
-        descPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        descPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-        descPoolInfo.maxSets = 1000 * IM_ARRAYSIZE(pool_sizes);
-        descPoolInfo.poolSizeCount = (uint32_t)IM_ARRAYSIZE(pool_sizes);
-        descPoolInfo.pPoolSizes = pool_sizes;
-        VK_CHECK(vkCreateDescriptorPool(g_Device, &descPoolInfo, nullptr, &g_DescriptorPool));
-
-        IMGUI_CHECKVERSION();
-        ImGui::CreateContext();
-        imgui_context_created = true;
-        ImGuiIO &io = ImGui::GetIO();
-        io.IniFilename = NULL;
-
-        android_backend_initialized = ImGui_ImplAndroid_Init(native_window);
-
-        ImGui_ImplVulkan_InitInfo init_info = {};
-        init_info.Instance = g_Instance;
-        init_info.PhysicalDevice = g_PhysicalDevice;
-        init_info.Device = g_Device;
-        init_info.QueueFamily = g_QueueFamily;
-        init_info.Queue = g_Queue;
-        init_info.PipelineCache = VK_NULL_HANDLE;
-        init_info.DescriptorPool = g_DescriptorPool;
-        init_info.MinImageCount = g_SwapchainImages.size();
-        init_info.ImageCount = g_SwapchainImages.size();
-        init_info.Allocator = nullptr;
-
-        init_info.PipelineInfoMain.RenderPass = g_RenderPass;
-        init_info.PipelineInfoMain.Subpass = 0;
-        init_info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
-
-        init_info.CheckVkResultFn = [](VkResult err)
-        {
-            if (err) LS_LOGE_TAG("RenderVK", "ImGui Vulkan VkResult=%d", err);
-        };
-
-        vulkan_backend_initialized = ImGui_ImplVulkan_Init(&init_info);
-        if (!android_backend_initialized || !vulkan_backend_initialized)
-        {
-            shutdown();
-            return false;
-        }
-
-        ImFontConfig font_cfg;
-        font_cfg.SizePixels = 31.0f;
-        font_cfg.FontDataOwnedByAtlas = false;
-        io.Fonts->AddFontFromMemoryTTF((void *)OPPOSans_H, OPPOSans_H_size, 31.0f, &font_cfg, io.Fonts->GetGlyphRangesChineseFull());
-        ImGui::GetStyle().ScaleAllSizes(3.0f);
-
-        if (!Touch_Init())
-        {
-            LS_LOGE_TAG("RenderVK", "初始化触摸输入失败");
-            shutdown();
-            return false;
-        }
-
-        return true;
-    }
-    inline void drawBegin()
-    {
-        const auto now = std::chrono::steady_clock::now();
-        if (s_lastDisplayInfoQuery == std::chrono::steady_clock::time_point{} || now - s_lastDisplayInfoQuery >= std::chrono::milliseconds(250))
-        {
-            s_lastDisplayInfoQuery = now;
-            const auto updatedDisplayInfo = android::SurfaceControlManager::GetDisplayInfo();
-            if (updatedDisplayInfo.width > 0 && updatedDisplayInfo.height > 0)
+            auto &image = g_SwapchainImages[i];
+            viewInfo.image = images[i];
+            status = vkCreateImageView(g_Device, &viewInfo, nullptr, &image.view);
+            if (status != VK_SUCCESS)
             {
-                displayInfo = updatedDisplayInfo;
+                image.view = VK_NULL_HANDLE;
+                CleanupSwapchain();
+                return status;
+            }
+            framebufferInfo.pAttachments = &image.view;
+            status = vkCreateFramebuffer(g_Device, &framebufferInfo, nullptr, &image.framebuffer);
+            if (status != VK_SUCCESS)
+            {
+                image.framebuffer = VK_NULL_HANDLE;
+                CleanupSwapchain();
+                return status;
+            }
+            status = vkCreateSemaphore(g_Device, &semaphoreInfo, nullptr, &image.renderFinished);
+            if (status != VK_SUCCESS)
+            {
+                image.renderFinished = VK_NULL_HANDLE;
+                CleanupSwapchain();
+                return status;
             }
         }
-        if (displayInfo.width <= 0 || displayInfo.height <= 0) return;
-
-        const bool rotated = orientation.load(std::memory_order_relaxed) != static_cast<uint32_t>(displayInfo.orientation);
-
-        if (g_SwapChainRebuild || rotated)
-        {
-            if (rotated)
-            {
-                UpdateScreenData(displayInfo.width, displayInfo.height, displayInfo.orientation);
-                // 不等待常规轮询周期，当前帧结束时立即刷新录屏投影。
-                s_lastRecordDisplayScan = {};
-            }
-            g_SwapChainRebuild = !RecreateSwapchain();
-        }
-
-        Touch_UpdateImGui();
-
-        ImGui_ImplVulkan_NewFrame();
-        ImGui_ImplAndroid_NewFrame();
-        ImGui::NewFrame();
-
-        // 旋转或启动时，强制将菜单拉回左上角安全位置
-        static bool s_reposition = true;
-        if (rotated) s_reposition = true;
-
-        if (s_reposition)
-        {
-            ImGui::SetNextWindowPos(ImVec2(100.0f, 100.0f), ImGuiCond_Always);
-            s_reposition = false; // 仅生效一帧，之后允许用户自由拖拽
-        }
+        return status;
     }
 
-    inline void drawEnd()
+    struct RecordSurfaceState
     {
-        if (!imgui_context_created || !vulkan_backend_initialized) return;
+        android::SurfaceControlManager::RecordDisplayInfo display;
+        android::SurfaceControlManager::DisplayInfo source;
+    };
+    static std::optional<RecordSurfaceState> s_recordSurface;
+    static std::optional<android::SurfaceControlManager::RecordDisplayInfo> s_cachedRecordDisplay;
+    static std::optional<android::SurfaceControlManager::RecordDisplayInfo> s_pendingRecordDisplay;
+    static bool s_recordDisplayMissed = false;
+    static std::chrono::steady_clock::time_point s_lastRecordDisplayScan{};
+    static bool s_allowCapture = false;
 
-        ImGui::Render();
-        ImDrawData *draw_data = ImGui::GetDrawData();
-
-        if (g_Device == VK_NULL_HANDLE || g_Swapchain == VK_NULL_HANDLE || g_Framebuffers.empty()) return;
-
-        VK_CHECK(vkWaitForFences(g_Device, 1, &g_InFlightFences[g_CurrentFrame], VK_TRUE, UINT64_MAX));
-
-        uint32_t imageIndex;
-        VkResult result = vkAcquireNextImageKHR(g_Device, g_Swapchain, UINT64_MAX, g_ImageAvailableSemaphores[g_CurrentFrame], VK_NULL_HANDLE, &imageIndex);
-
-        if (result == VK_ERROR_OUT_OF_DATE_KHR)
-        {
-            g_SwapChainRebuild = true;
-            return;
-        }
-
-        else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
-        {
-            return;
-        }
-        if (imageIndex >= g_Framebuffers.size() || imageIndex >= g_RenderFinishedSemaphores.size())
-        {
-            g_SwapChainRebuild = true;
-            return;
-        }
-
-        VK_CHECK(vkResetFences(g_Device, 1, &g_InFlightFences[g_CurrentFrame]));
-
-        VkCommandBuffer cmd = g_CommandBuffers[g_CurrentFrame];
-        VK_CHECK(vkResetCommandBuffer(cmd, 0));
-
-        VkCommandBufferBeginInfo beginInfo{};
-        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
-
-        VkRenderPassBeginInfo renderPassInfo{};
-        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        renderPassInfo.renderPass = g_RenderPass;
-        renderPassInfo.framebuffer = g_Framebuffers[imageIndex];
-        renderPassInfo.renderArea.offset = {0, 0};
-        renderPassInfo.renderArea.extent = g_SwapchainExtent;
-
-        VkClearValue clearColor = {{{0.0f, 0.0f, 0.0f, 0.0f}}};
-        renderPassInfo.clearValueCount = 1;
-        renderPassInfo.pClearValues = &clearColor;
-
-        vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-        ImGui_ImplVulkan_RenderDrawData(draw_data, cmd);
-        vkCmdEndRenderPass(cmd);
-        VK_CHECK(vkEndCommandBuffer(cmd));
-
-        VkSubmitInfo submitInfo{};
-        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-
-        VkSemaphore waitSemaphores[] = {g_ImageAvailableSemaphores[g_CurrentFrame]};
-        VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-        submitInfo.waitSemaphoreCount = 1;
-        submitInfo.pWaitSemaphores = waitSemaphores;
-        submitInfo.pWaitDstStageMask = waitStages;
-        submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &cmd;
-
-        VkSemaphore signalSemaphores[] = {g_RenderFinishedSemaphores[imageIndex]};
-        submitInfo.signalSemaphoreCount = 1;
-        submitInfo.pSignalSemaphores = signalSemaphores;
-
-        VK_CHECK(vkQueueSubmit(g_Queue, 1, &submitInfo, g_InFlightFences[g_CurrentFrame]));
-
-        VkPresentInfoKHR presentInfo{};
-        presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-        presentInfo.waitSemaphoreCount = 1;
-        presentInfo.pWaitSemaphores = signalSemaphores;
-        presentInfo.swapchainCount = 1;
-        presentInfo.pSwapchains = &g_Swapchain;
-        presentInfo.pImageIndices = &imageIndex;
-
-        result = vkQueuePresentKHR(g_Queue, &presentInfo);
-
-        if (result == VK_ERROR_OUT_OF_DATE_KHR)
-        {
-            g_SwapChainRebuild = true;
-        }
-
-        if (s_allowCapture)
-        {
-            EnsureRecordSurface();
-        }
-
-        g_CurrentFrame = (g_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+    inline void CleanupRecordSurface()
+    {
+        if (!s_recordSurface) return;
+        android::SurfaceControlManager::DestroyMirrorOnLayerStack(native_window);
+        s_recordSurface.reset();
     }
 
     inline void shutdown()
     {
         Touch_Shutdown();
-
-        if (g_Device != VK_NULL_HANDLE) vkDeviceWaitIdle(g_Device);
-
+        if (g_Device) vkDeviceWaitIdle(g_Device);
         CleanupRecordSurface();
+        s_cachedRecordDisplay.reset();
+        s_pendingRecordDisplay.reset();
+        s_recordDisplayMissed = false;
+        s_lastRecordDisplayScan = {};
 
         if (vulkan_backend_initialized) ImGui_ImplVulkan_Shutdown();
         if (android_backend_initialized) ImGui_ImplAndroid_Shutdown();
@@ -801,49 +289,470 @@ namespace RenderVK
         android_backend_initialized = false;
         imgui_context_created = false;
 
-        if (g_Device != VK_NULL_HANDLE)
+        if (g_Device)
         {
-            DestroyRenderFinishedSemaphores();
             CleanupSwapchain();
             vkDestroyDescriptorPool(g_Device, g_DescriptorPool, nullptr);
             vkDestroyRenderPass(g_Device, g_RenderPass, nullptr);
-            for (auto semaphore : g_ImageAvailableSemaphores) vkDestroySemaphore(g_Device, semaphore, nullptr);
-            for (auto fence : g_InFlightFences) vkDestroyFence(g_Device, fence, nullptr);
+            for (auto &semaphore : g_ImageAvailableSemaphores)
+            {
+                vkDestroySemaphore(g_Device, semaphore, nullptr);
+                semaphore = VK_NULL_HANDLE;
+            }
+            for (auto &fence : g_InFlightFences)
+            {
+                vkDestroyFence(g_Device, fence, nullptr);
+                fence = VK_NULL_HANDLE;
+            }
             vkDestroyCommandPool(g_Device, g_CommandPool, nullptr);
             vkDestroyDevice(g_Device, nullptr);
+            g_DescriptorPool = VK_NULL_HANDLE;
+            g_RenderPass = VK_NULL_HANDLE;
+            g_CommandPool = VK_NULL_HANDLE;
             g_Device = VK_NULL_HANDLE;
         }
-
-        if (g_Instance != VK_NULL_HANDLE)
+        if (g_Instance)
         {
-            if (g_Surface != VK_NULL_HANDLE) vkDestroySurfaceKHR(g_Instance, g_Surface, nullptr);
+            vkDestroySurfaceKHR(g_Instance, g_Surface, nullptr);
             vkDestroyInstance(g_Instance, nullptr);
             g_Surface = VK_NULL_HANDLE;
             g_Instance = VK_NULL_HANDLE;
         }
-
         if (native_window)
         {
             android::SurfaceControlManager::Destroy(native_window);
             ANativeWindow_release(native_window);
             native_window = nullptr;
         }
-        g_PhysicalDevice = VK_NULL_HANDLE;
-        g_PresentMode = VK_PRESENT_MODE_FIFO_KHR;
-        g_QueueFamily = (uint32_t)-1;
-        g_Queue = VK_NULL_HANDLE;
-        g_Swapchain = VK_NULL_HANDLE;
-        g_RenderPass = VK_NULL_HANDLE;
-        g_CommandPool = VK_NULL_HANDLE;
-        g_DescriptorPool = VK_NULL_HANDLE;
-        g_SwapchainImages.clear();
-        g_SwapchainImageViews.clear();
-        g_Framebuffers.clear();
-        g_CommandBuffers.clear();
-        g_ImageAvailableSemaphores.clear();
-        g_RenderFinishedSemaphores.clear();
-        g_InFlightFences.clear();
         g_CurrentFrame = 0;
+        g_FirstFrame = true;
         g_SwapChainRebuild = false;
+    }
+
+    inline int init(bool allowCapture)
+    {
+        int status = 0;
+        if (vulkan_backend_initialized) return status;
+
+        s_allowCapture = allowCapture;
+        displayInfo = android::SurfaceControlManager::GetDisplayInfo();
+        s_lastDisplayInfoQuery = std::chrono::steady_clock::now();
+        if (displayInfo.width <= 0 || displayInfo.height <= 0)
+        {
+            displayInfo.width = 1080;
+            displayInfo.height = 2340;
+            displayInfo.orientation = 0;
+        }
+        UpdateScreenData(displayInfo.width, displayInfo.height, displayInfo.orientation);
+        // SurfaceFlinger 负责旋转投影；方形缓冲不随逻辑屏幕宽高交换。
+        const int max_side = std::max(displayInfo.width, displayInfo.height);
+        native_window = android::SurfaceControlManager::Create("Accessibility Overlays", max_side, max_side, !allowCapture, 2024);
+        if (!native_window)
+        {
+            LS_LOGE_TAG("RenderVK", "创建 ANativeWindow 失败");
+            status = -ENODEV;
+            return status;
+        }
+        ANativeWindow_acquire(native_window);
+
+        const char *instanceExtensions[] = {VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_ANDROID_SURFACE_EXTENSION_NAME};
+        VkInstanceCreateInfo instanceInfo{};
+        instanceInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+        instanceInfo.enabledExtensionCount = IM_ARRAYSIZE(instanceExtensions);
+        instanceInfo.ppEnabledExtensionNames = instanceExtensions;
+        status = vkCreateInstance(&instanceInfo, nullptr, &g_Instance);
+        if (status != VK_SUCCESS)
+        {
+            g_Instance = VK_NULL_HANDLE;
+            shutdown();
+            return status;
+        }
+        VkAndroidSurfaceCreateInfoKHR surfaceInfo{};
+        surfaceInfo.sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR;
+        surfaceInfo.window = native_window;
+        status = vkCreateAndroidSurfaceKHR(g_Instance, &surfaceInfo, nullptr, &g_Surface);
+        if (status != VK_SUCCESS)
+        {
+            g_Surface = VK_NULL_HANDLE;
+            shutdown();
+            return status;
+        }
+        uint32_t gpuCount = 0;
+        status = vkEnumeratePhysicalDevices(g_Instance, &gpuCount, nullptr);
+        if (status == VK_SUCCESS && gpuCount == 0) status = VK_ERROR_INITIALIZATION_FAILED;
+        if (status != VK_SUCCESS)
+        {
+            shutdown();
+            return status;
+        }
+        std::vector<VkPhysicalDevice> gpus(gpuCount);
+        status = vkEnumeratePhysicalDevices(g_Instance, &gpuCount, gpus.data());
+        if (status != VK_SUCCESS)
+        {
+            shutdown();
+            return status;
+        }
+
+        uint32_t queueFamily = VK_QUEUE_FAMILY_IGNORED;
+        for (uint32_t gpu = 0; gpu < gpuCount; ++gpu)
+        {
+            uint32_t count = 0;
+            vkGetPhysicalDeviceQueueFamilyProperties(gpus[gpu], &count, nullptr);
+            std::vector<VkQueueFamilyProperties> families(count);
+            vkGetPhysicalDeviceQueueFamilyProperties(gpus[gpu], &count, families.data());
+            for (uint32_t i = 0; i < count; ++i)
+            {
+                if (!(families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)) continue;
+                VkBool32 presentSupport = VK_FALSE;
+                status = vkGetPhysicalDeviceSurfaceSupportKHR(gpus[gpu], i, g_Surface, &presentSupport);
+                if (status != VK_SUCCESS)
+                {
+                    shutdown();
+                    return status;
+                }
+                if (!presentSupport) continue;
+                queueFamily = i;
+                break;
+            }
+            if (queueFamily == VK_QUEUE_FAMILY_IGNORED) continue;
+            g_PhysicalDevice = gpus[gpu];
+            break;
+        }
+        if (queueFamily == VK_QUEUE_FAMILY_IGNORED)
+        {
+            LS_LOGE_TAG("RenderVK", "没有找到同时支持图形和呈现的队列族");
+            status = VK_ERROR_INITIALIZATION_FAILED;
+            shutdown();
+            return status;
+        }
+
+        const char *deviceExtension = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+        const float queuePriority = 1.0f;
+        VkDeviceQueueCreateInfo queueInfo{};
+        queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        queueInfo.queueFamilyIndex = queueFamily;
+        queueInfo.queueCount = 1;
+        queueInfo.pQueuePriorities = &queuePriority;
+        VkDeviceCreateInfo deviceInfo{};
+        deviceInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+        deviceInfo.pQueueCreateInfos = &queueInfo;
+        deviceInfo.queueCreateInfoCount = 1;
+        deviceInfo.enabledExtensionCount = 1;
+        deviceInfo.ppEnabledExtensionNames = &deviceExtension;
+        status = vkCreateDevice(g_PhysicalDevice, &deviceInfo, nullptr, &g_Device);
+        if (status != VK_SUCCESS)
+        {
+            g_Device = VK_NULL_HANDLE;
+            shutdown();
+            return status;
+        }
+        vkGetDeviceQueue(g_Device, queueFamily, 0, &g_Queue);
+
+        status = CreateSwapchain();
+        if (status != VK_SUCCESS)
+        {
+            LS_LOGE_TAG("RenderVK", "创建主交换链失败: %d", status);
+            shutdown();
+            return status;
+        }
+
+        VkCommandPoolCreateInfo poolInfo{};
+        poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        poolInfo.queueFamilyIndex = queueFamily;
+        status = vkCreateCommandPool(g_Device, &poolInfo, nullptr, &g_CommandPool);
+        if (status != VK_SUCCESS)
+        {
+            g_CommandPool = VK_NULL_HANDLE;
+            shutdown();
+            return status;
+        }
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.commandPool = g_CommandPool;
+        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandBufferCount = MAX_FRAMES_IN_FLIGHT;
+        status = vkAllocateCommandBuffers(g_Device, &allocInfo, g_CommandBuffers);
+        if (status != VK_SUCCESS)
+        {
+            shutdown();
+            return status;
+        }
+
+        VkSemaphoreCreateInfo semaphoreInfo{};
+        semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        VkFenceCreateInfo fenceInfo{};
+        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+        for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i)
+        {
+            status = vkCreateSemaphore(g_Device, &semaphoreInfo, nullptr, &g_ImageAvailableSemaphores[i]);
+            if (status != VK_SUCCESS)
+            {
+                g_ImageAvailableSemaphores[i] = VK_NULL_HANDLE;
+                shutdown();
+                return status;
+            }
+            status = vkCreateFence(g_Device, &fenceInfo, nullptr, &g_InFlightFences[i]);
+            if (status != VK_SUCCESS)
+            {
+                g_InFlightFences[i] = VK_NULL_HANDLE;
+                shutdown();
+                return status;
+            }
+        }
+
+        const VkDescriptorPoolSize poolSizes[] = {{VK_DESCRIPTOR_TYPE_SAMPLER, 1000}, {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000}, {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000}, {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000}, {VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000}, {VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000}, {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000}, {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000}, {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000}, {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000}, {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000}};
+        VkDescriptorPoolCreateInfo descPoolInfo{};
+        descPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        descPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+        descPoolInfo.maxSets = 1000 * IM_ARRAYSIZE(poolSizes);
+        descPoolInfo.poolSizeCount = IM_ARRAYSIZE(poolSizes);
+        descPoolInfo.pPoolSizes = poolSizes;
+        status = vkCreateDescriptorPool(g_Device, &descPoolInfo, nullptr, &g_DescriptorPool);
+        if (status != VK_SUCCESS)
+        {
+            g_DescriptorPool = VK_NULL_HANDLE;
+            shutdown();
+            return status;
+        }
+
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        imgui_context_created = true;
+        android_backend_initialized = ImGui_ImplAndroid_Init(native_window);
+        if (!android_backend_initialized)
+        {
+            status = -EIO;
+            shutdown();
+            return status;
+        }
+        ImGui_ImplVulkan_InitInfo initInfo{};
+        initInfo.Instance = g_Instance;
+        initInfo.PhysicalDevice = g_PhysicalDevice;
+        initInfo.Device = g_Device;
+        initInfo.QueueFamily = queueFamily;
+        initInfo.Queue = g_Queue;
+        initInfo.DescriptorPool = g_DescriptorPool;
+        initInfo.MinImageCount = static_cast<uint32_t>(g_SwapchainImages.size());
+        initInfo.ImageCount = initInfo.MinImageCount;
+        initInfo.PipelineInfoMain.RenderPass = g_RenderPass;
+        initInfo.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+        initInfo.CheckVkResultFn = [](VkResult result)
+        {
+            if (result != VK_SUCCESS) LS_LOGE_TAG("RenderVK", "ImGui Vulkan VkResult=%d", result);
+        };
+        vulkan_backend_initialized = ImGui_ImplVulkan_Init(&initInfo);
+        if (!vulkan_backend_initialized)
+        {
+            status = -EIO;
+            shutdown();
+            return status;
+        }
+
+        ImGuiIO &io = ImGui::GetIO();
+        io.IniFilename = nullptr;
+        ImFontConfig font_cfg;
+        font_cfg.FontDataOwnedByAtlas = false;
+        io.Fonts->AddFontFromMemoryTTF((void *)OPPOSans_H, OPPOSans_H_size, 31.0f, &font_cfg, io.Fonts->GetGlyphRangesChineseFull());
+        ImGui::GetStyle().ScaleAllSizes(3.0f);
+        if (!Touch_Init())
+        {
+            LS_LOGE_TAG("RenderVK", "初始化触摸输入失败");
+            status = -EIO;
+            shutdown();
+            return status;
+        }
+        return status;
+    }
+
+    inline int drawBegin()
+    {
+        int status = 0;
+        if (!vulkan_backend_initialized)
+        {
+            status = -ENODEV;
+            return status;
+        }
+
+        bool rotated = false;
+        const auto now = std::chrono::steady_clock::now();
+        if (now - s_lastDisplayInfoQuery >= std::chrono::milliseconds(250))
+        {
+            s_lastDisplayInfoQuery = now;
+            const auto updated = android::SurfaceControlManager::GetDisplayInfo();
+            if (updated.width > 0 && updated.height > 0 &&
+                (updated.width != displayInfo.width || updated.height != displayInfo.height || updated.orientation != displayInfo.orientation))
+            {
+                rotated = updated.orientation != displayInfo.orientation;
+                displayInfo = updated;
+                UpdateScreenData(displayInfo.width, displayInfo.height, displayInfo.orientation);
+                g_SwapChainRebuild = true;
+                s_lastRecordDisplayScan = {};
+            }
+        }
+        if (g_SwapChainRebuild)
+        {
+            status = vkDeviceWaitIdle(g_Device);
+            if (status != VK_SUCCESS) return status;
+            status = CreateSwapchain();
+            if (status == VK_SUCCESS)
+            {
+                g_SwapChainRebuild = false;
+                ImGui_ImplVulkan_SetMinImageCount(static_cast<uint32_t>(g_SwapchainImages.size()));
+            }
+            else if (status == VK_ERROR_OUT_OF_DATE_KHR || status == VK_INCOMPLETE) status = 0;
+            else return status;
+        }
+
+        Touch_UpdateImGui();
+        ImGui_ImplVulkan_NewFrame();
+        ImGui_ImplAndroid_NewFrame();
+        ImGui::NewFrame();
+        if (g_FirstFrame || rotated) ImGui::SetNextWindowPos(ImVec2(100.0f, 100.0f), ImGuiCond_Always);
+        g_FirstFrame = false;
+        return status;
+    }
+
+    inline bool SameRecordDisplay(const android::SurfaceControlManager::RecordDisplayInfo &lhs, const android::SurfaceControlManager::RecordDisplayInfo &rhs)
+    {
+        return lhs.layerStack == rhs.layerStack && lhs.orientation == rhs.orientation && lhs.layerStackRect == rhs.layerStackRect && lhs.displayRect == rhs.displayRect;
+    }
+
+    inline int drawEnd()
+    {
+        int status = 0;
+        if (!vulkan_backend_initialized)
+        {
+            status = -ENODEV;
+            return status;
+        }
+
+        ImGui::Render();
+        if (g_SwapChainRebuild) return status;
+
+        const VkFence fence = g_InFlightFences[g_CurrentFrame];
+        status = vkWaitForFences(g_Device, 1, &fence, VK_TRUE, UINT64_MAX);
+        if (status != VK_SUCCESS) return status;
+
+        uint32_t imageIndex;
+        const VkResult acquire = vkAcquireNextImageKHR(g_Device, g_Swapchain, UINT64_MAX, g_ImageAvailableSemaphores[g_CurrentFrame], VK_NULL_HANDLE, &imageIndex);
+        if (acquire == VK_ERROR_OUT_OF_DATE_KHR)
+        {
+            g_SwapChainRebuild = true;
+            return status;
+        }
+        // SUBOPTIMAL 仍然取得了图像；完成这次提交、消耗 acquire 信号量后再重建。
+        if (acquire == VK_SUBOPTIMAL_KHR) g_SwapChainRebuild = true;
+        else if (acquire != VK_SUCCESS)
+        {
+            status = acquire;
+            return status;
+        }
+
+        const VkCommandBuffer cmd = g_CommandBuffers[g_CurrentFrame];
+        status = vkResetCommandBuffer(cmd, 0);
+        if (status != VK_SUCCESS) return status;
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        status = vkBeginCommandBuffer(cmd, &beginInfo);
+        if (status != VK_SUCCESS) return status;
+
+        const auto &image = g_SwapchainImages[imageIndex];
+        const VkClearValue clearColor{};
+        VkRenderPassBeginInfo renderPassInfo{};
+        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        renderPassInfo.renderPass = g_RenderPass;
+        renderPassInfo.framebuffer = image.framebuffer;
+        renderPassInfo.renderArea.extent = g_SwapchainExtent;
+        renderPassInfo.clearValueCount = 1;
+        renderPassInfo.pClearValues = &clearColor;
+        vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+        vkCmdEndRenderPass(cmd);
+        status = vkEndCommandBuffer(cmd);
+        if (status != VK_SUCCESS) return status;
+
+        const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.waitSemaphoreCount = 1;
+        submitInfo.pWaitSemaphores = &g_ImageAvailableSemaphores[g_CurrentFrame];
+        submitInfo.pWaitDstStageMask = &waitStage;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &cmd;
+        submitInfo.signalSemaphoreCount = 1;
+        submitInfo.pSignalSemaphores = &image.renderFinished;
+        status = vkResetFences(g_Device, 1, &fence);
+        if (status != VK_SUCCESS) return status;
+        status = vkQueueSubmit(g_Queue, 1, &submitInfo, fence);
+        if (status != VK_SUCCESS) return status;
+        g_CurrentFrame = (g_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+
+        VkPresentInfoKHR presentInfo{};
+        presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        presentInfo.waitSemaphoreCount = 1;
+        presentInfo.pWaitSemaphores = &image.renderFinished;
+        presentInfo.swapchainCount = 1;
+        presentInfo.pSwapchains = &g_Swapchain;
+        presentInfo.pImageIndices = &imageIndex;
+        const VkResult present = vkQueuePresentKHR(g_Queue, &presentInfo);
+        if (present == VK_ERROR_OUT_OF_DATE_KHR || present == VK_SUBOPTIMAL_KHR) g_SwapChainRebuild = true;
+        else if (present != VK_SUCCESS)
+        {
+            status = present;
+            return status;
+        }
+
+        if (!s_allowCapture) return status;
+        const auto now = std::chrono::steady_clock::now();
+        if (s_lastRecordDisplayScan == std::chrono::steady_clock::time_point{} || now - s_lastRecordDisplayScan >= std::chrono::seconds(2))
+        {
+            s_lastRecordDisplayScan = now;
+            android::SurfaceControlManager::RecordDisplayInfo scanned{};
+            if (!android::SurfaceControlManager::FindRecordDisplay(&scanned, displayInfo.width, displayInfo.height))
+            {
+                if (s_recordDisplayMissed) s_cachedRecordDisplay.reset();
+                s_recordDisplayMissed = true;
+                s_pendingRecordDisplay.reset();
+            }
+            else
+            {
+                s_recordDisplayMissed = false;
+                // 已有镜像时，连续两次扫描到同一新目标才切换 layerStack。
+                if (!s_recordSurface || !s_cachedRecordDisplay || scanned.layerStack == s_cachedRecordDisplay->layerStack ||
+                    (s_pendingRecordDisplay && SameRecordDisplay(scanned, *s_pendingRecordDisplay)))
+                {
+                    s_cachedRecordDisplay = scanned;
+                    s_pendingRecordDisplay.reset();
+                }
+                else s_pendingRecordDisplay = scanned;
+            }
+        }
+        if (!s_cachedRecordDisplay)
+        {
+            CleanupRecordSurface();
+            return status;
+        }
+
+        const auto &target = *s_cachedRecordDisplay;
+        if (!s_recordSurface || s_recordSurface->display.layerStack != target.layerStack)
+        {
+            CleanupRecordSurface();
+            if (!android::SurfaceControlManager::CreateMirrorOnLayerStack(native_window, target.layerStack)) return status;
+            s_recordSurface.emplace();
+        }
+        else if (SameRecordDisplay(s_recordSurface->display, target) && s_recordSurface->source.orientation == displayInfo.orientation &&
+                 s_recordSurface->source.width == displayInfo.width && s_recordSurface->source.height == displayInfo.height) return status;
+
+        if (!android::SurfaceControlManager::ConfigureMirrorProjection(native_window, displayInfo, target))
+        {
+            CleanupRecordSurface();
+            return status;
+        }
+        s_recordSurface->display = target;
+        s_recordSurface->source = displayInfo;
+        LS_LOGI_TAG_FMT("RenderVK", "录屏镜像层就绪 layerStack={} orientation={} stackRect=({},{}-{},{}), displayRect=({},{}-{},{}), source={}x{}", target.layerStack, target.orientation, target.layerStackRect.left, target.layerStackRect.top, target.layerStackRect.right, target.layerStackRect.bottom, target.displayRect.left, target.displayRect.top, target.displayRect.right, target.displayRect.bottom, displayInfo.width, displayInfo.height);
+        return status;
     }
 } // namespace RenderVK

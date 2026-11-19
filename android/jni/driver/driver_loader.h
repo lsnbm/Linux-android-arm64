@@ -3,27 +3,240 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <charconv>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <dlfcn.h>
 #include <elf.h>
 #include <limits>
 #include <optional>
 #include <print>
 #include <string>
 #include <string_view>
+#include <sys/klog.h>
+#include <sys/stat.h>
 #include <sys/system_properties.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <sys/utsname.h>
-#include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
-
-#include "logger/logger.h"
 
 #ifndef SYS_init_module
 #define SYS_init_module 105
 #endif
+//不知道为何很多设备没有curl命令行工具，但是有curl库
+namespace Curl
+{
+    // libcurl 公开 C ABI 的稳定值；不要求迁移本头文件时额外携带 curl 开发头。
+    // 运行设备须有可加载的 libcurl.so；
+    enum Option : int
+    {
+        WriteData = 10001,
+        Url = 10002,
+        WriteFunction = 20011,
+        Timeout = 13,
+        FailOnError = 45,
+        FollowLocation = 52,
+        VerifyPeer = 64,
+        CaInfo = 10065,
+        MaxRedirects = 68,
+        ConnectTimeout = 78,
+        VerifyHost = 81,
+        CaPath = 10097,
+        NoSignal = 99,
+        MaxFileSize = 114,
+        Protocols = 181,
+        RedirectProtocols = 182,
+    };
+    inline constexpr int ResponseCode = 0x200002;
+    inline constexpr size_t MaxModuleSize = 64ULL * 1024 * 1024;
+
+    // curl_version_info(CURLVERSION_FIRST) 返回结构的固定前缀。
+    struct VersionInfo
+    {
+        int age;
+        const char *version;
+        unsigned version_number;
+        const char *host;
+        int features;
+    };
+
+    struct Api
+    {
+        void *library = nullptr;
+        int (*global_init)(long) = nullptr;
+        const VersionInfo *(*version_info)(int) = nullptr;
+        void *(*easy_init)() = nullptr;
+        int (*easy_setopt)(void *, int, ...) = nullptr;
+        int (*easy_perform)(void *) = nullptr;
+        int (*easy_getinfo)(void *, int, ...) = nullptr;
+        void (*easy_cleanup)(void *) = nullptr;
+        const char *(*easy_strerror)(int) = nullptr;
+        const char *error = "libcurl.so 不可用";
+
+        Api()
+        {
+            library = dlopen("libcurl.so", RTLD_NOW | RTLD_LOCAL);
+            if (!library) return;
+            global_init = reinterpret_cast<decltype(global_init)>(dlsym(library, "curl_global_init"));
+            version_info = reinterpret_cast<decltype(version_info)>(dlsym(library, "curl_version_info"));
+            easy_init = reinterpret_cast<decltype(easy_init)>(dlsym(library, "curl_easy_init"));
+            easy_setopt = reinterpret_cast<decltype(easy_setopt)>(dlsym(library, "curl_easy_setopt"));
+            easy_perform = reinterpret_cast<decltype(easy_perform)>(dlsym(library, "curl_easy_perform"));
+            easy_getinfo = reinterpret_cast<decltype(easy_getinfo)>(dlsym(library, "curl_easy_getinfo"));
+            easy_cleanup = reinterpret_cast<decltype(easy_cleanup)>(dlsym(library, "curl_easy_cleanup"));
+            easy_strerror = reinterpret_cast<decltype(easy_strerror)>(dlsym(library, "curl_easy_strerror"));
+            if (!global_init || !version_info || !easy_init || !easy_setopt || !easy_perform || !easy_getinfo || !easy_cleanup || !easy_strerror)
+            {
+                error = "libcurl 缺少必要接口";
+                return;
+            }
+            if (global_init(3L) != 0)
+            {
+                error = "libcurl 全局初始化失败";
+                return;
+            }
+            const VersionInfo *info = version_info(0);
+            // NOSIGNAL 下同步 DNS 不能保证超时，要求 SSL 与异步解析均可用。
+            if (!info || !(info->features & (1 << 2)) || !(info->features & (1 << 7)))
+            {
+                error = "libcurl 需要 HTTPS 和异步 DNS 支持";
+                return;
+            }
+            error = nullptr;
+        }
+
+        // 保留到进程退出，避免超时后尚未退出的 DNS 线程执行已卸载代码。
+        // 不做进程级 global_cleanup，以免影响迁移项目中其他 libcurl 使用方。
+    };
+
+    inline const Api &GetApi()
+    {
+        static const Api api;
+        return api;
+    }
+
+    struct Transfer
+    {
+        const Api &api;
+        void *handle;
+        std::vector<uint8_t> &output;
+        int result = 0;
+        int write_error = 0;
+
+        Transfer(const Api &api, std::vector<uint8_t> &output) : api(api), handle(api.easy_init()), output(output)
+        {
+        }
+        ~Transfer()
+        {
+            if (handle) api.easy_cleanup(handle);
+        }
+        Transfer(const Transfer &) = delete;
+        Transfer &operator=(const Transfer &) = delete;
+
+        template <typename T> void Set(Option option, T value)
+        {
+            if (result == 0) result = api.easy_setopt(handle, option, value);
+        }
+
+        static size_t Write(char *data, size_t size, size_t count, void *context) noexcept
+        {
+            auto &transfer = *static_cast<Transfer *>(context);
+            if (size == 0 || count == 0) return 0;
+            if (count > MaxModuleSize / size || transfer.output.size() > MaxModuleSize - size * count)
+            {
+                transfer.write_error = EFBIG;
+                return 0;
+            }
+            const size_t bytes = size * count;
+            try
+            {
+                const auto *begin = reinterpret_cast<const uint8_t *>(data);
+                transfer.output.insert(transfer.output.end(), begin, begin + bytes);
+            }
+            catch (...)
+            {
+                transfer.write_error = ENOMEM;
+                return 0;
+            }
+            return bytes;
+        }
+    };
+
+    inline const char *GetCaPath()
+    {
+        const char *path = "/apex/com.android.conscrypt/cacerts";
+        struct stat info{};
+        if (stat(path, &info) != 0)
+        {
+            if (errno != ENOENT && errno != ENOTDIR) return nullptr;
+            path = "/system/etc/security/cacerts";
+            if (stat(path, &info) != 0) return nullptr;
+        }
+        if (!S_ISDIR(info.st_mode))
+        {
+            errno = ENOTDIR;
+            return nullptr;
+        }
+        if (access(path, R_OK | X_OK) != 0) return nullptr;
+        return path;
+    }
+
+    inline bool DownloadHttps(const std::string &url, std::vector<uint8_t> &output)
+    {
+        output.clear();
+        if (!url.starts_with("https://") || url.find('\0') != std::string::npos)
+        {
+            errno = EINVAL;
+            return false;
+        }
+        const auto &api = GetApi();
+        if (api.error)
+        {
+            std::println(stderr, "[DriverLoader] {}", api.error);
+            errno = ENOSYS;
+            return false;
+        }
+        const char *ca_path = GetCaPath();
+        if (!ca_path) return false;
+        Transfer transfer(api, output);
+        if (!transfer.handle)
+        {
+            errno = ENOMEM;
+            return false;
+        }
+        transfer.Set(Url, url.c_str());
+        transfer.Set(WriteFunction, &Transfer::Write);
+        transfer.Set(WriteData, static_cast<void *>(&transfer));
+        transfer.Set(FailOnError, 1L);
+        transfer.Set(FollowLocation, 1L);
+        transfer.Set(MaxRedirects, 20L);
+        transfer.Set(ConnectTimeout, 15L);
+        transfer.Set(Timeout, 40L);
+        transfer.Set(NoSignal, 1L);
+        transfer.Set(VerifyPeer, 1L);
+        transfer.Set(VerifyHost, 2L);
+        transfer.Set(CaInfo, static_cast<const char *>(nullptr));
+        transfer.Set(CaPath, ca_path);
+        transfer.Set(Protocols, 2L); // CURLPROTO_HTTPS：初始请求和重定向均不允许降级。
+        transfer.Set(RedirectProtocols, 2L);
+        transfer.Set(MaxFileSize, static_cast<long>(MaxModuleSize));
+
+        long status = 0;
+        if (transfer.result == 0) transfer.result = api.easy_perform(transfer.handle);
+        if (transfer.result == 0) transfer.result = api.easy_getinfo(transfer.handle, ResponseCode, &status);
+        if (transfer.result == 0 && status >= 200 && status < 300 && !output.empty()) return true;
+
+        const int error = transfer.write_error ? transfer.write_error : (transfer.result == 28 ? ETIMEDOUT : EIO);
+        output.clear();
+        std::println(stderr, "[DriverLoader] HTTPS 下载失败: curl={} ({}), HTTP={}, errno={}", transfer.result, api.easy_strerror(transfer.result), status, error);
+        std::fflush(stderr);
+        errno = error;
+        return false;
+    }
+} // namespace Curl
 
 namespace DriverLoader
 {
@@ -57,7 +270,7 @@ namespace DriverLoader
             }
             return false;
         }
-    }
+    } // namespace Vivo
 
     inline bool IsElfRangeValid(size_t offset, size_t size, size_t image_size)
     {
@@ -169,7 +382,6 @@ namespace DriverLoader
         if (!IsElfRangeValid(modinfo_header_offset, sizeof(modinfo_section), module_image.size())) return false;
         std::memcpy(module_image.data() + modinfo_header_offset, &modinfo_section, sizeof(modinfo_section));
 
-        LS_LOGI_TAG("DriverLoader", "vermagic 修补: %s -> %s", module_vermagic.c_str(), target_vermagic.c_str());
         std::println(stderr, "[DriverLoader] vermagic 修补: {} -> {}", module_vermagic, target_vermagic);
         std::fflush(stderr);
         return true;
@@ -180,7 +392,6 @@ namespace DriverLoader
         struct utsname kernel_info{};
         if (uname(&kernel_info) != 0)
         {
-            LS_LOGE_TAG("DriverLoader", "获取内核版本失败: errno=%d (%s)", errno, strerror(errno));
             std::println(stderr, "[DriverLoader] 获取内核版本失败: errno={} ({})", errno, strerror(errno));
             std::fflush(stderr);
             return {};
@@ -190,7 +401,6 @@ namespace DriverLoader
         int minor = 0;
         if (std::sscanf(kernel_info.release, "%d.%d", &major, &minor) != 2)
         {
-            LS_LOGE_TAG("DriverLoader", "无法解析内核版本: %s", kernel_info.release);
             std::println(stderr, "[DriverLoader] 无法解析内核版本: {}", std::string_view(kernel_info.release));
             std::fflush(stderr);
             return {};
@@ -209,86 +419,88 @@ namespace DriverLoader
         }
         else
         {
-            LS_LOGE_TAG("DriverLoader", "不支持的内核版本: %s", kernel_info.release);
             std::println(stderr, "[DriverLoader] 不支持的内核版本: {}", std::string_view(kernel_info.release));
             std::fflush(stderr);
             return {};
         }
 
-        LS_LOGI_TAG("DriverLoader", "内核版本 %d.%d，候选模块数量=%zu", major, minor, candidates.size());
         std::println(stderr, "[DriverLoader] 内核版本 {}.{}, 候选模块数量={}", major, minor, candidates.size());
         std::fflush(stderr);
         return candidates;
     }
 
-    inline bool ReadCommandOutput(const std::string &command, std::vector<uint8_t> &output)
-    {
-        constexpr size_t MAX_MODULE_SIZE = 64ULL * 1024 * 1024;
-        uint8_t buffer[16 * 1024];
-        output.clear();
-
-        FILE *stream = popen(command.c_str(), "r");
-        if (!stream) return false;
-
-        while (true)
-        {
-            const size_t bytes_read = fread(buffer, 1, sizeof(buffer), stream);
-            if (bytes_read > 0)
-            {
-                if (output.size() > MAX_MODULE_SIZE - bytes_read)
-                {
-                    pclose(stream);
-                    output.clear();
-                    errno = EFBIG;
-                    return false;
-                }
-                output.insert(output.end(), buffer, buffer + bytes_read);
-            }
-            if (bytes_read < sizeof(buffer)) break;
-        }
-
-        const bool read_ok = ferror(stream) == 0;
-        const int command_status = pclose(stream);
-        if (!read_ok || command_status == -1 || !WIFEXITED(command_status) || WEXITSTATUS(command_status) != 0 || output.empty())
-        {
-            output.clear();
-            return false;
-        }
-        return true;
-    }
-
     inline bool DownloadModule(const std::string &module_name, std::vector<uint8_t> &module_image)
     {
         const std::string url = "https://raw.githubusercontent.com/lsnbm/Linux-android-arm64/main/lsdriver/byte_stream/" + module_name;
-        const std::string curl_command = "curl -fLsS --connect-timeout 15 --max-time 40 '" + url + "'";
-        if (ReadCommandOutput(curl_command, module_image)) return true;
+        if (Curl::DownloadHttps(url, module_image)) return true;
 
-        LS_LOGE_TAG("DriverLoader", "下载模块失败: %s", url.c_str());
-        std::println(stderr, "[DriverLoader] 下载模块失败: {}", url);
+        const int download_error = errno;
+        std::println(stderr, "[DriverLoader] 下载模块失败: {} errno={} ({})", url, download_error, strerror(download_error));
         std::fflush(stderr);
+        errno = download_error;
         return false;
     }
 
     inline void PrintDmesgTail()
     {
-        FILE *stream = popen("dmesg 2>&1 | tail -n 80", "r");
-        if (!stream)
+        // READ_ALL 不消费或清空日志；保留全部标签，避免漏掉内核模块加载器的诊断。
+        int capacity;
+        do
         {
-            LS_LOGE_TAG("DriverLoader", "读取 dmesg 失败: errno=%d (%s)", errno, strerror(errno));
-            std::println(stderr, "[DriverLoader] 读取 dmesg 失败: errno={} ({})", errno, strerror(errno));
+            capacity = klogctl(KLOG_SIZE_BUFFER, nullptr, 0);
+        } while (capacity < 0 && errno == EINTR);
+        std::string snapshot;
+        int count = capacity;
+        if (capacity > 0)
+        {
+            snapshot.resize(static_cast<size_t>(capacity));
+            do
+            {
+                count = klogctl(KLOG_READ_ALL, snapshot.data(), capacity);
+            } while (count < 0 && errno == EINTR);
+        }
+        if (count < 0)
+        {
+            const int read_error = errno;
+            std::println(stderr, "[DriverLoader] 读取 dmesg 失败: errno={} ({})", read_error, strerror(read_error));
             std::fflush(stderr);
             return;
         }
+        if (count == 0) return;
 
-        char line[512];
-        while (fgets(line, sizeof(line), stream))
+        // 从快照末尾寻找最后 80 行；末尾换行不额外算作空行。
+        size_t begin = static_cast<size_t>(count);
+        int lines = snapshot[begin - 1] == '\n' ? 0 : 1;
+        while (begin > 0)
         {
-            line[strcspn(line, "\r\n")] = '\0';
-            LS_LOGE_TAG("DriverLoader", "dmesg: %s", line);
-            std::println(stderr, "[DriverLoader] dmesg: {}", std::string_view(line));
-            std::fflush(stderr);
+            if (snapshot[--begin] == '\n' && ++lines > 80)
+            {
+                ++begin;
+                break;
+            }
         }
-        pclose(stream);
+        std::string_view remaining(snapshot.data() + begin, static_cast<size_t>(count) - begin);
+        while (!remaining.empty())
+        {
+            const size_t end = remaining.find('\n');
+            auto line = remaining.substr(0, end);
+            line = line.substr(0, line.find('\r'));
+            // 去掉合法的行首 <PRI>，保留时间戳和正文，不按固定长度截断长行。
+            if (line.starts_with('<'))
+            {
+                const size_t close = line.find('>');
+                if (close > 1 && close <= 4)
+                {
+                    unsigned priority = 0;
+                    const auto parsed = std::from_chars(line.data() + 1, line.data() + close, priority);
+                    if (parsed.ec == std::errc{} && parsed.ptr == line.data() + close && priority <= 191) line.remove_prefix(close + 1);
+                }
+            }
+            std::println(stderr, "[DriverLoader] dmesg: {}", line);
+            std::fflush(stderr);
+            if (end == std::string_view::npos) break;
+            remaining.remove_prefix(end + 1);
+        }
     }
 
     inline int LoadKernelModule()
@@ -302,7 +514,6 @@ namespace DriverLoader
         int last_error = -EIO;
         for (const std::string &module_name : candidates)
         {
-            LS_LOGI_TAG("DriverLoader", "尝试下载并加载: %s", module_name.c_str());
             std::println(stderr, "[DriverLoader] 尝试下载并加载: {}", module_name);
             std::fflush(stderr);
 
@@ -314,7 +525,6 @@ namespace DriverLoader
             }
             if (module_image.size() > std::numeric_limits<unsigned long>::max())
             {
-                LS_LOGE_TAG("DriverLoader", "模块过大: %s", module_name.c_str());
                 std::println(stderr, "[DriverLoader] 模块过大: {}", module_name);
                 std::fflush(stderr);
                 last_error = -EFBIG;
@@ -323,7 +533,6 @@ namespace DriverLoader
 
             if (is_vivo_device && !PatchVermagic(module_image, Vivo::VermagicSuffix))
             {
-                LS_LOGE_TAG("DriverLoader", "vivo 设备模块 vermagic 修补失败: %s", module_name.c_str());
                 std::println(stderr, "[DriverLoader] vivo 设备模块 vermagic 修补失败: {}", module_name);
                 std::fflush(stderr);
                 last_error = -EINVAL;
@@ -334,13 +543,11 @@ namespace DriverLoader
             const long result = syscall(SYS_init_module, module_image.data(), static_cast<unsigned long>(module_image.size()), "");
             if (result == 0)
             {
-                LS_LOGI_TAG("DriverLoader", "内核模块加载成功: %s", module_name.c_str());
                 std::println(stderr, "[DriverLoader] 内核模块加载成功: {}", module_name);
                 std::fflush(stderr);
                 return 0;
             }
             last_error = -errno;
-            LS_LOGE_TAG("DriverLoader", "内核模块加载失败: %s errno=%d (%s)", module_name.c_str(), -last_error, strerror(-last_error));
             std::println(stderr, "[DriverLoader] 内核模块加载失败: {} errno={} ({})", module_name, -last_error, strerror(-last_error));
             std::fflush(stderr);
             PrintDmesgTail();

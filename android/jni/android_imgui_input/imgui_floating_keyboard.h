@@ -1,106 +1,57 @@
 #pragma once
 
 #include "imgui.h"
-#include "imgui_internal.h"
-#include <string>
+#include <algorithm>
 #include <cstring>
-#include <cstdio>
+#include <string>
+#include <string_view>
+#include <utility>
 
 namespace ImGuiFloatingKeyboard
 {
-    enum class Result
-    {
-        None,
-        Accepted,
-        Cancelled,
-    };
+    enum class Result { None, Accepted, Cancelled };
 
     namespace Internal
     {
-        static bool is_visible = false;
-        static char *target_buffer = nullptr;
-        static size_t target_buffer_size = 0;
-        static bool shift_active = false;
-        static bool caps_lock_active = false;
-        static std::string window_title = "Floating Keyboard";
-        static bool request_focus = false;
-        static int keyboard_mode = 0;
-        static char *result_buffer = nullptr;
-        static Result result = Result::None;
-
-        static ImVec2 last_display_size = ImVec2(0, 0);
-        static bool need_reposition = true;
-
-        // ===== 缩放设置（固定1.4，不可修改）=====
-        static constexpr float keyboard_scale = 1.4f;
-    } // namespace Internal
+        inline char *target_buffer = nullptr;
+        inline size_t target_buffer_size = 0;
+        inline std::string window_title;
+        inline bool just_opened = false;
+        inline bool shift_active = false, caps_lock_active = false;
+        enum class Mode { Letters, Numbers, Symbols };
+        inline Mode mode = Mode::Letters;
+        inline const char *result_buffer = nullptr;
+        inline Result result = Result::None;
+    }
 
     inline void Open(char *buffer, size_t buffer_size, const char *title = "Keyboard")
     {
-        if (!buffer || buffer_size == 0) return;
+        if (!buffer || !buffer_size) return;
         buffer[buffer_size - 1] = '\0';
         Internal::target_buffer = buffer;
         Internal::target_buffer_size = buffer_size;
-        Internal::is_visible = true;
-        Internal::shift_active = false;
-        Internal::caps_lock_active = false;
         Internal::window_title = title ? title : "Keyboard";
-        Internal::request_focus = true;
-        Internal::keyboard_mode = 0;
+        Internal::just_opened = true;
+        Internal::shift_active = Internal::caps_lock_active = false;
+        Internal::mode = Internal::Mode::Letters;
         Internal::result_buffer = nullptr;
         Internal::result = Result::None;
-        Internal::need_reposition = true;
-    }
-
-    template <size_t N> inline void Open(char (&buffer)[N], const char *title = "Keyboard")
-    {
-        Open(buffer, N, title);
-    }
-
-    inline void Close()
-    {
-        Internal::is_visible = false;
-        Internal::target_buffer = nullptr;
-    }
-
-    inline bool IsVisible()
-    {
-        return Internal::is_visible;
-    }
-
-    inline void Accept()
-    {
-        Internal::result_buffer = Internal::target_buffer;
-        Internal::result = Result::Accepted;
-        Close();
-    }
-
-    inline void Cancel()
-    {
-        Internal::result_buffer = Internal::target_buffer;
-        Internal::result = Result::Cancelled;
-        Close();
     }
 
     inline Result ConsumeResult(const char *buffer)
     {
         if (Internal::result_buffer != buffer) return Result::None;
-        const Result result = Internal::result;
         Internal::result_buffer = nullptr;
-        Internal::result = Result::None;
-        return result;
+        return std::exchange(Internal::result, Result::None);
     }
 
     template <size_t N> inline bool InputButton(char (&buffer)[N], const char *placeholder, ImVec2 size, const char *title = nullptr)
     {
         std::string label = buffer[0] ? buffer : placeholder;
         label += "###keyboard_input";
-
         ImGui::PushID(static_cast<const void *>(buffer));
-        const bool pressed = ImGui::Button(label.c_str(), size);
+        if (ImGui::Button(label.c_str(), size)) Open(buffer, N, title ? title : placeholder);
         ImGui::PopID();
-
-        if (pressed) Open(buffer, title ? title : placeholder);
         return ConsumeResult(buffer) == Result::Accepted;
     }
 
@@ -108,145 +59,74 @@ namespace ImGuiFloatingKeyboard
     {
         ImGui::PushID(static_cast<const void *>(buffer));
         if (color.w > 0.0f) ImGui::PushStyleColor(ImGuiCol_Button, color);
-        const bool pressed = ImGui::Button(label, size);
-        if (color.w > 0.0f) ImGui::PopStyleColor();
-        ImGui::PopID();
-
-        if (pressed)
+        if (ImGui::Button(label, size))
         {
             if (clearOnOpen) buffer[0] = '\0';
-            Open(buffer, title);
+            Open(buffer, N, title);
         }
+        if (color.w > 0.0f) ImGui::PopStyleColor();
+        ImGui::PopID();
         return ConsumeResult(buffer) == Result::Accepted;
     }
 
-    // ========== 辅助函数 ==========
-    static inline void InsertChar(char c)
+    namespace Internal
     {
-        if (!Internal::target_buffer || Internal::target_buffer_size < 2) return;
-        size_t len = strlen(Internal::target_buffer);
-        if (len >= Internal::target_buffer_size - 1) return;
-        Internal::target_buffer[len] = c;
-        Internal::target_buffer[len + 1] = '\0';
-    }
-
-    static inline void InsertString(const char *str)
-    {
-        if (!Internal::target_buffer || Internal::target_buffer_size < 2 || !str) return;
-        size_t current_len = strlen(Internal::target_buffer);
-        if (current_len >= Internal::target_buffer_size - 1) return;
-        size_t str_len = strlen(str);
-        size_t available = Internal::target_buffer_size - current_len - 1;
-        size_t copy_len = (str_len < available) ? str_len : available;
-
-        if (copy_len > 0)
+        inline void Append(std::string_view text)
         {
-            memcpy(Internal::target_buffer + current_len, str, copy_len);
-            Internal::target_buffer[current_len + copy_len] = '\0';
+            const size_t length = std::strlen(target_buffer);
+            size_t count = std::min(text.size(), target_buffer_size - length - 1);
+            // ImGui 使用 UTF-8；容量不足时，不拷贝跨越末尾的半个字符。
+            if (count < text.size())
+                while (count && (static_cast<unsigned char>(text[count]) & 0xc0) == 0x80) --count;
+            std::memmove(target_buffer + length, text.data(), count);
+            target_buffer[length + count] = '\0';
+        }
+
+        inline bool KeyButton(const char *label, ImVec2 size, ImVec4 color = ImVec4(0.25f, 0.25f, 0.28f, 1.0f))
+        {
+            ImGui::PushStyleColor(ImGuiCol_Button, color);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(color.x + 0.12f, color.y + 0.12f, color.z + 0.12f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(color.x + 0.22f, color.y + 0.22f, color.z + 0.22f, 1.0f));
+            const bool pressed = ImGui::Button(label, size);
+            ImGui::PopStyleColor(3);
+            return pressed;
+        }
+
+        inline void CharacterRow(const char *keys, ImVec2 size, bool letters)
+        {
+            for (; *keys; ++keys)
+            {
+                char label[] = {*keys, '\0'};
+                if (KeyButton(label, size))
+                {
+                    Append({keys, 1});
+                    if (letters && !caps_lock_active) shift_active = false;
+                }
+                if (keys[1]) ImGui::SameLine();
+            }
         }
     }
 
-    static inline void DeleteChar()
-    {
-        if (!Internal::target_buffer) return;
-        size_t len = strlen(Internal::target_buffer);
-        if (len > 0) Internal::target_buffer[len - 1] = '\0';
-    }
-
-    static inline void ClearAll()
-    {
-        if (Internal::target_buffer) Internal::target_buffer[0] = '\0';
-    }
-
-    // ========== 剪贴板功能 ==========
-    static inline void CopyToClipboard()
-    {
-        if (Internal::target_buffer && strlen(Internal::target_buffer) > 0)
-        {
-            ImGui::SetClipboardText(Internal::target_buffer);
-        }
-    }
-
-    static inline void PasteFromClipboard()
-    {
-        if (!Internal::target_buffer) return;
-        const char *clipboard = ImGui::GetClipboardText();
-        if (clipboard && strlen(clipboard) > 0)
-        {
-            InsertString(clipboard);
-        }
-    }
-
-    // ========== 按键渲染 ==========
-    static inline bool KeyButton(const char *label, const char *id, ImVec2 size, ImVec4 color = ImVec4(0.25f, 0.25f, 0.28f, 1.0f))
-    {
-        char full_id[64];
-        snprintf(full_id, sizeof(full_id), "%s##%s", label, id);
-
-        ImGui::PushStyleColor(ImGuiCol_Button, color);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(color.x + 0.12f, color.y + 0.12f, color.z + 0.12f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(color.x + 0.22f, color.y + 0.22f, color.z + 0.22f, 1.0f));
-
-        bool pressed = ImGui::Button(full_id, size);
-        ImGui::PopStyleColor(3);
-        return pressed;
-    }
-
-    // ========== 主绘制函数 ==========
     inline void Draw()
     {
-        if (!Internal::is_visible) return;
+        using namespace Internal;
+        if (!target_buffer) return;
 
-        ImGuiIO &io = ImGui::GetIO();
-        constexpr float scale = Internal::keyboard_scale; // 固定1.4
-
-        // 检测屏幕变化
-        if (Internal::last_display_size.x != io.DisplaySize.x || Internal::last_display_size.y != io.DisplaySize.y)
+        constexpr float scale = 1.4f, spacing = 5.0f * scale, key_height = 78.0f * scale;
+        const ImVec2 display = ImGui::GetIO().DisplaySize;
+        static ImVec2 last_display{};
+        const float width = std::min(820.0f * scale, display.x * 0.98f);
+        if (just_opened || last_display.x != display.x || last_display.y != display.y)
         {
-            Internal::need_reposition = true;
-            Internal::last_display_size = io.DisplaySize;
+            ImGui::SetNextWindowPos(ImVec2(std::max(10.0f, (display.x - width) * 0.5f), std::max(10.0f, display.y * 0.15f)));
+            last_display = display;
         }
-
-        float screen_w = io.DisplaySize.x;
-        float screen_h = io.DisplaySize.y;
-
-        // ===== 计算缩放后的尺寸（更大的基础宽度）=====
-        float base_width = 820.0f; // 增大基础宽度
-        float kb_width = base_width * scale;
-
-        // 确保不超过屏幕
-        if (kb_width > screen_w * 0.98f) kb_width = screen_w * 0.98f;
-        if (kb_width < 400.0f) kb_width = 400.0f;
-
-        // 按键高度（基础值 * 缩放）
-        float base_key_height = 78.0f; // 增大按键高度
-        float key_height = base_key_height * scale;
-
-        // 间距
-        float spacing = 5.0f * scale;
-
-        // ===== 窗口位置 =====
-        if (Internal::need_reposition)
-        {
-            float pos_x = (screen_w - kb_width) * 0.5f;
-            float pos_y = screen_h * 0.15f; // 更靠上
-            if (pos_x < 10) pos_x = 10;
-            if (pos_y < 10) pos_y = 10;
-            ImGui::SetNextWindowPos(ImVec2(pos_x, pos_y), ImGuiCond_Always);
-            Internal::need_reposition = false;
-        }
-
-        ImGui::SetNextWindowSize(ImVec2(kb_width, 0), ImGuiCond_Always);
-
-        ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings;
-
-        if (Internal::request_focus)
+        if (just_opened)
         {
             ImGui::SetNextWindowFocus();
-            Internal::request_focus = false;
+            just_opened = false;
         }
-
-        // ===== 样式 =====
+        ImGui::SetNextWindowSize(ImVec2(width, 0));
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.13f, 0.13f, 0.15f, 0.97f));
         ImGui::PushStyleColor(ImGuiCol_TitleBg, ImVec4(0.18f, 0.18f, 0.22f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_TitleBgActive, ImVec4(0.22f, 0.22f, 0.28f, 1.0f));
@@ -254,297 +134,99 @@ namespace ImGuiFloatingKeyboard
         ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f * scale);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f * scale, 12.0f * scale));
 
-        if (ImGui::Begin(Internal::window_title.c_str(), &Internal::is_visible, flags))
+        bool open = true, accepted = false;
+        if (ImGui::Begin(window_title.c_str(), &open, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings))
         {
-            // ===== 字体缩放 =====
             ImGui::SetWindowFontScale(scale);
+            const ImVec2 pos = ImGui::GetWindowPos(), size = ImGui::GetWindowSize();
+            const ImVec2 bounded(std::clamp(pos.x, 0.0f, std::max(0.0f, display.x - size.x)),
+                                 std::clamp(pos.y, 0.0f, std::max(0.0f, display.y - size.y)));
+            if (pos.x != bounded.x || pos.y != bounded.y) ImGui::SetWindowPos(bounded);
 
-            if (!Internal::target_buffer)
-            {
-                Close();
-                ImGui::SetWindowFontScale(1.0f);
-                ImGui::End();
-                ImGui::PopStyleVar(3);
-                ImGui::PopStyleColor(3);
-                return;
-            }
-
-            // 窗口边界修正
-            ImVec2 win_pos = ImGui::GetWindowPos();
-            ImVec2 win_size = ImGui::GetWindowSize();
-            bool need_fix = false;
-            if (win_pos.x < 0)
-            {
-                win_pos.x = 5;
-                need_fix = true;
-            }
-            if (win_pos.y < 0)
-            {
-                win_pos.y = 5;
-                need_fix = true;
-            }
-            if (win_pos.x + win_size.x > screen_w)
-            {
-                win_pos.x = screen_w - win_size.x - 5;
-                need_fix = true;
-            }
-            if (win_pos.y + win_size.y > screen_h)
-            {
-                win_pos.y = screen_h - win_size.y - 5;
-                need_fix = true;
-            }
-            if (need_fix) ImGui::SetWindowPos(win_pos);
-
-            float avail_width = ImGui::GetContentRegionAvail().x;
-            float std_key_w = (avail_width - spacing * 9) / 10.0f;
-
-            // ===== 输入预览 + 复制/粘贴/清空按钮 =====
+            const float available = ImGui::GetContentRegionAvail().x;
+            const ImVec2 edit_size(70.0f * scale, 38.0f * scale);
             ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.08f, 0.08f, 0.1f, 1.0f));
             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(12.0f * scale, 12.0f * scale));
-
-            // 按钮尺寸（3个按钮）
-            float func_btn_w = 70.0f * scale;
-            float func_btn_h = 38.0f * scale;
-            float total_btns_w = func_btn_w * 3 + spacing * 3; // ← 改为3个按钮
-
-            ImGui::SetNextItemWidth(avail_width - total_btns_w);
-            ImGui::InputText("##preview", Internal::target_buffer, Internal::target_buffer_size, ImGuiInputTextFlags_ReadOnly);
+            ImGui::SetNextItemWidth(available - 3 * (edit_size.x + ImGui::GetStyle().ItemSpacing.x));
+            ImGui::InputText("##preview", target_buffer, target_buffer_size, ImGuiInputTextFlags_ReadOnly);
             ImGui::PopStyleVar();
             ImGui::PopStyleColor();
-
             ImGui::SameLine();
-            if (KeyButton("复制", "copy", ImVec2(func_btn_w, func_btn_h), ImVec4(0.2f, 0.4f, 0.5f, 1.0f))) CopyToClipboard();
-
+            if (KeyButton("复制", edit_size, ImVec4(0.2f, 0.4f, 0.5f, 1.0f)) && *target_buffer) ImGui::SetClipboardText(target_buffer);
             ImGui::SameLine();
-            if (KeyButton("粘贴", "paste", ImVec2(func_btn_w, func_btn_h), ImVec4(0.3f, 0.45f, 0.25f, 1.0f))) PasteFromClipboard();
-
+            if (KeyButton("粘贴", edit_size, ImVec4(0.3f, 0.45f, 0.25f, 1.0f)))
+            {
+                if (const char *clipboard = ImGui::GetClipboardText()) Append(clipboard);
+            }
             ImGui::SameLine();
-            if (KeyButton("清空", "clear", ImVec2(func_btn_w, func_btn_h), ImVec4(0.5f, 0.25f, 0.2f, 1.0f))) ClearAll();
-
+            if (KeyButton("清空", edit_size, ImVec4(0.5f, 0.25f, 0.2f, 1.0f))) target_buffer[0] = '\0';
             ImGui::Separator();
             ImGui::Spacing();
-
-            // ===== 按键 =====
             ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(spacing, spacing));
 
-            bool is_upper = Internal::shift_active || Internal::caps_lock_active;
+            const bool letters = mode == Mode::Letters, numbers = mode == Mode::Numbers;
+            const bool upper = shift_active || caps_lock_active;
+            static constexpr const char *rows[][3] = {
+                {"qwertyuiop", "asdfghjkl", "zxcvbnm"},
+                {"1234567890", "@#$_&-+()/", "*\"':;!?"},
+                {"~`|\\<>{}[]", "^%=*+!?;:/", "@#$&()\""},
+                {"QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"},
+            };
+            const auto &layout = rows[letters && upper ? 3 : static_cast<int>(mode)];
+            const ImVec2 key((available - 9 * spacing) / 10, key_height), wide(key.x * 1.5f, key_height);
+            const ImVec4 mode_color(0.3f, 0.3f, 0.38f, 1.0f);
+            ImGui::PushID(0);
+            CharacterRow(layout[0], key, letters);
+            ImGui::PopID();
+            if (letters) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + key.x * 0.5f);
+            ImGui::PushID(1);
+            CharacterRow(layout[1], key, letters);
+            ImGui::PopID();
 
-            // ==================== 字母键盘 ====================
-            if (Internal::keyboard_mode == 0)
+            if (letters)
             {
-                // 第1行
-                const char *row1 = is_upper ? "QWERTYUIOP" : "qwertyuiop";
-                for (int i = 0; row1[i]; ++i)
-                {
-                    char lbl[2] = {row1[i], 0};
-                    char id[16];
-                    snprintf(id, 16, "r1_%d", i);
-                    if (KeyButton(lbl, id, ImVec2(std_key_w, key_height)))
-                    {
-                        InsertChar(row1[i]);
-                        if (Internal::shift_active && !Internal::caps_lock_active) Internal::shift_active = false;
-                    }
-                    if (row1[i + 1]) ImGui::SameLine();
-                }
-
-                // 第2行
-                const char *row2 = is_upper ? "ASDFGHJKL" : "asdfghjkl";
-                float row2_offset = std_key_w * 0.5f;
-                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + row2_offset);
-                for (int i = 0; row2[i]; ++i)
-                {
-                    char lbl[2] = {row2[i], 0};
-                    char id[16];
-                    snprintf(id, 16, "r2_%d", i);
-                    if (KeyButton(lbl, id, ImVec2(std_key_w, key_height)))
-                    {
-                        InsertChar(row2[i]);
-                        if (Internal::shift_active && !Internal::caps_lock_active) Internal::shift_active = false;
-                    }
-                    if (row2[i + 1]) ImGui::SameLine();
-                }
-
-                // 第3行
-                const char *row3 = is_upper ? "ZXCVBNM" : "zxcvbnm";
-                float wide_key_w = std_key_w * 1.5f;
-                float row3_key_w = (avail_width - wide_key_w * 2 - spacing * 8) / 7.0f;
-
-                ImVec4 shift_color = (Internal::shift_active || Internal::caps_lock_active) ? ImVec4(0.3f, 0.45f, 0.7f, 1.0f) : ImVec4(0.3f, 0.3f, 0.35f, 1.0f);
-                const char *shift_label = Internal::caps_lock_active ? "CAPS" : (is_upper ? "SHIFT" : "shift");
-
-                if (KeyButton(shift_label, "shift", ImVec2(wide_key_w, key_height), shift_color)) Internal::shift_active = !Internal::shift_active;
+                KeyButton(caps_lock_active ? "CAPS###shift" : (upper ? "SHIFT###shift" : "shift###shift"), wide,
+                          upper ? ImVec4(0.3f, 0.45f, 0.7f, 1.0f) : ImVec4(0.3f, 0.3f, 0.35f, 1.0f));
                 if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
                 {
-                    Internal::caps_lock_active = !Internal::caps_lock_active;
-                    Internal::shift_active = false;
+                    caps_lock_active = !caps_lock_active;
+                    shift_active = false;
                 }
-                ImGui::SameLine();
-
-                for (int i = 0; row3[i]; ++i)
-                {
-                    char lbl[2] = {row3[i], 0};
-                    char id[16];
-                    snprintf(id, 16, "r3_%d", i);
-                    if (KeyButton(lbl, id, ImVec2(row3_key_w, key_height)))
-                    {
-                        InsertChar(row3[i]);
-                        if (Internal::shift_active && !Internal::caps_lock_active) Internal::shift_active = false;
-                    }
-                    ImGui::SameLine();
-                }
-
-                if (KeyButton("DEL", "bksp", ImVec2(wide_key_w, key_height), ImVec4(0.55f, 0.2f, 0.2f, 1.0f))) DeleteChar();
-
-                // 第4行
-                float mode_key_w = std_key_w * 1.3f;
-                float punct_key_w = std_key_w;
-                float ok_key_w = std_key_w * 1.5f;
-                float space_w = avail_width - mode_key_w - punct_key_w * 2 - ok_key_w - spacing * 4;
-
-                if (KeyButton("?123", "tonum", ImVec2(mode_key_w, key_height), ImVec4(0.3f, 0.3f, 0.38f, 1.0f))) Internal::keyboard_mode = 1;
-                ImGui::SameLine();
-
-                if (KeyButton(",", "comma", ImVec2(punct_key_w, key_height))) InsertChar(',');
-                ImGui::SameLine();
-
-                if (KeyButton("SPACE", "space", ImVec2(space_w, key_height), ImVec4(0.22f, 0.22f, 0.26f, 1.0f))) InsertChar(' ');
-                ImGui::SameLine();
-
-                if (KeyButton(".", "period", ImVec2(punct_key_w, key_height))) InsertChar('.');
-                ImGui::SameLine();
-
-                if (KeyButton("OK", "enter", ImVec2(ok_key_w, key_height), ImVec4(0.2f, 0.5f, 0.3f, 1.0f))) Accept();
+                else if (ImGui::IsItemActivated() && !caps_lock_active) shift_active = !shift_active;
             }
-            // ==================== 数字符号键盘1 ====================
-            else if (Internal::keyboard_mode == 1)
+            else if (KeyButton(numbers ? "#+=" : "?123", wide, mode_color)) mode = numbers ? Mode::Symbols : Mode::Numbers;
+            ImGui::SameLine();
+            ImGui::PushID(2);
+            CharacterRow(layout[2], ImVec2((available - wide.x * 2 - spacing * 8) / 7, key_height), letters);
+            ImGui::PopID();
+            ImGui::SameLine();
+            if (KeyButton("DEL", wide, ImVec4(0.55f, 0.2f, 0.2f, 1.0f)) && *target_buffer)
             {
-                const char *row1 = "1234567890";
-                for (int i = 0; row1[i]; ++i)
-                {
-                    char lbl[2] = {row1[i], 0};
-                    char id[16];
-                    snprintf(id, 16, "n1_%d", i);
-                    if (KeyButton(lbl, id, ImVec2(std_key_w, key_height))) InsertChar(row1[i]);
-                    if (row1[i + 1]) ImGui::SameLine();
-                }
-
-                const char *row2 = "@#$_&-+()/";
-                for (int i = 0; row2[i]; ++i)
-                {
-                    char lbl[2] = {row2[i], 0};
-                    char id[16];
-                    snprintf(id, 16, "n2_%d", i);
-                    if (KeyButton(lbl, id, ImVec2(std_key_w, key_height))) InsertChar(row2[i]);
-                    if (row2[i + 1]) ImGui::SameLine();
-                }
-
-                float wide_key_w = std_key_w * 1.5f;
-                float row3_key_w = (avail_width - wide_key_w * 2 - spacing * 8) / 7.0f;
-
-                if (KeyButton("#+=", "tosym", ImVec2(wide_key_w, key_height), ImVec4(0.3f, 0.3f, 0.38f, 1.0f))) Internal::keyboard_mode = 2;
-                ImGui::SameLine();
-
-                const char *row3 = "*\"':;!?";
-                for (int i = 0; row3[i]; ++i)
-                {
-                    char lbl[2] = {row3[i], 0};
-                    char id[16];
-                    snprintf(id, 16, "n3_%d", i);
-                    if (KeyButton(lbl, id, ImVec2(row3_key_w, key_height))) InsertChar(row3[i]);
-                    ImGui::SameLine();
-                }
-
-                if (KeyButton("DEL", "bksp2", ImVec2(wide_key_w, key_height), ImVec4(0.55f, 0.2f, 0.2f, 1.0f))) DeleteChar();
-
-                float mode_key_w = std_key_w * 1.3f;
-                float punct_key_w = std_key_w;
-                float ok_key_w = std_key_w * 1.5f;
-                float space_w = avail_width - mode_key_w - punct_key_w * 2 - ok_key_w - spacing * 4;
-
-                if (KeyButton("ABC", "toabc", ImVec2(mode_key_w, key_height), ImVec4(0.3f, 0.3f, 0.38f, 1.0f))) Internal::keyboard_mode = 0;
-                ImGui::SameLine();
-
-                if (KeyButton(",", "comma2", ImVec2(punct_key_w, key_height))) InsertChar(',');
-                ImGui::SameLine();
-
-                if (KeyButton("SPACE", "space2", ImVec2(space_w, key_height), ImVec4(0.22f, 0.22f, 0.26f, 1.0f))) InsertChar(' ');
-                ImGui::SameLine();
-
-                if (KeyButton(".", "period2", ImVec2(punct_key_w, key_height))) InsertChar('.');
-                ImGui::SameLine();
-
-                if (KeyButton("OK", "enter2", ImVec2(ok_key_w, key_height), ImVec4(0.2f, 0.5f, 0.3f, 1.0f))) Accept();
-            }
-            // ==================== 符号键盘2 ====================
-            else if (Internal::keyboard_mode == 2)
-            {
-                const char *row1 = "~`|\\<>{}[]";
-                for (int i = 0; row1[i]; ++i)
-                {
-                    char lbl[2] = {row1[i], 0};
-                    char id[16];
-                    snprintf(id, 16, "s1_%d", i);
-                    if (KeyButton(lbl, id, ImVec2(std_key_w, key_height))) InsertChar(row1[i]);
-                    if (row1[i + 1]) ImGui::SameLine();
-                }
-
-                const char *row2 = "^%=*+!?;:/";
-                for (int i = 0; row2[i]; ++i)
-                {
-                    char lbl[2] = {row2[i], 0};
-                    char id[16];
-                    snprintf(id, 16, "s2_%d", i);
-                    if (KeyButton(lbl, id, ImVec2(std_key_w, key_height))) InsertChar(row2[i]);
-                    if (row2[i + 1]) ImGui::SameLine();
-                }
-
-                float wide_key_w = std_key_w * 1.5f;
-                float row3_key_w = (avail_width - wide_key_w * 2 - spacing * 8) / 7.0f;
-
-                if (KeyButton("?123", "tonum2", ImVec2(wide_key_w, key_height), ImVec4(0.3f, 0.3f, 0.38f, 1.0f))) Internal::keyboard_mode = 1;
-                ImGui::SameLine();
-
-                const char *row3 = "@#$&()\"";
-                for (int i = 0; row3[i]; ++i)
-                {
-                    char lbl[2] = {row3[i], 0};
-                    char id[16];
-                    snprintf(id, 16, "s3_%d", i);
-                    if (KeyButton(lbl, id, ImVec2(row3_key_w, key_height))) InsertChar(row3[i]);
-                    ImGui::SameLine();
-                }
-
-                if (KeyButton("DEL", "bksp3", ImVec2(wide_key_w, key_height), ImVec4(0.55f, 0.2f, 0.2f, 1.0f))) DeleteChar();
-
-                float mode_key_w = std_key_w * 1.3f;
-                float punct_key_w = std_key_w;
-                float ok_key_w = std_key_w * 1.5f;
-                float space_w = avail_width - mode_key_w - punct_key_w * 2 - ok_key_w - spacing * 4;
-
-                if (KeyButton("ABC", "toabc2", ImVec2(mode_key_w, key_height), ImVec4(0.3f, 0.3f, 0.38f, 1.0f))) Internal::keyboard_mode = 0;
-                ImGui::SameLine();
-
-                if (KeyButton(",", "comma3", ImVec2(punct_key_w, key_height))) InsertChar(',');
-                ImGui::SameLine();
-
-                if (KeyButton("SPACE", "space3", ImVec2(space_w, key_height), ImVec4(0.22f, 0.22f, 0.26f, 1.0f))) InsertChar(' ');
-                ImGui::SameLine();
-
-                if (KeyButton(".", "period3", ImVec2(punct_key_w, key_height))) InsertChar('.');
-                ImGui::SameLine();
-
-                if (KeyButton("OK", "enter3", ImVec2(ok_key_w, key_height), ImVec4(0.2f, 0.5f, 0.3f, 1.0f))) Accept();
+                size_t last = std::strlen(target_buffer) - 1;
+                while (last && (static_cast<unsigned char>(target_buffer[last]) & 0xc0) == 0x80) --last;
+                target_buffer[last] = '\0';
             }
 
+            const ImVec2 mode_key(key.x * 1.3f, key_height);
+            if (KeyButton(letters ? "?123" : "ABC", mode_key, mode_color)) mode = letters ? Mode::Numbers : Mode::Letters;
+            ImGui::SameLine();
+            if (KeyButton(",", key)) Append(",");
+            ImGui::SameLine();
+            if (KeyButton("SPACE", ImVec2(available - mode_key.x - 2 * key.x - wide.x - 4 * spacing, key_height), ImVec4(0.22f, 0.22f, 0.26f, 1.0f))) Append(" ");
+            ImGui::SameLine();
+            if (KeyButton(".", key)) Append(".");
+            ImGui::SameLine();
+            accepted = KeyButton("OK", wide, ImVec4(0.2f, 0.5f, 0.3f, 1.0f));
             ImGui::PopStyleVar();
             ImGui::SetWindowFontScale(1.0f);
         }
         ImGui::End();
-
-        if (!Internal::is_visible && Internal::target_buffer) Cancel();
-
         ImGui::PopStyleVar(3);
         ImGui::PopStyleColor(3);
+        if (accepted || !open)
+        {
+            result_buffer = std::exchange(target_buffer, nullptr);
+            result = accepted ? Result::Accepted : Result::Cancelled;
+        }
     }
-
-} // namespace ImGuiFloatingKeyboard
+}

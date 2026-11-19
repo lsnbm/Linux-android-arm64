@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -284,7 +285,7 @@ private:
             bpParams_.editingField = regIndex;
             std::snprintf(bpParams_.regEditBuf, sizeof(bpParams_.regEditBuf), "%.*s", static_cast<int>(std::min(hexValue.size(), sizeof(bpParams_.regEditBuf) - 1)), hexValue.data());
             const std::string title = std::format("修改 {} (Hex)", name);
-            ImGuiFloatingKeyboard::Open(bpParams_.regEditBuf, title.c_str());
+            ImGuiFloatingKeyboard::Open(bpParams_.regEditBuf, sizeof(bpParams_.regEditBuf), title.c_str());
         }
         if (bpParams_.editingRecordIdx != recordIndex || bpParams_.editingField != regIndex) return;
         const auto result = ImGuiFloatingKeyboard::ConsumeResult(bpParams_.regEditBuf);
@@ -1339,7 +1340,7 @@ private:
                             state_.modifyAddr = state.item.address;
                             std::snprintf(buf_.modify, sizeof(buf_.modify), "%s", state.value.c_str());
                             state_.showModify = true;
-                            ImGuiFloatingKeyboard::Open(buf_.modify, state.item.kind == Types::SavedValueKind::Pointer ? "新地址(Hex)" : state.item.kind == Types::SavedValueKind::Text ? "新字符串" : "新数值");
+                            ImGuiFloatingKeyboard::Open(buf_.modify, sizeof(buf_.modify), state.item.kind == Types::SavedValueKind::Pointer ? "新地址(Hex)" : state.item.kind == Types::SavedValueKind::Text ? "新字符串" : "新数值");
                         }
                         ImGui::SameLine();
                         if (UI::Btn("备注", {actionWidth, S(36)}))
@@ -1347,7 +1348,7 @@ private:
                             state_.noteAddr = state.item.address;
                             std::snprintf(buf_.savedNote, sizeof(buf_.savedNote), "%s", state.item.note.c_str());
                             state_.showSavedNote = true;
-                            ImGuiFloatingKeyboard::Open(buf_.savedNote, "文字备注");
+                            ImGuiFloatingKeyboard::Open(buf_.savedNote, sizeof(buf_.savedNote), "文字备注");
                         }
                         ImGui::SameLine();
                         if (UI::Btn(state.locked ? "解锁" : "锁定", {actionWidth, S(36)}, state.locked ? Colors::BTN_UNLOCK : Colors::BTN_LOCK)) runtime_.saved.toggle(state.item.address);
@@ -2095,40 +2096,48 @@ public:
 // ============================================================================
 int RunMemoryTool(ApplicationRuntime &application)
 {
+    int status = 0;
     Config::g_Running = true;
-    constexpr bool kAllowCapture = true;
-
-    if (!application.initializeGraphics(kAllowCapture))
+    status = application.initializeGraphics(true);
+    if (status != 0)
     {
-        LS_LOGE_TAG("Main", "初始化图形引擎失败");
-        return 1;
+        LS_LOGE_TAG("Main", "初始化图形引擎失败: %d", status);
+        return status;
     }
 
-    int rc = 0;
     try
     {
         MainUI ui(application);
         while (Config::g_Running)
         {
-            RenderVK::drawBegin();
+            status = RenderVK::drawBegin();
+            if (status != 0)
+            {
+                LS_LOGE_TAG("Main", "开始渲染失败: %d", status);
+                return status;
+            }
             ui.draw();
-            RenderVK::drawEnd();
+            status = RenderVK::drawEnd();
+            if (status != 0)
+            {
+                LS_LOGE_TAG("Main", "提交渲染失败: %d", status);
+                return status;
+            }
         }
     }
     catch (const std::exception &ex)
     {
         LS_LOGE_TAG_FMT("Main", "内存工具运行异常: {}", ex.what());
-        rc = 1;
+        status = 1;
     }
     catch (...)
     {
         LS_LOGE_TAG("Main", "内存工具运行异常: unknown exception");
-        rc = 1;
+        status = 1;
     }
 
-    return rc;
+    return status;
 }
-
 // 脱离终端后台运行；调用前不得创建工作线程，fork() 后仅保留调用线程。
 static bool daemonize(const char *log_path)
 {
@@ -2186,6 +2195,100 @@ static bool daemonize(const char *log_path)
     setvbuf(stdout, nullptr, _IONBF, 0);
     setvbuf(stderr, nullptr, _IONBF, 0);
     return true;
+}
+
+static void ConfigureProcessSurvivalPriority()
+{
+    errno = 0;
+    if (setpriority(PRIO_PROCESS, 0, -20) == 0)
+    {
+        LS_LOGI_TAG("Main", "进程 nice 优先级已设置为 -20");
+    }
+    else
+    {
+        const int savedErrno = errno;
+        LS_LOGW_TAG("Main", "设置进程 nice 优先级失败: errno=%d (%s)", savedErrno, std::strerror(savedErrno));
+    }
+
+    const int oomFd = open("/proc/self/oom_score_adj", O_WRONLY | O_CLOEXEC);
+    if (oomFd == -1)
+    {
+        const int savedErrno = errno;
+        LS_LOGW_TAG("Main", "打开 oom_score_adj 失败: errno=%d (%s)", savedErrno, std::strerror(savedErrno));
+        return;
+    }
+
+    constexpr char kLowestOomScoreAdj[] = "-1000";
+    const ssize_t written = write(oomFd, kLowestOomScoreAdj, sizeof(kLowestOomScoreAdj) - 1);
+    const int savedErrno = errno;
+    close(oomFd);
+
+    if (written == static_cast<ssize_t>(sizeof(kLowestOomScoreAdj) - 1))
+    {
+        LS_LOGI_TAG("Main", "进程 oom_score_adj 已设置为 -1000");
+    }
+    else if (written < 0)
+    {
+        LS_LOGW_TAG("Main", "设置 oom_score_adj 失败: errno=%d (%s)", savedErrno, std::strerror(savedErrno));
+    }
+    else
+    {
+        LS_LOGW_TAG("Main", "设置 oom_score_adj 写入不足: %zd/%zu 字节", written, sizeof(kLowestOomScoreAdj) - 1);
+    }
+}
+
+static void StopManagerApps()
+{
+    static constexpr const char *PackageNames[] = {
+        "bin.mt.plus",
+        "me.weishu.kernelsu",
+        "com.sukisu.ultra",
+    };
+
+    DIR *ProcDirectory = opendir("/proc");
+    if (!ProcDirectory)
+    {
+        LS_LOGE_ERRNO("扫描管理器进程失败");
+        return;
+    }
+
+    const pid_t SelfPid = getpid();
+    while (dirent *Entry = readdir(ProcDirectory))
+    {
+        if (Entry->d_name[0] < '0' || Entry->d_name[0] > '9') continue;
+        char *End = nullptr;
+        errno = 0;
+        const long ProcessId = std::strtol(Entry->d_name, &End, 10);
+        if (errno != 0 || *End != '\0' || ProcessId <= 1 || ProcessId > INT_MAX || ProcessId == SelfPid) continue;
+
+        const std::string CmdlinePath = std::string("/proc/") + Entry->d_name + "/cmdline";
+        std::ifstream Cmdline(CmdlinePath, std::ios::binary);
+        std::string ProcessName;
+        if (!std::getline(Cmdline, ProcessName, '\0')) continue;
+
+        bool IsManagerApp = false;
+        for (const char *PackageName : PackageNames)
+        {
+            const size_t PackageLength = std::strlen(PackageName);
+            if (ProcessName == PackageName || (ProcessName.size() > PackageLength && ProcessName.compare(0, PackageLength, PackageName) == 0 && ProcessName[PackageLength] == ':'))
+            {
+                IsManagerApp = true;
+                break;
+            }
+        }
+        if (!IsManagerApp) continue;
+
+        if (kill(static_cast<pid_t>(ProcessId), SIGKILL) == 0)
+        {
+            LS_LOGI_TAG("Main", "已向管理器进程 %s pid=%ld 发送 SIGKILL", ProcessName.c_str(), ProcessId);
+        }
+        else if (errno != ESRCH)
+        {
+            const int SavedErrno = errno;
+            LS_LOGW_TAG("Main", "强制终止管理器进程 %s pid=%ld 失败: errno=%d (%s)", ProcessName.c_str(), ProcessId, SavedErrno, std::strerror(SavedErrno));
+        }
+    }
+    closedir(ProcDirectory);
 }
 
 int main()

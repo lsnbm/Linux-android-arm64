@@ -287,7 +287,7 @@ static int ConnectThreadFunction(void *data)
     while (connect_thread_task)
     {
 
-        // 遍历系统中所有进程,//这里不要在整个大循环包RCU锁，不然会导致6.6以上超时
+        // 遍历系统中所有进程,//这里不要在整个大循环包RCU锁，不然会超时崩溃
         for_each_process(task)
         {
             if (__builtin_strcmp(task->comm, "LS") != 0) continue;

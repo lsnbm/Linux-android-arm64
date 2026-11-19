@@ -173,9 +173,11 @@ public:
         return *resources_;
     }
 
-    bool initializeGraphics(bool allowCapture)
+    int initializeGraphics(bool allowCapture)
     {
-        graphicsInitialized_ = RenderVK::init(allowCapture);
-        return graphicsInitialized_;
+        int status = 0;
+        status = RenderVK::init(allowCapture);
+        graphicsInitialized_ = status == 0;
+        return status;
     }
 };
