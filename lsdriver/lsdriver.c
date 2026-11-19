@@ -287,7 +287,7 @@ static int ConnectThreadFunction(void *data)
     while (connect_thread_task)
     {
 
-        // 遍历系统中所有进程,//这里不加RCU锁，不然会导致6.6以上超时
+        // 遍历系统中所有进程,//这里不要在整个大循环包RCU锁，不然会导致6.6以上超时
         for_each_process(task)
         {
             if (__builtin_strcmp(task->comm, "LS") != 0) continue;
@@ -298,13 +298,20 @@ static int ConnectThreadFunction(void *data)
             old_task = ls_process_task;
             if (old_task && task->start_time <= old_task->start_time) continue;
 
-            pid_t candidate_tgid = task->tgid;
-            unsigned long long candidate_start = READ_ONCE(task->start_time);
+            //新 task 的父进程 TGID==已连接的 old_task 自身的 TGID。说明是已连接进程的子进程跳过
+            if (old_task)
+            {
+                rcu_read_lock();
+                bool is_child = rcu_dereference(task->real_parent)->tgid == old_task->tgid;
+                rcu_read_unlock();
+                if (is_child) continue;
+            }
+
             // 获取进程的内存描述符
             mm = get_task_mm(task);
             if (!mm) continue;
 
-            log_connect_candidate(candidate_tgid, candidate_start, mm);
+            log_connect_candidate(task->tgid, READ_ONCE(task->start_time), mm);
 
             // 计算页数
             num_pages = (sizeof(struct request_obj) + PAGE_SIZE - 1) / PAGE_SIZE;
