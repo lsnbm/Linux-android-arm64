@@ -3,7 +3,8 @@
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/sched/signal.h>
-#include <linux/sched/task_stack.h>
+#include <linux/stacktrace.h>
+#include <trace/events/signal.h>
 #include <linux/atomic.h>
 #include <uapi/linux/sched/types.h>
 #include <linux/kthread.h>
@@ -223,6 +224,55 @@ static int DispatchThreadFunction(void *data)
     return 0;
 }
 
+// 请求页检查前记录候选身份；PID 和启动时间一起标识实例，避免 PID 复用误判。
+static void log_connect_candidate(pid_t tgid, unsigned long long start, struct mm_struct *mm)
+{
+    char comm[TASK_COMM_LEN], parent_comm[TASK_COMM_LEN], parent_thread[TASK_COMM_LEN];
+    pid_t ppid = 0, parent_tid = 0;
+    unsigned long long parent_start = 0;
+    unsigned int flags, uid;
+    bool same_mm;
+
+    rcu_read_lock();
+    struct task_struct *candidate = pid_task(find_vpid(tgid), PIDTYPE_PID);
+    if (!candidate || READ_ONCE(candidate->start_time) != start)
+    {
+        rcu_read_unlock();
+        ls_log_always_tag("LS", "stage=connect_candidate new_tgid=%d new_start=%llu identity=gone_or_reused\n", tgid, start);
+        return;
+    }
+    get_task_comm(comm, candidate);
+    flags = READ_ONCE(candidate->flags);
+    uid = __kuid_val(task_uid(candidate));
+    same_mm = READ_ONCE(candidate->mm) == mm;
+    struct task_struct *parent = rcu_dereference(candidate->real_parent);
+    if (parent)
+    {
+        parent_tid = parent->pid;
+        ppid = parent->tgid;
+        struct task_struct *leader = READ_ONCE(parent->group_leader);
+        parent_start = READ_ONCE(leader->start_time);
+        get_task_comm(parent_comm, leader);
+        get_task_comm(parent_thread, parent);
+    }
+    rcu_read_unlock();
+
+    // 使用候选进程的 mm 引用；取代码段所在文件，不把继承的映像当作子进程即将执行的命令。
+    char buf[256];
+    const char *image = "<no-file>";
+    mmap_read_lock(mm);
+    unsigned long code = READ_ONCE(mm->start_code);
+    struct vm_area_struct *vma = find_vma(mm, code);
+    if (code && vma && vma->vm_start <= code && vma->vm_file)
+    {
+        image = d_path(&vma->vm_file->f_path, buf, sizeof(buf));
+        if (IS_ERR(image)) image = "<path-unavailable>";
+    }
+    mmap_read_unlock(mm);
+
+    ls_log_always_tag("LS", "stage=connect_candidate new_tgid=%d new_start=%llu comm=%s uid=%u fork_no_exec=%u same_mm=%u ppid=%d parent_start=%llu parent_comm=%s parent_tid=%d parent_thread=%s code_image=%s\n", tgid, start, comm, uid, !!(flags & PF_FORKNOEXEC), same_mm, ppid, parent_start, ppid ? parent_comm : "<none>", parent_tid, ppid ? parent_thread : "<none>", image);
+}
+
 static int ConnectThreadFunction(void *data)
 {
     struct task_struct *task;
@@ -232,7 +282,8 @@ static int ConnectThreadFunction(void *data)
     int num_pages;
     int ret;
 
-    // 和内核线程在运行
+    // 内核线程在运行，这里不必判断用户进程连接或存活，
+    // 因为新进程启动要是旧一直活者，新的永远连不上
     while (connect_thread_task)
     {
 
@@ -247,9 +298,13 @@ static int ConnectThreadFunction(void *data)
             old_task = ls_process_task;
             if (old_task && task->start_time <= old_task->start_time) continue;
 
+            pid_t candidate_tgid = task->tgid;
+            unsigned long long candidate_start = READ_ONCE(task->start_time);
             // 获取进程的内存描述符
             mm = get_task_mm(task);
             if (!mm) continue;
+
+            log_connect_candidate(candidate_tgid, candidate_start, mm);
 
             // 计算页数
             num_pages = (sizeof(struct request_obj) + PAGE_SIZE - 1) / PAGE_SIZE;
@@ -293,7 +348,11 @@ static int ConnectThreadFunction(void *data)
                 goto out_put_pages;
             }
             old_task = ls_process_task;
-            if (old_task && !(READ_ONCE(old_task->flags) & PF_EXITING)) send_sig(SIGKILL, old_task, 0); // 杀死旧的task线程组
+            if (old_task && !(READ_ONCE(old_task->flags) & PF_EXITING))
+            {
+                ls_log_always_tag("LS", "signal_attempt=SIGKILL reason=replace_old_ls sender_pid=%d old_tgid=%d old_start=%llu new_tgid=%d\n", current->pid, old_task->tgid, (unsigned long long)READ_ONCE(old_task->start_time), task->tgid);
+                send_sig(SIGKILL, old_task, 0); // 杀死旧的task线程组
+            }
 
             // 成功 get_user_pages_remote 持有页面引用，只需释放 mm
             ls_process_task = task;                            // 保存用户进程指针
@@ -322,238 +381,68 @@ static int ConnectThreadFunction(void *data)
     return 0;
 }
 
-//去掉 ARM64 内核返回地址中的指针认证码（PAC）
-static inline unsigned long exit_strip_kernel_pac(unsigned long address)
-{
-#ifdef CONFIG_ARM64_PTR_AUTH_KERNEL
-    register unsigned long stripped_address asm("x30") = address;
+static struct tracepoint *signal_tp;
 
-    /*
-    xpaci x0    // 移除任意寄存器中“指令指针”类型的 PAC
-    xpacd x0    // 移除任意寄存器中“数据指针”类型的 PAC
-    xpaclri     // 专门移除 x30/LR 中的指令 PAC
-    */
-    asm("hint #7" : "+r"(stripped_address)); //XPACLRI指令
-    return stripped_address;
-#else
-    return address;
-#endif
-}
-
-static const char *exit_watch_process_name(const char *comm)
+// 记录发往 LS 的 SIGKILL，用同一事件号关联入队结果和发送方调用栈。
+static void signal_generate(void *data, int sig, struct kernel_siginfo *info, struct task_struct *task, int group, int result)
 {
-    static const char *const process_names[] = {
-        "LS", "com.tencent.tmgp.dfm", "com.tencent.tmgp.sgame", "com.pi.czrxdfirst", "com.bwxrk.yqmy.gz", "me.hd.ggtutorial",
+    if (sig != SIGKILL) return;
+
+    // 发送路径已持有目标 sighand->siglock。按组长名匹配，也覆盖发给 Binder 线程的信号。
+    struct task_struct *leader = READ_ONCE(task->group_leader);
+    char comm[TASK_COMM_LEN];
+    __builtin_memcpy(comm, leader->comm, sizeof(comm));
+    if (__builtin_memcmp(comm, "LS", sizeof("LS")) != 0) return;
+
+    static const char *const results[] = {
+        [TRACE_SIGNAL_DELIVERED] = "queued", [TRACE_SIGNAL_IGNORED] = "ignored", [TRACE_SIGNAL_ALREADY_PENDING] = "already_pending", [TRACE_SIGNAL_OVERFLOW_FAIL] = "overflow", [TRACE_SIGNAL_LOSE_INFO] = "lost_info",
     };
-
-    for (int i = 0; i < ARRAY_SIZE(process_names); i++)
+    static atomic64_t sequence = ATOMIC64_INIT(0);
+    unsigned long long event = atomic64_inc_return(&sequence);
+    // 两个 SEND_SIG_* 哨兵值直接映射到 si_code，只有实际的 siginfo 指针才能解引用。
+    int code = info == SEND_SIG_NOINFO ? SI_USER : info == SEND_SIG_PRIV ? SI_KERNEL : info->si_code;
+    const char *outcome = (unsigned int)result < ARRAY_SIZE(results) ? results[result] : "unknown";
+    ls_log_always_tag("LS", "stage=signal_generate event=%llu signal=SIGKILL(9) result=%s(%d) si_code=%d group=%d tgid=%d process_start=%llu target_tid=%d target_comm=%.*s sender_tgid=%d sender_tid=%d sender_comm=%.*s context=%s\n", event, outcome, result, code, group, task->tgid, (unsigned long long)READ_ONCE(leader->start_time), task->pid, TASK_COMM_LEN, task->comm, current->tgid, current->pid, TASK_COMM_LEN, current->comm, in_task() ? "task" : "interrupt");
+    // 仅在本次信号成功入队时采集发送栈，重复发送仍会留下上面的摘要。
+    if (result == TRACE_SIGNAL_DELIVERED)
     {
-        size_t length = __builtin_strlen(process_names[i]);
-        const char *suffix = length >= TASK_COMM_LEN ? process_names[i] + length - (TASK_COMM_LEN - 1) : process_names[i];
-
-        if (__builtin_strcmp(comm, suffix) == 0 || __builtin_strncmp(comm, process_names[i], TASK_COMM_LEN - 1) == 0) return process_names[i];
-    }
-
-    return NULL;
-}
-
-static const char *exit_signal_name(unsigned int signal)
-{
-    switch (signal)
-    {
-    case SIGILL:
-        return "SIGILL";
-    case SIGTRAP:
-        return "SIGTRAP";
-    case SIGABRT:
-        return "SIGABRT";
-    case SIGBUS:
-        return "SIGBUS";
-    case SIGFPE:
-        return "SIGFPE";
-    case SIGKILL:
-        return "SIGKILL";
-    case SIGSEGV:
-        return "SIGSEGV";
-    case SIGSYS:
-        return "SIGSYS";
-    case SIGTERM:
-        return "SIGTERM";
-    default:
-        return "UNKNOWN";
+        unsigned long frames[16];
+        unsigned int count = stack_trace_save(frames, ARRAY_SIZE(frames), 0);
+        for (unsigned int i = 0; i < count; i++) ls_log_always_tag("LS", "event=%llu sender_frame=%u %pS\n", event, i, (void *)frames[i]);
     }
 }
 
-static const char *exit_fault_code_name(unsigned int signal, int code)
+// 遍历时按名称匹配，通过 data 把观测点指针写回调用者。
+static void find_signal_tp(struct tracepoint *tp, void *data)
 {
-    if (signal == SIGSEGV)
-    {
-        if (code == SEGV_MAPERR) return "SEGV_MAPERR";
-        if (code == SEGV_ACCERR) return "SEGV_ACCERR";
-    }
-    else if (signal == SIGBUS)
-    {
-        if (code == BUS_ADRALN) return "BUS_ADRALN";
-        if (code == BUS_ADRERR) return "BUS_ADRERR";
-        if (code == BUS_OBJERR) return "BUS_OBJERR";
-    }
-    else if (signal == SIGILL)
-    {
-        if (code == ILL_ILLOPC) return "ILL_ILLOPC";
-        if (code == ILL_ILLOPN) return "ILL_ILLOPN";
-        if (code == ILL_ILLADR) return "ILL_ILLADR";
-        if (code == ILL_PRVOPC) return "ILL_PRVOPC";
-    }
-    else if (signal == SIGFPE)
-    {
-        if (code == FPE_INTDIV) return "FPE_INTDIV";
-        if (code == FPE_INTOVF) return "FPE_INTOVF";
-        if (code == FPE_FLTINV) return "FPE_FLTINV";
-    }
-    else if (signal == SIGTRAP)
-    {
-        if (code == TRAP_BRKPT) return "TRAP_BRKPT";
-        if (code == TRAP_TRACE) return "TRAP_TRACE";
-    }
-
-    return "UNKNOWN";
+    // data 是注册函数传入的 &tp，命中后写入该局部变量。
+    if (__builtin_strcmp(tp->name, "signal_generate") == 0) *(struct tracepoint **)data = tp;
 }
 
-static inline unsigned long long next_process_event_id(void)
+// 注册信号回调
+static int signal_register(void)
 {
-    static uint64_t process_event_sequence;
+    struct tracepoint *tp = NULL;
+    for_each_kernel_tracepoint(find_signal_tp, &tp);
+    if (!tp) return -ENOENT;
 
-    return __atomic_add_fetch(&process_event_sequence, 1, __ATOMIC_RELAXED);
-}
-//当前 hook 被调用时，内核是通过哪些函数一路调用到这里的。 它记录的是内核调用栈
-static void log_exit_kernel_chain(const char *tag, unsigned long long event_id, const struct pt_regs *regs)
-{
-    unsigned long stack_low = (unsigned long)task_stack_page(current);
-    unsigned long stack_high = stack_low + THREAD_SIZE;
-    unsigned long frame_pointer = regs->regs[29];
-    unsigned long address = exit_strip_kernel_pac(regs->regs[30]);
-    unsigned int depth = 0;
-
-    if (address) ls_log_always_tag(tag, "event=%llu frame=%02u address=%pS\n", event_id, depth++, (void *)address);
-
-    while (depth < sizeof(uint64_t))
-    {
-        const unsigned long *frame = (const unsigned long *)frame_pointer;
-        unsigned long previous_fp;
-
-        if ((frame_pointer & 0xf) || frame_pointer < stack_low || frame_pointer > stack_high - 2 * sizeof(*frame)) break;
-
-        previous_fp = READ_ONCE(frame[0]);
-        address = exit_strip_kernel_pac(READ_ONCE(frame[1]));
-        if (address) ls_log_always_tag(tag, "event=%llu frame=%02u address=%pS\n", event_id, depth++, (void *)address);
-
-        if (previous_fp <= frame_pointer) break;
-        frame_pointer = previous_fp;
-    }
+    // 用事件原型在编译期检查回调签名，再通过通用接口注册。
+    check_trace_callback_type_signal_generate(signal_generate);
+    int ret = tracepoint_probe_register(tp, signal_generate, NULL);
+    if (!ret) WRITE_ONCE(signal_tp, tp);
+    return ret;
 }
 
-/*
-arm64_force_sig_fault
-    -> 原始异常：ESR、fault 地址、信号、用户 PC/LR/SP
-*/
-static int arm64_force_sig_fault_hook_work(struct pt_regs *regs)
+// 卸载信号回调
+static void signal_unregister(void)
 {
-    struct task_struct *task = current;
-    char process_comm[TASK_COMM_LEN];
-    char thread_comm[TASK_COMM_LEN];
-
-    get_task_comm(process_comm, task->group_leader);
-    const char *process_name = exit_watch_process_name(process_comm);
-    if (!process_name) return 0;
-
-    struct pt_regs *user_regs = task_pt_regs(task);
-    const char *source = (const char *)(uintptr_t)regs->regs[3];
-    unsigned int signal = (unsigned int)regs->regs[0];
-    int code = (int)regs->regs[1];
-    unsigned int signal_flags = READ_ONCE(task->signal->flags);
-    unsigned long long event_id = next_process_event_id();
-
-    get_task_comm(thread_comm, task);
-    ls_log_always_tag("fault", "event=%llu stage=fault_delivery process=%s process_start=%llu thread=%s thread_start=%llu tgid=%d tid=%d signal=%s(%u) si_code=%s(%d) addr=0x%lx esr=0x%lx source=%s pc=0x%llx lr=0x%llx sp=0x%llx group_exit=%u group_exit_code=0x%x pf_signaled=%u\n", event_id, process_name, (unsigned long long)READ_ONCE(task->group_leader->start_time), thread_comm, (unsigned long long)READ_ONCE(task->start_time), task->tgid, task->pid, exit_signal_name(signal), signal, exit_fault_code_name(signal, code), code, (unsigned long)regs->regs[2], task->thread.fault_code, source ? source : "<none>", (unsigned long long)user_regs->pc, (unsigned long long)user_regs->regs[30], (unsigned long long)user_regs->sp, !!(signal_flags & SIGNAL_GROUP_EXIT), READ_ONCE(task->signal->group_exit_code), !!(READ_ONCE(task->flags) & PF_SIGNALED));
-    log_exit_kernel_chain("fault", event_id, regs);
-    return 0;
-}
-
-/*
-do_group_exit
-    -> 异常是否最终触发整个线程组退出、退出信号/状态
-*/
-static int do_group_exit_hook_work(struct pt_regs *regs)
-{
-    struct task_struct *task = current;
-    struct pt_regs *user_regs = task_pt_regs(task);
-    char process_comm[TASK_COMM_LEN];
-    char thread_comm[TASK_COMM_LEN];
-    unsigned int requested_code = (unsigned int)regs->regs[0];
-    unsigned int signal_flags = READ_ONCE(task->signal->flags);
-    unsigned int group_exit_code = READ_ONCE(task->signal->group_exit_code);
-    unsigned int effective_code = requested_code;
-    unsigned int signal;
-    unsigned long long event_id;
-
-    get_task_comm(process_comm, task->group_leader);
-    const char *process_name = exit_watch_process_name(process_comm);
-    if (!process_name) return 0;
-
-    if (signal_flags & SIGNAL_GROUP_EXIT) effective_code = group_exit_code;
-
-    signal = effective_code & 0x7f;
-    event_id = next_process_event_id();
-    get_task_comm(thread_comm, task);
-
-    if (signal)
+    struct tracepoint *tp = xchg(&signal_tp, NULL);
+    if (tp)
     {
-        ls_log_always_tag("group_exit", "event=%llu stage=group_exit process=%s process_start=%llu thread=%s thread_start=%llu tgid=%d tid=%d leader=%u requested_code=0x%x effective_code=0x%x signal=%s(%u) core_dump=%u already_exiting=%u pf_signaled=%u live_threads=%d pc=0x%llx lr=0x%llx sp=0x%llx\n", event_id, process_name, (unsigned long long)READ_ONCE(task->group_leader->start_time), thread_comm, (unsigned long long)READ_ONCE(task->start_time), task->tgid, task->pid, thread_group_leader(task), requested_code, effective_code, exit_signal_name(signal), signal, !!(effective_code & 0x80), !!(signal_flags & SIGNAL_GROUP_EXIT), !!(READ_ONCE(task->flags) & PF_SIGNALED), atomic_read(&task->signal->live), (unsigned long long)user_regs->pc, (unsigned long long)user_regs->regs[30], (unsigned long long)user_regs->sp);
+        tracepoint_probe_unregister(tp, signal_generate, NULL);
+        // 等待其他 CPU 上已经进入的回调返回。
+        tracepoint_synchronize_unregister();
     }
-    else
-    {
-        ls_log_always_tag("group_exit", "event=%llu stage=group_exit process=%s process_start=%llu thread=%s thread_start=%llu tgid=%d tid=%d leader=%u requested_code=0x%x effective_code=0x%x status=%u already_exiting=%u pf_signaled=%u live_threads=%d pc=0x%llx lr=0x%llx sp=0x%llx\n", event_id, process_name, (unsigned long long)READ_ONCE(task->group_leader->start_time), thread_comm, (unsigned long long)READ_ONCE(task->start_time), task->tgid, task->pid, thread_group_leader(task), requested_code, effective_code, (effective_code >> 8) & 0xff, !!(signal_flags & SIGNAL_GROUP_EXIT), !!(READ_ONCE(task->flags) & PF_SIGNALED), atomic_read(&task->signal->live), (unsigned long long)user_regs->pc, (unsigned long long)user_regs->regs[30], (unsigned long long)user_regs->sp);
-    }
-
-    log_exit_kernel_chain("group_exit", event_id, regs);
-    return 0;
-}
-
-/*
-do_exit
-    -> 每个线程实际进入不可返回的退出路径
-*/
-static int do_exit_hook_work(struct pt_regs *regs)
-{
-    struct task_struct *task = current;
-    struct pt_regs *user_regs = task_pt_regs(task);
-    char process_comm[TASK_COMM_LEN];
-    char thread_comm[TASK_COMM_LEN];
-    unsigned long code = regs->regs[0];
-    unsigned int signal = code & 0x7f;
-    unsigned int signal_flags = READ_ONCE(task->signal->flags);
-    bool is_leader = thread_group_leader(task);
-
-    get_task_comm(process_comm, task->group_leader);
-    const char *process_name = exit_watch_process_name(process_comm);
-    if (process_name)
-    {
-        unsigned long long event_id = next_process_event_id();
-
-        get_task_comm(thread_comm, task);
-        if (signal)
-        {
-            ls_log_always_tag("exit", "event=%llu stage=thread_exit process=%s process_start=%llu thread=%s thread_start=%llu tgid=%d tid=%d leader=%u code=0x%lx signal=%s(%u) core_dump=%u group_exit=%u group_exit_code=0x%x pf_signaled=%u live_threads=%d pc=0x%llx lr=0x%llx sp=0x%llx\n", event_id, process_name, (unsigned long long)READ_ONCE(task->group_leader->start_time), thread_comm, (unsigned long long)READ_ONCE(task->start_time), task->tgid, task->pid, is_leader, code, exit_signal_name(signal), signal, !!(code & 0x80), !!(signal_flags & SIGNAL_GROUP_EXIT), READ_ONCE(task->signal->group_exit_code), !!(READ_ONCE(task->flags) & PF_SIGNALED), atomic_read(&task->signal->live), (unsigned long long)user_regs->pc, (unsigned long long)user_regs->regs[30], (unsigned long long)user_regs->sp);
-        }
-        else
-        {
-            ls_log_always_tag("exit", "event=%llu stage=thread_exit process=%s process_start=%llu thread=%s thread_start=%llu tgid=%d tid=%d leader=%u code=0x%lx status=%u group_exit=%u group_exit_code=0x%x pf_signaled=%u live_threads=%d pc=0x%llx lr=0x%llx sp=0x%llx\n", event_id, process_name, (unsigned long long)READ_ONCE(task->group_leader->start_time), thread_comm, (unsigned long long)READ_ONCE(task->start_time), task->tgid, task->pid, is_leader, code, (unsigned int)((code >> 8) & 0xff), !!(signal_flags & SIGNAL_GROUP_EXIT), READ_ONCE(task->signal->group_exit_code), !!(READ_ONCE(task->flags) & PF_SIGNALED), atomic_read(&task->signal->live), (unsigned long long)user_regs->pc, (unsigned long long)user_regs->regs[30], (unsigned long long)user_regs->sp);
-        }
-
-        if (signal || (signal_flags & SIGNAL_GROUP_EXIT) || is_leader) log_exit_kernel_chain("exit", event_id, regs);
-    }
-
-    return 0;
 }
 
 /*
@@ -578,7 +467,9 @@ static int taskstats_exit_hook_work(struct pt_regs *regs)
     // 仅匹配用户态通过 PR_SET_NAME 设置的精确进程名。
     if (__builtin_strcmp(process_comm, "LS") == 0)
     {
-        // 相应处理
+        // 与 wait() 使用相同的进程退出状态，组长可能先于最后一个线程退出。
+        unsigned int status = READ_ONCE(task->signal->flags) & SIGNAL_GROUP_EXIT ? READ_ONCE(task->signal->group_exit_code) : READ_ONCE(task->group_leader->exit_code);
+        ls_log_always_tag("LS", "stage=process_exit tgid=%d process_start=%llu wait_status=0x%x signal=%u exit_status=%u\n", task->tgid, (unsigned long long)READ_ONCE(task->group_leader->start_time), status, status & 0x7f, (status >> 8) & 0xff);
 
         hide_task_remove(task->tgid); // 只取消当前用户进程的隐藏，不影响隐藏的内核线程
         hide_kgsl_remove(task->tgid); // 取消当前用户进程的高通GPU节点隐藏
@@ -597,47 +488,19 @@ static int taskstats_exit_hook_work(struct pt_regs *regs)
         if (!connect_thread_task && !dispatch_thread_task)
         {
             //cpu_render_exit();
+            signal_unregister();
             inline_hook_remove_all(); // 内核退出才清理所有hook
         }
     }
     return 0;
 }
 
-static int do_exit_init(void)
+static int taskstats_exit_init(void)
 {
-    /*
-    arm64_force_sig_fault -> 记录原始异常
-    do_group_exit         -> 记录谁发起整个进程退出及原因
-    do_exit               -> 记录实际线程退出
-    taskstats_exit        -> 在线程组最后一个线程退出时执行资源清理
-    主线程很可能只做资源初始化和线程初始化就退出了，所以不能只看主线程退出就清理驱动相关资源，
-    之前在do_exit_hook_work中看主线程退出清理很错误，现在改为taskstats_exit_hook_work在线程组最后一个线程退出时执行资源清理
-    使用 "nohup dmesg -w > /storage/emulated/0/dmesg.txt 2>/dev/null &"查看日志
-    /sdcard是软链接（快捷方式）/storage/emulated/0 是真实挂载点，两者最终指向同一块内置闪存/data/media/0，内容完全一致。
-    */
     static struct hook_entry taskstats_exit_hooks[] = {
         HOOK_ENTRY("taskstats_exit", taskstats_exit_hook_work),
     };
-    static struct hook_entry exit_hooks[] = {
-        HOOK_ENTRY("arm64_force_sig_fault", arm64_force_sig_fault_hook_work),
-        HOOK_ENTRY("do_group_exit", do_group_exit_hook_work),
-        HOOK_ENTRY("do_exit", do_exit_hook_work),
-    };
-    //taskstats_exit必须hook成功，主要服务于连接进程退出的资源清理，其他3个hook是无关紧要的崩溃日志hook
-    int ret = inline_hook_install(taskstats_exit_hooks);
-    if (ret < 0)
-    {
-        ls_log_always_tag("core", "安装 taskstats_exit 清理 hook 失败，错误码: %d\n", ret);
-        return ret;
-    }
-
-    ret = inline_hook_install(exit_hooks);
-    if (ret < 0)
-    {
-        ls_log_always_tag("core", "安装进程异常/退出诊断 hook 失败，诊断组已回滚，taskstats_exit 清理 hook 保留，错误码: %d\n", ret);
-    }
-
-    return 0;
+    return inline_hook_install(taskstats_exit_hooks);
 }
 
 // 隐藏内核模块
@@ -799,11 +662,18 @@ static int __init lsdriver_init(void)
     }
 
     // 注册用户进程退出回调
-    status = do_exit_init();
+    status = taskstats_exit_init();
     if (status < 0)
     {
         ls_log_always_tag("core", "注册 taskstats_exit 清理 hook 失败，错误码: %d\n", status);
         goto fail;
+    }
+
+    status = signal_register();
+    if (status < 0)
+    {
+        ls_log_always_tag("LS", "注册 signal_generate 诊断失败，错误码: %d\n", status);
+        status = 0;
     }
 
     // //初始化cpu渲染相关资源
@@ -841,6 +711,7 @@ static int __init lsdriver_init(void)
     return status;
 
 fail:
+    signal_unregister();
     if (connect_thread_task) hide_task_remove(connect_thread_task->pid);
     if (dispatch_thread_task) hide_task_remove(dispatch_thread_task->pid);
     connect_thread_task = NULL;
