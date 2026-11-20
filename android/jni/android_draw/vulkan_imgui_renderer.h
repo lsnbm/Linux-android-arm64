@@ -677,9 +677,9 @@ public:
             swapChainRebuild_ = true;
             return status;
         }
-        // SUBOPTIMAL 仍然取得了图像；完成这次提交、消耗 acquire 信号量后再重建。
-        if (acquire == VK_SUBOPTIMAL_KHR) swapChainRebuild_ = true;
-        else if (acquire != VK_SUCCESS)
+        // Android 可能持续报告 SUBOPTIMAL，交换链仍可用；仅在显示变化或 OUT_OF_DATE 时重建。
+        // 此时仍已取得图像，必须完成提交并消耗 acquire 信号量。
+        if (acquire != VK_SUCCESS && acquire != VK_SUBOPTIMAL_KHR)
         {
             status = acquire;
             return status;
@@ -732,8 +732,8 @@ public:
         presentInfo.pSwapchains = &swapchain_;
         presentInfo.pImageIndices = &imageIndex;
         const VkResult present = vkQueuePresentKHR(queue_, &presentInfo);
-        if (present == VK_ERROR_OUT_OF_DATE_KHR || present == VK_SUBOPTIMAL_KHR) swapChainRebuild_ = true;
-        else if (present != VK_SUCCESS)
+        if (present == VK_ERROR_OUT_OF_DATE_KHR) swapChainRebuild_ = true;
+        else if (present != VK_SUCCESS && present != VK_SUBOPTIMAL_KHR)
         {
             status = present;
             return status;
