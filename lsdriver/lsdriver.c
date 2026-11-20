@@ -110,6 +110,7 @@ static int DispatchThreadFunction(void *data)
                 // 有活干，重置计数器
                 spin_count = 0;
 
+                //__ATOMIC_RELAXED标志在ARM下编译出来的就是普通的LDR和STR了，各种场景下汇编看了多次了
                 __atomic_store_n(&req->kernel, 0, __ATOMIC_RELAXED); // 清除请求标志
 
                 enum request_op op = __atomic_load_n(&req->op, __ATOMIC_RELAXED);
