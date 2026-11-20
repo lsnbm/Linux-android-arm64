@@ -35,7 +35,7 @@
 7. cgroup_seqfile_show
    这是四个目标 cgroup 文件共用的 seq show 包装，只过滤指定文件，不影响其他文件。
    v1 的 arg 是 PID 列表元素：tasks 按 PID 查任务，cgroup.procs 按 TGID 对象身份比较。
-   v2 的 arg 是 task_struct：直接读取其 TGID；通过 cftype 的层级标志区分参数类型。
+   v2 的 arg 是 task_struct：直接读取其 TGID；按当前 cgroup 所属层级区分参数类型。
    命中时不调用原 show，返回 0 且不输出字节；seq_file 继续原生 next，不留下空行或
    分页占位，不需要替换 PID 列表、任务迭代器或修改缓存。
 
@@ -256,8 +256,8 @@ static int cgroup_seqfile_show_hook_work(struct pt_regs *regs)
 
     if (!hide_task_match_cgroup_file(cft)) return 0;
 
-    // v2 文件由 cgroup_add_dfl_cftypes() 设置该标志；v1 文件使用 PID 列表。
-    if (cft->flags & __CFTYPE_ONLY_ON_DFL) hidden = hide_task_match_tgid(READ_ONCE(((struct task_struct *)arg)->tgid));
+    // 核心 v2 文件没有 __CFTYPE_ONLY_ON_DFL；按当前 cgroup 的 root 区分参数类型。
+    if (seq_css(seq)->cgroup->root == &cgrp_dfl_root) hidden = hide_task_match_tgid(READ_ONCE(((struct task_struct *)arg)->tgid));
     else if (__builtin_strcmp(cft->name, "cgroup.procs") == 0) hidden = hide_task_match_cgroup_tgid(*(pid_t *)arg);
     else hidden = hide_task_match_pid(*(pid_t *)arg);
     if (!hidden) return 0;
