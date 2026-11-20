@@ -2,6 +2,7 @@
 
 #include "../logger/logger.h"
 #include "imgui/imgui.h"
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <charconv>
@@ -53,6 +54,7 @@ class TouchInput
         int x = 0, y = 0;
     };
     std::array<Event, 2048> pending;
+    std::array<Event, 2048> dispatch; // 仅渲染线程使用，避免每帧分配事件批次。
     size_t count = 0;
     struct Slot
     {
@@ -76,7 +78,7 @@ class TouchInput
         return (bits[bit / 8] & (1u << (bit % 8))) != 0;
     }
 
-    ImVec2 screenPosition(ImVec2 p) const
+    static ImVec2 screenPosition(ImVec2 p, int width, int height, int rotation)
     {
         switch (rotation)
         {
@@ -91,7 +93,7 @@ class TouchInput
         }
     }
 
-    static void ReadEvents(std::stop_token stop, TouchInput *self, int input, int minX, int minY, double dx, double dy, std::vector<Slot> slots)
+    static void ReadEvents(std::stop_token stop, TouchInput *self, int input, int minX, int minY, double dx, double dy, std::vector<Slot> slots, std::vector<Contact> contacts)
     {
         // 各触点先缓存在输入线程，等 SYN_REPORT 到达再提交一批事件。
         int status = 0;
@@ -147,21 +149,23 @@ class TouchInput
                     continue;
                 }
                 if (event.type != EV_SYN || event.code != SYN_REPORT) continue;
-                // 输入线程只加锁提交事件，不直接调用 ImGui。
-                std::lock_guard lock(self->mutex);
-                const bool resync = self->count + 2 > self->pending.size();
-                if (resync) self->count = 0;
-                self->reported.clear();
+                // 扫描和归一化在锁外完成；两个缓冲区均在启动时预分配。
+                contacts.clear();
                 for (size_t index = 0; index < slots.size(); ++index)
                 {
                     const auto &finger = slots[index];
                     if (finger.id < 0) continue;
-                    self->reported.push_back({static_cast<int>(index), {static_cast<float>((double(finger.x) - minX) / dx), static_cast<float>((double(finger.y) - minY) / dy)}});
+                    contacts.push_back({static_cast<int>(index), {static_cast<float>((double(finger.x) - minX) / dx), static_cast<float>((double(finger.y) - minY) / dy)}});
                 }
+                // 触点、屏幕参数和对应事件在同一临界区内发布。
+                std::lock_guard lock(self->mutex);
+                self->reported.swap(contacts);
+                const bool resync = self->count + 2 > self->pending.size();
+                if (resync) self->count = 0;
                 const bool down = !self->reported.empty();
                 if (down) // 菜单只收到一个主指针，其他手指只用于调试绘制。
                 {
-                    const auto p = self->screenPosition(self->reported.front().pos);
+                    const auto p = screenPosition(self->reported.front().pos, self->width, self->height, self->rotation);
                     const int px = static_cast<int>(p.x), py = static_cast<int>(p.y);
                     if (resync || !wasDown || px != lastX || py != lastY) self->pending[self->count++] = {Event::Position, px, py};
                     lastX = px;
@@ -275,7 +279,8 @@ public:
             frame.reserve(best.slotCount);
             // 在初始化时启动线程，而非静态初始化时启动：调用方可能在此之前 fork。
             worker = std::jthread(ReadEvents, this, best.fd, best.minX, best.minY,
-                                  double(best.maxX) - best.minX, double(best.maxY) - best.minY, std::vector<Slot>(best.slotCount));
+                                  double(best.maxX) - best.minX, double(best.maxY) - best.minY,
+                                  std::vector<Slot>(best.slotCount), std::vector<Contact>(best.slotCount));
         }
         catch (const std::system_error &error)
         {
@@ -294,14 +299,30 @@ public:
     // 可从任意线程读取；返回本实例最近一次完整上报中仍按下的触点副本。
     [[nodiscard]] std::vector<TouchPoint> snapshot() const
     {
-        std::lock_guard lock(mutex);
-        if (width <= 0 || height <= 0) return {};
         std::vector<TouchPoint> points;
-        points.reserve(reported.size());
-        for (const auto &contact : reported)
+        int w, h, orientation;
+        for (;;)
         {
-            const auto p = screenPosition(contact.pos);
-            points.push_back({contact.slot, p.x, p.y});
+            std::unique_lock lock(mutex);
+            if (width <= 0 || height <= 0) return {};
+            if (points.capacity() < reported.size())
+            {
+                const size_t capacity = reported.capacity();
+                lock.unlock();
+                points.reserve(capacity);
+                continue; // 扩容期间状态可能改变，重新获取完整快照。
+            }
+            w = width;
+            h = height;
+            orientation = rotation;
+            for (const auto &contact : reported) points.push_back({contact.slot, contact.pos.x, contact.pos.y});
+            break;
+        }
+        for (auto &point : points)
+        {
+            const auto p = screenPosition({point.x, point.y}, w, h, orientation);
+            point.x = p.x;
+            point.y = p.y;
         }
         return points;
     }
@@ -322,19 +343,30 @@ public:
     // 在渲染线程的 ImGui::NewFrame 之前消费已提交的触摸事件。
     void updateImGui()
     {
-        std::lock_guard lock(mutex);
         frame.clear();
-        for (const auto &contact : reported) frame.push_back({contact.slot, screenPosition(contact.pos)});
-        if (!count) return;
+        int w, h, orientation;
+        size_t eventCount;
+        {
+            std::lock_guard lock(mutex);
+            w = width;
+            h = height;
+            orientation = rotation;
+            // frame 已按设备 slot 数预分配，此处只复制，不分配或调用 ImGui。
+            for (const auto &contact : reported) frame.push_back(contact);
+            eventCount = count;
+            std::copy_n(pending.begin(), eventCount, dispatch.begin());
+            count = 0;
+        }
+        for (auto &contact : frame) contact.pos = screenPosition(contact.pos, w, h, orientation);
+        if (!eventCount) return;
         ImGuiIO &io = ImGui::GetIO();
         io.AddMouseSourceEvent(ImGuiMouseSource_TouchScreen);
-        for (size_t i = 0; i < count; ++i)
+        for (size_t i = 0; i < eventCount; ++i)
         {
-            const auto &event = pending[i];
+            const auto &event = dispatch[i];
             if (event.kind == Event::Position) io.AddMousePosEvent(event.x, event.y);
             else io.AddMouseButtonEvent(0, event.kind == Event::Press);
         }
-        count = 0;
     }
 
     // 仅在绘制回调中使用；点与矩形使用同一帧，不读取正在写入的输入状态。
