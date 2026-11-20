@@ -27,8 +27,8 @@
    从系统调用现场取得 PID，参数 flags 合法且 TGID 命中时返回 -ESRCH；
    非法 flags、无效 PID 等仍交给原系统调用处理。
 5. __arm64_sys_clock_gettime / __arm64_sys_clock_getres
-   识别 clockid 低三位为 2 的进程 CPU 时钟，从编码中还原 PID 并匹配 TGID。
-   命中 PROF、VIRT、SCHED 时均按原生不存在进程的行为返回 -EINVAL。
+   clockid 的 bit 2 为零表示进程时钟，低两位区分 PROF=0、VIRT=1、SCHED=2；
+   从编码中还原 PID 并匹配 TGID，三种时钟均按原生不存在进程的行为返回 -EINVAL。
 6. __arm64_sys_getpriority
    只处理 PRIO_PROCESS 且 who 非零的查询；TGID 命中时返回原生不存在进程的 -ESRCH，
    who 为零的当前进程查询以及 PRIO_PGRP/PRIO_USER 保持原行为。
@@ -117,10 +117,12 @@ static bool hide_task_match_pid_name(const char *name, int namlen, unsigned int 
     return hide_task_match_pid(pid);
 }
 
-// 进程 CPU 时钟的 clockid 编码为 (~pid << 3) | clock；clock=2 表示进程 CPU 时间。
+// 进程 CPU 时钟的 bit 2 为零；低两位 PROF=0、VIRT=1、SCHED=2 都是有效时钟类型。
 static bool hide_task_match_process_clock(int clock_id)
 {
-    if (((unsigned int)clock_id & 7U) != 2U) return false;
+    unsigned int type = (unsigned int)clock_id & 3U;
+
+    if (((unsigned int)clock_id & 4U) || type > 2U) return false;
 
     return hide_task_match_pid((pid_t) ~(clock_id >> 3));
 }
@@ -237,9 +239,8 @@ static bool hide_task_match_cgroup_tgid(pid_t tgid)
     return matched;
 }
 
-static bool hide_task_match_cgroup_file(struct seq_file *seq)
+static bool hide_task_match_cgroup_file(const struct cftype *cft)
 {
-    const struct cftype *cft = seq_cft(seq);
     const char *name = cft->name;
 
     return __builtin_strcmp(name, "cgroup.procs") == 0 || __builtin_strcmp(name, "tasks") == 0 || __builtin_strcmp(name, "cgroup.threads") == 0;
@@ -250,18 +251,15 @@ static int cgroup_seqfile_show_hook_work(struct pt_regs *regs)
 {
     struct seq_file *seq = (struct seq_file *)regs->regs[0];
     void *arg = (void *)regs->regs[1];
+    const struct cftype *cft = seq_cft(seq);
     bool hidden;
 
-    if (!hide_task_match_cgroup_file(seq)) return 0;
+    if (!hide_task_match_cgroup_file(cft)) return 0;
 
-    const struct cftype *cft = seq_cft(seq);
     // v2 文件由 cgroup_add_dfl_cftypes() 设置该标志；v1 文件使用 PID 列表。
-    if (cft->flags & __CFTYPE_ONLY_ON_DFL)
-        hidden = hide_task_match_tgid(READ_ONCE(((struct task_struct *)arg)->tgid));
-    else if (__builtin_strcmp(cft->name, "cgroup.procs") == 0)
-        hidden = hide_task_match_cgroup_tgid(*(pid_t *)arg);
-    else
-        hidden = hide_task_match_pid(*(pid_t *)arg);
+    if (cft->flags & __CFTYPE_ONLY_ON_DFL) hidden = hide_task_match_tgid(READ_ONCE(((struct task_struct *)arg)->tgid));
+    else if (__builtin_strcmp(cft->name, "cgroup.procs") == 0) hidden = hide_task_match_cgroup_tgid(*(pid_t *)arg);
+    else hidden = hide_task_match_pid(*(pid_t *)arg);
     if (!hidden) return 0;
 
     // 不调用原 show，不输出字节；seq_file 会继续调用原生 next，分页位置只统计实际输出。
@@ -270,13 +268,13 @@ static int cgroup_seqfile_show_hook_work(struct pt_regs *regs)
 }
 
 static struct hook_entry g_hide_task_hooks[] = {
-    HOOK_ENTRY("filldir64", filldir64_hook_work),
-    HOOK_ENTRY("proc_pid_lookup", proc_pid_lookup_hook_work),
-    HOOK_ENTRY("pid_revalidate", pid_revalidate_hook_work),
-    HOOK_ENTRY("__arm64_sys_pidfd_open", pidfd_open_hook_work),
-    HOOK_ENTRY("__arm64_sys_clock_gettime", hide_task_cpu_clock_hook_work),
-    HOOK_ENTRY("__arm64_sys_clock_getres", hide_task_cpu_clock_hook_work),
-    HOOK_ENTRY("__arm64_sys_getpriority", getpriority_hook_work),
+    HOOK_ENTRY("filldir64", filldir64_hook_work), 
+    HOOK_ENTRY("proc_pid_lookup", proc_pid_lookup_hook_work), 
+    HOOK_ENTRY("pid_revalidate", pid_revalidate_hook_work), 
+    HOOK_ENTRY("__arm64_sys_pidfd_open", pidfd_open_hook_work), 
+    HOOK_ENTRY("__arm64_sys_clock_gettime", hide_task_cpu_clock_hook_work), 
+    HOOK_ENTRY("__arm64_sys_clock_getres", hide_task_cpu_clock_hook_work), 
+    HOOK_ENTRY("__arm64_sys_getpriority", getpriority_hook_work), 
     HOOK_ENTRY("cgroup_seqfile_show", cgroup_seqfile_show_hook_work),
 };
 
