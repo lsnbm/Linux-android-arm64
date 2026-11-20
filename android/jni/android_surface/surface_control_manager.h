@@ -164,6 +164,7 @@ namespace android
             void *(*Allocate)(size_t) = nullptr;
             void (*Deallocate)(void *) = nullptr;
             void (*BinderPointerDestructor)(void *) = nullptr;
+            void *(*BinderPointerMoveAssign)(void *, void *) = nullptr;
 
             size_t systemVersion = 0;
             bool initSuccess = false;
@@ -301,6 +302,7 @@ namespace android
                 Allocate = reinterpret_cast<decltype(Allocate)>(dlsym(libgui, "_Znwm"));
                 Deallocate = reinterpret_cast<decltype(Deallocate)>(dlsym(libgui, "_ZdlPv"));
                 BinderPointerDestructor = reinterpret_cast<decltype(BinderPointerDestructor)>(dlsym(libgui, "_ZN7android2spINS_7IBinderEED1Ev"));
+                BinderPointerMoveAssign = reinterpret_cast<decltype(BinderPointerMoveAssign)>(dlsym(libgui, "_ZN7android2spINS_7IBinderEEaSEOS2_"));
                 ResolveMethod(SurfaceComposerClient, Constructor, libgui, "_ZN7android21SurfaceComposerClientC2Ev");
                 if (systemVersion >= 12)
                 {
@@ -335,7 +337,7 @@ namespace android
                 ResolveMethod(SurfaceComposerClient, GetPhysicalDisplayIds, libgui, "_ZN7android21SurfaceComposerClient21getPhysicalDisplayIdsEv");
                 ResolveMethod(SurfaceComposerClient, GetPhysicalDisplayToken, libgui, "_ZN7android21SurfaceComposerClient23getPhysicalDisplayTokenENS_17PhysicalDisplayIdE");
                 ResolveMethod(SurfaceComposerClient__Transaction, Constructor, libgui, "_ZN7android21SurfaceComposerClient11TransactionC2Ev");
-                ResolveMethod(SurfaceComposerClient__Transaction, Destructor, libgui, "_ZN7android21SurfaceComposerClient11TransactionD1Ev");
+                SurfaceComposerClient__Transaction__Destructor = reinterpret_cast<decltype(SurfaceComposerClient__Transaction__Destructor)>(dlsym(libgui, "_ZN7android21SurfaceComposerClient11TransactionD1Ev"));
                 ResolveMethod(SurfaceComposerClient__Transaction, SetLayer, libgui, "_ZN7android21SurfaceComposerClient11Transaction8setLayerERKNS_2spINS_14SurfaceControlEEEi");
                 ResolveMethod(SurfaceComposerClient__Transaction, SetTrustedOverlay, libgui, "_ZN7android21SurfaceComposerClient11Transaction17setTrustedOverlayERKNS_2spINS_14SurfaceControlEEEb");
                 SurfaceComposerClient__Transaction__SetLayerStack = reinterpret_cast<decltype(SurfaceComposerClient__Transaction__SetLayerStack)>(dlsym(libgui, "_ZN7android21SurfaceComposerClient11Transaction13setLayerStackERKNS_2spINS_14SurfaceControlEEENS_2ui10LayerStackE"));
@@ -383,7 +385,7 @@ namespace android
                 const bool hasDisplayInfo = systemVersion >= 11 ? SurfaceComposerClient__GetDisplayState != nullptr : SurfaceComposerClient__GetDisplayInfo != nullptr;
                 const bool hasApply = SurfaceComposerClient__Transaction__Apply != nullptr || SurfaceComposerClient__Transaction__ApplyLegacy != nullptr;
                 const bool hasTrustedOverlay = systemVersion < 12 || SurfaceComposerClient__Transaction__SetTrustedOverlay != nullptr;
-                initSuccess = Allocate && Deallocate && BinderPointerDestructor && SurfaceComposerClient__Transaction__Destructor && RefBase__IncStrong != nullptr && RefBase__DecStrong != nullptr && String8__Constructor != nullptr && String8__Destructor != nullptr && SurfaceComposerClient__Constructor != nullptr && SurfaceControl__GetSurface != nullptr && SurfaceControl__DisConnect != nullptr && SurfaceComposerClient__Transaction__Constructor != nullptr && SurfaceComposerClient__Transaction__SetLayer != nullptr && hasLayerMetadata && hasSurfaceCreate && hasDisplayToken && hasDisplayInfo && hasTrustedOverlay && hasApply;
+                initSuccess = Allocate && Deallocate && (BinderPointerDestructor || BinderPointerMoveAssign) && RefBase__IncStrong != nullptr && RefBase__DecStrong != nullptr && String8__Constructor != nullptr && String8__Destructor != nullptr && SurfaceComposerClient__Constructor != nullptr && SurfaceControl__GetSurface != nullptr && SurfaceControl__DisConnect != nullptr && SurfaceComposerClient__Transaction__Constructor != nullptr && SurfaceComposerClient__Transaction__SetLayer != nullptr && hasLayerMetadata && hasSurfaceCreate && hasDisplayToken && hasDisplayInfo && hasTrustedOverlay && hasApply;
                 if (!initSuccess) LS_LOGE_TAG("Surface", "SurfaceComposerClient 必需符号不完整");
             }
 
@@ -484,7 +486,16 @@ namespace android
             SurfaceComposerClientTransaction &operator=(const SurfaceComposerClientTransaction &) = delete;
             ~SurfaceComposerClientTransaction()
             {
-                api.SurfaceComposerClient__Transaction__Destructor(data);
+                if (api.SurfaceComposerClient__Transaction__Destructor) api.SurfaceComposerClient__Transaction__Destructor(data);
+                else
+                {
+                    // AOSP 9/10 Transaction 首个虚函数为析构，11 起继承 Parcelable 的首槽析构。
+                    // inline D1 可不导出，但构造后的虚表仍保留该入口。
+                    // Itanium ABI 虚表首项是非释放析构，不能调用随后会 delete 存储的 D0。
+                    void **vtable;
+                    std::memcpy(&vtable, data, sizeof(vtable));
+                    reinterpret_cast<void (*)(void *)>(vtable[0])(data);
+                }
             }
 
             int32_t Apply()
@@ -535,8 +546,16 @@ namespace android
             SurfaceComposerClient &operator=(const SurfaceComposerClient &) = delete;
             ~SurfaceComposerClient()
             {
-                // IBinder 虚继承 RefBase，由平台 sp<IBinder> 析构完成正确的虚基类调整。
-                if (displayToken.pointer) api.BinderPointerDestructor(&displayToken);
+                // IBinder 虚继承 RefBase，由平台 sp<IBinder> 析构或赋空完成虚基类调整。
+                if (displayToken.pointer)
+                {
+                    if (api.BinderPointerDestructor) api.BinderPointerDestructor(&displayToken);
+                    else
+                    {
+                        StrongPointer<void> empty;
+                        api.BinderPointerMoveAssign(&displayToken, &empty);
+                    }
+                }
                 if (data) api.RefBase__DecStrong(data, this);
             }
 
