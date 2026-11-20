@@ -3,6 +3,7 @@
 #include "imgui.h"
 #include <algorithm>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -16,7 +17,7 @@ private:
     enum class Mode { Letters, Numbers, Symbols };
     Mode mode = Mode::Letters;
     std::string draft, window_title;
-    char *target_buffer = nullptr;
+    char *target_buffer = nullptr; // 借用至确认或关闭，析构不提交草稿、不释放调用方缓冲区。
     size_t capacity = 0;
     const char *result_buffer = nullptr;
     Result result = Result::None;
@@ -58,6 +59,10 @@ private:
     }
 
 public:
+    FloatingKeyboard() = default;
+    FloatingKeyboard(const FloatingKeyboard &) = delete;
+    FloatingKeyboard &operator=(const FloatingKeyboard &) = delete;
+
     template <size_t N> void Open(char (&buffer)[N], const char *title)
     {
         draft.assign(buffer, strnlen(buffer, N - 1));
@@ -80,7 +85,9 @@ public:
 
     template <size_t N> bool InputButton(char (&buffer)[N], const char *placeholder, ImVec2 size, const char *title = nullptr)
     {
-        std::string label = buffer[0] ? buffer : placeholder;
+        std::string label;
+        if (buffer[0]) label.assign(buffer, strnlen(buffer, N - 1));
+        else if (placeholder) label = placeholder;
         label += "###keyboard_input";
         ImGui::PushID(static_cast<const void *>(buffer));
         if (ImGui::Button(label.c_str(), size)) Open(buffer, title ? title : placeholder);
@@ -235,3 +242,5 @@ public:
         }
     }
 };
+
+inline std::unique_ptr<FloatingKeyboard> gFloatingKeyboard = nullptr;

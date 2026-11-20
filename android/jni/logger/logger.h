@@ -29,14 +29,12 @@
 #ifdef __cplusplus
 template <typename... Args> inline void ls_log_format(android_LogPriority priority, std::format_string<Args...> format, Args &&...args)
 {
-    const std::string message = std::format(format, std::forward<Args>(args)...);
-    __android_log_write(priority, LS_LOG_TAG, message.c_str());
+    __android_log_write(priority, LS_LOG_TAG, std::format(format, std::forward<Args>(args)...).c_str());
 }
 
 template <typename... Args> inline void ls_log_format_tag(android_LogPriority priority, const char *tag, std::format_string<Args...> format, Args &&...args)
 {
-    const std::string message = std::format(format, std::forward<Args>(args)...);
-    __android_log_print(priority, LS_LOG_TAG, "[%s] %s", tag, message.c_str());
+    __android_log_print(priority, LS_LOG_TAG, "[%s] %s", tag, std::format(format, std::forward<Args>(args)...).c_str());
 }
 
 #define LS_LOGI_FMT(...)          ls_log_format(ANDROID_LOG_INFO, __VA_ARGS__)

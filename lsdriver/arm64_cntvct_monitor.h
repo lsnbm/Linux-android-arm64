@@ -21,6 +21,7 @@
 
 #include <linux/jiffies.h>
 #include <linux/mutex.h>
+#include <linux/rcupdate.h>
 #include <linux/sched.h>
 #include <linux/sched/signal.h>
 #include <linux/spinlock.h>
@@ -172,11 +173,10 @@ static int cntvct_monitor_install(pid_t target_tgid)
 {
     if (target_tgid <= 0) return -EINVAL;
 
-    struct task_struct *task = get_task_by_pid(target_tgid);
-    if (!task) return -ESRCH;
-
-    bool valid = task->tgid == target_tgid;
-    put_task_struct(task);
+    rcu_read_lock();
+    struct task_struct *task = find_task_by_vpid(target_tgid);
+    bool valid = task && READ_ONCE(task->tgid) == target_tgid;
+    rcu_read_unlock();
     if (!valid) return -ESRCH;
 
     mutex_lock(&g_cntvct_monitor_mutex);

@@ -1,12 +1,14 @@
 #pragma once
 #include <algorithm>
 #include <memory>
+#include <stdexcept>
 #include <vector>
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
 #include <cctype>
 #include "../../capstone/include/capstone/capstone.h"
+#include "../../logger/logger.h"
 
 namespace Disasm
 {
@@ -25,12 +27,11 @@ namespace Disasm
     {
     private:
         csh m_handle;
-        bool m_valid;
 
     public:
         static constexpr size_t DEFAULT_MAX_INSTRUCTIONS = 500;
 
-        Disassembler() : m_handle(0), m_valid(false)
+        Disassembler() : m_handle(0)
         {
             int major = 0, minor = 0;
             cs_version(&major, &minor);
@@ -39,20 +40,25 @@ namespace Disasm
             if (!cs_support(CS_ARCH_AARCH64))
             {
                 LS_LOGE_TAG("Disassembler", "Capstone 库未编译 ARM64/AArch64 支持");
-                return;
+                throw std::runtime_error("Capstone 未编译 ARM64 支持");
             }
 
             cs_err err = cs_open(CS_ARCH_AARCH64, CS_MODE_LITTLE_ENDIAN, &m_handle);
             if (err != CS_ERR_OK)
             {
                 LS_LOGE_TAG("Disassembler", "ARM64 初始化失败: %s", cs_strerror(err));
-                return;
+                throw std::runtime_error(cs_strerror(err));
             }
 
-            cs_option(m_handle, CS_OPT_DETAIL, CS_OPT_OFF);
-            cs_option(m_handle, CS_OPT_SKIPDATA, CS_OPT_ON);
+            err = cs_option(m_handle, CS_OPT_DETAIL, CS_OPT_OFF);
+            if (err == CS_ERR_OK) err = cs_option(m_handle, CS_OPT_SKIPDATA, CS_OPT_ON);
+            if (err != CS_ERR_OK)
+            {
+                LS_LOGE_TAG("Disassembler", "ARM64 选项初始化失败: %s", cs_strerror(err));
+                cs_close(&m_handle);
+                throw std::runtime_error(cs_strerror(err));
+            }
 
-            m_valid = true;
             LS_LOGI_TAG("Disassembler", "初始化成功: ARM64");
         }
 
@@ -70,12 +76,6 @@ namespace Disasm
         std::vector<DisasmLine> Disassemble(uint64_t address, const uint8_t *buffer, size_t size, size_t maxCount = DEFAULT_MAX_INSTRUCTIONS, bool logInstructions = false)
         {
             std::vector<DisasmLine> results;
-
-            if (!m_valid)
-            {
-                LS_LOGE_TAG("Disassembler", "反汇编器未初始化");
-                return results;
-            }
 
             if (address & 0x3)
             {
@@ -134,4 +134,5 @@ namespace Disasm
 
     };
 
+    inline std::unique_ptr<Disassembler> gDisassembler = nullptr;
 } // namespace Disasm

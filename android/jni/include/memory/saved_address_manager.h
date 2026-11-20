@@ -1,10 +1,12 @@
 #pragma once
+#include <memory>
 #include "../base/memory_utils.h"
 #include <atomic>
 #include <chrono>
 #include <future>
 #include <list>
 #include <mutex>
+#include <span>
 #include <thread>
 
 class SavedAddressManager
@@ -63,11 +65,13 @@ private:
         return MemUtils::ReadAsString(item.address, item.type);
     }
 
-    static bool writeValue(uintptr_t addr, Types::DataType type, Types::SavedValueKind kind, std::string_view value)
+    static int writeValue(uintptr_t addr, Types::DataType type, Types::SavedValueKind kind, std::string_view value)
     {
-        if (kind == Types::SavedValueKind::Pointer) return MemUtils::WritePointerFromString(addr, value);
-        if (kind == Types::SavedValueKind::Text) return MemUtils::WriteText(addr, value);
-        return MemUtils::WriteFromString(addr, type, value);
+        int status = 0;
+        if (kind == Types::SavedValueKind::Pointer) status = MemUtils::WritePointerFromString(addr, value);
+        else if (kind == Types::SavedValueKind::Text) status = MemUtils::WriteText(addr, value);
+        else status = MemUtils::WriteFromString(addr, type, value);
+        return status;
     }
 
 public:
@@ -80,7 +84,19 @@ public:
                 {
                     std::lock_guard lock(mutex_);
                     // clear/remove 返回后，不应再按旧地址提交后台写入。
-                    for (const auto &item : locks_) writeValue(item.addr, item.type, item.kind, item.value);
+                    for (auto item = locks_.begin(); item != locks_.end();)
+                    {
+                        int status = 0;
+                        try { status = writeValue(item->addr, item->type, item->kind, item->value); }
+                        catch (const std::bad_alloc &) { status = -ENOMEM; }
+                        catch (...) { status = -EIO; }
+                        if (status != 0)
+                        {
+                            LS_LOGE_TAG("Saved", "锁定写入失败: addr=%llx status=%d", static_cast<unsigned long long>(item->addr), status);
+                            item = locks_.erase(item);
+                        }
+                        else ++item;
+                    }
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(20));
             }
@@ -99,115 +115,140 @@ public:
         return std::ranges::any_of(items_, [addr](const auto &item) { return item.address == addr; });
     }
 
-    bool add(uintptr_t addr, Types::DataType type, Types::SavedValueKind kind = Types::SavedValueKind::Numeric, size_t textLength = 64)
+    int add(uintptr_t addr, Types::DataType type, Types::SavedValueKind kind = Types::SavedValueKind::Numeric, size_t textLength = 64)
     {
+        int status = 0;
+        std::lock_guard targetLock(Config::TargetMutex);
         std::lock_guard lock(mutex_);
-        if (!addr || findSaved(addr) != items_.end()) return false;
+        if (!addr)
+        {
+            status = -EINVAL;
+            return status;
+        }
+        if (findSaved(addr) != items_.end())
+        {
+            status = -EEXIST;
+            return status;
+        }
         items_.push_back({addr, type, kind, std::clamp<size_t>(textLength, 1, 256), {}});
-        return true;
+        return status;
     }
 
-    bool setNote(uintptr_t addr, std::string note)
+    int setNote(uintptr_t addr, std::string note)
     {
+        int status = 0;
         std::lock_guard lock(mutex_);
         const auto saved = findSaved(addr);
-        if (saved == items_.end()) return false;
+        if (saved == items_.end())
+        {
+            status = -ENOENT;
+            return status;
+        }
         if (note.size() > 256) note.resize(256);
         saved->note = std::move(note);
-        return true;
+        return status;
     }
 
-    bool remove(uintptr_t addr)
+    int remove(uintptr_t addr)
     {
+        int status = 0;
         std::lock_guard lock(mutex_);
         const auto item = findSaved(addr);
-        if (item == items_.end()) return false;
+        if (item == items_.end())
+        {
+            status = -ENOENT;
+            return status;
+        }
         items_.erase(item);
         if (auto locked = find(addr); locked != locks_.end()) locks_.erase(locked);
-        return true;
+        return status;
     }
 
-    bool write(uintptr_t addr, std::string_view value)
+    int write(uintptr_t addr, std::string_view value)
     {
-        Item item{};
-        {
-            std::lock_guard lock(mutex_);
-            const auto saved = findSaved(addr);
-            if (saved == items_.end()) return false;
-            item = *saved;
-        }
-        if (!writeValue(item.address, item.type, item.kind, value)) return false;
+        int status = 0;
+        std::lock_guard targetLock(Config::TargetMutex);
         std::lock_guard lock(mutex_);
-        if (auto locked = find(addr); locked != locks_.end()) locked->value = std::string(value);
-        return true;
-    }
-
-    bool toggle(uintptr_t addr)
-    {
-        std::lock_guard lock(mutex_);
-        if (auto locked = find(addr); locked != locks_.end())
-        {
-            locks_.erase(locked);
-            return false;
-        }
         const auto saved = findSaved(addr);
-        if (saved == items_.end()) return false;
-        locks_.push_back({addr, saved->type, saved->kind, readValue(*saved)});
-        return true;
+        if (saved == items_.end())
+        {
+            status = -ENOENT;
+            return status;
+        }
+        status = writeValue(saved->address, saved->type, saved->kind, value);
+        if (status != 0) return status;
+        if (auto locked = find(addr); locked != locks_.end()) locked->value = std::string(value);
+        return status;
     }
 
-    bool setLocked(uintptr_t addr, bool locked, std::string_view value = {})
+    int setLocked(uintptr_t addr, bool locked, std::string_view value = {})
     {
-        Item item{};
-        {
-            std::lock_guard lock(mutex_);
-            const auto saved = findSaved(addr);
-            if (saved == items_.end()) return false;
-            if (!locked)
-            {
-                std::erase_if(locks_, [addr](const auto &entry) { return entry.addr == addr; });
-                return true;
-            }
-            item = *saved;
-        }
-
-        std::string lockValue = value.empty() ? readValue(item) : std::string(value);
-        if (lockValue.empty() || lockValue == "??" || !writeValue(item.address, item.type, item.kind, lockValue)) return false;
-
+        int status = 0;
+        std::lock_guard targetLock(Config::TargetMutex);
         std::lock_guard lock(mutex_);
-        if (findSaved(addr) == items_.end()) return false;
-        if (auto entry = find(addr); entry != locks_.end())
+        const auto saved = findSaved(addr);
+        if (saved == items_.end())
         {
-            entry->type = item.type;
-            entry->kind = item.kind;
-            entry->value = std::move(lockValue);
+            status = -ENOENT;
+            return status;
+        }
+        if (!locked)
+        {
+            if (auto entry = find(addr); entry != locks_.end()) locks_.erase(entry);
         }
         else
         {
-            locks_.push_back({addr, item.type, item.kind, std::move(lockValue)});
+            std::string lockValue = value.empty() ? readValue(*saved) : std::string(value);
+            if (lockValue.empty() || lockValue == "??")
+            {
+                status = -EIO;
+                return status;
+            }
+            status = writeValue(addr, saved->type, saved->kind, lockValue);
+            if (status != 0) return status;
+            if (auto entry = find(addr); entry != locks_.end())
+            {
+                entry->type = saved->type;
+                entry->kind = saved->kind;
+                entry->value = std::move(lockValue);
+            }
+            else locks_.push_back({addr, saved->type, saved->kind, std::move(lockValue)});
         }
-        return true;
+        return status;
     }
 
-    void togglePage(std::span<const ItemState> states, bool lockItems)
+    int togglePage(std::span<const ItemState> states, bool lockItems)
     {
+        int status = 0;
+        std::lock_guard targetLock(Config::TargetMutex);
         std::lock_guard lk(mutex_);
+        std::list<LockItem> pending;
         for (const auto &state : states)
         {
             if (lockItems)
             {
                 const auto saved = findSaved(state.item.address);
-                if (saved != items_.end() && find(state.item.address) == locks_.end()) locks_.push_back({saved->address, saved->type, saved->kind, readValue(*saved)});
+                if (saved == items_.end()) return status = -ENOENT;
+                if (find(state.item.address) != locks_.end()) continue;
+                std::string value = readValue(*saved);
+                if (value.empty() || value == "??") return status = -EIO;
+                status = writeValue(saved->address, saved->type, saved->kind, value);
+                if (status != 0) return status;
+                pending.push_back({saved->address, saved->type, saved->kind, std::move(value)});
             }
             else
             {
                 std::erase_if(locks_, [&](const auto &locked) { return locked.addr == state.item.address; });
             }
         }
+        locks_.splice(locks_.end(), pending);
+        return status;
     }
 
-    void applyOffset(uintptr_t offset, bool negative)
+    int applyOffset(uintptr_t offset, bool negative)
     {
+        int status = 0;
+        std::lock_guard targetLock(Config::TargetMutex);
         std::lock_guard lock(mutex_);
         Items shifted;
         shifted.reserve(items_.size());
@@ -219,14 +260,21 @@ public:
             Item shiftedItem = item;
             shiftedItem.address = address;
             shifted.push_back(shiftedItem);
-            if (find(item.address) != locks_.end()) shiftedLocks.push_back({address, item.type, item.kind, readValue(shiftedItem)});
+            if (find(item.address) != locks_.end())
+            {
+                std::string value = readValue(shiftedItem);
+                if (value.empty() || value == "??") return status = -EIO;
+                shiftedLocks.push_back({address, item.type, item.kind, std::move(value)});
+            }
         }
         items_.swap(shifted);
         locks_.swap(shiftedLocks);
+        return status;
     }
 
     ItemStates snapshotStates() const
     {
+        std::lock_guard targetLock(Config::TargetMutex);
         ItemStates states;
         {
             std::lock_guard lock(mutex_);
@@ -249,3 +297,5 @@ public:
         locks_.clear();
     }
 };
+
+inline std::unique_ptr<SavedAddressManager> gSavedAddresses = nullptr;

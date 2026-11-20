@@ -5,7 +5,7 @@
 
 #include "../../driver/driver.h"
 
-inline int RunGnssTest()
+inline void RunGnssTest()
 {
     constexpr int beijingLatitudeE7 = 399087220;
     constexpr int beijingLongitudeE7 = 1163974990;
@@ -21,5 +21,4 @@ inline int RunGnssTest()
     }
 
     LS_LOGI_TAG("GNSS", "全部测试序列执行完毕");
-    return 0;
 }

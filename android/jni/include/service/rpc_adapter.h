@@ -20,11 +20,16 @@ namespace Rpc
         if (params != request.end() && !params->is_object()) return {{"ok", false}, {"operation", name}, {"error", "params 字段必须是对象"}};
         try
         {
-            return dispatch(name, params == request.end() ? json::object() : *params);
+            if (params == request.end()) return dispatch(name, json::object());
+            return dispatch(name, *params);
         }
         catch (const std::exception &exception)
         {
             return {{"ok", false}, {"operation", name}, {"error", exception.what()}};
+        }
+        catch (...)
+        {
+            return {{"ok", false}, {"operation", name}, {"error", "未知操作错误"}};
         }
     }
 }

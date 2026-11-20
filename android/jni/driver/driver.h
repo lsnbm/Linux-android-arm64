@@ -1261,4 +1261,4 @@ private: // 私有实现，外部无需关系
     }
 };
 
-Driver *dr = NULL;
+inline std::unique_ptr<Driver> dr = nullptr;

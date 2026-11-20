@@ -74,22 +74,6 @@ namespace MemUtils
         return value;
     }
 
-    inline std::string FormatUInt128Hex(__uint128_t value)
-    {
-        if (value == 0) return "0x0";
-
-        char buf[35]{};
-        int pos = 34;
-        static constexpr char kHex[] = "0123456789ABCDEF";
-        while (value != 0 && pos > 1)
-        {
-            buf[--pos] = kHex[static_cast<unsigned>(value & 0xF)];
-            value >>= 4;
-        }
-        buf[--pos] = 'x';
-        buf[--pos] = '0';
-        return std::string(buf + pos);
-    }
 
     // 验证地址合法
     constexpr bool IsValidAddr(uintptr_t addr) noexcept
@@ -137,53 +121,65 @@ namespace MemUtils
         }
     }
 
-    inline bool HwbpWriteRegisterValue(Driver::bp_record &record, int reg, __uint128_t value)
+    inline int HwbpWriteRegisterValue(Driver::bp_record &record, int reg, __uint128_t value)
     {
-        if (reg < 0 || reg >= Driver::MAX_REG_COUNT) return false;
+        int status = 0;
+        if (reg < 0 || reg >= Driver::MAX_REG_COUNT)
+        {
+            status = -EINVAL;
+            return status;
+        }
 
-        BP_SET_MASK(&record, reg, BP_OP_WRITE);
+        if ((reg < Driver::IDX_Q0 || reg > Driver::IDX_Q31) &&
+            (value > std::numeric_limits<std::uint64_t>::max() ||
+             ((reg == Driver::IDX_SYSCALLNO || reg == Driver::IDX_FPSR || reg == Driver::IDX_FPCR) && value > std::numeric_limits<std::uint32_t>::max())))
+        {
+            status = -ERANGE;
+            return status;
+        }
+
         switch (reg)
         {
         case Driver::IDX_PC:
             record.pc = static_cast<std::uint64_t>(value);
-            return true;
+            break;
         case Driver::IDX_HIT_COUNT:
             record.hit_count = static_cast<std::uint64_t>(value);
-            return true;
+            break;
         case Driver::IDX_LR:
             record.lr = static_cast<std::uint64_t>(value);
-            return true;
+            break;
         case Driver::IDX_SP:
             record.sp = static_cast<std::uint64_t>(value);
-            return true;
+            break;
         case Driver::IDX_ORIG_X0:
             record.orig_x0 = static_cast<std::uint64_t>(value);
-            return true;
+            break;
         case Driver::IDX_SYSCALLNO:
             record.syscallno = static_cast<std::int32_t>(static_cast<std::uint32_t>(value));
-            return true;
+            break;
         case Driver::IDX_PSTATE:
             record.pstate = static_cast<std::uint64_t>(value);
-            return true;
+            break;
         case Driver::IDX_FPSR:
             record.fpsr = static_cast<std::uint32_t>(value);
-            return true;
+            break;
         case Driver::IDX_FPCR:
             record.fpcr = static_cast<std::uint32_t>(value);
-            return true;
+            break;
         default:
             if (reg >= Driver::IDX_X0 && reg <= Driver::IDX_X29)
-            {
                 record.*HwbpXFields[reg - Driver::IDX_X0] = static_cast<std::uint64_t>(value);
-                return true;
-            }
-            if (reg >= Driver::IDX_Q0 && reg <= Driver::IDX_Q31)
-            {
+            else if (reg >= Driver::IDX_Q0 && reg <= Driver::IDX_Q31)
                 record.*HwbpQFields[reg - Driver::IDX_Q0] = value;
-                return true;
+            else
+            {
+                status = -EINVAL;
+                return status;
             }
-            return false;
         }
+        BP_SET_MASK(&record, reg, BP_OP_WRITE);
+        return status;
     }
 
     inline std::optional<int> HwbpParseInt(std::string_view text)
@@ -198,70 +194,6 @@ namespace MemUtils
         return value;
     }
 
-    inline std::optional<int> HwbpRegIndexFromToken(std::string_view fieldToken)
-    {
-        std::string token(fieldToken);
-        if (token.starts_with("op.")) token.erase(0, 3);
-        else if (token.starts_with("mask.")) token.erase(0, 5);
-
-        if (token == "pc") return Driver::IDX_PC;
-        if (token == "hit_count") return Driver::IDX_HIT_COUNT;
-        if (token == "lr") return Driver::IDX_LR;
-        if (token == "sp") return Driver::IDX_SP;
-        if (token == "pstate") return Driver::IDX_PSTATE;
-        if (token == "orig_x0") return Driver::IDX_ORIG_X0;
-        if (token == "syscallno") return Driver::IDX_SYSCALLNO;
-        if (token == "fpsr") return Driver::IDX_FPSR;
-        if (token == "fpcr") return Driver::IDX_FPCR;
-        if (token.size() >= 2 && token[0] == 'x')
-        {
-            const auto regIndex = HwbpParseInt(std::string_view(token).substr(1));
-            if (regIndex && *regIndex >= 0 && *regIndex < 30) return Driver::IDX_X0 + *regIndex;
-        }
-        if (token.size() >= 2 && (token[0] == 'v' || token[0] == 'q'))
-        {
-            const auto regIndex = HwbpParseInt(std::string_view(token).substr(1));
-            if (regIndex && *regIndex >= 0 && *regIndex < 32) return Driver::IDX_Q0 + *regIndex;
-        }
-        return std::nullopt;
-    }
-
-    inline bool AssignHwbpRecordField(Driver::bp_record &record, std::string_view fieldToken, __uint128_t value)
-    {
-        std::string token(fieldToken);
-        for (char &ch : token)
-        {
-            if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch - 'A' + 'a');
-        }
-
-        if (token.starts_with("mask"))
-        {
-            std::string_view indexText(token.data() + 4, token.size() - 4);
-            if (!indexText.empty() && (indexText.front() == '.' || indexText.front() == '_' || indexText.front() == '[')) indexText.remove_prefix(1);
-            if (!indexText.empty() && indexText.back() == ']') indexText.remove_suffix(1);
-            if (const auto maskIndex = HwbpParseInt(indexText); maskIndex && *maskIndex >= 0 && *maskIndex < 18)
-            {
-                if (value > std::numeric_limits<std::uint8_t>::max()) return false;
-                record.mask[*maskIndex] = static_cast<std::uint8_t>(value);
-                return true;
-            }
-        }
-
-        if (token.starts_with("op.") || token.starts_with("mask."))
-        {
-            const auto regIndex = HwbpRegIndexFromToken(token);
-            if (!regIndex || value > BP_OP_WRITE) return false;
-            BP_SET_MASK(&record, *regIndex, static_cast<std::uint8_t>(value));
-            return true;
-        }
-
-        const auto regIndex = HwbpRegIndexFromToken(token);
-        if (!regIndex) return false;
-        if (*regIndex >= Driver::IDX_Q0 && *regIndex <= Driver::IDX_Q31) return HwbpWriteRegisterValue(record, *regIndex, value);
-        if ((*regIndex == Driver::IDX_SYSCALLNO || *regIndex == Driver::IDX_FPSR || *regIndex == Driver::IDX_FPCR) && value > std::numeric_limits<std::uint32_t>::max()) return false;
-        if (value > std::numeric_limits<std::uint64_t>::max()) return false;
-        return HwbpWriteRegisterValue(record, *regIndex, value);
-    }
 
     // 按指定类型读取内存并转为字符串。
     inline std::string ReadAsString(uintptr_t addr, DataType type)
@@ -278,15 +210,30 @@ namespace MemUtils
     }
 
     // 把字符串按指定类型写入目标地址。
-    inline bool WriteFromString(uintptr_t addr, DataType type, std::string_view str)
+    inline int WriteFromString(uintptr_t addr, DataType type, std::string_view str)
     {
-        if (!addr) return false;
-        return DispatchType(type,
-                            [&]<typename T>() -> bool
+        int status = 0;
+        if (!addr)
+        {
+            status = -EINVAL;
+            return status;
+        }
+        status = DispatchType(type,
+                            [&]<typename T>() -> int
                             {
+                                int status = 0;
                                 const auto value = ParseScanValue<T>(str);
-                                return value.has_value() && dr->Write<T>(addr, *value) == static_cast<int>(sizeof(T));
+                                if (!value)
+                                {
+                                    status = -EINVAL;
+                                    return status;
+                                }
+                                status = dr->Write<T>(addr, *value);
+                                if (status < 0) return status;
+                                status = status == static_cast<int>(sizeof(T)) ? 0 : -EIO;
+                                return status;
                             });
+        return status;
     }
 
     // 读取指针值并格式化为十六进制文本。
@@ -304,13 +251,20 @@ namespace MemUtils
         return value;
     }
 
-    inline bool WriteText(uintptr_t addr, std::string_view str)
+    inline int WriteText(uintptr_t addr, std::string_view str)
     {
-        if (!addr || str.empty()) return false;
+        int status = 0;
+        if (!addr || str.empty())
+        {
+            status = -EINVAL;
+            return status;
+        }
 
         std::string temp(str);
-        const auto size = temp.size() + 1;
-        return dr->Write(addr, temp.data(), size) == static_cast<int>(size);
+        status = dr->Write(addr, temp.data(), temp.size() + 1);
+        if (status < 0) return status;
+        status = static_cast<size_t>(status) == temp.size() + 1 ? 0 : -EIO;
+        return status;
     }
 
     inline std::string ReadAsPointerString(uintptr_t addr)
@@ -322,11 +276,19 @@ namespace MemUtils
     }
 
     // 把十六进制文本解析后写入指针值。
-    inline bool WritePointerFromString(uintptr_t addr, std::string_view str)
+    inline int WritePointerFromString(uintptr_t addr, std::string_view str)
     {
-        if (!addr) return false;
+        int status = 0;
         const auto parsed = ParseUInt64(str, 16);
-        return parsed && dr->Write<int64_t>(addr, static_cast<int64_t>(*parsed)) == static_cast<int>(sizeof(int64_t));
+        if (!addr || !parsed)
+        {
+            status = -EINVAL;
+            return status;
+        }
+        status = dr->Write<int64_t>(addr, static_cast<int64_t>(*parsed));
+        if (status < 0) return status;
+        status = status == static_cast<int>(sizeof(int64_t)) ? 0 : -EIO;
+        return status;
     }
 
     // ── HEX 偏移解析 ──

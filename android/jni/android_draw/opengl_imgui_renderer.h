@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <cstdint>
+#include <memory>
 #include <optional>
 
 #include <android/native_window.h>
@@ -13,7 +15,6 @@
 // Android/ImGui 依赖
 #include "android_imgui_input/imgui_touch_input.h"
 #include "android_surface/surface_control_manager.h"
-#include "font/oppo_font.h"
 #include "imgui/backends/imgui_impl_android.h"
 #include "imgui/backends/imgui_impl_opengl3.h"
 #include "imgui/imgui.h"
@@ -22,17 +23,22 @@
 // OpenGL ES 后端实现
 class OpenGLRenderer
 {
-    std::optional<TouchInput> input;
     EGLDisplay display = EGL_NO_DISPLAY;
     EGLSurface surface = EGL_NO_SURFACE;
     EGLContext context = EGL_NO_CONTEXT;
-    bool firstFrame_ = true;
-    bool imgui_context_created = false;
+    ImGuiContext *imgui_context = nullptr;
     bool android_backend_initialized = false;
     bool opengl_backend_initialized = false;
     ANativeWindow *native_window = nullptr;
     android::SurfaceControlManager::DisplayInfo displayInfo{};
     std::chrono::steady_clock::time_point lastDisplayInfoQuery_{};
+
+    struct ImGuiContextScope
+    {
+        ImGuiContext *previous = ImGui::GetCurrentContext();
+        explicit ImGuiContextScope(ImGuiContext *current) { ImGui::SetCurrentContext(current); }
+        ~ImGuiContextScope() { ImGui::SetCurrentContext(previous); }
+    };
 
     struct RecordSurfaceState
     {
@@ -54,25 +60,29 @@ class OpenGLRenderer
     void CleanupRecordSurface()
     {
         if (!recordSurface_) return;
-        android::SurfaceControlManager::DestroyMirrorOnLayerStack(native_window);
+        if (android::gSurfaceControl) android::gSurfaceControl->DestroyMirrorOnLayerStack(native_window);
         recordSurface_.reset();
     }
 
     void shutdown()
     {
-        input.reset();
         CleanupRecordSurface();
         cachedRecordDisplay_.reset();
         pendingRecordDisplay_.reset();
         recordDisplayMissed_ = false;
         lastRecordDisplayScan_ = {};
 
-        if (opengl_backend_initialized) ImGui_ImplOpenGL3_Shutdown();
-        if (android_backend_initialized) ImGui_ImplAndroid_Shutdown();
-        if (imgui_context_created) ImGui::DestroyContext();
+        if (imgui_context)
+        {
+            ImGuiContextScope scope{imgui_context};
+            if (scope.previous == imgui_context) scope.previous = nullptr;
+            if (opengl_backend_initialized) ImGui_ImplOpenGL3_Shutdown();
+            if (android_backend_initialized) ImGui_ImplAndroid_Shutdown();
+            ImGui::DestroyContext(imgui_context);
+            imgui_context = nullptr;
+        }
         opengl_backend_initialized = false;
         android_backend_initialized = false;
-        imgui_context_created = false;
 
         if (display != EGL_NO_DISPLAY)
         {
@@ -87,11 +97,10 @@ class OpenGLRenderer
         }
         if (native_window)
         {
-            android::SurfaceControlManager::Destroy(native_window);
+            if (android::gSurfaceControl) android::gSurfaceControl->Destroy(native_window);
             ANativeWindow_release(native_window);
             native_window = nullptr;
         }
-        firstFrame_ = true;
     }
 
 public:
@@ -100,15 +109,12 @@ public:
     OpenGLRenderer &operator=(const OpenGLRenderer &) = delete;
     ~OpenGLRenderer() { shutdown(); }
 
-    void drawTouchDebug(ImDrawList &draw, const TouchDebugView &view) const
-    {
-        if (input) input->drawTouchDebug(draw, view);
-    }
-
-    int init(bool allowCapture)
+    template <class Setup> int init(bool allowCapture, Setup &&setup, const char *windowName = "ImGui", int32_t windowType = -1)
     {
         int status = 0;
         if (opengl_backend_initialized) return status;
+        if (!gTouchInput || !android::gSurfaceControl || !android::gBinderDump) return status = -ENODEV;
+        // 不借用外部 context；失败回滚及退出只清理本实例创建的 context。
         if (ImGui::GetCurrentContext()) return status = -EBUSY;
         struct Rollback
         {
@@ -117,7 +123,7 @@ public:
         } rollback{this};
 
         allowCapture_ = allowCapture;
-        displayInfo = android::SurfaceControlManager::GetDisplayInfo();
+        displayInfo = android::gSurfaceControl->GetDisplayInfo();
         lastDisplayInfoQuery_ = std::chrono::steady_clock::now();
         if (displayInfo.width <= 0 || displayInfo.height <= 0)
         {
@@ -129,8 +135,7 @@ public:
         // 缓冲保持长边方形：setBuffersGeometry 只改缓冲像素尺寸，不改图层几何，旋转时交换宽高会拉伸画面。
         // displayInfo.width/height 仍是屏幕逻辑尺寸，用于界面布局和触摸坐标。
         const int max_side = std::max(displayInfo.width, displayInfo.height);
-        // 这是独立绘制层；与系统无障碍容器同名，不代表挂在该容器下，也不代表它是无障碍服务。
-        native_window = android::SurfaceControlManager::Create("Accessibility Overlays", max_side, max_side, !allowCapture, 2024);
+        native_window = android::gSurfaceControl->Create(windowName, max_side, max_side, !allowCapture, windowType);
         if (!native_window)
         {
             LS_LOGE_TAG("RenderGL", "创建 ANativeWindow 失败");
@@ -178,8 +183,8 @@ public:
 
         // 初始化 ImGui
         IMGUI_CHECKVERSION();
-        ImGui::CreateContext();
-        imgui_context_created = true;
+        imgui_context = ImGui::CreateContext();
+        if (!imgui_context) return status = -ENOMEM;
         android_backend_initialized = ImGui_ImplAndroid_Init(native_window);
         if (!android_backend_initialized)
         {
@@ -193,15 +198,11 @@ public:
             return status;
         }
 
-        ImGuiIO &io = ImGui::GetIO();
-        io.IniFilename = nullptr;
-        ImFontConfig font_cfg;
-        font_cfg.FontDataOwnedByAtlas = false;
-        io.Fonts->AddFontFromMemoryTTF((void *)OPPOSans_H, OPPOSans_H_size, 31.0f, &font_cfg, io.Fonts->GetGlyphRangesChineseFull());
-        ImGui::GetStyle().ScaleAllSizes(3.0f);
+        // 回调只配置当前由本实例持有的 context，不切换或销毁它。
+        setup();
         // 在输入线程启动前设置触摸坐标所用的屏幕尺寸和方向。
-        input.emplace().setScreen(displayInfo.width, displayInfo.height, displayInfo.orientation);
-        status = input->start();
+        gTouchInput->setScreen(displayInfo.width, displayInfo.height, displayInfo.orientation);
+        status = gTouchInput->start();
         if (status != 0)
         {
             LS_LOGE_TAG("RenderGL", "初始化触摸输入失败: %d", status);
@@ -214,39 +215,35 @@ public:
     template <typename Draw> int drawFrame(Draw &&draw)
     {
         int status = 0;
-        if (!opengl_backend_initialized)
+        if (!opengl_backend_initialized || !gTouchInput || !android::gSurfaceControl)
         {
             status = -ENODEV;
             return status;
         }
+        ImGuiContextScope scope{imgui_context};
 
-        bool rotated = false;
         const auto now = std::chrono::steady_clock::now();
         if (now - lastDisplayInfoQuery_ >= std::chrono::milliseconds(250))
         {
             lastDisplayInfoQuery_ = now;
-            const auto updated = android::SurfaceControlManager::GetDisplayInfo();
+            const auto updated = android::gSurfaceControl->GetDisplayInfo();
             if (updated.width > 0 && updated.height > 0 &&
                 (updated.width != displayInfo.width || updated.height != displayInfo.height || updated.orientation != displayInfo.orientation))
             {
-                rotated = updated.orientation != displayInfo.orientation;
                 displayInfo = updated;
-                input->setScreen(displayInfo.width, displayInfo.height, displayInfo.orientation);
+                gTouchInput->setScreen(displayInfo.width, displayInfo.height, displayInfo.orientation);
                 // 不等待常规轮询周期，下一次呈现后立即刷新录屏投影。
                 lastRecordDisplayScan_ = {};
             }
         }
 
-        input->updateImGui();
+        gTouchInput->updateImGui();
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplAndroid_NewFrame();
         ImGui::NewFrame();
-        // 启动或旋转时只将菜单拉回左上角一帧，之后仍可自由拖拽。
-        if (firstFrame_ || rotated) ImGui::SetNextWindowPos(ImVec2(100.0f, 100.0f), ImGuiCond_Always);
-        firstFrame_ = false;
         const bool block = draw(displayInfo.width, displayInfo.height);
         ImGui::Render();
-        status = input->setBlocking(block);
+        status = gTouchInput->setBlocking(block);
         if (status != 0) return status;
 
         // EGL 管理窗口缓冲区的大小变化，不需要像 Vulkan 一样重建交换链。
@@ -261,14 +258,14 @@ public:
             return status;
         }
 
-        // 检测录屏虚拟显示的目标 layerStack，将主绘制层镜像到该显示。
+        // 检测录屏虚拟显示的目标 layerStack，将主绘制层镜像到该显示；镜像不可用不终止主帧。
         if (!allowCapture_) return status;
         const auto presentedAt = std::chrono::steady_clock::now();
         if (lastRecordDisplayScan_ == std::chrono::steady_clock::time_point{} || presentedAt - lastRecordDisplayScan_ >= std::chrono::seconds(2))
         {
             lastRecordDisplayScan_ = presentedAt;
             android::SurfaceControlManager::RecordDisplayInfo scanned{};
-            if (!android::SurfaceControlManager::FindRecordDisplay(&scanned, displayInfo.width, displayInfo.height))
+            if (android::gSurfaceControl->FindRecordDisplay(&scanned, displayInfo.width, displayInfo.height) != 0)
             {
                 if (recordDisplayMissed_) cachedRecordDisplay_.reset();
                 recordDisplayMissed_ = true;
@@ -297,13 +294,13 @@ public:
         if (!recordSurface_ || recordSurface_->display.layerStack != target.layerStack)
         {
             CleanupRecordSurface();
-            if (!android::SurfaceControlManager::CreateMirrorOnLayerStack(native_window, target.layerStack)) return status;
+            if (android::gSurfaceControl->CreateMirrorOnLayerStack(native_window, target.layerStack) != 0) return status;
             recordSurface_.emplace();
         }
         else if (SameRecordDisplay(recordSurface_->display, target) && recordSurface_->source.orientation == displayInfo.orientation &&
                  recordSurface_->source.width == displayInfo.width && recordSurface_->source.height == displayInfo.height) return status;
 
-        if (!android::SurfaceControlManager::ConfigureMirrorProjection(native_window, displayInfo, target))
+        if (android::gSurfaceControl->ConfigureMirrorProjection(native_window, displayInfo, target) != 0)
         {
             CleanupRecordSurface();
             return status;
@@ -314,3 +311,5 @@ public:
         return status;
     }
 };
+
+inline std::unique_ptr<OpenGLRenderer> gOpenGLRenderer = nullptr;

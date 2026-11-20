@@ -32,37 +32,61 @@
 #include <linux/err.h>
 #include <linux/version.h>
 #include <linux/mutex.h>
+#include <linux/rcupdate.h>
 #include <uapi/linux/pidfd.h>
 
 #include "export_fun.h"
 #include "inline_hook_frame.h"
 #include "klog/lsdriver_log.h"
 
-#define HIDE_TASK_MAX_PIDS 8
+#define HIDE_TASK_MAX_TGIDS 0x10
 
-// 隐藏表保存内核侧 pid/tgid 数值；filldir64 里只拿得到目录项 name，所以后面转成字符串比较。
-static pid_t g_hidden_pids[HIDE_TASK_MAX_PIDS];
+// 隐藏表保存线程组 TGID；所有入口先把 PID 解析为任务，再按任务的 TGID 匹配。
+static pid_t g_hidden_tgids[HIDE_TASK_MAX_TGIDS];
 static DEFINE_MUTEX(g_hide_task_lock);
 
-// filldir64 没有 struct file 参数，无法确认当前目录是否为 /proc；这里用 DT_DIR + 精确 PID 名字匹配。
+static bool hide_task_match_tgid(pid_t tgid)
+{
+    for (int i = 0; i < HIDE_TASK_MAX_TGIDS; i++)
+        if (READ_ONCE(g_hidden_tgids[i]) == tgid) return true;
+
+    return false;
+}
+
+// 在 RCU 保护下读取任务的 TGID，覆盖线程组中的主线程和其他线程 PID。
+static bool hide_task_match_pid(pid_t pid)
+{
+    bool matched = false;
+
+    if (pid <= 0) return false;
+
+    rcu_read_lock();
+    struct task_struct *task = find_task_by_vpid(pid);
+    if (task) matched = hide_task_match_tgid(READ_ONCE(task->tgid));
+    rcu_read_unlock();
+
+    return matched;
+}
+
+// filldir64 没有 struct file 参数，无法确认当前目录是否为 /proc；这里按 DT_DIR + 数字目录名解析 PID。
 static bool hide_task_match_pid_name(const char *name, int namlen, unsigned int d_type)
 {
-    char pid_str[16];
+    pid_t pid = 0;
 
     // 排除 d_type 的附加标志，仅比较文件类型位。
-    if ((d_type & S_DT_MASK) != DT_DIR || !name || namlen <= 0 || namlen >= sizeof(pid_str)) return false;
+    if ((d_type & S_DT_MASK) != DT_DIR || !name || namlen <= 0 || namlen > 10) return false;
 
-    for (int i = 0; i < HIDE_TASK_MAX_PIDS; i++)
+    // name 不是 NUL 结尾字符串，逐位解析并拒绝前导符号、非数字和整数溢出。
+    for (int i = 0; i < namlen; i++)
     {
-        pid_t hidden_pid = READ_ONCE(g_hidden_pids[i]);
+        if (name[i] < '0' || name[i] > '9') return false;
 
-        if (!hidden_pid) continue;
-
-        // name 不是 NUL 结尾字符串，必须按 namlen 做定长比较。
-        int pid_len = snprintf(pid_str, sizeof(pid_str), "%d", hidden_pid);
-        if (pid_len == namlen && __builtin_memcmp(name, pid_str, namlen) == 0) return true;
+        int digit = name[i] - '0';
+        if (pid > (INT_MAX - digit) / 10) return false;
+        pid = pid * 10 + digit;
     }
-    return false;
+
+    return hide_task_match_pid(pid);
 }
 
 // 进程 CPU 时钟的 clockid 编码为 (~pid << 3) | clock；clock=2 表示进程 CPU 时间。
@@ -70,13 +94,7 @@ static bool hide_task_match_process_clock(int clock_id)
 {
     if (((unsigned int)clock_id & 7U) != 2U) return false;
 
-    pid_t pid = (pid_t) ~(clock_id >> 3);
-    if (pid <= 0) return false;
-
-    for (int i = 0; i < HIDE_TASK_MAX_PIDS; i++)
-        if (READ_ONCE(g_hidden_pids[i]) == pid) return true;
-
-    return false;
+    return hide_task_match_pid((pid_t) ~(clock_id >> 3));
 }
 
 // 设置成功返回值并跳过 filldir64，省略当前目录项。
@@ -113,13 +131,13 @@ static int proc_pid_lookup_hook_work(struct pt_regs *regs)
     return 1;
 }
 
-// 使 /proc 根目录下已缓存的隐藏 PID 目录项失效。
+// 使已缓存的隐藏 PID 目录项失效，按任务的 TGID 匹配隐藏表。
 static int pid_revalidate_hook_work(struct pt_regs *regs)
 {
     bool legacy_signature = __builtin_types_compatible_p(typeof(((struct dentry_operations *)0)->d_revalidate), int (*)(struct dentry *, unsigned int));
     const struct dentry *dentry = (const struct dentry *)regs->regs[legacy_signature ? 0 : 2];
 
-    if (dentry->d_parent != dentry->d_sb->s_root || !hide_task_match_pid_name(dentry->d_name.name, dentry->d_name.len, DT_DIR)) return 0;
+    if (!hide_task_match_pid_name(dentry->d_name.name, dentry->d_name.len, DT_DIR)) return 0;
 
     regs->regs[0] = 0;
     return 1;
@@ -136,17 +154,10 @@ static int pidfd_open_hook_work(struct pt_regs *regs)
     allowed_flags |= PIDFD_THREAD;
 #endif
     if ((unsigned int)sys_regs->regs[1] & ~allowed_flags) return 0;
+    if (!hide_task_match_pid((pid_t)sys_regs->regs[0])) return 0;
 
-    pid_t pid = (pid_t)sys_regs->regs[0];
-    if (pid <= 0) return 0;
-
-    for (int i = 0; i < HIDE_TASK_MAX_PIDS; i++)
-    {
-        if (READ_ONCE(g_hidden_pids[i]) != pid) continue;
-        regs->regs[0] = (unsigned long)-ESRCH;
-        return 1;
-    }
-    return 0;
+    regs->regs[0] = (unsigned long)-ESRCH;
+    return 1;
 }
 
 // 隐藏进程的 clock_gettime 探测按不存在的进程处理。
@@ -161,88 +172,84 @@ static int clock_gettime_hook_work(struct pt_regs *regs)
 }
 
 static struct hook_entry g_hide_task_hooks[] = {
-    HOOK_ENTRY("filldir64", filldir64_hook_work), 
-    HOOK_ENTRY("proc_pid_lookup", proc_pid_lookup_hook_work),
-    HOOK_ENTRY("pid_revalidate", pid_revalidate_hook_work), 
-    HOOK_ENTRY("__arm64_sys_pidfd_open", pidfd_open_hook_work), 
-    HOOK_ENTRY("__arm64_sys_clock_gettime", clock_gettime_hook_work),
+    HOOK_ENTRY("filldir64", filldir64_hook_work), HOOK_ENTRY("proc_pid_lookup", proc_pid_lookup_hook_work), HOOK_ENTRY("pid_revalidate", pid_revalidate_hook_work), HOOK_ENTRY("__arm64_sys_pidfd_open", pidfd_open_hook_work), HOOK_ENTRY("__arm64_sys_clock_gettime", clock_gettime_hook_work),
 };
 
-// 安装 hook，隐藏目标 pid。
-static int hide_task_install(pid_t pid)
+// 安装 hook，隐藏目标 TGID 对应的整个线程组。
+static int hide_task_install(pid_t tgid)
 {
     int ret = 0;
     int empty = -1;
-    bool has_hidden_pid = false;
+    bool has_hidden_tgid = false;
 
-    if (pid <= 0)
+    if (tgid <= 0)
     {
-        ls_log_always_tag("task_hide", "install failed: invalid PID %d\n", pid);
+        ls_log_always_tag("task_hide", "install failed: invalid TGID %d\n", tgid);
         return -EINVAL;
     }
 
     mutex_lock(&g_hide_task_lock);
 
-    for (int i = 0; i < HIDE_TASK_MAX_PIDS; i++)
+    for (int i = 0; i < HIDE_TASK_MAX_TGIDS; i++)
     {
-        pid_t hidden_pid = READ_ONCE(g_hidden_pids[i]);
+        pid_t hidden_tgid = READ_ONCE(g_hidden_tgids[i]);
 
-        if (hidden_pid == pid) goto out_unlock;
-        if (hidden_pid) has_hidden_pid = true;
+        if (hidden_tgid == tgid) goto out_unlock;
+        if (hidden_tgid) has_hidden_tgid = true;
         else if (empty < 0) empty = i;
     }
 
     if (empty < 0)
     {
         ret = -ENOSPC;
-        ls_log_always_tag("task_hide", "install failed: PID table full, PID %d\n", pid);
+        ls_log_always_tag("task_hide", "install failed: TGID table full, TGID %d\n", tgid);
         goto out_unlock;
     }
 
-    if (!has_hidden_pid)
+    if (!has_hidden_tgid)
     {
         ret = inline_hook_install(g_hide_task_hooks);
         if (ret)
         {
-            ls_log_always_tag("task_hide", "proc PID hooks install failed: %d, PID %d\n", ret, pid);
+            ls_log_always_tag("task_hide", "proc PID hooks install failed: %d, TGID %d\n", ret, tgid);
             goto out_unlock;
         }
     }
 
-    // hook 安装成功后再写隐藏表，避免表里有 PID 但拦截点没生效。
-    WRITE_ONCE(g_hidden_pids[empty], pid);
+    // hook 安装成功后再写隐藏表，避免表里有 TGID 但拦截点没生效。
+    WRITE_ONCE(g_hidden_tgids[empty], tgid);
 
 out_unlock:
     mutex_unlock(&g_hide_task_lock);
     return ret;
 }
 
-// 删除一个隐藏 PID；如果隐藏表已经空了，就卸载隐藏相关 hook。
-static void hide_task_remove(pid_t pid)
+// 删除一个隐藏 TGID；如果隐藏表已经空了，就卸载隐藏相关 hook。
+static void hide_task_remove(pid_t tgid)
 {
-    bool has_hidden_pid = false;
+    bool has_hidden_tgid = false;
     bool removed = false;
 
-    if (pid <= 0)
+    if (tgid <= 0)
     {
-        ls_log_always_tag("task_hide", "remove failed: invalid PID %d\n", pid);
+        ls_log_always_tag("task_hide", "remove failed: invalid TGID %d\n", tgid);
         return;
     }
 
     mutex_lock(&g_hide_task_lock);
-    for (int i = 0; i < HIDE_TASK_MAX_PIDS; i++)
+    for (int i = 0; i < HIDE_TASK_MAX_TGIDS; i++)
     {
-        pid_t hidden_pid = READ_ONCE(g_hidden_pids[i]);
+        pid_t hidden_tgid = READ_ONCE(g_hidden_tgids[i]);
 
-        if (hidden_pid == pid)
+        if (hidden_tgid == tgid)
         {
-            WRITE_ONCE(g_hidden_pids[i], 0);
+            WRITE_ONCE(g_hidden_tgids[i], 0);
             removed = true;
         }
-        else if (hidden_pid) has_hidden_pid = true;
+        else if (hidden_tgid) has_hidden_tgid = true;
     }
 
-    if (removed && !has_hidden_pid) inline_hook_remove(g_hide_task_hooks);
+    if (removed && !has_hidden_tgid) inline_hook_remove(g_hide_task_hooks);
     mutex_unlock(&g_hide_task_lock);
 }
 

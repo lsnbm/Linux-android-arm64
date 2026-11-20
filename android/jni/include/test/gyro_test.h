@@ -22,7 +22,7 @@ inline void DoGyroSweep(const char *name, int start, int end, int step, int axis
     }
 }
 
-inline int RunGyroTest()
+inline void RunGyroTest()
 {
     LS_LOGI_TAG("Gyro", "初始化完成，开始自动上报测试序列");
 
@@ -46,5 +46,4 @@ inline int RunGyroTest()
     }
 
     LS_LOGI_TAG("Gyro", "全部测试序列执行完毕");
-    return 0;
 }

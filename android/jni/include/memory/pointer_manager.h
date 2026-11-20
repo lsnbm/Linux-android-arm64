@@ -1,15 +1,20 @@
 #pragma once
+#include <memory>
 #include "../base/memory_utils.h"
 #include "../base/owned_file.h"
 #include "../../thread-pool/include/BS_thread_pool.hpp"
 #include <atomic>
+#include <fcntl.h>
 #include <functional>
 #include <future>
 #include <map>
 #include <mutex>
 #include <optional>
 #include <set>
+#include <sys/mman.h>
+#include <sys/stat.h>
 #include <tuple>
+#include <unistd.h>
 
 class PointerManager
 {
@@ -125,894 +130,77 @@ private:
     std::optional<BS::thread_pool<>> workers_;
     std::future<void> task_;
 
-    bool beginOperation(Operation operation)
+    int beginOperation(Operation operation)
     {
+        int status = 0;
         std::lock_guard lock(statusMutex_);
-        Operation expected = Operation::Idle;
-        if (!operation_.compare_exchange_strong(expected, operation, std::memory_order_acq_rel)) return false;
+        if (operation_.load(std::memory_order_acquire) != Operation::Idle)
+        {
+            status = -EBUSY;
+            return status;
+        }
         lastOperation_.store(operation, std::memory_order_release);
         scanProgress_.store(0.0f, std::memory_order_release);
         chainCount_.store(0, std::memory_order_release);
         completed_.store(false, std::memory_order_release);
         success_.store(false, std::memory_order_release);
         lastError_.clear();
-        return true;
+        operation_.store(operation, std::memory_order_release);
+        return status;
     }
 
-    void finishOperation(Operation operation, bool success, std::string error = {}) noexcept
+    void finishOperation(int status, std::string_view error = {}) noexcept
     {
+        std::unique_lock lock(statusMutex_, std::defer_lock);
         try
         {
-            std::lock_guard lock(statusMutex_);
-            lastError_ = success ? std::string() : std::move(error);
+            lock.lock();
+            if (status == 0) lastError_.clear();
+            else lastError_ = error;
         }
         catch (...)
         {
-            success = false;
+            status = -EIO;
         }
-
-        success_.store(success, std::memory_order_release);
+        success_.store(status == 0, std::memory_order_release);
         completed_.store(true, std::memory_order_release);
         scanProgress_.store(1.0f, std::memory_order_release);
-        Operation expected = operation;
-        if (!operation_.compare_exchange_strong(expected, Operation::Idle, std::memory_order_acq_rel)) operation_.store(Operation::Idle, std::memory_order_release);
+        operation_.store(Operation::Idle, std::memory_order_release);
     }
 
-    static uintptr_t OffsetEnd(uintptr_t base, size_t offset)
+    // 仅在 catch 内使用，不依赖 ndk-build 默认关闭的 RTTI。
+    static int CurrentExceptionStatus() noexcept
     {
-        const uintptr_t maxAddress = Config::Constants::ADDR_MAX - 1;
-        const uintptr_t last = offset > maxAddress - base ? maxAddress : base + offset;
-        return last + 1;
-    }
-
-    static size_t SaturatingAdd(size_t left, size_t right)
-    {
-        return right > std::numeric_limits<size_t>::max() - left ? std::numeric_limits<size_t>::max() : left + right;
-    }
-
-    static void WaitFutures(std::vector<std::future<void>> &futures)
-    {
-        std::exception_ptr firstError;
-        for (auto &future : futures)
-        {
-            try
-            {
-                if (future.valid()) future.get();
-            }
-            catch (...)
-            {
-                if (!firstError) firstError = std::current_exception();
-            }
-        }
-        futures.clear();
-        if (firstError) std::rethrow_exception(firstError);
-    }
-
-    template <typename F> void RunOperation(Operation operation, std::string_view fallbackError, F &&task) noexcept
-    {
-        bool succeeded = false;
-        std::string error;
-        struct Guard
-        {
-            PointerManager &owner;
-            Operation operation;
-            bool &succeeded;
-            std::string &error;
-            ~Guard()
-            {
-                owner.finishOperation(operation, succeeded, std::move(error));
-            }
-        } guard{*this, operation, succeeded, error};
-
+        int status = 0;
         try
         {
-            error = fallbackError;
-            task(succeeded, error);
-        }
-        catch (const std::exception &ex)
-        {
-            try
-            {
-                error = ex.what();
-            }
-            catch (...)
-            {
-            }
-        }
-        catch (...)
-        {
-        }
-    }
-
-    bool SnapshotLayout(const std::string &filterModule)
-    {
-        regions_.clear();
-        moduleBases_.clear();
-
-        const std::unique_ptr<Driver::virtual_memory> snapshot(new Driver::virtual_memory(dr->GetMemoryInfo()));
-        const int regionCount = std::clamp(snapshot->region_count, 0, MAX_SCAN_REGIONS);
-        const int moduleCount = std::clamp(snapshot->module_count, 0, MAX_MODULES);
-        auto addRegion = [this](uintptr_t rawStart, uintptr_t rawEnd)
-        {
-            constexpr uintptr_t alignment = sizeof(uintptr_t);
-            uintptr_t start = MemUtils::Normalize(rawStart);
-            uintptr_t end = MemUtils::Normalize(rawEnd);
-            start = std::max(start, Config::Constants::ADDR_MIN + 1);
-            end = std::min(end, Config::Constants::ADDR_MAX);
-            start = (start + alignment - 1) & ~(alignment - 1);
-            end &= ~(alignment - 1);
-            if (start < end) regions_.emplace_back(start, end);
-        };
-
-        for (int i = 0; i < regionCount; ++i) addRegion(snapshot->regions[i].start, snapshot->regions[i].end);
-
-        for (int moduleIndex = 0; moduleIndex < moduleCount; ++moduleIndex)
-        {
-            const auto &module = snapshot->modules[moduleIndex];
-            const std::string fullPath(module.name, strnlen(module.name, sizeof(module.name)));
-            const std::string name(MemUtils::BaseName(fullPath));
-            const bool accepted = filterModule.empty() || name.find(filterModule) != std::string::npos;
-            uint64_t sourceId = 1469598103934665603ULL;
-            for (const unsigned char character : fullPath)
-            {
-                sourceId ^= character;
-                sourceId *= 1099511628211ULL;
-            }
-            const int segmentCount = std::clamp(module.seg_count, 0, MAX_SEGS_PER_MODULE);
-
-            for (int segmentIndex = 0; segmentIndex < segmentCount; ++segmentIndex)
-            {
-                const auto &segment = module.segs[segmentIndex];
-                const uintptr_t start = MemUtils::Normalize(segment.start);
-                const uintptr_t end = MemUtils::Normalize(segment.end);
-                addRegion(start, end);
-                if (!accepted || !MemUtils::IsValidAddr(start) || end <= start || end > Config::Constants::ADDR_MAX) continue;
-
-                BaseRange base;
-                base.start = start;
-                base.end = end;
-                base.sourceId = sourceId;
-                base.name = name;
-                base.segment = segment.index;
-                base.isBss = segment.index == -1;
-                moduleBases_.push_back(std::move(base));
-            }
-        }
-
-        std::sort(regions_.begin(), regions_.end());
-        std::vector<std::pair<uintptr_t, uintptr_t>> merged;
-        merged.reserve(regions_.size());
-        for (const auto &region : regions_)
-        {
-            if (merged.empty() || region.first > merged.back().second) merged.push_back(region);
-            else merged.back().second = std::max(merged.back().second, region.second);
-        }
-        regions_ = std::move(merged);
-
-        std::sort(moduleBases_.begin(), moduleBases_.end(), [](const BaseRange &left, const BaseRange &right) { return std::tie(left.start, left.end, left.sourceId, left.segment) < std::tie(right.start, right.end, right.sourceId, right.segment); });
-        moduleBases_.erase(std::unique(moduleBases_.begin(), moduleBases_.end(), [](const BaseRange &left, const BaseRange &right) { return left.start == right.start && left.end == right.end && left.sourceId == right.sourceId && left.segment == right.segment; }), moduleBases_.end());
-        return !regions_.empty();
-    }
-
-    // 完整写入临时文件后原子发布为唯一结果文件。
-    static bool SaveUniqueBin(FILE *source, std::string &path)
-    {
-        if (!source) return false;
-        char tempPath[] = ".Pointer_scan_XXXXXX";
-        int fd = mkstemp(tempPath);
-        if (fd < 0) return false;
-
-        Io::File temp(fdopen(fd, "w+b"));
-        if (!temp)
-        {
-            close(fd);
-            remove(tempPath);
-            return false;
-        }
-
-        rewind(source);
-        std::array<char, 1 << 16> buffer{};
-        bool ok = true;
-        for (size_t size; (size = fread(buffer.data(), 1, buffer.size(), source)) > 0;)
-        {
-            if (fwrite(buffer.data(), 1, size, temp.get()) != size)
-            {
-                ok = false;
-                break;
-            }
-        }
-        if (ferror(source) != 0 || fflush(temp.get()) != 0 || fsync(fileno(temp.get())) != 0 || ferror(temp.get()) != 0) ok = false;
-        if (fclose(temp.release()) != 0) ok = false;
-
-        char candidate[256];
-        bool published = false;
-        for (int i = 0; ok && i < 9999; ++i)
-        {
-            if (i == 0) snprintf(candidate, sizeof(candidate), "Pointer.bin");
-            else snprintf(candidate, sizeof(candidate), "Pointer_%d.bin", i);
-
-            if (link(tempPath, candidate) == 0)
-            {
-                path = candidate;
-                published = true;
-                break;
-            }
-            if (errno != EEXIST) break;
-        }
-        remove(tempPath);
-        return published;
-    }
-
-    std::optional<std::vector<BaseRange>> SnapshotBases(BaseMode mode, uintptr_t manualBase, uintptr_t arrayBase, size_t arrayCount, size_t maxOffset)
-    {
-        if (mode == BaseMode::Module) return moduleBases_;
-
-        std::vector<BaseRange> bases;
-        if (mode == BaseMode::Manual)
-        {
-            BaseRange base;
-            base.mode = mode;
-            base.start = manualBase;
-            base.end = OffsetEnd(manualBase, maxOffset);
-            base.sourceId = manualBase;
-            bases.push_back(std::move(base));
-            return bases;
-        }
-
-        constexpr size_t kBatchEntries = PAGE_SIZE / sizeof(uintptr_t);
-        std::array<uintptr_t, kBatchEntries> entries{};
-        bases.reserve(arrayCount);
-        auto addBase = [&](size_t index, uintptr_t objectBase)
-        {
-            objectBase = MemUtils::Normalize(objectBase);
-            if (!MemUtils::IsValidAddr(objectBase)) return;
-            BaseRange base;
-            base.mode = mode;
-            base.start = objectBase;
-            base.end = OffsetEnd(objectBase, maxOffset);
-            base.sourceId = index;
-            base.arrayBase = arrayBase;
-            base.arrayIndex = index;
-            bases.push_back(std::move(base));
-        };
-
-        for (size_t first = 0; first < arrayCount; first += kBatchEntries)
-        {
-            const size_t count = std::min(kBatchEntries, arrayCount - first);
-            const size_t bytes = count * sizeof(uintptr_t);
-            const uintptr_t address = arrayBase + first * sizeof(uintptr_t);
-            if (dr->Read(address, entries.data(), bytes) == static_cast<int>(bytes))
-            {
-                for (size_t i = 0; i < count; ++i) addBase(first + i, entries[i]);
-                continue;
-            }
-
-            for (size_t i = 0; i < count; ++i)
-            {
-                uintptr_t objectBase = 0;
-                if (dr->Read(address + i * sizeof(uintptr_t), &objectBase, sizeof(objectBase)) != static_cast<int>(sizeof(objectBase))) return std::nullopt;
-                addBase(first + i, objectBase);
-            }
-        }
-
-        std::sort(bases.begin(), bases.end(), [](const BaseRange &left, const BaseRange &right) { return std::tie(left.start, left.end, left.sourceId) < std::tie(right.start, right.end, right.sourceId); });
-        return bases;
-    }
-
-    // 在候选指针中筛选可匹配项。
-    void search_in_pointers(std::vector<PtrDir> &input, std::vector<PtrData *> &out, size_t offset)
-    {
-        if (input.empty() || pointers_.empty()) return;
-
-        for (auto &pd : pointers_)
-        {
-            const uintptr_t v = MemUtils::Normalize(pd.value);
-            const auto match = std::lower_bound(input.begin(), input.end(), v, [](const PtrDir &node, uintptr_t address) { return node.address < address; });
-            if (match == input.end() || match->address - v > offset) continue;
-
-            out.push_back(&pd);
-        }
-    }
-
-    // 通过活动区间同时匹配模块、手动和数组基址。
-    void filter_to_ranges(std::vector<std::vector<PtrDir>> &dirs, std::vector<PtrRange> &ranges, std::vector<PtrData *> &curr, int level, const std::vector<BaseRange> &bases)
-    {
-        std::set<size_t> active;
-        std::priority_queue<std::pair<uintptr_t, size_t>, std::vector<std::pair<uintptr_t, size_t>>, std::greater<>> expiry;
-        std::map<size_t, PtrRange> found;
-        size_t nextBase = 0;
-
-        for (auto *pointer : curr)
-        {
-            const uintptr_t address = MemUtils::Normalize(pointer->address);
-            while (nextBase < bases.size() && bases[nextBase].start <= address)
-            {
-                active.insert(nextBase);
-                expiry.emplace(bases[nextBase].end, nextBase);
-                ++nextBase;
-            }
-            while (!expiry.empty() && expiry.top().first <= address)
-            {
-                active.erase(expiry.top().second);
-                expiry.pop();
-            }
-
-            const uintptr_t value = MemUtils::Normalize(pointer->value);
-            if (active.empty())
-            {
-                dirs[level].emplace_back(address, value, 0u, 1u);
-                continue;
-            }
-            for (const size_t baseIndex : active)
-            {
-                auto [entry, inserted] = found.try_emplace(baseIndex);
-                if (inserted)
-                {
-                    entry->second.level = level;
-                    entry->second.base = bases[baseIndex];
-                }
-                entry->second.results.emplace_back(address, value, 0u, 1u);
-            }
-        }
-
-        for (auto &[baseIndex, range] : found) ranges.push_back(std::move(range));
-    }
-
-    // 并发建立各层索引关联。
-    std::vector<std::future<void>> create_assoc_index(std::vector<PtrDir> &prev, std::vector<PtrDir> &curr, size_t offset)
-    {
-        std::vector<std::future<void>> futures;
-        if (curr.empty()) return futures;
-        if (prev.size() > std::numeric_limits<uint32_t>::max()) throw std::length_error("指针层节点数量超出格式上限");
-        size_t total = curr.size(), pos = 0;
-        futures.reserve(1 + (total - 1) / 10000);
-        try
-        {
-            while (pos < total)
-            {
-                size_t chunk = std::min(total - pos, static_cast<size_t>(10000));
-                futures.push_back(workers_->submit_task([&prev, nodes = &curr[pos], chunk, offset]
-                {
-                    for (size_t index = 0; index < chunk; ++index)
-                    {
-                        const uintptr_t value = MemUtils::Normalize(nodes[index].value);
-                        const uintptr_t upper = offset > std::numeric_limits<uintptr_t>::max() - value ? std::numeric_limits<uintptr_t>::max() : value + offset;
-                        const auto first = std::lower_bound(prev.begin(), prev.end(), value, [](const PtrDir &node, uintptr_t address) { return node.address < address; });
-                        const auto last = std::upper_bound(first, prev.end(), upper, [](uintptr_t address, const PtrDir &node) { return address < node.address; });
-                        nodes[index].start = static_cast<uint32_t>(first - prev.begin());
-                        nodes[index].end = static_cast<uint32_t>(last - prev.begin());
-                    }
-                }));
-                pos += chunk;
-            }
-        }
-        catch (...)
-        {
-            const auto submitError = std::current_exception();
-            try
-            {
-                WaitFutures(futures);
-            }
-            catch (...)
-            {
-            }
-            std::rethrow_exception(submitError);
-        }
-        return futures;
-    }
-
-    struct DirTree
-    {
-        std::vector<std::vector<size_t>> counts;
-        std::vector<std::vector<PtrDir *>> contents;
-        bool valid = false;
-    };
-
-    // 构建层级化指针目录树结构。
-    DirTree build_dir_tree(std::vector<std::vector<PtrDir>> &dirs, std::vector<PtrRange> &ranges)
-    {
-        DirTree tree;
-        if (ranges.empty()) return tree;
-
-        int max_level = 0;
-        for (auto &r : ranges) max_level = std::max(max_level, r.level);
-
-        std::vector<std::vector<PtrRange *>> level_ranges(dirs.size());
-        for (auto &r : ranges) level_ranges[r.level].push_back(&r);
-
-        tree.counts.resize(max_level);
-        tree.contents.resize(max_level + 1);
-
-        for (int i = max_level; i > 0; i--)
-        {
-            std::vector<PtrDir *> stn;
-            for (auto *r : level_ranges[i])
-                for (auto &v : r->results) stn.push_back(&v);
-            for (auto *p : tree.contents[i]) stn.push_back(p);
-
-            std::sort(stn.begin(), stn.end(), [](auto a, auto b) { return a->start < b->start; });
-
-            size_t distance = 0;
-            uint32_t right = 0;
-            tree.contents[i - 1].reserve(stn.size());
-            for (auto *node : stn)
-            {
-                if (right <= node->start) distance += node->start - right;
-                for (uint32_t child = std::max(right, node->start); child < node->end; ++child) tree.contents[i - 1].push_back(&dirs[i - 1][child]);
-                right = std::max(right, node->end);
-                node->start -= static_cast<uint32_t>(distance);
-                node->end -= static_cast<uint32_t>(distance);
-            }
-            if (tree.contents[i - 1].empty()) return tree;
-        }
-
-        tree.counts[0].assign(tree.contents[0].size(), 1);
-        for (int i = 1; i < max_level; i++)
-        {
-            auto &cc = tree.counts[i];
-            cc.resize(tree.contents[i].size(), 0);
-            for (size_t j = 0; j < tree.contents[i].size(); j++)
-            {
-                const auto &node = *tree.contents[i][j];
-                for (uint32_t child = node.start; child < node.end; ++child) cc[j] = SaturatingAdd(cc[j], tree.counts[i - 1][child]);
-            }
-        }
-
-        tree.valid = true;
-        return tree;
-    }
-
-    // 将指针树结果序列化写入文件。
-    bool write_bin_file(std::vector<std::vector<PtrDir *>> &contents, std::vector<PtrRange> &ranges, FILE *f, BaseMode scanMode, uintptr_t target, uintptr_t manualBase, uintptr_t arrayBase, size_t arrayCount)
-    {
-        if (!f || ranges.size() > static_cast<size_t>(std::numeric_limits<int>::max())) return false;
-        if (!ranges.empty() && (contents.size() < 2 || contents.size() - 1 > static_cast<size_t>(std::numeric_limits<int>::max()))) return false;
-        auto writeObject = [f](const auto &value) { return fwrite(&value, sizeof(value), 1, f) == 1; };
-        auto writeArray = [f](const void *data, size_t size, size_t count) { return count == 0 || fwrite(data, size, count, f) == count; };
-
-        BinHeader hdr{};
-        strcpy(hdr.sign, ".bin pointer chain");
-        hdr.size = sizeof(uintptr_t);
-        hdr.version = kBinVersion;
-        hdr.module_count = static_cast<int>(ranges.size());
-        hdr.level = ranges.empty() ? 0 : static_cast<int>(contents.size()) - 1;
-        hdr.scanBaseMode = static_cast<uint8_t>(scanMode);
-        hdr.scanManualBase = scanMode == BaseMode::Manual ? MemUtils::Normalize(manualBase) : 0;
-        hdr.scanArrayBase = scanMode == BaseMode::Array ? MemUtils::Normalize(arrayBase) : 0;
-        hdr.scanArrayCount = scanMode == BaseMode::Array ? arrayCount : 0;
-        hdr.scanTarget = MemUtils::Normalize(target);
-        if (!writeObject(hdr)) return false;
-
-        for (auto &r : ranges)
-        {
-            if (r.results.empty() || r.results.size() > static_cast<size_t>(std::numeric_limits<int>::max())) return false;
-            BinSym sym{};
-            sym.start = MemUtils::Normalize(r.base.start);
-            sym.segment = r.base.segment;
-            sym.isBss = r.base.isBss;
-            sym.sourceMode = static_cast<uint8_t>(r.base.mode);
-            sym.sourceId = r.base.sourceId;
-            if (r.base.mode == BaseMode::Manual)
-            {
-                sym.manualBase = sym.start;
-                strncpy(sym.name, "manual", sizeof(sym.name) - 1);
-            }
-            else if (r.base.mode == BaseMode::Array)
-            {
-                sym.arrayBase = MemUtils::Normalize(r.base.arrayBase);
-                sym.arrayIndex = r.base.arrayIndex;
-                snprintf(sym.name, sizeof(sym.name), "array[%zu]", r.base.arrayIndex);
-            }
-            else
-            {
-                strncpy(sym.name, r.base.name.data(), std::min(r.base.name.size(), sizeof(sym.name) - 1));
-            }
-            sym.level = r.level;
-            sym.pointer_count = static_cast<int>(r.results.size());
-            if (!writeObject(sym) || !writeArray(r.results.data(), sizeof(PtrDir), r.results.size())) return false;
-        }
-
-        for (size_t i = 0; !ranges.empty() && i + 1 < contents.size(); i++)
-        {
-            if (contents[i].empty() || contents[i].size() > std::numeric_limits<unsigned int>::max()) return false;
-            BinLevel ll{};
-            ll.level = static_cast<int>(i);
-            ll.count = static_cast<unsigned int>(contents[i].size());
-            if (!writeObject(ll)) return false;
-            for (auto *p : contents[i])
-                if (!writeObject(*p)) return false;
-        }
-        return fflush(f) == 0 && ferror(f) == 0;
-    }
-
-public:
-    static std::string_view OperationName(Operation operation)
-    {
-        switch (operation)
-        {
-        case Operation::Scanning:
-            return "scanning";
-        case Operation::Merging:
-            return "merging";
-        case Operation::Exporting:
-            return "exporting";
-        default:
-            return "idle";
-        }
-    }
-
-    State state() const
-    {
-        std::lock_guard lock(statusMutex_);
-        return {operation_.load(std::memory_order_acquire), lastOperation_.load(std::memory_order_acquire), scanProgress_.load(std::memory_order_acquire), chainCount_.load(std::memory_order_acquire), completed_.load(std::memory_order_acquire), success_.load(std::memory_order_acquire), lastError_};
-    }
-
-    bool isBusy() const noexcept
-    {
-        return operation_.load(std::memory_order_acquire) != Operation::Idle;
-    }
-
-    void clear()
-    {
-        std::lock_guard lock(statusMutex_);
-        if (operation_.load(std::memory_order_acquire) != Operation::Idle) return;
-        pointers_.clear();
-        regions_.clear();
-        moduleBases_.clear();
-        chainCount_ = 0;
-        scanProgress_ = 0.0f;
-        completed_ = false;
-        success_ = false;
-        lastOperation_ = Operation::Idle;
-        lastError_.clear();
-    }
-
-private:
-    // 采集进程可用指针并建立初始集合。
-    bool CollectPointers(size_t &pointerCount, int buf_count = 10, int buf_size = 1 << 20)
-    {
-        pointerCount = 0;
-        pointers_.clear();
-        if (regions_.empty() || buf_count <= 0 || buf_size < static_cast<int>(sizeof(uintptr_t))) return false;
-        const size_t blockSize = static_cast<size_t>(buf_size) / sizeof(uintptr_t) * sizeof(uintptr_t);
-
-        Io::File merged(tmpfile());
-        if (!merged)
-        {
-            LS_LOGE_TAG("Pointer", "无法创建合并临时文件");
-            return false;
-        }
-
-        int idx = buf_count - 1;
-        std::vector<std::unique_ptr<char[]>> bufferStorage;
-        bufferStorage.reserve(buf_count);
-        std::vector<char *> bufs(buf_count);
-        for (int i = 0; i < buf_count; i++)
-        {
-            bufferStorage.push_back(std::make_unique<char[]>(PAGE_SIZE));
-            bufs[i] = bufferStorage.back().get();
-        }
-
-        std::mutex mergedMtx;
-        std::atomic<bool> collectionFailed{false};
-        std::vector<std::future<void>> futures;
-        const size_t maxPending = std::min<size_t>(buf_count, workers_->get_thread_count());
-        futures.reserve(maxPending);
-        try
-        {
-            for (auto &[rstart, rend] : regions_)
-            {
-                for (uintptr_t pos = rstart; pos < rend; pos += blockSize)
-                {
-                    futures.push_back(workers_->submit_task(
-                        [this, &bufs, &idx, pos, chunk = std::min(static_cast<size_t>(rend - pos), blockSize), file = merged.get(), &mergedMtx, &collectionFailed]
-                        {
-                            std::vector<PtrData> blockPointers;
-                            blockPointers.reserve(chunk / sizeof(uintptr_t));
-                            {
-                                char *buffer;
-                                {
-                                    std::unique_lock lock(block_mtx_);
-                                    block_cv_.wait(lock, [&idx] { return idx >= 0; });
-                                    buffer = bufs[idx--];
-                                }
-                                struct BufferGuard
-                                {
-                                    PointerManager &owner;
-                                    std::vector<char *> &buffers;
-                                    int &index;
-                                    char *buffer;
-                                    ~BufferGuard()
-                                    {
-                                        std::lock_guard lock(owner.block_mtx_);
-                                        buffers[++index] = buffer;
-                                        owner.block_cv_.notify_one();
-                                    }
-                                } guard{*this, bufs, idx, buffer};
-
-                                for (size_t cursor = 0; cursor < chunk;)
-                                {
-                                    const size_t request = std::min(static_cast<size_t>(PAGE_SIZE), chunk - cursor);
-                                    if (dr->Read(pos + cursor, buffer, request) != static_cast<int>(request))
-                                    {
-                                        collectionFailed = true;
-                                        return;
-                                    }
-                                    for (size_t index = 0; index < request / sizeof(uintptr_t); ++index)
-                                    {
-                                        const uintptr_t value = MemUtils::Normalize(reinterpret_cast<const uintptr_t *>(buffer)[index]);
-                                        const auto region = std::upper_bound(regions_.begin(), regions_.end(), value, [](uintptr_t address, const auto &range) { return address < range.second; });
-                                        if (region != regions_.end() && value >= region->first) blockPointers.emplace_back(pos + cursor + index * sizeof(uintptr_t), value);
-                                    }
-                                    cursor += request;
-                                }
-                            }
-                            if (!blockPointers.empty())
-                            {
-                                std::lock_guard<std::mutex> lk(mergedMtx);
-                                if (!collectionFailed && fwrite(blockPointers.data(), sizeof(PtrData), blockPointers.size(), file) != blockPointers.size()) collectionFailed = true;
-                            }
-                        }));
-                    if (futures.size() >= maxPending) WaitFutures(futures);
-                }
-            }
-            WaitFutures(futures);
-        }
-        catch (...)
-        {
-            try
-            {
-                WaitFutures(futures);
-            }
-            catch (...)
-            {
-            }
             throw;
         }
-
-        if (collectionFailed)
+        catch (const std::system_error &error)
         {
-            LS_LOGE_TAG("Pointer", "临时存储失败");
-            return false;
+            status = error.code().value() > 0 ? -error.code().value() : -EAGAIN;
         }
-
-        if (fflush(merged.get()) != 0 || ferror(merged.get()) != 0)
+        catch (const std::bad_alloc &)
         {
-            LS_LOGE_TAG("Pointer", "刷新临时存储失败");
-            return false;
+            status = -ENOMEM;
         }
-
-        struct stat st;
-        if (fstat(fileno(merged.get()), &st) == 0)
+        catch (const std::length_error &)
         {
-            if (st.st_size < 0 || static_cast<size_t>(st.st_size) % sizeof(PtrData) != 0)
-            {
-                LS_LOGE_TAG("Pointer", "临时存储大小无效");
-                return false;
-            }
-            size_t total = static_cast<size_t>(st.st_size) / sizeof(PtrData);
-            if (total > 0)
-            {
-                pointers_.resize(total);
-                rewind(merged.get());
-                if (fread(pointers_.data(), sizeof(PtrData), total, merged.get()) != total)
-                {
-                    pointers_.clear();
-                    LS_LOGE_TAG("Pointer", "读取合并临时存储失败");
-                    return false;
-                }
-            }
+            status = -EOVERFLOW;
         }
-        else
+        catch (...)
         {
-            LS_LOGE_TAG("Pointer", "获取合并临时文件状态失败");
-            return false;
+            status = -EIO;
         }
-
-        std::sort(pointers_.begin(), pointers_.end(), [](const PtrData &left, const PtrData &right) { return std::tie(left.address, left.value) < std::tie(right.address, right.value); });
-        pointers_.erase(std::unique(pointers_.begin(), pointers_.end(), [](const PtrData &left, const PtrData &right) { return left.address == right.address && left.value == right.value; }), pointers_.end());
-        pointerCount = pointers_.size();
-        return true;
+        return status;
     }
 
-public:
-    bool startAsync(pid_t pid, uintptr_t target, int depth, int maxOffset, bool useManual, uintptr_t manualBase, bool useArray, uintptr_t arrayBase, size_t arrayCount, std::string filterModule)
+    struct TempPath
     {
-        std::lock_guard targetLock(Config::TargetMutex);
-        if (depth <= 0 || depth > 16 || maxOffset <= 0 || (useManual && useArray)) return false;
-        target = MemUtils::Normalize(target);
-        manualBase = MemUtils::Normalize(manualBase);
-        arrayBase = MemUtils::Normalize(arrayBase);
-        if (!MemUtils::IsValidAddr(target)) return false;
-        if (useManual && !MemUtils::IsValidAddr(manualBase)) return false;
-        if (useArray)
-        {
-            constexpr size_t kMaxArrayCount = 1000000;
-            constexpr uintptr_t kMaxArrayBase = Config::Constants::ADDR_MAX - sizeof(uintptr_t);
-            if (!MemUtils::IsValidAddr(arrayBase) || arrayCount == 0 || arrayCount > kMaxArrayCount) return false;
-            if (arrayBase > kMaxArrayBase || arrayCount - 1 > (kMaxArrayBase - arrayBase) / sizeof(uintptr_t)) return false;
-        }
-        if (!beginOperation(Operation::Scanning)) return false;
-        if (pid <= 0 || pid != dr->GetGlobalPid())
-        {
-            finishOperation(Operation::Scanning, false, "目标进程已变化");
-            return false;
-        }
-        scanProgress_ = 0.0f;
-        try
-        {
-            if (!workers_) workers_.emplace(std::max(4u, std::thread::hardware_concurrency()));
-            task_ = std::async(std::launch::async, [this, pid, target, depth, maxOffset, useManual, manualBase, useArray, arrayBase, arrayCount, filterModule = std::move(filterModule)]() mutable
-            {
-                bool succeeded = false;
-                std::string error;
-                struct ScanGuard
-                {
-                    PointerManager &owner;
-                    bool &succeeded;
-                    std::string &error;
-                    ~ScanGuard()
-                    {
-                        owner.finishOperation(PointerManager::Operation::Scanning, succeeded, std::move(error));
-                    }
-                } guard{*this, succeeded, error};
-
-                try
-                {
-                    if (pid <= 0 || pid != dr->GetGlobalPid())
-                    {
-                        error = "目标进程已变化";
-                        return;
-                    }
-
-                    LS_LOGI_TAG_FMT("Pointer", "开始扫描: 目标=0x{:X} 深度={} 偏移={}", target, depth, maxOffset);
-
-                    if (!SnapshotLayout(filterModule))
-                    {
-                        error = "无法获取有效内存布局";
-                        return;
-                    }
-
-                    const BaseMode scanMode = useManual ? BaseMode::Manual : (useArray ? BaseMode::Array : BaseMode::Module);
-                    auto baseSnapshot = SnapshotBases(scanMode, manualBase, arrayBase, arrayCount, static_cast<size_t>(maxOffset));
-                    if (!baseSnapshot)
-                    {
-                        error = "无法完整读取 Array 基址快照";
-                        return;
-                    }
-                    std::vector<BaseRange> bases = std::move(*baseSnapshot);
-                    if (scanMode == BaseMode::Module && bases.empty())
-                    {
-                        error = filterModule.empty() ? "内存布局中没有可用模块基址" : std::format("没有匹配模块过滤条件: {}", filterModule);
-                        return;
-                    }
-
-                    size_t pointerCount = 0;
-                    if (!CollectPointers(pointerCount))
-                    {
-                        LS_LOGE_TAG("Pointer", "扫描失败: 无法创建内存快照");
-                        error = "无法创建内存快照";
-                        return;
-                    }
-                    LS_LOGI_TAG_FMT("Pointer", "内存快照数量: {}", pointerCount);
-
-                    Io::File outfile(tmpfile());
-                    if (!outfile)
-                    {
-                        LS_LOGE_TAG("Pointer", "无法创建结果临时文件");
-                        error = "无法创建结果临时文件";
-                        return;
-                    }
-
-                    std::vector<PtrRange> ranges;
-                    std::vector<std::vector<PtrDir>> dirs(depth + 1);
-                    size_t totalChains = 0;
-                    bool wroteResults = false;
-
-                    dirs[0].emplace_back(target, 0, 0, 1);
-                    LS_LOGI_TAG_FMT("Pointer", "Level 0 初始化完成，目标地址数量: {}", dirs[0].size());
-
-                    for (int level = 1; level <= depth; level++)
-                    {
-                        std::vector<PtrData *> curr;
-                        search_in_pointers(dirs[level - 1], curr, static_cast<size_t>(maxOffset));
-
-                        if (curr.empty())
-                        {
-                            LS_LOGI_TAG_FMT("Pointer", "扫描在 Level {} 结束: 未找到指向上级的指针", level);
-                            break;
-                        }
-
-                        LS_LOGI_TAG_FMT("Pointer", "Level {} 搜索结果: 找到 {} 个指针", level, curr.size());
-                        std::sort(curr.begin(), curr.end(), [](auto a, auto b) { return a->address < b->address; });
-
-                        filter_to_ranges(dirs, ranges, curr, level, bases);
-
-                        auto futures = create_assoc_index(dirs[level - 1], dirs[level], static_cast<size_t>(maxOffset));
-                        WaitFutures(futures);
-
-                        scanProgress_ = static_cast<float>(level + 1) / (depth + 2);
-                    }
-
-                    for (auto &range : ranges)
-                    {
-                        if (range.level > 0)
-                        {
-                            auto futures = create_assoc_index(dirs[range.level - 1], range.results, static_cast<size_t>(maxOffset));
-                            WaitFutures(futures);
-                        }
-                    }
-
-                    if (!ranges.empty())
-                    {
-                        auto tree = build_dir_tree(dirs, ranges);
-                        if (tree.valid)
-                        {
-                            for (auto &r : ranges)
-                            {
-                                if (r.level > 0 && static_cast<size_t>(r.level - 1) < tree.counts.size())
-                                {
-                                    for (auto &v : r.results)
-                                    {
-                                        const auto &counts = tree.counts[r.level - 1];
-                                        if (v.start >= v.end || v.end > counts.size()) continue;
-                                        for (uint32_t child = v.start; child < v.end; ++child) totalChains = SaturatingAdd(totalChains, counts[child]);
-                                    }
-                                }
-                            }
-
-                            LS_LOGI_TAG_FMT("Pointer", "开始保存 {} 条链条", totalChains);
-                            wroteResults = write_bin_file(tree.contents, ranges, outfile.get(), scanMode, target, manualBase, arrayBase, arrayCount);
-                            if (wroteResults) LS_LOGI_TAG_FMT("Pointer", "文件写入完成，总链数: {}", totalChains);
-                            else LS_LOGE_TAG("Pointer", "指针结果序列化失败");
-                        }
-                    }
-                    else
-                    {
-                        std::vector<std::vector<PtrDir *>> emptyContents;
-                        wroteResults = write_bin_file(emptyContents, ranges, outfile.get(), scanMode, target, manualBase, arrayBase, arrayCount);
-                        LS_LOGI_TAG("Pointer", "扫描结果为空，已生成空图");
-                    }
-
-                    if (!wroteResults)
-                    {
-                        chainCount_ = 0;
-                        error = "无法序列化指针结果";
-                        return;
-                    }
-
-                    if (pid != dr->GetGlobalPid())
-                    {
-                        error = "目标进程在扫描期间发生变化";
-                        return;
-                    }
-
-                    std::string autoName;
-                    const bool saved = SaveUniqueBin(outfile.get(), autoName);
-                    if (saved) LS_LOGI_TAG_FMT("Pointer", "结果已保存至: {}", autoName);
-                    else LS_LOGE_TAG("Pointer", "无法原子保存指针结果文件");
-
-                    chainCount_ = saved ? totalChains : 0;
-                    succeeded = saved;
-                    if (!saved) error = "无法完整保存指针结果";
-                }
-                catch (const std::exception &ex)
-                {
-                    error = ex.what();
-                }
-                catch (...)
-                {
-                    error = "指针扫描发生未知异常";
-                }
-                    });
-        }
-        catch (const std::exception &ex)
-        {
-            finishOperation(Operation::Scanning, false, ex.what());
-            return false;
-        }
-        return true;
-    }
+        const char *path;
+        bool committed = false;
+        ~TempPath() { if (!committed) remove(path); }
+    };
 
     struct MemoryGraph
     {
@@ -1025,31 +213,47 @@ public:
         std::vector<Block> blocks;
         std::vector<std::vector<PtrDir>> levels;
 
-        template <typename T> static bool ReadObject(const char *&cur, const char *eof, T &out)
+        template <typename T> static int ReadObject(const char *&cur, const char *eof, T &out)
         {
-            if (cur > eof || sizeof(T) > static_cast<size_t>(eof - cur)) return false;
+            int status = 0;
+            if (cur > eof || sizeof(T) > static_cast<size_t>(eof - cur))
+            {
+                status = -EIO;
+                return status;
+            }
             std::memcpy(&out, cur, sizeof(T));
             cur += sizeof(T);
-            return true;
+            return status;
         }
 
-        template <typename T> static bool ReadVector(const char *&cur, const char *eof, size_t count, std::vector<T> &out)
+        template <typename T> static int ReadVector(const char *&cur, const char *eof, size_t count, std::vector<T> &out)
         {
-            if (cur > eof || count > static_cast<size_t>(eof - cur) / sizeof(T)) return false;
+            int status = 0;
+            if (cur > eof || count > static_cast<size_t>(eof - cur) / sizeof(T))
+            {
+                status = -EIO;
+                return status;
+            }
             out.resize(count);
             if (count > 0) std::memcpy(out.data(), cur, count * sizeof(T));
             cur += count * sizeof(T);
-            return true;
+            return status;
         }
 
-        template <typename T> static bool WriteObject(FILE *file, const T &value)
+        template <typename T> static int WriteObject(FILE *file, const T &value)
         {
-            return fwrite(&value, sizeof(T), 1, file) == 1;
+            int status = 0;
+            errno = 0;
+            if (fwrite(&value, sizeof(T), 1, file) != 1) status = errno ? -errno : -EIO;
+            return status;
         }
 
-        template <typename T> static bool WriteVector(FILE *file, const std::vector<T> &values)
+        template <typename T> static int WriteVector(FILE *file, const std::vector<T> &values)
         {
-            return values.empty() || fwrite(values.data(), sizeof(T), values.size(), file) == values.size();
+            int status = 0;
+            errno = 0;
+            if (!values.empty() && fwrite(values.data(), sizeof(T), values.size(), file) != values.size()) status = errno ? -errno : -EIO;
+            return status;
         }
 
         bool validate() const
@@ -1126,8 +330,7 @@ public:
                     if (block.sym.manualBase != 0 || block.sym.segment != 0 || block.sym.isBss) return false;
                 }
 
-                const std::string_view name(block.sym.name);
-                if (!blockIdentities.emplace(block.sym.sourceMode, block.sym.sourceId, name, block.sym.segment, block.sym.isBss, block.sym.arrayIndex, block.sym.level).second) return false;
+                if (!blockIdentities.emplace(block.sym.sourceMode, block.sym.sourceId, std::string_view(block.sym.name), block.sym.segment, block.sym.isBss, block.sym.arrayIndex, block.sym.level).second) return false;
 
                 const size_t childCount = levels[block.sym.level - 1].size();
                 std::set<std::tuple<uintptr_t, uintptr_t, uint32_t, uint32_t>> roots;
@@ -1143,8 +346,9 @@ public:
         }
 
         // 从二进制文件加载指针图数据。
-        bool load(const std::string &path)
+        int load(const std::string &path)
         {
+            int status = 0;
             struct Mapping
             {
                 int fd = -1;
@@ -1158,114 +362,977 @@ public:
             } mapping;
 
             mapping.fd = open(path.c_str(), O_RDONLY);
-            if (mapping.fd < 0) return false;
+            if (mapping.fd < 0)
+            {
+                status = -errno;
+                return status;
+            }
             struct stat st;
-            if (fstat(mapping.fd, &st) != 0 || st.st_size < static_cast<off_t>(sizeof(BinHeader))) return false;
-            if (static_cast<uintmax_t>(st.st_size) > std::numeric_limits<size_t>::max()) return false;
+            if (fstat(mapping.fd, &st) != 0)
+            {
+                status = -errno;
+                return status;
+            }
+            if (st.st_size < static_cast<off_t>(sizeof(BinHeader)))
+            {
+                status = -EIO;
+                return status;
+            }
+            if (static_cast<uintmax_t>(st.st_size) > std::numeric_limits<size_t>::max())
+            {
+                status = -EOVERFLOW;
+                return status;
+            }
 
             mapping.size = static_cast<size_t>(st.st_size);
             mapping.data = mmap(nullptr, mapping.size, PROT_READ, MAP_PRIVATE, mapping.fd, 0);
-            if (mapping.data == MAP_FAILED) return false;
+            if (mapping.data == MAP_FAILED)
+            {
+                status = -errno;
+                return status;
+            }
 
             const char *cur = static_cast<const char *>(mapping.data);
             const char *eof = cur + mapping.size;
-            blocks.clear();
-            levels.clear();
-            bool ok = false;
+            MemoryGraph pending;
             try
             {
-                ok = ReadObject(cur, eof, hdr);
-                constexpr std::string_view signature = ".bin pointer chain";
-                ok = ok && std::memcmp(hdr.sign, signature.data(), signature.size()) == 0 && hdr.sign[signature.size()] == '\0';
-                ok = ok && hdr.version == kBinVersion && hdr.size == static_cast<int>(sizeof(uintptr_t));
-                ok = ok && hdr.module_count >= 0 && hdr.level >= 0 && hdr.level <= 16 && hdr.scanBaseMode <= static_cast<uint8_t>(BaseMode::Array);
-                ok = ok && static_cast<size_t>(hdr.module_count) <= static_cast<size_t>(eof - cur) / sizeof(BinSym);
+                status = ReadObject(cur, eof, pending.hdr);
+                if (status != 0) return status;
+                // 这里只验证分配/解码边界；协议语义统一交给 validate。
+                if (pending.hdr.module_count < 0 || pending.hdr.level < 0 || pending.hdr.level > 16 ||
+                    static_cast<size_t>(pending.hdr.module_count) > static_cast<size_t>(eof - cur) / sizeof(BinSym))
+                {
+                    status = -EINVAL;
+                    return status;
+                }
 
-                if (ok) blocks.reserve(static_cast<size_t>(hdr.module_count));
-                for (int i = 0; ok && i < hdr.module_count; ++i)
+                pending.blocks.reserve(static_cast<size_t>(pending.hdr.module_count));
+                for (int i = 0; i < pending.hdr.module_count; ++i)
                 {
                     Block block;
-                    ok = ReadObject(cur, eof, block.sym);
-                    ok = ok && block.sym.pointer_count > 0 && block.sym.level > 0 && block.sym.level <= hdr.level;
-                    ok = ok && block.sym.sourceMode <= static_cast<uint8_t>(BaseMode::Array);
-                    ok = ok && std::memchr(block.sym.name, '\0', sizeof(block.sym.name)) != nullptr;
-                    if (!ok || !ReadVector(cur, eof, static_cast<size_t>(block.sym.pointer_count), block.roots))
+                    status = ReadObject(cur, eof, block.sym);
+                    if (status != 0) return status;
+                    if (block.sym.pointer_count <= 0)
                     {
-                        ok = false;
-                        break;
+                        status = -EINVAL;
+                        return status;
                     }
-                    blocks.push_back(std::move(block));
+                    status = ReadVector(cur, eof, static_cast<size_t>(block.sym.pointer_count), block.roots);
+                    if (status != 0) return status;
+                    pending.blocks.push_back(std::move(block));
                 }
 
-                if (ok) levels.resize(static_cast<size_t>(hdr.level));
-                for (int expectedLevel = 0; ok && expectedLevel < hdr.level; ++expectedLevel)
+                pending.levels.resize(static_cast<size_t>(pending.hdr.level));
+                for (int expectedLevel = 0; expectedLevel < pending.hdr.level; ++expectedLevel)
                 {
                     BinLevel level{};
-                    ok = ReadObject(cur, eof, level);
-                    ok = ok && level.level == expectedLevel && level.count > 0;
-                    if (!ok || !ReadVector(cur, eof, static_cast<size_t>(level.count), levels[expectedLevel]))
+                    status = ReadObject(cur, eof, level);
+                    if (status != 0) return status;
+                    if (level.level != expectedLevel)
                     {
-                        ok = false;
-                        break;
+                        status = -EINVAL;
+                        return status;
                     }
+                    status = ReadVector(cur, eof, static_cast<size_t>(level.count), pending.levels[expectedLevel]);
+                    if (status != 0) return status;
                 }
 
-                if (ok) ok = cur == eof && validate();
+                if (cur != eof || !pending.validate())
+                {
+                    status = -EINVAL;
+                    return status;
+                }
+                *this = std::move(pending);
+            }
+            catch (const std::bad_alloc &)
+            {
+                status = -ENOMEM;
+                return status;
+            }
+            catch (const std::length_error &)
+            {
+                status = -EOVERFLOW;
+                return status;
+            }
+            return status;
+        }
+
+    };
+
+    static uintptr_t OffsetEnd(uintptr_t base, size_t offset)
+    {
+        const uintptr_t maxAddress = Config::Constants::ADDR_MAX - 1;
+        const uintptr_t last = offset > maxAddress - base ? maxAddress : base + offset;
+        return last + 1;
+    }
+
+    static size_t SaturatingAdd(size_t left, size_t right)
+    {
+        return right > std::numeric_limits<size_t>::max() - left ? std::numeric_limits<size_t>::max() : left + right;
+    }
+
+    static void WaitFutures(std::vector<std::future<void>> &futures)
+    {
+        std::exception_ptr firstError;
+        for (auto &future : futures)
+        {
+            try
+            {
+                if (future.valid()) future.get();
             }
             catch (...)
             {
-                ok = false;
+                if (!firstError) firstError = std::current_exception();
             }
-
-            if (!ok)
-            {
-                hdr = {};
-                blocks.clear();
-                levels.clear();
-            }
-            return ok;
         }
+        futures.clear();
+        if (firstError) std::rethrow_exception(firstError);
+    }
 
-        // 将当前指针图保存到文件。
-        bool save(const std::string &path) const
+    template <typename F> void RunOperation(std::string_view fallbackError, F &&task) noexcept
+    {
+        int status = 0;
+        std::string error;
+        struct Guard
         {
-            if (!validate()) return false;
-            Io::File file(fopen(path.c_str(), "wb"));
-            if (!file) return false;
+            PointerManager &owner;
+            int &status;
+            std::string &error;
+            ~Guard()
+            {
+                owner.finishOperation(status, error);
+            }
+        } guard{*this, status, error};
 
-            bool ok = WriteObject(file.get(), hdr);
-            for (const auto &blk : blocks)
-            {
-                ok = ok && WriteObject(file.get(), blk.sym) && WriteVector(file.get(), blk.roots);
-                if (!ok) break;
-            }
-            for (int i = 0; ok && i < hdr.level; ++i)
-            {
-                if (levels[i].size() > std::numeric_limits<unsigned int>::max())
-                {
-                    ok = false;
-                    break;
-                }
-                BinLevel bl{};
-                bl.level = i;
-                bl.count = static_cast<unsigned int>(levels[i].size());
-                ok = WriteObject(file.get(), bl) && WriteVector(file.get(), levels[i]);
-            }
-            if (ok) ok = fflush(file.get()) == 0 && fsync(fileno(file.get())) == 0 && ferror(file.get()) == 0;
-            if (fclose(file.release()) != 0) ok = false;
-            if (!ok) remove(path.c_str());
-            return ok;
+        try
+        {
+            error = fallbackError;
+            status = task(error);
         }
-    };
+        catch (const std::exception &ex)
+        {
+            status = CurrentExceptionStatus();
+            try
+            {
+                error = ex.what();
+            }
+            catch (...)
+            {
+            }
+        }
+        catch (...)
+        {
+            status = -EIO;
+        }
+    }
 
+    // 并发建立各层索引关联。
+    std::vector<std::future<void>> create_assoc_index(std::vector<PtrDir> &prev, std::vector<PtrDir> &curr, size_t offset)
+    {
+        std::vector<std::future<void>> futures;
+        if (curr.empty()) return futures;
+        if (prev.size() > std::numeric_limits<uint32_t>::max()) throw std::length_error("指针层节点数量超出格式上限");
+        size_t total = curr.size(), pos = 0;
+        futures.reserve(1 + (total - 1) / 10000);
+        try
+        {
+            while (pos < total)
+            {
+                size_t chunk = std::min(total - pos, static_cast<size_t>(10000));
+                futures.push_back(workers_->submit_task([&prev, nodes = &curr[pos], chunk, offset]
+                {
+                    for (size_t index = 0; index < chunk; ++index)
+                    {
+                        const uintptr_t value = nodes[index].value;
+                        const uintptr_t upper = offset > std::numeric_limits<uintptr_t>::max() - value ? std::numeric_limits<uintptr_t>::max() : value + offset;
+                        const auto first = std::lower_bound(prev.begin(), prev.end(), value, [](const PtrDir &node, uintptr_t address) { return node.address < address; });
+                        const auto last = std::upper_bound(first, prev.end(), upper, [](uintptr_t address, const PtrDir &node) { return address < node.address; });
+                        nodes[index].start = static_cast<uint32_t>(first - prev.begin());
+                        nodes[index].end = static_cast<uint32_t>(last - prev.begin());
+                    }
+                }));
+                pos += chunk;
+            }
+        }
+        catch (...)
+        {
+            const auto submitError = std::current_exception();
+            try
+            {
+                WaitFutures(futures);
+            }
+            catch (...)
+            {
+            }
+            std::rethrow_exception(submitError);
+        }
+        return futures;
+    }
+
+    // 将指针树结果序列化写入文件。
+    int write_bin_file(std::vector<std::vector<PtrDir *>> &contents, std::vector<PtrRange> &ranges, FILE *f, BaseMode scanMode, uintptr_t target, uintptr_t manualBase, uintptr_t arrayBase, size_t arrayCount)
+    {
+        int status = 0;
+        if (!f || ranges.size() > static_cast<size_t>(std::numeric_limits<int>::max()))
+        {
+            status = -EINVAL;
+            return status;
+        }
+        if (!ranges.empty() && (contents.size() < 2 || contents.size() - 1 > static_cast<size_t>(std::numeric_limits<int>::max())))
+        {
+            status = -EINVAL;
+            return status;
+        }
+
+        BinHeader hdr{};
+        strcpy(hdr.sign, ".bin pointer chain");
+        hdr.size = sizeof(uintptr_t);
+        hdr.version = kBinVersion;
+        hdr.module_count = static_cast<int>(ranges.size());
+        hdr.level = ranges.empty() ? 0 : static_cast<int>(contents.size()) - 1;
+        hdr.scanBaseMode = static_cast<uint8_t>(scanMode);
+        hdr.scanManualBase = scanMode == BaseMode::Manual ? manualBase : 0;
+        hdr.scanArrayBase = scanMode == BaseMode::Array ? arrayBase : 0;
+        hdr.scanArrayCount = scanMode == BaseMode::Array ? arrayCount : 0;
+        hdr.scanTarget = target;
+        status = MemoryGraph::WriteObject(f, hdr);
+        if (status != 0) return status;
+
+        for (auto &r : ranges)
+        {
+            if (r.results.empty() || r.results.size() > static_cast<size_t>(std::numeric_limits<int>::max()))
+            {
+                status = -EINVAL;
+                return status;
+            }
+            BinSym sym{};
+            sym.start = r.base.start;
+            sym.segment = r.base.segment;
+            sym.isBss = r.base.isBss;
+            sym.sourceMode = static_cast<uint8_t>(r.base.mode);
+            sym.sourceId = r.base.sourceId;
+            if (r.base.mode == BaseMode::Manual)
+            {
+                sym.manualBase = sym.start;
+                strncpy(sym.name, "manual", sizeof(sym.name) - 1);
+            }
+            else if (r.base.mode == BaseMode::Array)
+            {
+                sym.arrayBase = r.base.arrayBase;
+                sym.arrayIndex = r.base.arrayIndex;
+                snprintf(sym.name, sizeof(sym.name), "array[%zu]", r.base.arrayIndex);
+            }
+            else
+            {
+                strncpy(sym.name, r.base.name.data(), std::min(r.base.name.size(), sizeof(sym.name) - 1));
+            }
+            sym.level = r.level;
+            sym.pointer_count = static_cast<int>(r.results.size());
+            status = MemoryGraph::WriteObject(f, sym);
+            if (status != 0) return status;
+            status = MemoryGraph::WriteVector(f, r.results);
+            if (status != 0) return status;
+        }
+
+        for (int i = 0; i < hdr.level; ++i)
+        {
+            if (contents[i].empty() || contents[i].size() > std::numeric_limits<unsigned int>::max())
+            {
+                status = -EINVAL;
+                return status;
+            }
+            BinLevel ll{};
+            ll.level = static_cast<int>(i);
+            ll.count = static_cast<unsigned int>(contents[i].size());
+            status = MemoryGraph::WriteObject(f, ll);
+            if (status != 0) return status;
+            for (auto *p : contents[i])
+            {
+                status = MemoryGraph::WriteObject(f, *p);
+                if (status != 0) return status;
+            }
+        }
+        if (fflush(f) != 0) status = -errno;
+        else if (ferror(f) != 0) status = -EIO;
+        return status;
+    }
+
+public:
+    ~PointerManager()
+    {
+        // 主任务仍可能向 workers_ 提交任务，必须先等主任务。
+        if (task_.valid()) task_.wait();
+        if (workers_) workers_->wait();
+    }
+
+    static std::string_view OperationName(Operation operation)
+    {
+        switch (operation)
+        {
+        case Operation::Scanning:
+            return "scanning";
+        case Operation::Merging:
+            return "merging";
+        case Operation::Exporting:
+            return "exporting";
+        default:
+            return "idle";
+        }
+    }
+
+    State state() const
+    {
+        std::lock_guard lock(statusMutex_);
+        return {operation_.load(std::memory_order_acquire), lastOperation_.load(std::memory_order_acquire), scanProgress_.load(std::memory_order_acquire), chainCount_.load(std::memory_order_acquire), completed_.load(std::memory_order_acquire), success_.load(std::memory_order_acquire), lastError_};
+    }
+
+    bool isBusy() const noexcept
+    {
+        return operation_.load(std::memory_order_acquire) != Operation::Idle;
+    }
+
+    void clear()
+    {
+        std::lock_guard lock(statusMutex_);
+        if (operation_.load(std::memory_order_acquire) != Operation::Idle) return;
+        pointers_.clear();
+        regions_.clear();
+        moduleBases_.clear();
+        chainCount_ = 0;
+        scanProgress_ = 0.0f;
+        completed_ = false;
+        success_ = false;
+        lastOperation_ = Operation::Idle;
+        lastError_.clear();
+    }
+
+    int startAsync(pid_t pid, uintptr_t target, int depth, int maxOffset, bool useManual, uintptr_t manualBase, bool useArray, uintptr_t arrayBase, size_t arrayCount, std::string filterModule)
+    {
+        int status = 0;
+        std::lock_guard targetLock(Config::TargetMutex);
+        if (depth <= 0 || depth > 16 || maxOffset <= 0 || (useManual && useArray))
+        {
+            status = -EINVAL;
+            return status;
+        }
+        target = MemUtils::Normalize(target);
+        manualBase = MemUtils::Normalize(manualBase);
+        arrayBase = MemUtils::Normalize(arrayBase);
+        if (!MemUtils::IsValidAddr(target))
+        {
+            status = -EINVAL;
+            return status;
+        }
+        if (useManual && !MemUtils::IsValidAddr(manualBase))
+        {
+            status = -EINVAL;
+            return status;
+        }
+        if (useArray)
+        {
+            constexpr size_t kMaxArrayCount = 1000000;
+            constexpr uintptr_t kMaxArrayBase = Config::Constants::ADDR_MAX - sizeof(uintptr_t);
+            if (!MemUtils::IsValidAddr(arrayBase) || arrayCount == 0 || arrayCount > kMaxArrayCount)
+            {
+                status = -EINVAL;
+                return status;
+            }
+            if (arrayBase > kMaxArrayBase || arrayCount - 1 > (kMaxArrayBase - arrayBase) / sizeof(uintptr_t))
+            {
+                status = -EINVAL;
+                return status;
+            }
+        }
+        status = beginOperation(Operation::Scanning);
+        if (status != 0) return status;
+        if (pid <= 0 || pid != dr->GetGlobalPid())
+        {
+            status = -ESTALE;
+            finishOperation(status, "目标进程已变化");
+            return status;
+        }
+        try
+        {
+            if (!workers_) workers_.emplace(std::max(4u, std::thread::hardware_concurrency()));
+            task_ = std::async(std::launch::async, [this, pid, target, depth, maxOffset, useManual, manualBase, useArray, arrayBase, arrayCount, filterModule = std::move(filterModule)]() mutable
+            {
+                RunOperation("指针扫描发生未知异常", [&](std::string &error) -> int
+                {
+                    int status = 0;
+                    LS_LOGI_TAG_FMT("Pointer", "开始扫描: 目标=0x{:X} 深度={} 偏移={}", target, depth, maxOffset);
+
+                    {
+                        regions_.clear();
+                        moduleBases_.clear();
+
+                        const std::unique_ptr<Driver::virtual_memory> snapshot(new Driver::virtual_memory(dr->GetMemoryInfo()));
+                        const int regionCount = std::clamp(snapshot->region_count, 0, MAX_SCAN_REGIONS);
+                        const int moduleCount = std::clamp(snapshot->module_count, 0, MAX_MODULES);
+                        auto addRegion = [this](uintptr_t rawStart, uintptr_t rawEnd)
+                        {
+                            constexpr uintptr_t alignment = sizeof(uintptr_t);
+                            uintptr_t start = MemUtils::Normalize(rawStart);
+                            uintptr_t end = MemUtils::Normalize(rawEnd);
+                            start = std::max(start, Config::Constants::ADDR_MIN + 1);
+                            end = std::min(end, Config::Constants::ADDR_MAX);
+                            start = (start + alignment - 1) & ~(alignment - 1);
+                            end &= ~(alignment - 1);
+                            if (start < end) regions_.emplace_back(start, end);
+                        };
+
+                        for (int i = 0; i < regionCount; ++i) addRegion(snapshot->regions[i].start, snapshot->regions[i].end);
+
+                        for (int moduleIndex = 0; moduleIndex < moduleCount; ++moduleIndex)
+                        {
+                            const auto &module = snapshot->modules[moduleIndex];
+                            const std::string fullPath(module.name, strnlen(module.name, sizeof(module.name)));
+                            const std::string name(MemUtils::BaseName(fullPath));
+                            const bool accepted = filterModule.empty() || name.find(filterModule) != std::string::npos;
+                            uint64_t sourceId = 1469598103934665603ULL;
+                            for (const unsigned char character : fullPath)
+                            {
+                                sourceId ^= character;
+                                sourceId *= 1099511628211ULL;
+                            }
+                            const int segmentCount = std::clamp(module.seg_count, 0, MAX_SEGS_PER_MODULE);
+
+                            for (int segmentIndex = 0; segmentIndex < segmentCount; ++segmentIndex)
+                            {
+                                const auto &segment = module.segs[segmentIndex];
+                                const uintptr_t start = MemUtils::Normalize(segment.start);
+                                const uintptr_t end = MemUtils::Normalize(segment.end);
+                                addRegion(start, end);
+                                if (!accepted || !MemUtils::IsValidAddr(start) || end <= start || end > Config::Constants::ADDR_MAX) continue;
+
+                                BaseRange base;
+                                base.start = start;
+                                base.end = end;
+                                base.sourceId = sourceId;
+                                base.name = name;
+                                base.segment = segment.index;
+                                base.isBss = segment.index == -1;
+                                moduleBases_.push_back(std::move(base));
+                            }
+                        }
+
+                        std::sort(regions_.begin(), regions_.end());
+                        std::vector<std::pair<uintptr_t, uintptr_t>> merged;
+                        merged.reserve(regions_.size());
+                        for (const auto &region : regions_)
+                        {
+                            if (merged.empty() || region.first > merged.back().second) merged.push_back(region);
+                            else merged.back().second = std::max(merged.back().second, region.second);
+                        }
+                        regions_ = std::move(merged);
+
+                        std::sort(moduleBases_.begin(), moduleBases_.end(), [](const BaseRange &left, const BaseRange &right) { return std::tie(left.start, left.end, left.sourceId, left.segment) < std::tie(right.start, right.end, right.sourceId, right.segment); });
+                        moduleBases_.erase(std::unique(moduleBases_.begin(), moduleBases_.end(), [](const BaseRange &left, const BaseRange &right) { return left.start == right.start && left.end == right.end && left.sourceId == right.sourceId && left.segment == right.segment; }), moduleBases_.end());
+                        if (regions_.empty())
+                        {
+                            error = "无法获取有效内存布局";
+                            status = -ENOENT;
+                            return status;
+                        }
+                    }
+
+                    const BaseMode scanMode = useManual ? BaseMode::Manual : (useArray ? BaseMode::Array : BaseMode::Module);
+                    std::vector<BaseRange> bases;
+                    if (scanMode == BaseMode::Module) bases = moduleBases_;
+                    else if (scanMode == BaseMode::Manual)
+                    {
+                        BaseRange base;
+                        base.mode = scanMode;
+                        base.start = manualBase;
+                        base.end = OffsetEnd(manualBase, maxOffset);
+                        base.sourceId = manualBase;
+                        bases.push_back(std::move(base));
+                    }
+                    else
+                    {
+                        constexpr size_t kBatchEntries = PAGE_SIZE / sizeof(uintptr_t);
+                        std::array<uintptr_t, kBatchEntries> entries{};
+                        bases.reserve(arrayCount);
+                        auto addBase = [&](size_t index, uintptr_t objectBase)
+                        {
+                            objectBase = MemUtils::Normalize(objectBase);
+                            if (!MemUtils::IsValidAddr(objectBase)) return;
+                            BaseRange base;
+                            base.mode = scanMode;
+                            base.start = objectBase;
+                            base.end = OffsetEnd(objectBase, maxOffset);
+                            base.sourceId = index;
+                            base.arrayBase = arrayBase;
+                            base.arrayIndex = index;
+                            bases.push_back(std::move(base));
+                        };
+
+                        for (size_t first = 0; first < arrayCount; first += kBatchEntries)
+                        {
+                            const size_t count = std::min(kBatchEntries, arrayCount - first);
+                            const size_t bytes = count * sizeof(uintptr_t);
+                            const uintptr_t address = arrayBase + first * sizeof(uintptr_t);
+                            if (dr->Read(address, entries.data(), bytes) == static_cast<int>(bytes))
+                            {
+                                for (size_t i = 0; i < count; ++i) addBase(first + i, entries[i]);
+                                continue;
+                            }
+
+                            for (size_t i = 0; i < count; ++i)
+                            {
+                                uintptr_t objectBase = 0;
+                                status = dr->Read(address + i * sizeof(uintptr_t), &objectBase, sizeof(objectBase));
+                                if (status != static_cast<int>(sizeof(objectBase)))
+                                {
+                                    if (status >= 0) status = -EIO;
+                                    error = "无法完整读取 Array 基址快照";
+                                    return status;
+                                }
+                                status = 0;
+                                addBase(first + i, objectBase);
+                            }
+                        }
+
+                        std::sort(bases.begin(), bases.end(), [](const BaseRange &left, const BaseRange &right) { return std::tie(left.start, left.end, left.sourceId) < std::tie(right.start, right.end, right.sourceId); });
+                    }
+                    if (scanMode == BaseMode::Module && bases.empty())
+                    {
+                        error = filterModule.empty() ? "内存布局中没有可用模块基址" : std::format("没有匹配模块过滤条件: {}", filterModule);
+                        status = -ENOENT;
+                        return status;
+                    }
+
+                    {
+                        pointers_.clear();
+                        constexpr int buf_count = 10;
+                        constexpr size_t blockSize = 1 << 20;
+
+                        Io::File merged(tmpfile());
+                        if (!merged)
+                        {
+                            status = errno ? -errno : -EIO;
+                            LS_LOGE_TAG("Pointer", "无法创建合并临时文件");
+                            return status;
+                        }
+
+                        int idx = buf_count - 1;
+                        std::vector<std::unique_ptr<char[]>> bufferStorage;
+                        bufferStorage.reserve(buf_count);
+                        std::vector<char *> bufs(buf_count);
+                        for (int i = 0; i < buf_count; i++)
+                        {
+                            bufferStorage.push_back(std::make_unique<char[]>(PAGE_SIZE));
+                            bufs[i] = bufferStorage.back().get();
+                        }
+
+                        std::mutex mergedMtx;
+                        std::atomic<int> collectionStatus{0};
+                        std::vector<std::future<void>> futures;
+                        const size_t maxPending = std::min<size_t>(buf_count, workers_->get_thread_count());
+                        futures.reserve(maxPending);
+                        try
+                        {
+                            for (auto &[rstart, rend] : regions_)
+                            {
+                                for (uintptr_t pos = rstart; pos < rend; pos += blockSize)
+                                {
+                                    futures.push_back(workers_->submit_task(
+                                        [this, &bufs, &idx, pos, chunk = std::min(static_cast<size_t>(rend - pos), blockSize), file = merged.get(), &mergedMtx, &collectionStatus]
+                                        {
+                                            std::vector<PtrData> blockPointers;
+                                            blockPointers.reserve(chunk / sizeof(uintptr_t));
+                                            {
+                                                char *buffer;
+                                                {
+                                                    std::unique_lock lock(block_mtx_);
+                                                    block_cv_.wait(lock, [&idx] { return idx >= 0; });
+                                                    buffer = bufs[idx--];
+                                                }
+                                                struct BufferGuard
+                                                {
+                                                    PointerManager &owner;
+                                                    std::vector<char *> &buffers;
+                                                    int &index;
+                                                    char *buffer;
+                                                    ~BufferGuard()
+                                                    {
+                                                        std::lock_guard lock(owner.block_mtx_);
+                                                        buffers[++index] = buffer;
+                                                        owner.block_cv_.notify_one();
+                                                    }
+                                                } guard{*this, bufs, idx, buffer};
+
+                                                for (size_t cursor = 0; cursor < chunk;)
+                                                {
+                                                    const size_t request = std::min(static_cast<size_t>(PAGE_SIZE), chunk - cursor);
+                                                    const int readStatus = dr->Read(pos + cursor, buffer, request);
+                                                    if (readStatus != static_cast<int>(request))
+                                                    {
+                                                        int expected = 0;
+                                                        collectionStatus.compare_exchange_strong(expected, readStatus < 0 ? readStatus : -EIO);
+                                                        return;
+                                                    }
+                                                    for (size_t index = 0; index < request / sizeof(uintptr_t); ++index)
+                                                    {
+                                                        const uintptr_t value = MemUtils::Normalize(reinterpret_cast<const uintptr_t *>(buffer)[index]);
+                                                        const auto region = std::upper_bound(regions_.begin(), regions_.end(), value, [](uintptr_t address, const auto &range) { return address < range.second; });
+                                                        if (region != regions_.end() && value >= region->first) blockPointers.emplace_back(pos + cursor + index * sizeof(uintptr_t), value);
+                                                    }
+                                                    cursor += request;
+                                                }
+                                            }
+                                            if (!blockPointers.empty())
+                                            {
+                                                std::lock_guard<std::mutex> lk(mergedMtx);
+                                                errno = 0;
+                                                if (collectionStatus == 0 && fwrite(blockPointers.data(), sizeof(PtrData), blockPointers.size(), file) != blockPointers.size())
+                                                {
+                                                    int expected = 0;
+                                                    collectionStatus.compare_exchange_strong(expected, errno ? -errno : -EIO);
+                                                }
+                                            }
+                                        }));
+                                    if (futures.size() >= maxPending) WaitFutures(futures);
+                                }
+                            }
+                            WaitFutures(futures);
+                        }
+                        catch (...)
+                        {
+                            try
+                            {
+                                WaitFutures(futures);
+                            }
+                            catch (...)
+                            {
+                            }
+                            throw;
+                        }
+
+                        status = collectionStatus.load();
+                        if (status != 0)
+                        {
+                            LS_LOGE_TAG("Pointer", "临时存储失败");
+                            return status;
+                        }
+
+                        if (fflush(merged.get()) != 0 || ferror(merged.get()) != 0)
+                        {
+                            status = errno ? -errno : -EIO;
+                            LS_LOGE_TAG("Pointer", "刷新临时存储失败");
+                            return status;
+                        }
+
+                        struct stat st;
+                        if (fstat(fileno(merged.get()), &st) == 0)
+                        {
+                            if (st.st_size < 0 || static_cast<size_t>(st.st_size) % sizeof(PtrData) != 0)
+                            {
+                                LS_LOGE_TAG("Pointer", "临时存储大小无效");
+                                status = -EINVAL;
+                                return status;
+                            }
+                            size_t total = static_cast<size_t>(st.st_size) / sizeof(PtrData);
+                            if (total > 0)
+                            {
+                                pointers_.resize(total);
+                                rewind(merged.get());
+                                errno = 0;
+                                if (fread(pointers_.data(), sizeof(PtrData), total, merged.get()) != total)
+                                {
+                                    status = errno ? -errno : -EIO;
+                                    pointers_.clear();
+                                    LS_LOGE_TAG("Pointer", "读取合并临时存储失败");
+                                    return status;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            status = errno ? -errno : -EIO;
+                            LS_LOGE_TAG("Pointer", "获取合并临时文件状态失败");
+                            return status;
+                        }
+
+                        std::sort(pointers_.begin(), pointers_.end(), [](const PtrData &left, const PtrData &right) { return std::tie(left.address, left.value) < std::tie(right.address, right.value); });
+                        pointers_.erase(std::unique(pointers_.begin(), pointers_.end(), [](const PtrData &left, const PtrData &right) { return left.address == right.address && left.value == right.value; }), pointers_.end());
+                    }
+                    LS_LOGI_TAG_FMT("Pointer", "内存快照数量: {}", pointers_.size());
+
+                    Io::File outfile(tmpfile());
+                    if (!outfile)
+                    {
+                        status = -errno;
+                        LS_LOGE_TAG("Pointer", "无法创建结果临时文件");
+                        error = "无法创建结果临时文件";
+                        return status;
+                    }
+
+                    std::vector<PtrRange> ranges;
+                    std::vector<std::vector<PtrDir>> dirs(depth + 1);
+                    size_t totalChains = 0;
+
+                    dirs[0].emplace_back(target, 0, 0, 1);
+                    LS_LOGI_TAG_FMT("Pointer", "Level 0 初始化完成，目标地址数量: {}", dirs[0].size());
+
+                    for (int level = 1; level <= depth; level++)
+                    {
+                        std::vector<PtrData *> curr;
+                        for (auto &pd : pointers_)
+                        {
+                            const uintptr_t v = pd.value;
+                            const auto match = std::lower_bound(dirs[level - 1].begin(), dirs[level - 1].end(), v, [](const PtrDir &node, uintptr_t address) { return node.address < address; });
+                            if (match == dirs[level - 1].end() || match->address - v > static_cast<size_t>(maxOffset)) continue;
+
+                            curr.push_back(&pd);
+                        }
+
+                        if (curr.empty())
+                        {
+                            LS_LOGI_TAG_FMT("Pointer", "扫描在 Level {} 结束: 未找到指向上级的指针", level);
+                            break;
+                        }
+
+                        LS_LOGI_TAG_FMT("Pointer", "Level {} 搜索结果: 找到 {} 个指针", level, curr.size());
+                        // curr 是已按 address 排序的 pointers_ 的子序列。
+
+                        {
+                            std::set<size_t> active;
+                            std::priority_queue<std::pair<uintptr_t, size_t>, std::vector<std::pair<uintptr_t, size_t>>, std::greater<>> expiry;
+                            std::map<size_t, PtrRange> found;
+                            size_t nextBase = 0;
+
+                            for (auto *pointer : curr)
+                            {
+                                const uintptr_t address = pointer->address;
+                                while (nextBase < bases.size() && bases[nextBase].start <= address)
+                                {
+                                    active.insert(nextBase);
+                                    expiry.emplace(bases[nextBase].end, nextBase);
+                                    ++nextBase;
+                                }
+                                while (!expiry.empty() && expiry.top().first <= address)
+                                {
+                                    active.erase(expiry.top().second);
+                                    expiry.pop();
+                                }
+
+                                const uintptr_t value = pointer->value;
+                                if (active.empty())
+                                {
+                                    dirs[level].emplace_back(address, value, 0u, 1u);
+                                    continue;
+                                }
+                                for (const size_t baseIndex : active)
+                                {
+                                    auto [entry, inserted] = found.try_emplace(baseIndex);
+                                    if (inserted)
+                                    {
+                                        entry->second.level = level;
+                                        entry->second.base = bases[baseIndex];
+                                    }
+                                    entry->second.results.emplace_back(address, value, 0u, 1u);
+                                }
+                            }
+
+                            for (auto &[baseIndex, range] : found) ranges.push_back(std::move(range));
+                        }
+
+                        auto futures = create_assoc_index(dirs[level - 1], dirs[level], static_cast<size_t>(maxOffset));
+                        WaitFutures(futures);
+
+                        scanProgress_ = static_cast<float>(level + 1) / (depth + 2);
+                    }
+
+                    for (auto &range : ranges)
+                    {
+                        auto futures = create_assoc_index(dirs[range.level - 1], range.results, static_cast<size_t>(maxOffset));
+                        WaitFutures(futures);
+                    }
+
+                    if (!ranges.empty())
+                    {
+                        std::vector<std::vector<size_t>> treeCounts;
+                        std::vector<std::vector<PtrDir *>> treeContents;
+                        int max_level = 0;
+                        for (auto &r : ranges) max_level = std::max(max_level, r.level);
+
+                        std::vector<std::vector<PtrRange *>> level_ranges(dirs.size());
+                        for (auto &r : ranges) level_ranges[r.level].push_back(&r);
+
+                        treeCounts.resize(max_level);
+                        treeContents.resize(max_level + 1);
+
+                        for (int i = max_level; i > 0; i--)
+                        {
+                            std::vector<PtrDir *> stn;
+                            for (auto *r : level_ranges[i])
+                                for (auto &v : r->results) stn.push_back(&v);
+                            for (auto *p : treeContents[i]) stn.push_back(p);
+
+                            std::sort(stn.begin(), stn.end(), [](auto a, auto b) { return a->start < b->start; });
+
+                            size_t distance = 0;
+                            uint32_t right = 0;
+                            treeContents[i - 1].reserve(stn.size());
+                            for (auto *node : stn)
+                            {
+                                if (right <= node->start) distance += node->start - right;
+                                for (uint32_t child = std::max(right, node->start); child < node->end; ++child) treeContents[i - 1].push_back(&dirs[i - 1][child]);
+                                right = std::max(right, node->end);
+                                node->start -= static_cast<uint32_t>(distance);
+                                node->end -= static_cast<uint32_t>(distance);
+                            }
+                            if (treeContents[i - 1].empty())
+                            {
+                                error = "指针目录树结构无效";
+                                status = -EINVAL;
+                                return status;
+                            }
+                        }
+
+                        treeCounts[0].assign(treeContents[0].size(), 1);
+                        for (int i = 1; i < max_level; i++)
+                        {
+                            auto &cc = treeCounts[i];
+                            cc.resize(treeContents[i].size(), 0);
+                            for (size_t j = 0; j < treeContents[i].size(); j++)
+                            {
+                                const auto &node = *treeContents[i][j];
+                                for (uint32_t child = node.start; child < node.end; ++child) cc[j] = SaturatingAdd(cc[j], treeCounts[i - 1][child]);
+                            }
+                        }
+
+                        for (auto &r : ranges)
+                        {
+                            if (r.level > 0 && static_cast<size_t>(r.level - 1) < treeCounts.size())
+                            {
+                                for (auto &v : r.results)
+                                {
+                                    const auto &counts = treeCounts[r.level - 1];
+                                    if (v.start >= v.end || v.end > counts.size()) continue;
+                                    for (uint32_t child = v.start; child < v.end; ++child) totalChains = SaturatingAdd(totalChains, counts[child]);
+                                }
+                            }
+                        }
+
+                        LS_LOGI_TAG_FMT("Pointer", "开始保存 {} 条链条", totalChains);
+                        status = write_bin_file(treeContents, ranges, outfile.get(), scanMode, target, manualBase, arrayBase, arrayCount);
+                        if (status == 0) LS_LOGI_TAG_FMT("Pointer", "文件写入完成，总链数: {}", totalChains);
+                        else LS_LOGE_TAG("Pointer", "指针结果序列化失败");
+                    }
+                    else
+                    {
+                        std::vector<std::vector<PtrDir *>> emptyContents;
+                        status = write_bin_file(emptyContents, ranges, outfile.get(), scanMode, target, manualBase, arrayBase, arrayCount);
+                        LS_LOGI_TAG("Pointer", "扫描结果为空，已生成空图");
+                    }
+
+                    if (status != 0)
+                    {
+                        chainCount_ = 0;
+                        error = "无法序列化指针结果";
+                        return status;
+                    }
+
+                    if (pid != dr->GetGlobalPid())
+                    {
+                        error = "目标进程在扫描期间发生变化";
+                        status = -ESTALE;
+                        return status;
+                    }
+
+                    std::string autoName;
+                    {
+                        char tempPath[] = ".Pointer_scan_XXXXXX";
+                        int fd = mkstemp(tempPath);
+                        if (fd < 0)
+                        {
+                            status = -errno;
+                            return status;
+                        }
+                        TempPath pending{tempPath};
+
+                        Io::File temp(fdopen(fd, "w+b"));
+                        if (!temp)
+                        {
+                            status = -errno;
+                            close(fd);
+                            return status;
+                        }
+
+                        rewind(outfile.get());
+                        std::array<char, 1 << 16> buffer{};
+                        errno = 0;
+                        for (size_t size; (size = fread(buffer.data(), 1, buffer.size(), outfile.get())) > 0;)
+                        {
+                            if (fwrite(buffer.data(), 1, size, temp.get()) != size)
+                            {
+                                status = errno ? -errno : -EIO;
+                                return status;
+                            }
+                        }
+                        if (ferror(outfile.get()) != 0 || fflush(temp.get()) != 0 || fsync(fileno(temp.get())) != 0 || ferror(temp.get()) != 0)
+                        {
+                            status = errno ? -errno : -EIO;
+                            return status;
+                        }
+                        if (fclose(temp.release()) != 0)
+                        {
+                            status = -errno;
+                            return status;
+                        }
+
+                        char candidate[256];
+                        for (int i = 0; i < 9999; ++i)
+                        {
+                            if (i == 0) snprintf(candidate, sizeof(candidate), "Pointer.bin");
+                            else snprintf(candidate, sizeof(candidate), "Pointer_%d.bin", i);
+
+                            // 所有可能分配内存的工作均在发布文件之前完成。
+                            std::string publishedPath(candidate);
+                            if (link(tempPath, candidate) == 0)
+                            {
+                                autoName.swap(publishedPath);
+                                status = 0;
+                                break;
+                            }
+                            status = -errno;
+                            if (status != -EEXIST) return status;
+                        }
+                    }
+                    if (status == 0) LS_LOGI_TAG_FMT("Pointer", "结果已保存至: {}", autoName);
+                    else LS_LOGE_TAG("Pointer", "无法原子保存指针结果文件");
+
+                    chainCount_ = status == 0 ? totalChains : 0;
+                    if (status != 0) error = "无法完整保存指针结果";
+                    return status;
+                });
+            });
+        }
+        catch (const std::exception &ex)
+        {
+            status = CurrentExceptionStatus();
+            finishOperation(status, ex.what());
+            return status;
+        }
+        catch (...)
+        {
+            status = -EIO;
+            finishOperation(status, "无法启动指针扫描任务");
+            return status;
+        }
+        return status;
+    }
+
+private:
     using RootIdentity = std::tuple<uint8_t, uint64_t, std::string, int, bool, uint64_t, bool, uint64_t, int>;
 
     static RootIdentity MakeRootIdentity(const BinSym &sym, const PtrDir &root)
     {
         const uint64_t base = sym.sourceMode == static_cast<uint8_t>(BaseMode::Manual) ? sym.manualBase : sym.start;
         const bool negative = root.address < base;
-        const uint64_t offset = negative ? base - root.address : root.address - base;
-        return {sym.sourceMode, sym.sourceMode == 0 ? sym.sourceId : 0, sym.sourceMode == 0 ? std::string(sym.name) : std::string(), sym.sourceMode == 0 ? sym.segment : 0, sym.sourceMode == 0 && sym.isBss, sym.sourceMode == 2 ? sym.arrayIndex : 0, negative, offset, sym.level};
+        return {sym.sourceMode, sym.sourceMode == 0 ? sym.sourceId : 0, sym.sourceMode == 0 ? std::string(sym.name) : std::string(), sym.sourceMode == 0 ? sym.segment : 0, sym.sourceMode == 0 && sym.isBss, sym.sourceMode == 2 ? sym.arrayIndex : 0, negative, negative ? base - root.address : root.address - base, sym.level};
     }
 
     struct PrunedNode
@@ -1285,15 +1352,11 @@ public:
             result.node.end = 1;
             return result;
         }
-        if (static_cast<size_t>(childLevel) >= graphA.levels.size() || static_cast<size_t>(childLevel) >= graphB.levels.size()) return std::nullopt;
-
+        // 两个输入图均已通过 load/validate；递归只沿已验证的孩子区间。
         const auto &layerA = graphA.levels[childLevel];
         const auto &layerB = graphB.levels[childLevel];
-        const uint32_t startA = std::min(static_cast<uint32_t>(layerA.size()), nodeA.start);
-        const uint32_t endA = std::min(static_cast<uint32_t>(layerA.size()), nodeA.end);
-        if (startA >= endA) return std::nullopt;
 
-        for (uint32_t i = startA; i < endA; ++i)
+        for (uint32_t i = nodeA.start; i < nodeA.end; ++i)
         {
             if (layerA[i].address < nodeA.value) continue;
             const uint64_t offset = layerA[i].address - nodeA.value;
@@ -1303,12 +1366,9 @@ public:
             {
                 if (offset > std::numeric_limits<uint64_t>::max() - nodeB->value) continue;
                 const uint64_t expectedAddress = nodeB->value + offset;
-                const uint32_t startB = std::min(static_cast<uint32_t>(layerB.size()), nodeB->start);
-                const uint32_t endB = std::min(static_cast<uint32_t>(layerB.size()), nodeB->end);
-                if (startB >= endB) continue;
 
-                auto it = std::lower_bound(layerB.begin() + startB, layerB.begin() + endB, expectedAddress, [](const PtrDir &node, uint64_t address) { return node.address < address; });
-                while (it != layerB.begin() + endB && it->address == expectedAddress)
+                auto it = std::lower_bound(layerB.begin() + nodeB->start, layerB.begin() + nodeB->end, expectedAddress, [](const PtrDir &node, uint64_t address) { return node.address < address; });
+                while (it != layerB.begin() + nodeB->end && it->address == expectedAddress)
                 {
                     matchingChildren.push_back(&*it);
                     ++it;
@@ -1323,401 +1383,426 @@ public:
         return result;
     }
 
-    static bool FlattenPrunedNode(const PrunedNode &source, int childLevel, std::vector<std::vector<PtrDir>> &levels, PtrDir &output)
+    static int FlattenPrunedNode(const PrunedNode &source, int childLevel, std::vector<std::vector<PtrDir>> &levels, PtrDir &output)
     {
-        output = source.node;
+        int status = 0;
+        PtrDir pending = source.node;
         if (childLevel < 0)
         {
-            output.start = 0;
-            output.end = 1;
-            return true;
+            pending.start = 0;
+            pending.end = 1;
         }
-        if (source.children.empty() || static_cast<size_t>(childLevel) >= levels.size()) return false;
-
-        auto &layer = levels[childLevel];
-        if (source.children.size() > std::numeric_limits<uint32_t>::max() - layer.size()) return false;
-        output.start = static_cast<uint32_t>(layer.size());
-        for (const auto &child : source.children)
+        else
         {
-            PtrDir flattenedChild;
-            if (!FlattenPrunedNode(child, childLevel - 1, levels, flattenedChild)) return false;
-            layer.push_back(flattenedChild);
+            if (source.children.empty() || static_cast<size_t>(childLevel) >= levels.size())
+            {
+                status = -EINVAL;
+                return status;
+            }
+            auto &layer = levels[childLevel];
+            if (layer.size() > std::numeric_limits<uint32_t>::max() || source.children.size() > std::numeric_limits<uint32_t>::max() - layer.size())
+            {
+                status = -EOVERFLOW;
+                return status;
+            }
+            pending.start = static_cast<uint32_t>(layer.size());
+            for (const auto &child : source.children)
+            {
+                PtrDir flattenedChild;
+                status = FlattenPrunedNode(child, childLevel - 1, levels, flattenedChild);
+                if (status != 0) return status;
+                layer.push_back(flattenedChild);
+            }
+            pending.end = static_cast<uint32_t>(layer.size());
         }
-        output.end = static_cast<uint32_t>(layer.size());
-        return output.start < output.end;
+        output = pending;
+        return status;
     }
 
-    static bool IntersectGraphs(const MemoryGraph &graphA, const MemoryGraph &graphB, MemoryGraph &output, std::string &error)
-    {
-        if (graphA.hdr.scanBaseMode != graphB.hdr.scanBaseMode)
-        {
-            error = "指针文件的基址模式不一致";
-            return false;
-        }
-
-        std::map<RootIdentity, std::vector<const PtrDir *>> rootIndex;
-        for (const auto &block : graphB.blocks)
-            for (const auto &root : block.roots) rootIndex[MakeRootIdentity(block.sym, root)].push_back(&root);
-
-        output = {};
-        output.hdr = graphA.hdr;
-        output.levels.resize(static_cast<size_t>(graphA.hdr.level));
-
-        if (graphA.blocks.empty() || graphB.blocks.empty())
-        {
-            output.hdr.module_count = 0;
-            output.hdr.level = 0;
-            output.levels.clear();
-            return output.validate();
-        }
-
-        for (const auto &blockA : graphA.blocks)
-        {
-            MemoryGraph::Block outputBlock;
-            outputBlock.sym = blockA.sym;
-
-            for (const auto &rootA : blockA.roots)
-            {
-                const auto candidates = rootIndex.find(MakeRootIdentity(blockA.sym, rootA));
-                if (candidates == rootIndex.end()) continue;
-
-                auto prunedRoot = IntersectNode(rootA, candidates->second, blockA.sym.level - 1, graphA, graphB);
-                if (!prunedRoot) continue;
-
-                PtrDir flattenedRoot;
-                if (!FlattenPrunedNode(*prunedRoot, blockA.sym.level - 1, output.levels, flattenedRoot))
-                {
-                    error = "裁剪后的指针图过大或结构无效";
-                    return false;
-                }
-                outputBlock.roots.push_back(flattenedRoot);
-            }
-
-            if (!outputBlock.roots.empty())
-            {
-                if (outputBlock.roots.size() > static_cast<size_t>(std::numeric_limits<int>::max()))
-                {
-                    error = "裁剪后的根节点数量超出格式上限";
-                    return false;
-                }
-                outputBlock.sym.pointer_count = static_cast<int>(outputBlock.roots.size());
-                output.blocks.push_back(std::move(outputBlock));
-            }
-        }
-
-        if (output.blocks.empty())
-        {
-            output.hdr.module_count = 0;
-            output.hdr.level = 0;
-            output.levels.clear();
-            return output.validate();
-        }
-        if (output.blocks.size() > static_cast<size_t>(std::numeric_limits<int>::max()))
-        {
-            error = "裁剪后的基址块数量超出格式上限";
-            return false;
-        }
-
-        int maxLevel = 0;
-        for (const auto &block : output.blocks) maxLevel = std::max(maxLevel, block.sym.level);
-        output.hdr.level = maxLevel;
-        output.hdr.module_count = static_cast<int>(output.blocks.size());
-        output.levels.resize(static_cast<size_t>(maxLevel));
-        if (!output.validate())
-        {
-            error = "裁剪后的指针图校验失败";
-            return false;
-        }
-        return true;
-    }
-
-    static size_t CountGraphChains(const MemoryGraph &graph)
-    {
-        if (graph.blocks.empty()) return 0;
-
-        std::vector<std::vector<size_t>> counts(static_cast<size_t>(graph.hdr.level));
-        counts[0].assign(graph.levels[0].size(), 1);
-        for (int level = 1; level < graph.hdr.level; ++level)
-        {
-            counts[level].resize(graph.levels[level].size(), 0);
-            for (size_t i = 0; i < graph.levels[level].size(); ++i)
-            {
-                const auto &node = graph.levels[level][i];
-                for (uint32_t child = node.start; child < node.end; ++child) counts[level][i] = SaturatingAdd(counts[level][i], counts[level - 1][child]);
-            }
-        }
-
-        size_t total = 0;
-        for (const auto &block : graph.blocks)
-        {
-            const auto &childCounts = counts[block.sym.level - 1];
-            for (const auto &root : block.roots)
-                for (uint32_t child = root.start; child < root.end; ++child) total = SaturatingAdd(total, childCounts[child]);
-        }
-        return total;
-    }
-
+public:
     // 合并多轮扫描结果并裁剪失效链。
-    bool MergeBins()
+    int MergeBins()
     {
+        int status = 0;
         std::lock_guard targetLock(Config::TargetMutex);
-        if (!beginOperation(Operation::Merging)) return false;
+        status = beginOperation(Operation::Merging);
+        if (status != 0) return status;
 
         try
         {
             task_ = std::async(std::launch::async,
                 [this]()
                 {
-                    RunOperation(Operation::Merging, "指针结果合并失败",
-                                 [this](bool &succeeded, std::string &error)
-                                 {
-                                     LS_LOGI_TAG("Pointer", "开始基于图裁剪算法合并结果");
+                    RunOperation("指针结果合并失败", [this](std::string &error) -> int
+                    {
+                        int status = 0;
+                        LS_LOGI_TAG("Pointer", "开始基于图裁剪算法合并结果");
 
-                                     std::vector<std::string> files;
-                                     if (access("Pointer.bin", F_OK) == 0) files.push_back("Pointer.bin");
-                                     for (int i = 1; i < 9999; ++i)
-                                     {
-                                         char buf[64];
-                                         snprintf(buf, 64, "Pointer_%d.bin", i);
-                                         if (access(buf, F_OK) == 0) files.push_back(buf);
-                                     }
+                        std::vector<std::string> files;
+                        if (access("Pointer.bin", F_OK) == 0) files.push_back("Pointer.bin");
+                        for (int i = 1; i < 9999; ++i)
+                        {
+                            char buf[64];
+                            snprintf(buf, 64, "Pointer_%d.bin", i);
+                            if (access(buf, F_OK) == 0) files.push_back(buf);
+                        }
 
-                                     if (files.size() < 2)
-                                     {
-                                         error = "至少需要两个指针结果文件";
-                                         LS_LOGE_TAG_FMT("Pointer", "合并失败: {}", error);
-                                         return;
-                                     }
+                        if (files.size() < 2)
+                        {
+                            error = "至少需要两个指针结果文件";
+                            LS_LOGE_TAG_FMT("Pointer", "合并失败: {}", error);
+                            status = -ENOENT;
+                            return status;
+                        }
 
-                                     MemoryGraph GA;
-                                     LS_LOGI_TAG_FMT("Pointer", "加载基准指针图: {}", files[0]);
-                                     if (!GA.load(files[0]))
-                                     {
-                                         error = std::format("无法加载或校验 {}", files[0]);
-                                         return;
-                                     }
+                        MemoryGraph GA;
+                        LS_LOGI_TAG_FMT("Pointer", "加载基准指针图: {}", files[0]);
+                        status = GA.load(files[0]);
+                        if (status != 0)
+                        {
+                            error = std::format("无法加载或校验 {}", files[0]);
+                            return status;
+                        }
 
-                                     for (size_t f_idx = 1; f_idx < files.size(); ++f_idx)
-                                     {
-                                         LS_LOGI_TAG_FMT("Pointer", "正在比对并裁剪: {}", files[f_idx]);
-                                         MemoryGraph GB;
-                                         if (!GB.load(files[f_idx]))
-                                         {
-                                             error = std::format("无法加载或校验 {}", files[f_idx]);
-                                             return;
-                                         }
-                                         MemoryGraph nextGraph;
-                                         std::string intersectError;
-                                         if (!IntersectGraphs(GA, GB, nextGraph, intersectError))
-                                         {
-                                             error = std::format("{}: {}", files[f_idx], intersectError);
-                                             return;
-                                         }
-                                         GA = std::move(nextGraph);
-                                         scanProgress_ = static_cast<float>(f_idx + 1) / static_cast<float>(files.size() + 1);
+                        for (size_t f_idx = 1; f_idx < files.size(); ++f_idx)
+                        {
+                            LS_LOGI_TAG_FMT("Pointer", "正在比对并裁剪: {}", files[f_idx]);
+                            MemoryGraph GB;
+                            status = GB.load(files[f_idx]);
+                            if (status != 0)
+                            {
+                                error = std::format("无法加载或校验 {}", files[f_idx]);
+                                return status;
+                            }
+                            if (GA.hdr.scanBaseMode != GB.hdr.scanBaseMode)
+                            {
+                                error = "指针文件的基址模式不一致";
+                                status = -EINVAL;
+                                return status;
+                            }
 
-                                         size_t remaining_roots = 0;
-                                         for (auto &blk : GA.blocks) remaining_roots += blk.roots.size();
-                                         LS_LOGI_TAG_FMT("Pointer", "该轮裁剪完毕，剩余有效起始节点: {}", remaining_roots);
-                                     }
+                            std::map<RootIdentity, std::vector<const PtrDir *>> rootIndex;
+                            for (const auto &block : GB.blocks)
+                                for (const auto &root : block.roots) rootIndex[MakeRootIdentity(block.sym, root)].push_back(&root);
 
-                                     const size_t mergedChainCount = CountGraphChains(GA);
-                                     remove("Pointer_Merged.tmp");
-                                     if (!GA.save("Pointer_Merged.tmp"))
-                                     {
-                                         error = "无法完整写入合并临时文件";
-                                         return;
-                                     }
-                                     if (rename("Pointer_Merged.tmp", "Pointer.bin") != 0)
-                                     {
-                                         error = std::format("无法替换 Pointer.bin: {}", std::strerror(errno));
-                                         remove("Pointer_Merged.tmp");
-                                         return;
-                                     }
-                                     for (const auto &fn : files)
-                                     {
-                                         if (fn != "Pointer.bin" && remove(fn.c_str()) != 0) LS_LOGE_TAG_FMT("Pointer", "无法删除旧文件 {}: {}", fn, std::strerror(errno));
-                                     }
+                            MemoryGraph nextGraph;
+                            nextGraph.hdr = GA.hdr;
+                            nextGraph.levels.resize(static_cast<size_t>(GA.hdr.level));
 
-                                     chainCount_ = mergedChainCount;
-                                     succeeded = true;
-                                     LS_LOGI_TAG("Pointer", "图层合并结束，已生成 Pointer.bin");
-                                 });
+                            for (const auto &blockA : GA.blocks)
+                            {
+                                MemoryGraph::Block outputBlock;
+                                outputBlock.sym = blockA.sym;
+
+                                for (const auto &rootA : blockA.roots)
+                                {
+                                    const auto candidates = rootIndex.find(MakeRootIdentity(blockA.sym, rootA));
+                                    if (candidates == rootIndex.end()) continue;
+
+                                    auto prunedRoot = IntersectNode(rootA, candidates->second, blockA.sym.level - 1, GA, GB);
+                                    if (!prunedRoot) continue;
+
+                                    PtrDir flattenedRoot;
+                                    status = FlattenPrunedNode(*prunedRoot, blockA.sym.level - 1, nextGraph.levels, flattenedRoot);
+                                    if (status != 0)
+                                    {
+                                        error = "裁剪后的指针图过大或结构无效";
+                                        return status;
+                                    }
+                                    outputBlock.roots.push_back(flattenedRoot);
+                                }
+
+                                if (!outputBlock.roots.empty())
+                                {
+                                    if (outputBlock.roots.size() > static_cast<size_t>(std::numeric_limits<int>::max()))
+                                    {
+                                        error = "裁剪后的根节点数量超出格式上限";
+                                        status = -EOVERFLOW;
+                                        return status;
+                                    }
+                                    outputBlock.sym.pointer_count = static_cast<int>(outputBlock.roots.size());
+                                    nextGraph.blocks.push_back(std::move(outputBlock));
+                                }
+                            }
+
+                            if (nextGraph.blocks.size() > static_cast<size_t>(std::numeric_limits<int>::max()))
+                            {
+                                error = "裁剪后的基址块数量超出格式上限";
+                                status = -EOVERFLOW;
+                                return status;
+                            }
+
+                            int maxLevel = 0;
+                            for (const auto &block : nextGraph.blocks) maxLevel = std::max(maxLevel, block.sym.level);
+                            nextGraph.hdr.level = maxLevel;
+                            nextGraph.hdr.module_count = static_cast<int>(nextGraph.blocks.size());
+                            nextGraph.levels.resize(static_cast<size_t>(maxLevel));
+                            if (!nextGraph.validate())
+                            {
+                                error = "裁剪后的指针图校验失败";
+                                status = -EINVAL;
+                                return status;
+                            }
+                            GA = std::move(nextGraph);
+                            scanProgress_ = static_cast<float>(f_idx + 1) / static_cast<float>(files.size() + 1);
+
+                            size_t remaining_roots = 0;
+                            for (auto &blk : GA.blocks) remaining_roots += blk.roots.size();
+                            LS_LOGI_TAG_FMT("Pointer", "该轮裁剪完毕，剩余有效起始节点: {}", remaining_roots);
+                        }
+
+                        size_t mergedChainCount = 0;
+                        if (!GA.blocks.empty())
+                        {
+                            std::vector<std::vector<size_t>> counts(static_cast<size_t>(GA.hdr.level));
+                            counts[0].assign(GA.levels[0].size(), 1);
+                            for (int level = 1; level < GA.hdr.level; ++level)
+                            {
+                                counts[level].resize(GA.levels[level].size(), 0);
+                                for (size_t i = 0; i < GA.levels[level].size(); ++i)
+                                {
+                                    const auto &node = GA.levels[level][i];
+                                    for (uint32_t child = node.start; child < node.end; ++child) counts[level][i] = SaturatingAdd(counts[level][i], counts[level - 1][child]);
+                                }
+                            }
+
+                            for (const auto &block : GA.blocks)
+                            {
+                                const auto &childCounts = counts[block.sym.level - 1];
+                                for (const auto &root : block.roots)
+                                    for (uint32_t child = root.start; child < root.end; ++child) mergedChainCount = SaturatingAdd(mergedChainCount, childCounts[child]);
+                            }
+                        }
+                        TempPath mergedFile{"Pointer_Merged.tmp"};
+                        remove(mergedFile.path);
+                        error = "无法完整写入合并临时文件";
+                        {
+                            Io::File file(fopen(mergedFile.path, "wb"));
+                            if (!file)
+                            {
+                                status = -errno;
+                                return status;
+                            }
+
+                            status = MemoryGraph::WriteObject(file.get(), GA.hdr);
+                            if (status != 0) return status;
+                            for (const auto &blk : GA.blocks)
+                            {
+                                status = MemoryGraph::WriteObject(file.get(), blk.sym);
+                                if (status != 0) return status;
+                                status = MemoryGraph::WriteVector(file.get(), blk.roots);
+                                if (status != 0) return status;
+                            }
+                            for (int i = 0; i < GA.hdr.level; ++i)
+                            {
+                                BinLevel bl{};
+                                bl.level = i;
+                                bl.count = static_cast<unsigned int>(GA.levels[i].size());
+                                status = MemoryGraph::WriteObject(file.get(), bl);
+                                if (status != 0) return status;
+                                status = MemoryGraph::WriteVector(file.get(), GA.levels[i]);
+                                if (status != 0) return status;
+                            }
+                            if (fflush(file.get()) != 0 || fsync(fileno(file.get())) != 0)
+                            {
+                                status = -errno;
+                                return status;
+                            }
+                            if (ferror(file.get()) != 0)
+                            {
+                                status = -EIO;
+                                return status;
+                            }
+                            if (fclose(file.release()) != 0)
+                            {
+                                status = -errno;
+                                return status;
+                            }
+                        }
+                        if (rename("Pointer_Merged.tmp", "Pointer.bin") != 0)
+                        {
+                            status = -errno;
+                            error = std::format("无法替换 Pointer.bin: {}", std::strerror(-status));
+                            return status;
+                        }
+                        mergedFile.committed = true;
+                        for (const auto &fn : files)
+                        {
+                            if (fn != "Pointer.bin" && remove(fn.c_str()) != 0) LS_LOGE_TAG_FMT("Pointer", "无法删除旧文件 {}: {}", fn, std::strerror(errno));
+                        }
+
+                        chainCount_ = mergedChainCount;
+                        LS_LOGI_TAG("Pointer", "图层合并结束，已生成 Pointer.bin");
+                        return status;
+                    });
                 });
         }
         catch (const std::exception &ex)
         {
-            finishOperation(Operation::Merging, false, ex.what());
-            return false;
+            status = CurrentExceptionStatus();
+            finishOperation(status, ex.what());
+            return status;
         }
         catch (...)
         {
-            finishOperation(Operation::Merging, false, "无法启动指针合并任务");
-            return false;
+            status = -EIO;
+            finishOperation(status, "无法启动指针合并任务");
+            return status;
         }
-        return true;
+        return status;
     }
 
     // 将指针链导出为可读文本。
-    bool ExportToTxt()
+    int ExportToTxt()
     {
+        int status = 0;
         std::lock_guard targetLock(Config::TargetMutex);
-        if (!beginOperation(Operation::Exporting)) return false;
+        status = beginOperation(Operation::Exporting);
+        if (status != 0) return status;
 
         try
         {
             task_ = std::async(std::launch::async,
                 [this]()
                 {
-                    RunOperation(Operation::Exporting, "指针链导出失败",
-                                 [this](bool &succeeded, std::string &error)
-                                 {
-                                     LS_LOGI_TAG("Pointer", "开始导出文本链条");
+                    RunOperation("指针链导出失败", [this](std::string &error) -> int
+                    {
+                        int status = 0;
+                        LS_LOGI_TAG("Pointer", "开始导出文本链条");
 
-                                     MemoryGraph graph;
-                                     if (!graph.load("Pointer.bin"))
-                                     {
-                                         error = "无法加载或校验 Pointer.bin";
-                                         return;
-                                     }
+                        MemoryGraph graph;
+                        status = graph.load("Pointer.bin");
+                        if (status != 0)
+                        {
+                            error = "无法加载或校验 Pointer.bin";
+                            return status;
+                        }
 
-                                     constexpr const char *tempPath = "Pointer_Export.tmp";
-                                     constexpr const char *outputPath = "Pointer_Export.txt";
-                                     remove(tempPath);
-                                     Io::File output(fopen(tempPath, "wb"));
-                                     if (!output)
-                                     {
-                                         error = std::format("无法创建导出临时文件: {}", std::strerror(errno));
-                                         return;
-                                     }
-                                     struct TempGuard
-                                     {
-                                         const char *path;
-                                         bool committed = false;
-                                         ~TempGuard()
-                                         {
-                                             if (!committed) remove(path);
-                                         }
-                                     } tempGuard{tempPath};
+                        constexpr const char *tempPath = "Pointer_Export.tmp";
+                        constexpr const char *outputPath = "Pointer_Export.txt";
+                        TempPath tempGuard{tempPath};
+                        remove(tempPath);
+                        Io::File output(fopen(tempPath, "wb"));
+                        if (!output)
+                        {
+                            status = -errno;
+                            error = std::format("无法创建导出临时文件: {}", std::strerror(-status));
+                            return status;
+                        }
+                        auto writeFormat = [&](const char *format, auto... args)
+                        {
+                            if (status != 0) return;
+                            errno = 0;
+                            if (fprintf(output.get(), format, args...) < 0) status = errno ? -errno : -EIO;
+                        };
 
-                                     bool writeOk = true;
-                                     auto writeText = [&](const char *text)
-                                     {
-                                         if (writeOk && fputs(text, output.get()) == EOF) writeOk = false;
-                                     };
-                                     auto writeFormat = [&](const char *format, auto... args)
-                                     {
-                                         if (writeOk && fprintf(output.get(), format, args...) < 0) writeOk = false;
-                                     };
+                        writeFormat("%s", "// Pointer Scan Export\n");
+                        writeFormat("// Version: %d, Depth: %d\n", graph.hdr.version, graph.hdr.level);
+                        writeFormat("// Target: 0x%llX\n", static_cast<unsigned long long>(graph.hdr.scanTarget));
+                        writeFormat("// Base Mode: %d (0=Module, 1=Manual, 2=Array)\n", graph.hdr.scanBaseMode);
+                        writeFormat("%s", "// ========================================\n\n");
 
-                                     writeText("// Pointer Scan Export\n");
-                                     writeFormat("// Version: %d, Depth: %d\n", graph.hdr.version, graph.hdr.level);
-                                     writeFormat("// Target: 0x%llX\n", static_cast<unsigned long long>(graph.hdr.scanTarget));
-                                     writeFormat("// Base Mode: %d (0=Module, 1=Manual, 2=Array)\n", graph.hdr.scanBaseMode);
-                                     writeText("// ========================================\n\n");
+                        size_t exportedChains = 0;
+                        struct SignedOffset
+                        {
+                            bool negative;
+                            uint64_t magnitude;
+                        };
+                        std::array<SignedOffset, 16> offsets{};
+                        size_t offsetCount = 0;
+                        std::string currentBasePrefix;
 
-                                     size_t exportedChains = 0;
-                                     struct SignedOffset
-                                     {
-                                         bool negative;
-                                         uint64_t magnitude;
-                                     };
-                                     std::array<SignedOffset, 16> offsets{};
-                                     size_t offsetCount = 0;
-                                     std::string currentBasePrefix;
+                        std::function<void(int, const PtrDir &)> dfs = [&](int currentLevel, const PtrDir &node)
+                        {
+                            if (status != 0) return;
+                            if (currentLevel < 0)
+                            {
+                                writeFormat("%s", currentBasePrefix.c_str());
+                                for (size_t i = 0; i < offsetCount; ++i) writeFormat(offsets[i].negative ? " - 0x%llX" : " + 0x%llX", static_cast<unsigned long long>(offsets[i].magnitude));
+                                writeFormat("%s", "\n");
+                                if (exportedChains < std::numeric_limits<size_t>::max()) ++exportedChains;
+                                return;
+                            }
 
-                                     std::function<void(int, const PtrDir &)> dfs = [&](int currentLevel, const PtrDir &node)
-                                     {
-                                         if (!writeOk) return;
-                                         if (currentLevel < 0)
-                                         {
-                                             writeFormat("%s", currentBasePrefix.c_str());
-                                             for (size_t i = 0; i < offsetCount; ++i) writeFormat(offsets[i].negative ? " - 0x%llX" : " + 0x%llX", static_cast<unsigned long long>(offsets[i].magnitude));
-                                             writeText("\n");
-                                             if (exportedChains < std::numeric_limits<size_t>::max()) ++exportedChains;
-                                             return;
-                                         }
+                            for (uint32_t i = node.start; i < node.end; ++i)
+                            {
+                                // load 已验证图深度不超过 offsets 容量及每层孩子区间。
+                                const auto &child = graph.levels[currentLevel][i];
+                                offsets[offsetCount++] = child.address < node.value ? SignedOffset{true, node.value - child.address} : SignedOffset{false, child.address - node.value};
+                                dfs(currentLevel - 1, child);
+                                --offsetCount;
+                            }
+                        };
 
-                                         if (static_cast<size_t>(currentLevel) >= graph.levels.size() || node.start >= node.end || node.end > graph.levels[currentLevel].size())
-                                         {
-                                             writeOk = false;
-                                             return;
-                                         }
+                        for (const auto &block : graph.blocks)
+                        {
+                            char baseText[256];
+                            uint64_t baseAddress = 0;
+                            switch (block.sym.sourceMode)
+                            {
+                            case 1:
+                                snprintf(baseText, sizeof(baseText), "\"Manual_0x%llX\"", static_cast<unsigned long long>(block.sym.manualBase));
+                                baseAddress = block.sym.manualBase;
+                                break;
+                            case 2:
+                                snprintf(baseText, sizeof(baseText), "\"Array[%llu]\"", static_cast<unsigned long long>(block.sym.arrayIndex));
+                                baseAddress = block.sym.start;
+                                break;
+                            default:
+                                snprintf(baseText, sizeof(baseText), "\"%s[%d]\"", block.sym.name, block.sym.segment);
+                                baseAddress = block.sym.start;
+                                break;
+                            }
 
-                                         for (uint32_t i = node.start; i < node.end; ++i)
-                                         {
-                                             if (offsetCount >= offsets.size())
-                                             {
-                                                 writeOk = false;
-                                                 return;
-                                             }
-                                             const auto &child = graph.levels[currentLevel][i];
-                                             offsets[offsetCount++] = child.address < node.value ? SignedOffset{true, node.value - child.address} : SignedOffset{false, child.address - node.value};
-                                             dfs(currentLevel - 1, child);
-                                             --offsetCount;
-                                         }
-                                     };
+                            for (const auto &root : block.roots)
+                            {
+                                const bool negative = root.address < baseAddress;
+                                const uint64_t magnitude = negative ? baseAddress - root.address : root.address - baseAddress;
+                                currentBasePrefix = std::format("[{} {} 0x{:X}]", baseText, negative ? "-" : "+", magnitude);
+                                offsetCount = 0;
+                                dfs(block.sym.level - 1, root);
+                            }
+                        }
 
-                                     for (const auto &block : graph.blocks)
-                                     {
-                                         char baseText[256];
-                                         uint64_t baseAddress = 0;
-                                         switch (block.sym.sourceMode)
-                                         {
-                                         case 1:
-                                             snprintf(baseText, sizeof(baseText), "\"Manual_0x%llX\"", static_cast<unsigned long long>(block.sym.manualBase));
-                                             baseAddress = block.sym.manualBase;
-                                             break;
-                                         case 2:
-                                             snprintf(baseText, sizeof(baseText), "\"Array[%llu]\"", static_cast<unsigned long long>(block.sym.arrayIndex));
-                                             baseAddress = block.sym.start;
-                                             break;
-                                         default:
-                                             snprintf(baseText, sizeof(baseText), "\"%s[%d]\"", block.sym.name, block.sym.segment);
-                                             baseAddress = block.sym.start;
-                                             break;
-                                         }
+                        if (status == 0)
+                        {
+                            errno = 0;
+                            if (fflush(output.get()) != 0 || fsync(fileno(output.get())) != 0 || ferror(output.get()) != 0) status = errno ? -errno : -EIO;
+                        }
+                        if (fclose(output.release()) != 0 && status == 0) status = -errno;
+                        if (status != 0)
+                        {
+                            error = "导出文件写入不完整";
+                            return status;
+                        }
+                        if (rename(tempPath, outputPath) != 0)
+                        {
+                            status = -errno;
+                            error = std::format("无法替换 {}: {}", outputPath, std::strerror(-status));
+                            return status;
+                        }
+                        tempGuard.committed = true;
 
-                                         for (const auto &root : block.roots)
-                                         {
-                                             const bool negative = root.address < baseAddress;
-                                             const uint64_t magnitude = negative ? baseAddress - root.address : root.address - baseAddress;
-                                             currentBasePrefix = std::format("[{} {} 0x{:X}]", baseText, negative ? "-" : "+", magnitude);
-                                             offsetCount = 0;
-                                             dfs(block.sym.level - 1, root);
-                                         }
-                                     }
-
-                                     if (writeOk) writeOk = fflush(output.get()) == 0 && fsync(fileno(output.get())) == 0 && ferror(output.get()) == 0;
-                                     if (fclose(output.release()) != 0) writeOk = false;
-                                     if (!writeOk)
-                                     {
-                                         error = "导出文件写入不完整";
-                                         return;
-                                     }
-                                     if (rename(tempPath, outputPath) != 0)
-                                     {
-                                         error = std::format("无法替换 {}: {}", outputPath, std::strerror(errno));
-                                         return;
-                                     }
-                                     tempGuard.committed = true;
-
-                                     chainCount_ = exportedChains;
-                                     succeeded = true;
-                                     LS_LOGI_TAG_FMT("Pointer", "导出完成: 成功输出 {} 条链条", exportedChains);
-                                 });
+                        chainCount_ = exportedChains;
+                        LS_LOGI_TAG_FMT("Pointer", "导出完成: 成功输出 {} 条链条", exportedChains);
+                        return status;
+                    });
                 });
         }
         catch (const std::exception &ex)
         {
-            finishOperation(Operation::Exporting, false, ex.what());
-            return false;
+            status = CurrentExceptionStatus();
+            finishOperation(status, ex.what());
+            return status;
         }
         catch (...)
         {
-            finishOperation(Operation::Exporting, false, "无法启动指针导出任务");
-            return false;
+            status = -EIO;
+            finishOperation(status, "无法启动指针导出任务");
+            return status;
         }
-        return true;
+        return status;
     }
 };
+
+inline std::unique_ptr<PointerManager> gPointerManager = nullptr;

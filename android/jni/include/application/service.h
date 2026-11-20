@@ -1,5 +1,7 @@
 #pragma once
+#include <cerrno>
 #include <nlohmann/json.hpp>
+#include <type_traits>
 #include <variant>
 #include "runtime.h"
 #include "../base/system_log.h"
@@ -8,8 +10,6 @@
 class ApplicationService
 {
     using json = nlohmann::json;
-    ApplicationRuntime &runtime_;
-    Driver &driver_;
     std::mutex requestMutex_;
 
     // 清理文本中的换行字符
@@ -83,48 +83,6 @@ class ApplicationService
         }
     }
 
-    static std::optional<Types::SavedValueKind> parseSavedValueKindToken(std::string_view token)
-    {
-        const std::string t = toLowerAscii(token);
-        if (t.empty() || t == "numeric") return Types::SavedValueKind::Numeric;
-        if (t == "pointer") return Types::SavedValueKind::Pointer;
-        if (t == "text") return Types::SavedValueKind::Text;
-        return std::nullopt;
-    }
-
-    static std::string_view savedValueKindToken(Types::SavedValueKind kind)
-    {
-        switch (kind)
-        {
-        case Types::SavedValueKind::Numeric:
-            return "numeric";
-        case Types::SavedValueKind::Pointer:
-            return "pointer";
-        case Types::SavedValueKind::Text:
-            return "text";
-        default:
-            return "";
-        }
-    }
-
-    // 解析扫描模式标记
-    static std::optional<Types::FuzzyMode> parseFuzzyModeToken(std::string_view token)
-    {
-        const std::string t = toLowerAscii(token);
-        if (t == "unknown") return Types::FuzzyMode::Unknown;
-        if (t == "equal") return Types::FuzzyMode::Equal;
-        if (t == "greater") return Types::FuzzyMode::Greater;
-        if (t == "less") return Types::FuzzyMode::Less;
-        if (t == "increased") return Types::FuzzyMode::Increased;
-        if (t == "decreased") return Types::FuzzyMode::Decreased;
-        if (t == "changed") return Types::FuzzyMode::Changed;
-        if (t == "unchanged") return Types::FuzzyMode::Unchanged;
-        if (t == "range") return Types::FuzzyMode::Range;
-        if (t == "pointer") return Types::FuzzyMode::Pointer;
-        if (t == "string") return Types::FuzzyMode::String;
-        return std::nullopt;
-    }
-
     static std::string_view fuzzyModeToken(Types::FuzzyMode mode)
     {
         switch (mode)
@@ -172,114 +130,6 @@ class ApplicationService
         return std::nullopt;
     }
 
-    // 解析硬件断点类型
-    static std::optional<Driver::bp_type> parseBpTypeToken(std::string_view token)
-    {
-        const std::string t = toLowerAscii(token);
-        if (t == "read") return Driver::BP_BREAKPOINT_R;
-        if (t == "write") return Driver::BP_BREAKPOINT_W;
-        if (t == "read_write") return Driver::BP_BREAKPOINT_RW;
-        if (t == "execute") return Driver::BP_BREAKPOINT_X;
-        return std::nullopt;
-    }
-
-    // 解析硬件断点作用线程范围
-    static std::optional<Driver::bp_scope> parseBpScopeToken(std::string_view token)
-    {
-        const std::string t = toLowerAscii(token);
-        if (t == "main") return Driver::BP_SCOPE_MAIN_THREAD;
-        if (t == "other") return Driver::BP_SCOPE_OTHER_THREADS;
-        if (t == "all") return Driver::BP_SCOPE_ALL_THREADS;
-        return std::nullopt;
-    }
-
-    static std::optional<Driver::bp_len> parseBpLengthValue(int length)
-    {
-        switch (length)
-        {
-        case 1:
-            return Driver::BP_BREAKPOINT_LEN_1;
-        case 2:
-            return Driver::BP_BREAKPOINT_LEN_2;
-        case 3:
-            return Driver::BP_BREAKPOINT_LEN_3;
-        case 4:
-            return Driver::BP_BREAKPOINT_LEN_4;
-        case 5:
-            return Driver::BP_BREAKPOINT_LEN_5;
-        case 6:
-            return Driver::BP_BREAKPOINT_LEN_6;
-        case 7:
-            return Driver::BP_BREAKPOINT_LEN_7;
-        case 8:
-            return Driver::BP_BREAKPOINT_LEN_8;
-        default:
-            return std::nullopt;
-        }
-    }
-
-    // 将显示格式枚举转换为标记
-    static std::string_view viewFormatToToken(Types::ViewFormat format)
-    {
-        switch (format)
-        {
-        case Types::ViewFormat::Hex:
-            return "hex";
-        case Types::ViewFormat::Hexadecimal:
-            return "hexadecimal";
-        case Types::ViewFormat::I8:
-            return "i8";
-        case Types::ViewFormat::I16:
-            return "i16";
-        case Types::ViewFormat::I32:
-            return "i32";
-        case Types::ViewFormat::I64:
-            return "i64";
-        case Types::ViewFormat::Float:
-            return "f32";
-        case Types::ViewFormat::Double:
-            return "f64";
-        case Types::ViewFormat::Disasm:
-            return "disasm";
-        default:
-            return "hexadecimal";
-        }
-    }
-
-    // 将硬件断点类型转换为文本标记
-    static std::string_view bpTypeToToken(Driver::bp_type type)
-    {
-        switch (type)
-        {
-        case Driver::BP_BREAKPOINT_R:
-            return "read";
-        case Driver::BP_BREAKPOINT_W:
-            return "write";
-        case Driver::BP_BREAKPOINT_RW:
-            return "read_write";
-        case Driver::BP_BREAKPOINT_X:
-            return "execute";
-        default:
-            return "unknown";
-        }
-    }
-
-    // 将硬件断点线程范围转换为文本标记
-    static std::string_view bpScopeToToken(Driver::bp_scope scope)
-    {
-        switch (scope)
-        {
-        case Driver::BP_SCOPE_MAIN_THREAD:
-            return "main";
-        case Driver::BP_SCOPE_OTHER_THREADS:
-            return "other";
-        case Driver::BP_SCOPE_ALL_THREADS:
-            return "all";
-        default:
-            return "unknown";
-        }
-    }
-
     // 将字节数组编码为十六进制字符串
     static std::string bytesToHex(const std::uint8_t *bytes, std::size_t count)
     {
@@ -294,40 +144,52 @@ class ApplicationService
         return output;
     }
 
-    // 解析十六进制字节流
-    static std::optional<std::vector<std::uint8_t>> parseHexBytes(std::string_view text)
+    // 完成内存浏览事务并构建协议响应。
+    static json viewerResponse(std::string_view op, int status)
     {
-        std::vector<std::uint8_t> bytes;
-        bytes.reserve(text.size() / 2);
-        int high = -1;
-        for (const unsigned char ch : text)
-        {
-            if (std::isspace(ch) != 0) continue;
-            if (std::isxdigit(ch) == 0) return std::nullopt;
-            const int digit = ch >= '0' && ch <= '9' ? ch - '0' : ch >= 'a' && ch <= 'f' ? ch - 'a' + 10 : ch - 'A' + 10;
-            if (high < 0) high = digit;
-            else
-            {
-                bytes.push_back(static_cast<std::uint8_t>((high << 4) | digit));
-                high = -1;
-            }
-        }
-        if (high >= 0 || bytes.empty()) return std::nullopt;
-        return bytes;
-    }
-
-
-    // 构建内存浏览快照JSON
-    static json buildViewerSnapshotJson(const MemViewer &viewer)
-    {
+        if (status == 0) status = gMemViewer->waitDisasm();
+        if (status != 0) return {{"ok", false}, {"operation", op}, {"error", std::format("内存浏览失败: status={}", status)}};
         json root;
-        root["read_success"] = viewer.readSuccess();
-        root["read_status"] = viewer.readStatus();
-        root["base"] = std::format("0x{:X}", static_cast<std::uint64_t>(viewer.base()));
-        const auto format = viewer.format();
-        root["format"] = viewFormatToToken(format);
+        root["read_success"] = gMemViewer->readSuccess();
+        root["read_status"] = gMemViewer->readStatus();
+        root["base"] = std::format("0x{:X}", static_cast<std::uint64_t>(gMemViewer->base()));
+        const auto format = gMemViewer->format();
+        // 将显示格式枚举转换为标记
+        switch (format)
+        {
+        case Types::ViewFormat::Hex:
+            root["format"] = "hex";
+            break;
+        case Types::ViewFormat::Hexadecimal:
+            root["format"] = "hexadecimal";
+            break;
+        case Types::ViewFormat::I8:
+            root["format"] = "i8";
+            break;
+        case Types::ViewFormat::I16:
+            root["format"] = "i16";
+            break;
+        case Types::ViewFormat::I32:
+            root["format"] = "i32";
+            break;
+        case Types::ViewFormat::I64:
+            root["format"] = "i64";
+            break;
+        case Types::ViewFormat::Float:
+            root["format"] = "f32";
+            break;
+        case Types::ViewFormat::Double:
+            root["format"] = "f64";
+            break;
+        case Types::ViewFormat::Disasm:
+            root["format"] = "disasm";
+            break;
+        default:
+            root["format"] = "hexadecimal";
+            break;
+        }
 
-        const auto &buffer = viewer.buffer();
+        const auto buffer = gMemViewer->buffer();
         root["byte_count"] = buffer.size();
         root["data_hex"] = bytesToHex(buffer.data(), buffer.size());
 
@@ -335,7 +197,7 @@ class ApplicationService
         {
             root["disasm"] = json::array();
             std::size_t emittedLines = 0;
-            for (const auto &line : viewer.getDisasm())
+            for (const auto &line : gMemViewer->getDisasm())
             {
                 if (emittedLines >= buffer.size() / 4) break;
                 json item;
@@ -350,35 +212,7 @@ class ApplicationService
             }
         }
 
-        return root;
-    }
-
-    static json buildBreakpointDataJson(auto &info)
-    {
-        json data = {{"num_brps", info.num_brps}, {"num_wrps", info.num_wrps}, {"points", json::array()}};
-
-        for (auto &point : info.points)
-        {
-            const int pointRecordCount = std::clamp(point.record_count, 0, BP_RECORD_MAX);
-            json pointItem = {{"bt", static_cast<int>(point.bt)}, {"bl", static_cast<int>(point.bl)}, {"bs", static_cast<int>(point.bs)}, {"hit_addr", std::format("0x{:X}", point.hit_addr)}, {"record_count", pointRecordCount}, {"records", json::array()}};
-
-            for (int i = 0; i < pointRecordCount; ++i)
-            {
-                auto &rec = point.records[i];
-                MemUtils::HwbpRequestAll(rec);
-                json item = {{"mask", json::array()}, {"hit_count", static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_HIT_COUNT))}, {"pc", std::format("0x{:X}", static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_PC)))}, {"lr", std::format("0x{:X}", static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_LR)))}, {"sp", std::format("0x{:X}", static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_SP)))}, {"orig_x0", std::format("0x{:X}", static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_ORIG_X0)))}, {"syscallno", std::format("0x{:X}", static_cast<std::uint32_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_SYSCALLNO)))}, {"pstate", std::format("0x{:X}", static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_PSTATE)))}, {"fpsr", std::format("0x{:X}", static_cast<std::uint32_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_FPSR)))}, {"fpcr", std::format("0x{:X}", static_cast<std::uint32_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_FPCR)))}};
-                for (int m = 0; m < 18; ++m) item["mask"].push_back(std::format("0x{:X}", rec.mask[m]));
-                for (int reg = 0; reg < 30; ++reg) item[std::format("x{}", reg)] = std::format("0x{:X}", static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_X0 + reg)));
-                for (int reg = 0; reg < 32; ++reg)
-                {
-                    const auto qreg = MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_Q0 + reg);
-                    item[std::format("q{}", reg)] = {{"lo", std::format("0x{:X}", static_cast<std::uint64_t>(qreg))}, {"hi", std::format("0x{:X}", static_cast<std::uint64_t>(qreg >> 64))}};
-                }
-                pointItem["records"].push_back(std::move(item));
-            }
-            data["points"].push_back(std::move(pointItem));
-        }
-        return data;
+        return {{"ok", true}, {"operation", op}, {"data", std::move(root)}};
     }
 
     // 构建特征码扫描结果JSON
@@ -427,7 +261,6 @@ class ApplicationService
     }
 
 public:
-    ApplicationService(ApplicationRuntime &runtime, Driver &driver) : runtime_(runtime), driver_(driver) {}
 
     json execute(std::string_view op, const json &params)
     {
@@ -439,10 +272,10 @@ public:
             return {{"ok", true}, {"operation", op}, {"data", std::move(data)}};
         };
 
-        auto requiredString = [&](std::string_view key, std::string_view desc) -> std::variant<std::string, json>
+        auto requiredString = [&](std::string_view key) -> std::variant<std::string, json>
         {
             const auto value = getRequiredStringParam(params, key);
-            if (!value.has_value() || value->empty()) return std::variant<std::string, json>{std::in_place_index<1>, fail(std::format("operation={} 缺少参数 {}", op, desc))};
+            if (!value.has_value() || value->empty()) return std::variant<std::string, json>{std::in_place_index<1>, fail(std::format("operation={} 缺少参数 {}", op, key))};
             return std::variant<std::string, json>{std::in_place_index<0>, *value};
         };
 
@@ -452,22 +285,20 @@ public:
             return value.has_value() ? *value : "";
         };
 
-        auto requiredParsed = [&]<typename T>(std::string_view key, std::string_view desc, auto &&parse) -> std::variant<T, json>
+        auto requiredParsed = [&]<typename T>(std::string_view key) -> std::variant<T, json>
         {
-            const auto text = requiredString(key, desc);
+            const auto text = requiredString(key);
             if (std::holds_alternative<json>(text)) return std::variant<T, json>{std::in_place_index<1>, std::get<json>(text)};
-            const auto parsed = parse(std::get<std::string>(text));
-            if (!parsed.has_value()) return std::variant<T, json>{std::in_place_index<1>, fail(std::format("operation={} 参数 {} 无效", op, desc))};
+            std::optional<T> parsed;
+            if constexpr (std::is_same_v<T, int>) parsed = parseInt(std::get<std::string>(text));
+            else parsed = MemUtils::ParseUInt64(std::get<std::string>(text));
+            if (!parsed.has_value()) return std::variant<T, json>{std::in_place_index<1>, fail(std::format("operation={} 参数 {} 无效", op, key))};
             return std::variant<T, json>{std::in_place_index<0>, *parsed};
         };
 
-        auto requiredUInt64 = [&](std::string_view key, std::string_view desc) -> std::variant<std::uint64_t, json> { return requiredParsed.template operator()<std::uint64_t>(key, desc, [](std::string_view text) { return MemUtils::ParseUInt64(text); }); };
-
-        auto requiredInt = [&](std::string_view key, std::string_view desc) -> std::variant<int, json> { return requiredParsed.template operator()<int>(key, desc, parseInt); };
-
         auto scannerStateJson = [&]() -> json
         {
-            const auto state = runtime_.scanner.state();
+            const auto state = gMemScanner->state();
             return {
                 {"alignment", state.alignment},
                 {"scanning", state.scanning}, {"progress", state.progress}, {"count", state.count}, {"string_scan", state.stringScan}, {"value_type", state.stringScan ? "string" : state.dataType.has_value() ? dataTypeToken(*state.dataType) : ""}, {"mode", fuzzyModeToken(state.mode)}, {"value_format", state.mode == Types::FuzzyMode::Pointer ? "hex_address" : state.mode == Types::FuzzyMode::String ? "text" : "number"},
@@ -476,7 +307,7 @@ public:
 
         auto pointerStateJson = [&]() -> json
         {
-            const auto state = runtime_.pointer.state();
+            const auto state = gPointerManager->state();
             return {
                 {"busy", state.operation != PointerManager::Operation::Idle}, {"scanning", state.operation == PointerManager::Operation::Scanning}, {"operation", PointerManager::OperationName(state.operation)}, {"last_operation", PointerManager::OperationName(state.lastOperation)}, {"progress", state.progress}, {"count", state.count}, {"completed", state.completed}, {"success", state.success}, {"error", state.error},
             };
@@ -485,13 +316,13 @@ public:
         auto savedStatesJson = [&]() -> json
         {
             json items = json::array();
-            for (const auto &state : runtime_.saved.snapshotStates())
+            for (const auto &state : gSavedAddresses->snapshotStates())
             {
                 items.push_back({
                     {"address", std::format("0x{:X}", state.item.address)},
                     {"value_type", std::string(dataTypeToken(state.item.type))},
                     {"value_type_label", Types::Labels::TYPE[static_cast<size_t>(state.item.type)]},
-                    {"value_kind", std::string(savedValueKindToken(state.item.kind))},
+                    {"value_kind", state.item.kind == Types::SavedValueKind::Numeric ? "numeric" : state.item.kind == Types::SavedValueKind::Pointer ? "pointer" : state.item.kind == Types::SavedValueKind::Text ? "text" : ""},
                     {"text_length", state.item.textLength},
                     {"note", state.item.note},
                     {"value", state.value},
@@ -508,29 +339,29 @@ public:
 
         if (op == "target.find")
         {
-            const auto package = requiredString("package_name", "package_name");
+            const auto package = requiredString("package_name");
             if (std::holds_alternative<json>(package)) return std::get<json>(package);
-            const int pid = driver_.GetPid(std::get<std::string>(package));
+            const int pid = dr->GetPid(std::get<std::string>(package));
             if (pid <= 0) return fail("未找到进程");
             return okData({{"pid", pid}});
         }
 
         if (op == "target.select")
         {
-            const auto pid = requiredInt("pid", "pid");
+            const auto pid = requiredParsed.template operator()<int>("pid");
             if (std::holds_alternative<json>(pid)) return std::get<json>(pid);
             if (std::get<int>(pid) <= 0) return fail("pid 参数无效");
-            if (!runtime_.selectTarget(std::get<int>(pid))) return fail("扫描任务运行中或旧监听停止失败，无法切换 PID");
-            return okData({{"pid", driver_.GetGlobalPid()}});
+            if (gApplicationRuntime->selectTarget(std::get<int>(pid)) != 0) return fail("扫描任务运行中或旧监听停止失败，无法切换 PID");
+            return okData({{"pid", dr->GetGlobalPid()}});
         }
 
-        if (op == "target.get") return okData({{"pid", driver_.GetGlobalPid()}});
+        if (op == "target.get") return okData({{"pid", dr->GetGlobalPid()}});
 
         if (op == "syscall.start" || op == "syscall.stop")
         {
-            const int pid = driver_.GetGlobalPid();
+            const int pid = dr->GetGlobalPid();
             if (pid <= 0) return fail("全局PID未设置，请先执行 target.select 或 target.attach");
-            const int status = op == "syscall.start" ? runtime_.syscallMonitor.start() : runtime_.syscallMonitor.stop();
+            const int status = op == "syscall.start" ? gApplicationRuntime->startMonitor(ApplicationRuntime::Monitor::Syscall) : gApplicationRuntime->stopMonitor(ApplicationRuntime::Monitor::Syscall);
             if (status != 0) return fail(std::format("系统调用监听请求失败，状态={}", status));
             return okData({{"pid", pid}, {"active", op == "syscall.start"}, {"status", status}});
         }
@@ -543,9 +374,9 @@ public:
 
         if (op == "cntvct.start" || op == "cntvct.stop")
         {
-            const int pid = driver_.GetGlobalPid();
+            const int pid = dr->GetGlobalPid();
             if (pid <= 0) return fail("全局PID未设置，请先执行 target.select 或 target.attach");
-            const int status = op == "cntvct.start" ? runtime_.cntvctMonitor.start() : runtime_.cntvctMonitor.stop();
+            const int status = op == "cntvct.start" ? gApplicationRuntime->startMonitor(ApplicationRuntime::Monitor::Cntvct) : gApplicationRuntime->stopMonitor(ApplicationRuntime::Monitor::Cntvct);
             if (status != 0) return fail(std::format("CNTVCT 监听请求失败，状态={}", status));
             return okData({{"pid", pid}, {"active", op == "cntvct.start"}, {"status", status}});
         }
@@ -558,11 +389,11 @@ public:
 
         if (op == "target.attach")
         {
-            const auto package = requiredString("package_name", "package_name");
+            const auto package = requiredString("package_name");
             if (std::holds_alternative<json>(package)) return std::get<json>(package);
-            const int pid = driver_.GetPid(std::get<std::string>(package));
+            const int pid = dr->GetPid(std::get<std::string>(package));
             if (pid <= 0) return fail("未找到进程");
-            if (!runtime_.selectTarget(pid)) return fail("扫描任务运行中或旧监听停止失败，无法切换 PID");
+            if (gApplicationRuntime->selectTarget(pid) != 0) return fail("扫描任务运行中或旧监听停止失败，无法切换 PID");
             return okData({{"pid", pid}});
         }
 
@@ -570,10 +401,10 @@ public:
         {
             const std::string threadName = optionalString("thread_name");
 
-            const int pid = driver_.GetGlobalPid();
+            const int pid = dr->GetGlobalPid();
             if (pid <= 0) return fail("全局PID未设置，请先执行 target.select 或 target.attach");
 
-            const auto info = driver_.GetEnvParams(threadName);
+            const auto info = dr->GetEnvParams(threadName);
             if (info.tls_status != 0 && info.pacga_status != 0) return fail("获取环境参数失败");
 
             return okData({
@@ -589,7 +420,7 @@ public:
 
         if (op == "memory.map")
         {
-            const std::unique_ptr<Driver::virtual_memory> info(new Driver::virtual_memory(driver_.GetMemoryInfo()));
+            const std::unique_ptr<Driver::virtual_memory> info(new Driver::virtual_memory(dr->GetMemoryInfo()));
             json root;
             const int moduleCount = std::clamp(info->module_count, 0, MAX_MODULES);
             const int regionCount = std::clamp(info->region_count, 0, MAX_SCAN_REGIONS);
@@ -638,9 +469,9 @@ public:
 
         if (op == "module.resolve")
         {
-            const auto moduleName = requiredString("module_name", "module_name");
-            const auto segmentIndex = requiredInt("segment_index", "segment_index");
-            const auto which = requiredString("which", "which");
+            const auto moduleName = requiredString("module_name");
+            const auto segmentIndex = requiredParsed.template operator()<int>("segment_index");
+            const auto which = requiredString("which");
             if (std::holds_alternative<json>(moduleName)) return std::get<json>(moduleName);
             if (std::holds_alternative<json>(segmentIndex)) return std::get<json>(segmentIndex);
             if (std::holds_alternative<json>(which)) return std::get<json>(which);
@@ -649,29 +480,42 @@ public:
             if (whichValue != "start" && whichValue != "end") return fail("which 必须是 start 或 end");
 
             std::uint64_t address = 0;
-            if (!driver_.GetModuleAddress(std::get<std::string>(moduleName), static_cast<short>(std::get<int>(segmentIndex)), &address, whichValue == "start")) return fail("未找到目标模块或段");
+            if (!dr->GetModuleAddress(std::get<std::string>(moduleName), static_cast<short>(std::get<int>(segmentIndex)), &address, whichValue == "start")) return fail("未找到目标模块或段");
             return okData({{"address", std::format("0x{:X}", address)}});
         }
 
         if (op == "memory.dump")
         {
-            const auto target = requiredString("target", "target");
+            const auto target = requiredString("target");
             if (std::holds_alternative<json>(target)) return std::get<json>(target);
-            if (driver_.GetGlobalPid() <= 0) return fail("全局PID未设置，请先执行 target.select 或 target.attach");
+            if (dr->GetGlobalPid() <= 0) return fail("全局PID未设置，请先执行 target.select 或 target.attach");
             std::string path;
-            if (!driver_.DumpMemory(std::get<std::string>(target), &path)) return fail("内存 Dump 失败，请检查模块名或地址范围");
+            if (gApplicationRuntime->dumpMemory(std::get<std::string>(target), &path) != 0) return fail("内存 Dump 失败，请检查模块名或地址范围");
             return okData({{"target", std::get<std::string>(target)}, {"path", path}});
         }
 
         if (op == "scan.start" || op == "scan.refine")
         {
-            const auto mode = requiredString("mode", "mode");
+            const auto mode = requiredString("mode");
             if (std::holds_alternative<json>(mode)) return std::get<json>(mode);
 
-            const auto fuzzyMode = parseFuzzyModeToken(std::get<std::string>(mode));
+            // 解析扫描模式标记
+            const std::string modeToken = toLowerAscii(std::get<std::string>(mode));
+            std::optional<Types::FuzzyMode> fuzzyMode;
+            if (modeToken == "unknown") fuzzyMode = Types::FuzzyMode::Unknown;
+            else if (modeToken == "equal") fuzzyMode = Types::FuzzyMode::Equal;
+            else if (modeToken == "greater") fuzzyMode = Types::FuzzyMode::Greater;
+            else if (modeToken == "less") fuzzyMode = Types::FuzzyMode::Less;
+            else if (modeToken == "increased") fuzzyMode = Types::FuzzyMode::Increased;
+            else if (modeToken == "decreased") fuzzyMode = Types::FuzzyMode::Decreased;
+            else if (modeToken == "changed") fuzzyMode = Types::FuzzyMode::Changed;
+            else if (modeToken == "unchanged") fuzzyMode = Types::FuzzyMode::Unchanged;
+            else if (modeToken == "range") fuzzyMode = Types::FuzzyMode::Range;
+            else if (modeToken == "pointer") fuzzyMode = Types::FuzzyMode::Pointer;
+            else if (modeToken == "string") fuzzyMode = Types::FuzzyMode::String;
             if (!fuzzyMode.has_value()) return fail("mode 无效，支持: unknown/equal/greater/less/increased/decreased/changed/unchanged/range/pointer/string");
 
-            const int pid = driver_.GetGlobalPid();
+            const int pid = dr->GetGlobalPid();
             if (pid <= 0) return fail("全局PID未设置，请先执行 target.select 或 target.attach");
 
             const bool isFirst = (op == "scan.start");
@@ -686,11 +530,11 @@ public:
             if (*fuzzyMode == Types::FuzzyMode::String)
             {
                 if (valueToken.empty()) return fail("string 模式需要 value 参数");
-                if (!runtime_.scanner.startStringAsync(pid, valueToken, isFirst)) return fail("扫描请求被拒绝，请检查任务状态和结果类型");
+                if (gMemScanner->startStringAsync(pid, valueToken, isFirst) != 0) return fail("扫描请求被拒绝，请检查任务状态和结果类型");
                 return okData(scannerStateJson());
             }
 
-            const auto type = requiredString("value_type", "value_type");
+            const auto type = requiredString("value_type");
             if (std::holds_alternative<json>(type)) return std::get<json>(type);
             const auto dataType = parseDataTypeToken(std::get<std::string>(type));
             if (!dataType.has_value()) return fail("value_type 无效，支持: i8/i16/i32/i64/f32/f64");
@@ -701,13 +545,11 @@ public:
                 if (valueToken.empty()) return fail("pointer 模式需要 value 参数");
                 const auto parsed = MemUtils::ParseUInt64(valueToken, 16);
                 if (!parsed) return fail("value 参数不是有效的十六进制地址");
-                const auto target = static_cast<int64_t>(MemUtils::Normalize(static_cast<uintptr_t>(*parsed)));
-                if (!runtime_.scanner.startAsync<int64_t>(pid, target, Types::DataType::I64, *fuzzyMode, isFirst, int64_t{}, {}, MemUtils::FloatRounding::Rounded, alignment)) return fail("扫描请求被拒绝，请检查任务状态、数据类型和扫描模式");
+                if (gMemScanner->startAsync<int64_t>(pid, static_cast<int64_t>(MemUtils::Normalize(static_cast<uintptr_t>(*parsed))), Types::DataType::I64, *fuzzyMode, isFirst, int64_t{}, {}, MemUtils::FloatRounding::Rounded, alignment) != 0) return fail("扫描请求被拒绝，请检查任务状态、数据类型和扫描模式");
                 return okData(scannerStateJson());
             }
 
-            const bool needValue = *fuzzyMode == Types::FuzzyMode::Equal || *fuzzyMode == Types::FuzzyMode::Greater || *fuzzyMode == Types::FuzzyMode::Less || *fuzzyMode == Types::FuzzyMode::Range;
-            if (needValue && valueToken.empty()) return fail("当前模式需要 value 参数");
+            if (valueToken.empty() && (*fuzzyMode == Types::FuzzyMode::Equal || *fuzzyMode == Types::FuzzyMode::Greater || *fuzzyMode == Types::FuzzyMode::Less || *fuzzyMode == Types::FuzzyMode::Range)) return fail("当前模式需要 value 参数");
             const std::string rangeToken = optionalString("range_max");
             if (*fuzzyMode == Types::FuzzyMode::Range && rangeToken.empty()) return fail("range 模式需要 range_max 参数");
 
@@ -723,7 +565,7 @@ public:
                                           {
                                               if (*fuzzyMode == Types::FuzzyMode::Unknown || (*fuzzyMode >= Types::FuzzyMode::Increased && *fuzzyMode <= Types::FuzzyMode::Unchanged))
                                               {
-                                                  if (!runtime_.scanner.startAsync<T>(pid, T{}, *dataType, *fuzzyMode, isFirst, T{}, {}, rounding, alignment)) return fail("扫描请求被拒绝，请检查任务状态、数据类型和扫描模式");
+                                                  if (gMemScanner->startAsync<T>(pid, T{}, *dataType, *fuzzyMode, isFirst, T{}, {}, rounding, alignment) != 0) return fail("扫描请求被拒绝，请检查任务状态、数据类型和扫描模式");
                                                   return okData(scannerStateJson());
                                               }
 
@@ -738,7 +580,7 @@ public:
                                                   rangeMax = *parsedRange;
                                               }
 
-                                              if (!runtime_.scanner.startAsync<T>(pid, *target, *dataType, *fuzzyMode, isFirst, rangeMax, valueToken, rounding, alignment)) return fail("扫描请求被拒绝，请检查任务状态、数据类型和扫描模式");
+                                              if (gMemScanner->startAsync<T>(pid, *target, *dataType, *fuzzyMode, isFirst, rangeMax, valueToken, rounding, alignment) != 0) return fail("扫描请求被拒绝，请检查任务状态、数据类型和扫描模式");
                                               return okData(scannerStateJson());
                                           });
         }
@@ -747,16 +589,16 @@ public:
 
         if (op == "scan.clear")
         {
-            if (runtime_.scanner.isScanning()) return fail("内存扫描运行中，无法清空结果");
-            runtime_.scanner.clear();
+            if (gMemScanner->isScanning()) return fail("内存扫描运行中，无法清空结果");
+            gMemScanner->clear();
             return okData(scannerStateJson());
         }
 
         if (op == "scan.results")
         {
-            const auto start = requiredUInt64("start", "start");
-            const auto count = requiredUInt64("count", "count");
-            const auto type = requiredString("value_type", "value_type");
+            const auto start = requiredParsed.template operator()<std::uint64_t>("start");
+            const auto count = requiredParsed.template operator()<std::uint64_t>("count");
+            const auto type = requiredString("value_type");
             if (std::holds_alternative<json>(start)) return std::get<json>(start);
             if (std::holds_alternative<json>(count)) return std::get<json>(count);
             if (std::holds_alternative<json>(type)) return std::get<json>(type);
@@ -765,7 +607,7 @@ public:
             const std::string typeToken = toLowerAscii(std::get<std::string>(type));
             const bool stringType = (typeToken == "str" || typeToken == "string" || typeToken == "text");
             const auto dataType = parseDataTypeToken(std::get<std::string>(type));
-            const auto pageState = runtime_.scanner.pageState(static_cast<size_t>(std::get<std::uint64_t>(start)), static_cast<size_t>(std::get<std::uint64_t>(count)));
+            const auto pageState = gMemScanner->pageState(static_cast<size_t>(std::get<std::uint64_t>(start)), static_cast<size_t>(std::get<std::uint64_t>(count)));
             const auto &scannerState = pageState.state;
             if (scannerState.scanning) return fail("内存扫描运行中，请完成后获取结果");
             if (!stringType && !dataType.has_value()) return fail("value_type 参数无效");
@@ -796,7 +638,7 @@ public:
 
         if (op == "viewer.open")
         {
-            const auto address = requiredUInt64("address", "address");
+            const auto address = requiredParsed.template operator()<std::uint64_t>("address");
             if (std::holds_alternative<json>(address)) return std::get<json>(address);
             const std::string viewFormat = optionalString("view_format");
             std::optional<Types::ViewFormat> format;
@@ -805,36 +647,28 @@ public:
                 format = parseViewFormatToken(viewFormat);
                 if (!format.has_value()) return fail("view_format 无效，支持: hexadecimal/hex/i8/i16/i32/i64/f32/f64/disasm");
             }
-            runtime_.viewer.open(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), format);
-            if (runtime_.viewer.format() == Types::ViewFormat::Disasm) runtime_.viewer.waitDisasm();
-            return okData(buildViewerSnapshotJson(runtime_.viewer));
+            return viewerResponse(op, gMemViewer->open(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), format));
         }
 
         if (op == "viewer.seek")
         {
-            const auto offset = requiredString("offset", "offset");
+            const auto offset = requiredString("offset");
             if (std::holds_alternative<json>(offset)) return std::get<json>(offset);
-            if (!runtime_.viewer.applyOffset(std::get<std::string>(offset))) return fail("offset 参数无效");
-            if (runtime_.viewer.format() == Types::ViewFormat::Disasm) runtime_.viewer.waitDisasm();
-            return okData(buildViewerSnapshotJson(runtime_.viewer));
+            return viewerResponse(op, gMemViewer->applyOffset(std::get<std::string>(offset)));
         }
 
         if (op == "viewer.format")
         {
-            const auto viewFormat = requiredString("view_format", "view_format");
+            const auto viewFormat = requiredString("view_format");
             if (std::holds_alternative<json>(viewFormat)) return std::get<json>(viewFormat);
             const auto format = parseViewFormatToken(std::get<std::string>(viewFormat));
             if (!format.has_value()) return fail("view_format 无效，支持: hexadecimal/hex/i8/i16/i32/i64/f32/f64/disasm");
-            runtime_.viewer.setFormat(*format);
-            if (runtime_.viewer.format() == Types::ViewFormat::Disasm) runtime_.viewer.waitDisasm();
-            return okData(buildViewerSnapshotJson(runtime_.viewer));
+            return viewerResponse(op, gMemViewer->setFormat(*format));
         }
 
         if (op == "viewer.refresh")
         {
-            runtime_.viewer.refresh();
-            if (runtime_.viewer.format() == Types::ViewFormat::Disasm) runtime_.viewer.waitDisasm();
-            return okData(buildViewerSnapshotJson(runtime_.viewer));
+            return viewerResponse(op, gMemViewer->refresh());
         }
 
         if (op == "pointer.get") return okData(pointerStateJson());
@@ -843,9 +677,9 @@ public:
         {
             const std::string modeToken = optionalString("mode");
             const std::string mode = toLowerAscii(modeToken.empty() ? "module" : modeToken);
-            const auto target = requiredUInt64("target", "target");
-            const auto depth = requiredInt("depth", "depth");
-            const auto maxOffset = requiredInt("max_offset", "max_offset");
+            const auto target = requiredParsed.template operator()<std::uint64_t>("target");
+            const auto depth = requiredParsed.template operator()<int>("depth");
+            const auto maxOffset = requiredParsed.template operator()<int>("max_offset");
             if (std::holds_alternative<json>(target)) return std::get<json>(target);
             if (std::holds_alternative<json>(depth)) return std::get<json>(depth);
             if (std::holds_alternative<json>(maxOffset)) return std::get<json>(maxOffset);
@@ -859,14 +693,14 @@ public:
             std::size_t arrayCount = 0;
             if (useManual)
             {
-                const auto manual = requiredUInt64("manual_base", "manual_base");
+                const auto manual = requiredParsed.template operator()<std::uint64_t>("manual_base");
                 if (std::holds_alternative<json>(manual)) return std::get<json>(manual);
                 manualBase = std::get<std::uint64_t>(manual);
             }
             else if (useArray)
             {
-                const auto base = requiredUInt64("array_base", "array_base");
-                const auto count = requiredUInt64("array_count", "array_count");
+                const auto base = requiredParsed.template operator()<std::uint64_t>("array_base");
+                const auto count = requiredParsed.template operator()<std::uint64_t>("array_count");
                 if (std::holds_alternative<json>(base)) return std::get<json>(base);
                 if (std::holds_alternative<json>(count)) return std::get<json>(count);
                 if (std::get<std::uint64_t>(count) == 0 || std::get<std::uint64_t>(count) > 1000000) return fail("array_count 范围为 1-1000000");
@@ -878,42 +712,64 @@ public:
                 return fail("mode 仅支持 module/manual/array");
             }
 
-            const int pid = driver_.GetGlobalPid();
+            const int pid = dr->GetGlobalPid();
             if (pid <= 0) return fail("全局PID未设置，请先执行 target.select 或 target.attach");
-            if (runtime_.pointer.isBusy()) return fail("当前已有指针操作在运行");
+            if (gPointerManager->isBusy()) return fail("当前已有指针操作在运行");
 
-            const std::string moduleFilter = optionalString("module_filter");
-            if (!runtime_.pointer.startAsync(pid, static_cast<uintptr_t>(std::get<std::uint64_t>(target)), std::get<int>(depth), std::get<int>(maxOffset), useManual, static_cast<uintptr_t>(manualBase), useArray, static_cast<uintptr_t>(arrayBase), arrayCount, moduleFilter)) return fail("指针扫描请求被拒绝，请检查目标、参数和当前操作状态");
+            if (gPointerManager->startAsync(pid, static_cast<uintptr_t>(std::get<std::uint64_t>(target)), std::get<int>(depth), std::get<int>(maxOffset), useManual, static_cast<uintptr_t>(manualBase), useArray, static_cast<uintptr_t>(arrayBase), arrayCount, optionalString("module_filter")) != 0) return fail("指针扫描请求被拒绝，请检查目标、参数和当前操作状态");
             return okData(pointerStateJson());
         }
 
         if (op == "pointer.merge")
         {
-            if (!runtime_.pointer.MergeBins()) return fail("当前已有指针操作在运行，无法合并结果");
+            if (const int status = gPointerManager->MergeBins(); status != 0) return fail(std::format("无法提交指针合并，状态={}", status));
             return okData(pointerStateJson());
         }
 
         if (op == "pointer.export")
         {
-            if (!runtime_.pointer.ExportToTxt()) return fail("当前已有指针操作在运行，无法导出结果");
+            if (const int status = gPointerManager->ExportToTxt(); status != 0) return fail(std::format("无法提交指针导出，状态={}", status));
             return okData(pointerStateJson());
         }
 
         if (op == "breakpoint.get")
         {
-            return okData({{"mode", runtime_.hwbpMode}, {"bp_info", buildBreakpointDataJson(driver_.GetBreakpointInfo())}});
+            auto &info = dr->GetBreakpointInfo();
+            json data = {{"num_brps", info.num_brps}, {"num_wrps", info.num_wrps}, {"points", json::array()}};
+
+            for (auto &point : info.points)
+            {
+                const int pointRecordCount = std::clamp(point.record_count, 0, BP_RECORD_MAX);
+                json pointItem = {{"bt", static_cast<int>(point.bt)}, {"bl", static_cast<int>(point.bl)}, {"bs", static_cast<int>(point.bs)}, {"hit_addr", std::format("0x{:X}", point.hit_addr)}, {"record_count", pointRecordCount}, {"records", json::array()}};
+
+                for (int i = 0; i < pointRecordCount; ++i)
+                {
+                    auto &rec = point.records[i];
+                    MemUtils::HwbpRequestAll(rec);
+                    json item = {{"mask", json::array()}, {"hit_count", static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_HIT_COUNT))}, {"pc", std::format("0x{:X}", static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_PC)))}, {"lr", std::format("0x{:X}", static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_LR)))}, {"sp", std::format("0x{:X}", static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_SP)))}, {"orig_x0", std::format("0x{:X}", static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_ORIG_X0)))}, {"syscallno", std::format("0x{:X}", static_cast<std::uint32_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_SYSCALLNO)))}, {"pstate", std::format("0x{:X}", static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_PSTATE)))}, {"fpsr", std::format("0x{:X}", static_cast<std::uint32_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_FPSR)))}, {"fpcr", std::format("0x{:X}", static_cast<std::uint32_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_FPCR)))}};
+                    for (int m = 0; m < 18; ++m) item["mask"].push_back(std::format("0x{:X}", rec.mask[m]));
+                    for (int reg = 0; reg < 30; ++reg) item[std::format("x{}", reg)] = std::format("0x{:X}", static_cast<std::uint64_t>(MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_X0 + reg)));
+                    for (int reg = 0; reg < 32; ++reg)
+                    {
+                        const auto qreg = MemUtils::HwbpReadRegisterValue(rec, Driver::IDX_Q0 + reg);
+                        item[std::format("q{}", reg)] = {{"lo", std::format("0x{:X}", static_cast<std::uint64_t>(qreg))}, {"hi", std::format("0x{:X}", static_cast<std::uint64_t>(qreg >> 64))}};
+                    }
+                    pointItem["records"].push_back(std::move(item));
+                }
+                data["points"].push_back(std::move(pointItem));
+            }
+            return okData({{"mode", gApplicationRuntime->breakpointMode()}, {"bp_info", std::move(data)}});
         }
 
         if (op == "breakpoint.set")
         {
-            const auto mode = requiredString("mode", "mode");
+            const auto mode = requiredString("mode");
             if (std::holds_alternative<json>(mode)) return std::get<json>(mode);
             const std::string modeName = toLowerAscii(std::get<std::string>(mode));
             if (modeName != "hwbp" && modeName != "ptebp" && modeName != "dptbp" && modeName != "stepbp") return fail("mode 无效，支持: hwbp/ptebp/dptbp/stepbp");
-            if (!runtime_.hwbpMode.empty()) return fail(std::format("{} 设置前请先移除当前断点", modeName));
+            if (!gApplicationRuntime->breakpointMode().empty()) return fail(std::format("{} 设置前请先移除当前断点", modeName));
 
-            const int pid = driver_.GetGlobalPid();
-            if (pid <= 0) return fail("全局PID未设置，请先执行 target.select 或 target.attach");
+            if (dr->GetGlobalPid() <= 0) return fail("全局PID未设置，请先执行 target.select 或 target.attach");
 
             const auto pointsIt = params.find("points");
             if (pointsIt == params.end() || !pointsIt->is_array() || pointsIt->empty()) return fail(std::format("operation={} 缺少参数 points", op));
@@ -929,51 +785,61 @@ public:
                 const auto lengthText = getRequiredStringParam(pointJson, "length");
                 if (!addressText || !typeText || !scopeText || !lengthText) return fail("points 中每个断点都需要 address/bp_type/bp_scope/length");
                 const auto address = MemUtils::ParseUInt64(*addressText);
-                const auto bpType = parseBpTypeToken(*typeText);
-                const auto bpScope = parseBpScopeToken(*scopeText);
+                // 解析硬件断点类型
+                const std::string typeToken = toLowerAscii(*typeText);
+                std::optional<Driver::bp_type> bpType;
+                if (typeToken == "read") bpType = Driver::BP_BREAKPOINT_R;
+                else if (typeToken == "write") bpType = Driver::BP_BREAKPOINT_W;
+                else if (typeToken == "read_write") bpType = Driver::BP_BREAKPOINT_RW;
+                else if (typeToken == "execute") bpType = Driver::BP_BREAKPOINT_X;
+                // 解析硬件断点作用线程范围
+                const std::string scopeToken = toLowerAscii(*scopeText);
+                std::optional<Driver::bp_scope> bpScope;
+                if (scopeToken == "main") bpScope = Driver::BP_SCOPE_MAIN_THREAD;
+                else if (scopeToken == "other") bpScope = Driver::BP_SCOPE_OTHER_THREADS;
+                else if (scopeToken == "all") bpScope = Driver::BP_SCOPE_ALL_THREADS;
                 const auto length = parseInt(*lengthText);
                 if (!address || *address == 0 || !bpType || !bpScope || !length) return fail("points 中存在无效断点参数");
-                const auto bpLength = parseBpLengthValue(*length);
-                if (!bpLength) return fail("points 中存在无效断点参数，长度范围为 1-8");
+                if (*length < 1 || *length > 8) return fail("points 中存在无效断点参数，长度范围为 1-8");
                 Driver::bp_point point{};
                 point.hit_addr = *address;
                 point.bt = *bpType;
-                point.bl = *bpLength;
+                point.bl = static_cast<Driver::bp_len>(*length);
                 point.bs = *bpScope;
                 points.push_back(point);
             }
 
-            const auto pointSpan = std::span<const Driver::bp_point>(points.data(), points.size());
-            int status = 0;
-            if (modeName == "hwbp") status = driver_.SetProcessHwbpRef(pointSpan);
-            else if (modeName == "ptebp") status = driver_.SetProcessPtebpRef(pointSpan);
-            else if (modeName == "dptbp") status = driver_.SetProcessDptbpRef(pointSpan);
-            else status = driver_.SetProcessStepbpRef(pointSpan);
+            const int status = gApplicationRuntime->setBreakpoints(modeName, points);
             if (status != 0) return fail(std::format("设置 {} 失败 status={}", modeName, status));
-            runtime_.hwbpMode = modeName;
             json outPoints = json::array();
             for (std::size_t index = 0; index < points.size(); ++index)
-                outPoints.push_back({{"index", index}, {"address", std::format("0x{:X}", points[index].hit_addr)}, {"type", std::string(bpTypeToToken(points[index].bt))}, {"scope", std::string(bpScopeToToken(points[index].bs))}, {"length", static_cast<int>(points[index].bl)}});
+            {
+                const auto &point = points[index];
+                outPoints.push_back({
+                    {"index", index}, {"address", std::format("0x{:X}", point.hit_addr)},
+                    // 将硬件断点类型转换为文本标记
+                    {"type", point.bt == Driver::BP_BREAKPOINT_R ? "read" : point.bt == Driver::BP_BREAKPOINT_W ? "write" : point.bt == Driver::BP_BREAKPOINT_RW ? "read_write" : point.bt == Driver::BP_BREAKPOINT_X ? "execute" : "unknown"},
+                    // 将硬件断点线程范围转换为文本标记
+                    {"scope", point.bs == Driver::BP_SCOPE_MAIN_THREAD ? "main" : point.bs == Driver::BP_SCOPE_OTHER_THREADS ? "other" : point.bs == Driver::BP_SCOPE_ALL_THREADS ? "all" : "unknown"},
+                    {"length", static_cast<int>(point.bl)},
+                });
+            }
             return okData({{"status", status}, {"mode", modeName}, {"point_count", points.size()}, {"points", std::move(outPoints)}});
         }
 
         if (op == "breakpoint.clear")
         {
-            if (runtime_.hwbpMode.empty()) return okData({{"mode", ""}, {"cleared", false}});
+            if (gApplicationRuntime->breakpointMode().empty()) return okData({{"mode", ""}, {"cleared", false}});
 
-            if (runtime_.hwbpMode == "hwbp") driver_.RemoveProcessHwbpRef();
-            else if (runtime_.hwbpMode == "stepbp") driver_.RemoveProcessStepbpRef();
-            else if (runtime_.hwbpMode == "dptbp") driver_.RemoveProcessDptbpRef();
-            else driver_.RemoveProcessPtebpRef();
-            runtime_.hwbpMode.clear();
+            if (const int status = gApplicationRuntime->clearBreakpoints(); status != 0) return fail(std::format("移除断点失败 status={}", status));
             return okData({{"mode", ""}, {"cleared", true}});
         }
 
         if (op == "breakpoint_record.update")
         {
-            const auto index = requiredInt("index", "index");
-            const auto field = requiredString("field", "field");
-            const auto valueText = requiredString("value", "value");
+            const auto index = requiredParsed.template operator()<int>("index");
+            const auto field = requiredString("field");
+            const auto valueText = requiredString("value");
             if (std::holds_alternative<json>(index)) return std::get<json>(index);
             if (std::holds_alternative<json>(field)) return std::get<json>(field);
             if (std::holds_alternative<json>(valueText)) return std::get<json>(valueText);
@@ -981,7 +847,7 @@ public:
             if (!value.has_value()) return fail(std::format("operation={} 参数 value 无效", op));
             const int recordIndex = std::get<int>(index);
             if (recordIndex < 0) return fail("index 越界");
-            auto &info = driver_.GetBreakpointInfo();
+            auto &info = dr->GetBreakpointInfo();
             int pointRecordIndex = recordIndex;
             for (int pointIndex = 0; pointIndex < BP_CONFIG_MAX; ++pointIndex)
             {
@@ -989,8 +855,82 @@ public:
                 const int recordCount = std::clamp(point.record_count, 0, BP_RECORD_MAX);
                 if (pointRecordIndex < recordCount)
                 {
-                    if (!MemUtils::AssignHwbpRecordField(point.records[pointRecordIndex], std::get<std::string>(field), *value)) return fail("field 无效");
-                    return okData({{"index", recordIndex}, {"point_index", pointIndex}, {"point_record_index", pointRecordIndex}, {"field", std::get<std::string>(field)}, {"value_hex", MemUtils::FormatUInt128Hex(*value)}});
+                    std::string token(std::get<std::string>(field));
+                    for (char &ch : token)
+                    {
+                        if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch - 'A' + 'a');
+                    }
+
+                    std::optional<int> maskIndex;
+                    if (token.starts_with("mask"))
+                    {
+                        std::string_view indexText(token.data() + 4, token.size() - 4);
+                        if (!indexText.empty() && (indexText.front() == '.' || indexText.front() == '_' || indexText.front() == '[')) indexText.remove_prefix(1);
+                        if (!indexText.empty() && indexText.back() == ']') indexText.remove_suffix(1);
+                        maskIndex = MemUtils::HwbpParseInt(indexText);
+                    }
+                    if (maskIndex && *maskIndex >= 0 && *maskIndex < 18)
+                    {
+                        if ((*value) > std::numeric_limits<std::uint8_t>::max())
+                        {
+                            return fail("field 或 value 无效");
+                        }
+                        point.records[pointRecordIndex].mask[*maskIndex] = static_cast<std::uint8_t>((*value));
+                    }
+                    else
+                    {
+                        std::optional<int> regIndex;
+                        std::string_view name(token);
+                        if (name.starts_with("op.")) name.remove_prefix(3);
+                        else if (name.starts_with("mask.")) name.remove_prefix(5);
+
+                        if (name == "pc") regIndex = Driver::IDX_PC;
+                        else if (name == "hit_count") regIndex = Driver::IDX_HIT_COUNT;
+                        else if (name == "lr") regIndex = Driver::IDX_LR;
+                        else if (name == "sp") regIndex = Driver::IDX_SP;
+                        else if (name == "pstate") regIndex = Driver::IDX_PSTATE;
+                        else if (name == "orig_x0") regIndex = Driver::IDX_ORIG_X0;
+                        else if (name == "syscallno") regIndex = Driver::IDX_SYSCALLNO;
+                        else if (name == "fpsr") regIndex = Driver::IDX_FPSR;
+                        else if (name == "fpcr") regIndex = Driver::IDX_FPCR;
+                        else if (name.size() >= 2)
+                        {
+                            const auto index = MemUtils::HwbpParseInt(name.substr(1));
+                            if (index && *index >= 0)
+                            {
+                                if (name[0] == 'x' && *index < 30) regIndex = Driver::IDX_X0 + *index;
+                                else if ((name[0] == 'v' || name[0] == 'q') && *index < 32) regIndex = Driver::IDX_Q0 + *index;
+                            }
+                        }
+                        if (!regIndex)
+                        {
+                            return fail("field 或 value 无效");
+                        }
+                        if (token.starts_with("op.") || token.starts_with("mask."))
+                        {
+                            if ((*value) > BP_OP_WRITE)
+                            {
+                                return fail("field 或 value 无效");
+                            }
+                            BP_SET_MASK(&point.records[pointRecordIndex], *regIndex, static_cast<std::uint8_t>((*value)));
+                        }
+                        else
+                        {
+                            if (MemUtils::HwbpWriteRegisterValue(point.records[pointRecordIndex], *regIndex, (*value)) != 0) return fail("field 或 value 无效");
+                        }
+                    }
+
+                    char hex[35]{};
+                    size_t digit = sizeof(hex) - 1;
+                    __uint128_t remaining = *value;
+                    do
+                    {
+                        hex[--digit] = "0123456789ABCDEF"[static_cast<unsigned>(remaining & 0xf)];
+                        remaining >>= 4;
+                    } while (remaining != 0);
+                    hex[--digit] = 'x';
+                    hex[--digit] = '0';
+                    return okData({{"index", recordIndex}, {"point_index", pointIndex}, {"point_record_index", pointRecordIndex}, {"field", std::get<std::string>(field)}, {"value_hex", std::string(hex + digit)}});
                 }
                 pointRecordIndex -= recordCount;
             }
@@ -999,13 +939,13 @@ public:
 
         if (op == "signature.create")
         {
-            const auto address = requiredUInt64("address", "address");
-            const auto range = requiredInt("range", "range");
+            const auto address = requiredParsed.template operator()<std::uint64_t>("address");
+            const auto range = requiredParsed.template operator()<int>("range");
             if (std::holds_alternative<json>(address)) return std::get<json>(address);
             if (std::holds_alternative<json>(range)) return std::get<json>(range);
             const std::string requestedFile = optionalString("file_name");
             const std::string fileName = requestedFile.empty() ? std::string(SignatureScanner::SIG_DEFAULT_FILE) : requestedFile;
-            if (!SignatureScanner::ScanAddressSignature(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), std::get<int>(range), fileName.c_str())) return fail("特征码保存失败");
+            if (SignatureScanner::ScanAddressSignature(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), std::get<int>(range), fileName.c_str()) != 0) return fail("特征码保存失败");
             return okData({{"saved", true}, {"file", fileName}});
         }
 
@@ -1020,8 +960,8 @@ public:
 
         if (op == "signature.match")
         {
-            const auto rangeOffset = requiredInt("range_offset", "range_offset");
-            const auto pattern = requiredString("pattern", "pattern");
+            const auto rangeOffset = requiredParsed.template operator()<int>("range_offset");
+            const auto pattern = requiredString("pattern");
             if (std::holds_alternative<json>(rangeOffset)) return std::get<json>(rangeOffset);
             if (std::holds_alternative<json>(pattern)) return std::get<json>(pattern);
             return okData(buildSignatureMatchesJson(SignatureScanner::ScanSignature(std::get<std::string>(pattern).c_str(), std::get<int>(rangeOffset)), std::get<int>(rangeOffset), std::get<std::string>(pattern)));
@@ -1029,7 +969,7 @@ public:
 
         if (op == "signature.filter")
         {
-            const auto address = requiredUInt64("address", "address");
+            const auto address = requiredParsed.template operator()<std::uint64_t>("address");
             if (std::holds_alternative<json>(address)) return std::get<json>(address);
             const std::string requestedFile = optionalString("file_name");
             const std::string fileName = requestedFile.empty() ? std::string(SignatureScanner::SIG_DEFAULT_FILE) : requestedFile;
@@ -1041,14 +981,18 @@ public:
 
         if (op == "saved.add")
         {
-            const auto address = requiredUInt64("address", "address");
-            const auto valueType = requiredString("value_type", "value_type");
+            const auto address = requiredParsed.template operator()<std::uint64_t>("address");
+            const auto valueType = requiredString("value_type");
             if (std::holds_alternative<json>(address)) return std::get<json>(address);
             if (std::holds_alternative<json>(valueType)) return std::get<json>(valueType);
             const auto dataType = parseDataTypeToken(std::get<std::string>(valueType));
             if (!dataType.has_value()) return fail("value_type 无效");
 
-            const auto kind = parseSavedValueKindToken(optionalString("value_kind"));
+            const std::string kindToken = toLowerAscii(optionalString("value_kind"));
+            std::optional<Types::SavedValueKind> kind;
+            if (kindToken.empty() || kindToken == "numeric") kind = Types::SavedValueKind::Numeric;
+            else if (kindToken == "pointer") kind = Types::SavedValueKind::Pointer;
+            else if (kindToken == "text") kind = Types::SavedValueKind::Text;
             if (!kind.has_value()) return fail("value_kind 无效");
             if (*kind == Types::SavedValueKind::Pointer && *dataType != Types::DataType::I64) return fail("pointer 保存项必须使用 i64");
             if (*kind == Types::SavedValueKind::Text && *dataType != Types::DataType::I8) return fail("text 保存项必须使用 i8");
@@ -1062,79 +1006,80 @@ public:
             }
 
             const uintptr_t savedAddress = static_cast<uintptr_t>(std::get<std::uint64_t>(address));
-            const bool created = runtime_.saved.add(savedAddress, *dataType, *kind, textLength);
-            if (!created && !runtime_.saved.contains(savedAddress)) return fail("保存地址失败");
-            if (const std::string note = optionalString("note"); !note.empty() && !runtime_.saved.setNote(savedAddress, note)) return fail("设置备注失败");
+            const int status = gSavedAddresses->add(savedAddress, *dataType, *kind, textLength);
+            if (status != 0 && status != -EEXIST) return fail(std::format("保存地址失败 status={}", status));
+            if (const std::string note = optionalString("note"); !note.empty() && gSavedAddresses->setNote(savedAddress, note) != 0) return fail("设置备注失败");
             json data = savedStatesJson();
-            data["created"] = created;
+            data["created"] = status == 0;
             return okData(std::move(data));
         }
 
         if (op == "saved.remove")
         {
-            const auto address = requiredUInt64("address", "address");
+            const auto address = requiredParsed.template operator()<std::uint64_t>("address");
             if (std::holds_alternative<json>(address)) return std::get<json>(address);
-            const bool removed = runtime_.saved.remove(static_cast<uintptr_t>(std::get<std::uint64_t>(address)));
+            const int status = gSavedAddresses->remove(static_cast<uintptr_t>(std::get<std::uint64_t>(address)));
+            if (status != 0 && status != -ENOENT) return fail(std::format("删除保存地址失败 status={}", status));
             json data = savedStatesJson();
-            data["removed"] = removed;
+            data["removed"] = status == 0;
             return okData(std::move(data));
         }
 
         if (op == "saved.write")
         {
-            const auto address = requiredUInt64("address", "address");
-            const auto value = requiredString("value", "value");
+            const auto address = requiredParsed.template operator()<std::uint64_t>("address");
+            const auto value = requiredString("value");
             if (std::holds_alternative<json>(address)) return std::get<json>(address);
             if (std::holds_alternative<json>(value)) return std::get<json>(value);
-            if (!runtime_.saved.write(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), std::get<std::string>(value))) return fail("写入保存地址失败");
+            if (gSavedAddresses->write(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), std::get<std::string>(value)) != 0) return fail("写入保存地址失败");
             return okData(savedStatesJson());
         }
 
         if (op == "saved.note.set")
         {
-            const auto address = requiredUInt64("address", "address");
+            const auto address = requiredParsed.template operator()<std::uint64_t>("address");
             if (std::holds_alternative<json>(address)) return std::get<json>(address);
-            if (!runtime_.saved.setNote(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), optionalString("note"))) return fail("保存地址不存在");
+            if (gSavedAddresses->setNote(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), optionalString("note")) != 0) return fail("保存地址不存在");
             return okData(savedStatesJson());
         }
 
         if (op == "saved.lock.set")
         {
-            const auto address = requiredUInt64("address", "address");
+            const auto address = requiredParsed.template operator()<std::uint64_t>("address");
             if (std::holds_alternative<json>(address)) return std::get<json>(address);
             const auto locked = params.find("locked");
             if (locked == params.end() || !locked->is_boolean()) return fail("locked 必须是布尔值");
-            if (!runtime_.saved.setLocked(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), locked->get<bool>(), optionalString("value"))) return fail(locked->get<bool>() ? "锁定保存地址失败" : "保存地址不存在");
+            if (gSavedAddresses->setLocked(static_cast<uintptr_t>(std::get<std::uint64_t>(address)), locked->get<bool>(), optionalString("value")) != 0) return fail(locked->get<bool>() ? "锁定保存地址失败" : "保存地址不存在");
             return okData(savedStatesJson());
         }
 
         if (op == "saved.offset")
         {
-            const auto offsetText = requiredString("offset", "offset");
+            const auto offsetText = requiredString("offset");
             if (std::holds_alternative<json>(offsetText)) return std::get<json>(offsetText);
             const auto offset = MemUtils::ParseHexOffset(std::get<std::string>(offsetText));
             if (!offset.has_value()) return fail("offset 无效");
-            runtime_.saved.applyOffset(offset->offset, offset->negative);
+            if (gSavedAddresses->applyOffset(offset->offset, offset->negative) != 0) return fail("偏移后读取锁定值失败");
             return okData(savedStatesJson());
         }
 
         if (op == "saved.clear")
         {
-            runtime_.saved.clear();
+            gSavedAddresses->clear();
             return okData(savedStatesJson());
         }
 
         if (op == "memory.read")
         {
-            const auto address = requiredUInt64("address", "address");
-            const auto size = requiredInt("size", "size");
+            const auto address = requiredParsed.template operator()<std::uint64_t>("address");
+            const auto size = requiredParsed.template operator()<int>("size");
             if (std::holds_alternative<json>(address)) return std::get<json>(address);
             if (std::holds_alternative<json>(size)) return std::get<json>(size);
             constexpr int MAX_TRANSFER_SIZE = 1024 * 1024;
             const int byteCount = std::get<int>(size);
             if (byteCount <= 0 || byteCount > MAX_TRANSFER_SIZE) return fail("size 范围 1-1048576");
             std::vector<std::uint8_t> bytes(static_cast<size_t>(byteCount));
-            const int readBytes = driver_.Read(std::get<std::uint64_t>(address), bytes.data(), bytes.size());
+            const int readBytes = dr->Read(std::get<std::uint64_t>(address), bytes.data(), bytes.size());
             if (readBytes != byteCount) return fail(std::format("读取失败 status={}", readBytes));
             return okData({
                 {"address", std::format("0x{:X}", std::get<std::uint64_t>(address))},
@@ -1145,23 +1090,38 @@ public:
 
         if (op == "memory.write")
         {
-            const auto address = requiredUInt64("address", "address");
-            const auto dataHex = requiredString("data_hex", "data_hex");
+            const auto address = requiredParsed.template operator()<std::uint64_t>("address");
+            const auto dataHex = requiredString("data_hex");
             if (std::holds_alternative<json>(address)) return std::get<json>(address);
             if (std::holds_alternative<json>(dataHex)) return std::get<json>(dataHex);
-            auto bytes = parseHexBytes(std::get<std::string>(dataHex));
-            if (!bytes) return fail("data_hex 无效");
+            // 解析十六进制字节流
+            std::vector<std::uint8_t> bytes;
+            bytes.reserve(std::get<std::string>(dataHex).size() / 2);
+            int high = -1;
+            for (const unsigned char ch : std::get<std::string>(dataHex))
+            {
+                if (std::isspace(ch) != 0) continue;
+                if (std::isxdigit(ch) == 0) return fail("data_hex 无效");
+                const int digit = ch >= '0' && ch <= '9' ? ch - '0' : ch >= 'a' && ch <= 'f' ? ch - 'a' + 10 : ch - 'A' + 10;
+                if (high < 0) high = digit;
+                else
+                {
+                    bytes.push_back(static_cast<std::uint8_t>((high << 4) | digit));
+                    high = -1;
+                }
+            }
+            if (high >= 0 || bytes.empty()) return fail("data_hex 无效");
             constexpr size_t MAX_TRANSFER_SIZE = 1024 * 1024;
-            if (bytes->size() > MAX_TRANSFER_SIZE) return fail("data_hex 最大 1048576 字节");
-            const int writeBytes = driver_.Write(std::get<std::uint64_t>(address), bytes->data(), bytes->size());
-            if (writeBytes != static_cast<int>(bytes->size())) return fail(std::format("写入失败 status={}", writeBytes));
-            std::vector<std::uint8_t> readback(bytes->size());
-            const int readBytes = driver_.Read(std::get<std::uint64_t>(address), readback.data(), readback.size());
+            if (bytes.size() > MAX_TRANSFER_SIZE) return fail("data_hex 最大 1048576 字节");
+            const int writeBytes = dr->Write(std::get<std::uint64_t>(address), bytes.data(), bytes.size());
+            if (writeBytes != static_cast<int>(bytes.size())) return fail(std::format("写入失败 status={}", writeBytes));
+            std::vector<std::uint8_t> readback(bytes.size());
+            const int readBytes = dr->Read(std::get<std::uint64_t>(address), readback.data(), readback.size());
             const bool readbackComplete = readBytes == static_cast<int>(readback.size());
             return okData({
                 {"address", std::format("0x{:X}", std::get<std::uint64_t>(address))},
-                {"size", bytes->size()},
-                {"verified", readbackComplete && readback == *bytes},
+                {"size", bytes.size()},
+                {"verified", readbackComplete && readback == bytes},
                 {"readback_status", readBytes},
                 {"readback_hex", readbackComplete ? bytesToHex(readback.data(), readback.size()) : ""},
             });
@@ -1171,3 +1131,5 @@ public:
     }
 
 };
+
+inline std::unique_ptr<ApplicationService> gApplicationService = nullptr;

@@ -9,6 +9,7 @@
 #include <linux/pid.h>
 #include <linux/rcupdate.h>
 #include <linux/sched.h>
+#include <linux/sched/signal.h>
 #include <linux/sched/task.h>
 #include <linux/types.h>
 #include <asm/sysreg.h>
@@ -22,8 +23,14 @@ static inline int get_tpidr_el0_by_name(int32_t tgid, const char *thread_name, u
     if (!thread_name || !tpidr_el0 || tgid <= 0) return -EINVAL;
 
     *tpidr_el0 = 0;
-    process_task = get_task_by_pid(tgid);
-    if (!process_task) return -ESRCH;
+    // 查找任务、遍历线程链表和读取线程字段均在同一个 RCU 临界区内完成。
+    rcu_read_lock();
+    process_task = find_task_by_vpid(tgid);
+    if (!process_task)
+    {
+        rcu_read_unlock();
+        return -ESRCH;
+    }
 
     for_each_thread(process_task, thread_task)
     {
@@ -35,7 +42,7 @@ static inline int get_tpidr_el0_by_name(int32_t tgid, const char *thread_name, u
         }
     }
 
-    put_task_struct(process_task);
+    rcu_read_unlock();
     return *tpidr_el0 ? 0 : -ESRCH;
 }
 

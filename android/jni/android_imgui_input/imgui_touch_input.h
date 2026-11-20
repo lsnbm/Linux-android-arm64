@@ -11,6 +11,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <linux/input.h>
+#include <memory>
 #include <mutex>
 #include <new>
 #include <poll.h>
@@ -66,6 +67,7 @@ class TouchInput
     std::vector<Contact> frame;    // 渲染线程在 NewFrame 之前锁存的屏幕坐标。
     int width = 0, height = 0, rotation = 0;
     int fd = -1;
+    int workerStatus = 0;
     bool blocking = false;
     std::jthread worker;
 
@@ -89,16 +91,111 @@ class TouchInput
         }
     }
 
-public:
-    ~TouchInput()
+    static void ReadEvents(std::stop_token stop, TouchInput *self, int input, int minX, int minY, double dx, double dy, std::vector<Slot> slots)
+    {
+        // 各触点先缓存在输入线程，等 SYN_REPORT 到达再提交一批事件。
+        int status = 0;
+        int slot = 0, lastX = 0, lastY = 0;
+        bool wasDown = false;
+        pollfd pfd{input, POLLIN, 0};
+        input_event events[64];
+        while (!stop.stop_requested())
+        {
+            // 50 ms 超时使空闲设备也能及时响应退出请求。
+            const int ready = poll(&pfd, 1, 50);
+            if (ready == 0 || (ready < 0 && errno == EINTR)) continue;
+            if (ready < 0)
+            {
+                status = -errno;
+                LS_LOGE_TAG("Touch", "poll 设备失败: %s", strerror(-status));
+                break;
+            }
+            if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL))
+            {
+                status = (pfd.revents & POLLNVAL) ? -EBADF : -ENODEV;
+                LS_LOGE_TAG("Touch", "输入设备断开 revents=0x%x", pfd.revents);
+                break;
+            }
+            const ssize_t bytes = read(input, events, sizeof(events));
+            if (bytes < 0 && (errno == EINTR || errno == EAGAIN)) continue;
+            if (bytes <= 0)
+            {
+                status = bytes == 0 ? -ENODEV : -errno;
+                LS_LOGE_TAG("Touch", "读取输入设备失败: %s", bytes == 0 ? "EOF" : strerror(-status));
+                break;
+            }
+            for (size_t i = 0; i < static_cast<size_t>(bytes) / sizeof(input_event); ++i)
+            {
+                const auto &event = events[i];
+                if (event.type == EV_ABS)
+                {
+                    switch (event.code)
+                    {
+                    case ABS_MT_SLOT:
+                        slot = event.value >= 0 && event.value < static_cast<int>(std::size(slots)) ? event.value : -1;
+                        break;
+                    case ABS_MT_TRACKING_ID:
+                        if (slot >= 0) slots[slot].id = event.value;
+                        break;
+                    case ABS_MT_POSITION_X:
+                        if (slot >= 0) slots[slot].x = event.value;
+                        break;
+                    case ABS_MT_POSITION_Y:
+                        if (slot >= 0) slots[slot].y = event.value;
+                        break;
+                    }
+                    continue;
+                }
+                if (event.type != EV_SYN || event.code != SYN_REPORT) continue;
+                // 输入线程只加锁提交事件，不直接调用 ImGui。
+                std::lock_guard lock(self->mutex);
+                const bool resync = self->count + 2 > self->pending.size();
+                if (resync) self->count = 0;
+                self->reported.clear();
+                for (size_t index = 0; index < slots.size(); ++index)
+                {
+                    const auto &finger = slots[index];
+                    if (finger.id < 0) continue;
+                    self->reported.push_back({static_cast<int>(index), {static_cast<float>((double(finger.x) - minX) / dx), static_cast<float>((double(finger.y) - minY) / dy)}});
+                }
+                const bool down = !self->reported.empty();
+                if (down) // 菜单只收到一个主指针，其他手指只用于调试绘制。
+                {
+                    const auto p = self->screenPosition(self->reported.front().pos);
+                    const int px = static_cast<int>(p.x), py = static_cast<int>(p.y);
+                    if (resync || !wasDown || px != lastX || py != lastY) self->pending[self->count++] = {Event::Position, px, py};
+                    lastX = px;
+                    lastY = py;
+                }
+                if (resync || down != wasDown) self->pending[self->count++] = {down ? Event::Press : Event::Release};
+                wasDown = down;
+            }
+        }
+        std::lock_guard lock(self->mutex);
+        self->workerStatus = status;
+        self->reported.clear();
+        if (wasDown)
+        {
+            if (self->count == self->pending.size()) self->count = 0;
+            self->pending[self->count++] = {Event::Release};
+        }
+    }
+
+    void shutdown()
     {
         if (worker.joinable())
         {
             worker.request_stop();
             worker.join();
         }
-        if (fd >= 0) close(fd); // close 同时释放 EVIOCGRAB。
+        if (fd >= 0) close(std::exchange(fd, -1)); // close 同时释放 EVIOCGRAB。
     }
+
+public:
+    TouchInput() = default;
+    TouchInput(const TouchInput &) = delete;
+    TouchInput &operator=(const TouchInput &) = delete;
+    ~TouchInput() { shutdown(); }
 
     // 更新屏幕信息，输入线程按同一组尺寸和方向换算坐标。
     void setScreen(int w, int h, int orientation)
@@ -113,7 +210,7 @@ public:
     {
         int status = 0;
         std::lock_guard startLock(mutex);
-        if (fd >= 0) return status;
+        if (fd >= 0) return status = workerStatus;
         DIR *dir = opendir("/dev/input");
         if (!dir) return status = -errno;
 
@@ -123,6 +220,7 @@ public:
             bool direct = false, pointer = false;
             int64_t area = 0;
         } best;
+        int unavailable = -ENODEV;
         while (const auto *entry = readdir(dir))
         {
             if (strncmp(entry->d_name, "event", 5) != 0) continue;
@@ -132,7 +230,11 @@ public:
             if (number.ec != std::errc{} || number.ptr != end || candidate.number < 0) continue;
             // 非阻塞读取配合 poll；没有新事件时不让 read 阻塞退出。
             candidate.fd = openat(dirfd(dir), entry->d_name, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-            if (candidate.fd < 0) continue;
+            if (candidate.fd < 0)
+            {
+                if (errno == EACCES || errno == EPERM) unavailable = -errno;
+                continue;
+            }
 
             uint8_t absBits[(ABS_MAX + 8) / 8]{};
             input_absinfo x{}, y{}, slotAxis{};
@@ -158,105 +260,22 @@ public:
             if (candidate.fd >= 0) close(candidate.fd);
         }
         closedir(dir);
-        if (best.fd < 0) return status = -ENODEV;
-        LS_LOGD_TAG("Touch", "选择设备 /dev/input/event%d range=%dx%d", best.number, best.maxX, best.maxY);
-        if (ioctl(best.fd, EVIOCGRAB, 1) < 0)
+        if (best.fd < 0) return status = unavailable;
+        struct CloseOnReturn
         {
-            status = -errno;
-            close(best.fd);
-            return status;
-        }
+            int &fd;
+            ~CloseOnReturn() { if (fd >= 0) close(fd); }
+        } closeOnReturn{best.fd};
+        LS_LOGD_TAG("Touch", "选择设备 /dev/input/event%d range=%dx%d", best.number, best.maxX, best.maxY);
+        if (ioctl(best.fd, EVIOCGRAB, 1) < 0) return status = -errno;
 
         try
         {
             reported.reserve(best.slotCount);
             frame.reserve(best.slotCount);
             // 在初始化时启动线程，而非静态初始化时启动：调用方可能在此之前 fork。
-            worker = std::jthread(
-                [this, input = best.fd, minX = best.minX, minY = best.minY, dx = double(best.maxX) - best.minX, dy = double(best.maxY) - best.minY, slots = std::vector<Slot>(best.slotCount)](std::stop_token stop) mutable
-                {
-                    // 各触点先缓存在输入线程，等 SYN_REPORT 到达再提交一批事件。
-                    int slot = 0, lastX = 0, lastY = 0;
-                    bool wasDown = false;
-                    pollfd pfd{input, POLLIN, 0};
-                    input_event events[64];
-                    while (!stop.stop_requested())
-                    {
-                        // 50 ms 超时使空闲设备也能及时响应退出请求。
-                        const int ready = poll(&pfd, 1, 50);
-                        if (ready == 0 || (ready < 0 && errno == EINTR)) continue;
-                        if (ready < 0)
-                        {
-                            LS_LOGE_TAG("Touch", "poll 设备失败: %s", strerror(errno));
-                            break;
-                        }
-                        if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL))
-                        {
-                            LS_LOGE_TAG("Touch", "输入设备断开 revents=0x%x", pfd.revents);
-                            break;
-                        }
-                        const ssize_t bytes = read(input, events, sizeof(events));
-                        if (bytes < 0 && (errno == EINTR || errno == EAGAIN)) continue;
-                        if (bytes <= 0)
-                        {
-                            LS_LOGE_TAG("Touch", "读取输入设备失败: %s", bytes == 0 ? "EOF" : strerror(errno));
-                            break;
-                        }
-                        for (size_t i = 0; i < static_cast<size_t>(bytes) / sizeof(input_event); ++i)
-                        {
-                            const auto &event = events[i];
-                            if (event.type == EV_ABS)
-                            {
-                                switch (event.code)
-                                {
-                                case ABS_MT_SLOT:
-                                    slot = event.value >= 0 && event.value < static_cast<int>(std::size(slots)) ? event.value : -1;
-                                    break;
-                                case ABS_MT_TRACKING_ID:
-                                    if (slot >= 0) slots[slot].id = event.value;
-                                    break;
-                                case ABS_MT_POSITION_X:
-                                    if (slot >= 0) slots[slot].x = event.value;
-                                    break;
-                                case ABS_MT_POSITION_Y:
-                                    if (slot >= 0) slots[slot].y = event.value;
-                                    break;
-                                }
-                                continue;
-                            }
-                            if (event.type != EV_SYN || event.code != SYN_REPORT) continue;
-                            // 输入线程只加锁提交事件，不直接调用 ImGui。
-                            std::lock_guard lock(mutex);
-                            const bool resync = count + 2 > pending.size();
-                            if (resync) count = 0;
-                            reported.clear();
-                            for (size_t index = 0; index < slots.size(); ++index)
-                            {
-                                const auto &finger = slots[index];
-                                if (finger.id < 0) continue;
-                                reported.push_back({static_cast<int>(index), {static_cast<float>((double(finger.x) - minX) / dx), static_cast<float>((double(finger.y) - minY) / dy)}});
-                            }
-                            const bool down = !reported.empty();
-                            if (down) // 菜单只收到一个主指针，其他手指只用于调试绘制。
-                            {
-                                const auto p = screenPosition(reported.front().pos);
-                                const int px = static_cast<int>(p.x), py = static_cast<int>(p.y);
-                                if (resync || !wasDown || px != lastX || py != lastY) pending[count++] = {Event::Position, px, py};
-                                lastX = px;
-                                lastY = py;
-                            }
-                            if (resync || down != wasDown) pending[count++] = {down ? Event::Press : Event::Release};
-                            wasDown = down;
-                        }
-                    }
-                    std::lock_guard lock(mutex);
-                    reported.clear();
-                    if (wasDown)
-                    {
-                        if (count == pending.size()) count = 0;
-                        pending[count++] = {Event::Release};
-                    }
-                });
+            worker = std::jthread(ReadEvents, this, best.fd, best.minX, best.minY,
+                                  double(best.maxX) - best.minX, double(best.maxY) - best.minY, std::vector<Slot>(best.slotCount));
         }
         catch (const std::system_error &error)
         {
@@ -266,12 +285,8 @@ public:
         {
             status = -ENOMEM;
         }
-        if (status != 0)
-        {
-            close(best.fd);
-            return status;
-        }
-        fd = best.fd;
+        if (status != 0) return status;
+        fd = std::exchange(best.fd, -1);
         blocking = true;
         return status;
     }
@@ -294,6 +309,9 @@ public:
     int setBlocking(bool block)
     {
         int status = 0;
+        std::lock_guard lock(mutex);
+        if (fd < 0) return status = -ENODEV;
+        if (workerStatus != 0) return status = workerStatus;
         if (block == blocking) return status;
         // EVIOCGRAB：1 启用独占，0 取消独占。
         if (ioctl(fd, EVIOCGRAB, static_cast<int>(block)) < 0) return status = -errno;
@@ -340,5 +358,4 @@ public:
     }
 };
 
-// 借用渲染器的输入对象；主线程在读线程启动前赋值、全部 join 后置空。
-inline const TouchInput *gTouchInput = nullptr;
+inline std::unique_ptr<TouchInput> gTouchInput = nullptr;

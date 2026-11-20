@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <cstdio>
 #include <thread>
@@ -68,30 +69,16 @@ inline void DoPinchTest(int screenW, int screenH)
     dr->TouchUp(1);
 }
 
-inline bool GetTouchScreenSize(int &width, int &height)
-{
-    android::detail::ui::DisplayState display{};
-    if (!android::SurfaceControlManager::GetComposerInstance().GetDisplayInfo(&display)) return false;
-    const int orientation = static_cast<int>(display.orientation);
-    if (orientation < 0 || orientation > 3 || display.layerStackSpaceRect.width <= 0 || display.layerStackSpaceRect.height <= 0) return false;
-
-    // 保持测试的自然方向坐标；直接读取有效逻辑尺寸，也能反映分辨率覆盖设置。
-    // 不按长短边排序，以免把自然横屏设备强制当成竖屏。
-    width = display.layerStackSpaceRect.width;
-    height = display.layerStackSpaceRect.height;
-    if (orientation == 1 || orientation == 3) std::swap(width, height);
-    return true;
-}
-
 inline int RunTouchTest()
 {
-    int screenW = 0, screenH = 0;
-    if (!GetTouchScreenSize(screenW, screenH))
+    int status = 0;
+    const auto display = android::gSurfaceControl->GetDisplayInfo(android::SurfaceControlManager::DisplayAxes::Natural);
+    if (display.width <= 0 || display.height <= 0)
     {
         LS_LOGE_TAG("TouchTest", "读取屏幕尺寸失败，取消触摸测试");
-        return -EIO;
+        return status = -EIO;
     }
-
+    const int screenW = display.width, screenH = display.height;
     LS_LOGI_TAG("TouchTest", "屏幕逻辑尺寸: %dx%d", screenW, screenH);
 
     // 1) 单击测试：屏幕左上 1/4 区域
@@ -121,5 +108,5 @@ inline int RunTouchTest()
     DoTapTest(0, screenW / 2, screenH / 2, screenW, screenH, 50);
 
     LS_LOGI_TAG("TouchTest", "全部测试序列执行完毕");
-    return 0;
+    return status;
 }

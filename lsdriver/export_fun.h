@@ -7,6 +7,7 @@
 #include <linux/types.h>
 #include <linux/mm.h>
 #include <linux/pid.h>
+#include <linux/rcupdate.h>
 #include <linux/sched.h>
 #include <linux/sched/mm.h>
 #include <linux/sched/task.h>
@@ -348,25 +349,14 @@ static inline bool user_range_writable(struct mm_struct *mm, uint64_t address, s
     return user_page_writable(mm, last_page);
 }
 
-// 根据 pid 获取 task_struct，调用方负责 put_task_struct。
-static inline struct task_struct *get_task_by_pid(pid_t pid)
-{
-    struct pid *pid_struct = find_get_pid(pid);
-    if (!pid_struct) return NULL;
-
-    struct task_struct *task = get_pid_task(pid_struct, PIDTYPE_PID);
-    put_pid(pid_struct);
-    return task;
-}
-
 // 根据 pid 获取 mm_struct，调用方负责 mmput。
 static inline struct mm_struct *get_mm_by_pid(pid_t pid)
 {
-    struct task_struct *task = get_task_by_pid(pid);
-    if (!task) return NULL;
+    rcu_read_lock();
+    struct task_struct *task = find_task_by_vpid(pid);
+    struct mm_struct *mm = task ? get_task_mm(task) : NULL;
+    rcu_read_unlock();
 
-    struct mm_struct *mm = get_task_mm(task);
-    put_task_struct(task);
     return mm;
 }
 

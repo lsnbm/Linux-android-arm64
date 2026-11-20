@@ -1,4 +1,5 @@
 #pragma once
+#include <memory>
 #include <future>
 #include <span>
 #include "../base/memory_utils.h"
@@ -19,6 +20,17 @@ private:
 public:
     MemViewer() : buffer_(Config::Constants::MEM_VIEW_DEFAULT_BYTES)
     {
+    }
+
+    ~MemViewer()
+    {
+        // 包括 refresh/clear 已丢弃 future、但仍在执行的任务。
+        // main 必须先销毁 Viewer，再销毁全局 Disassembler。
+        if (worker_)
+        {
+            worker_->purge();
+            worker_->wait();
+        }
     }
 
     // 返回当前内存浏览格式。
@@ -53,23 +65,37 @@ public:
         return disasmFuture_.valid();
     }
 
-    void waitDisasm()
+    int waitDisasm()
     {
-        if (!disasmFuture_.valid()) return;
-
+        int status = 0;
+        if (!disasmFuture_.valid()) return status;
         try
         {
             disasmCache_ = disasmFuture_.get();
         }
+        catch (const std::bad_alloc &)
+        {
+            status = -ENOMEM;
+            return status;
+        }
+        catch (const std::system_error &error)
+        {
+            status = error.code().value() ? -error.code().value() : -EIO;
+            return status;
+        }
         catch (...)
         {
-            disasmCache_.clear();
+            status = -EIO;
+            return status;
         }
+        return status;
     }
 
-    void pollDisasm()
+    int pollDisasm()
     {
-        if (disasmFuture_.valid() && disasmFuture_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) waitDisasm();
+        int status = 0;
+        if (disasmFuture_.valid() && disasmFuture_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) status = waitDisasm();
+        return status;
     }
 
     void clear()
@@ -83,74 +109,113 @@ public:
     }
 
     // 重新读取并刷新当前浏览缓存。
-    void refresh()
+    int refresh()
     {
+        int status = 0;
         if (worker_) worker_->purge();
         disasmFuture_ = {};
         disasmCache_.clear();
         if (!MemUtils::IsValidAddr(base_))
         {
             readStatus_ = -EINVAL;
-            return;
+            status = readStatus_;
+            return status;
         }
         std::ranges::fill(buffer_, 0);
         readStatus_ = dr->Read(base_, buffer_.data(), buffer_.size());
-        if (!readSuccess() || format_ != Types::ViewFormat::Disasm) return;
+        if (!readSuccess())
+        {
+            status = readStatus_ < 0 ? readStatus_ : -EIO;
+            return status;
+        }
+        if (format_ != Types::ViewFormat::Disasm) return status;
 
         const size_t disasmSize = std::min(static_cast<size_t>(readStatus_), buffer_.size()) & ~static_cast<size_t>(3);
-        if (disasmSize == 0) return;
+        if (disasmSize == 0) return status;
+        if (!Disasm::gDisassembler)
+        {
+            status = -ENODEV;
+            return status;
+        }
         try
         {
             if (!worker_) worker_.emplace(1);
             disasmFuture_ = worker_->submit_task(
                 [base = base_, bytes = buffer_, disasmSize]
                 {
-                    Disasm::Disassembler disasm;
-                    return disasm.Disassemble(base, bytes.data(), disasmSize, Disasm::Disassembler::DEFAULT_MAX_INSTRUCTIONS, true);
+                    return Disasm::gDisassembler->Disassemble(base, bytes.data(), disasmSize, Disasm::Disassembler::DEFAULT_MAX_INSTRUCTIONS, true);
                 });
         }
-        catch (const std::exception &error)
+        catch (const std::bad_alloc &)
         {
-            LS_LOGE_TAG("Viewer", "无法提交显示任务: %s", error.what());
+            status = -ENOMEM;
+            return status;
         }
+        catch (const std::system_error &error)
+        {
+            status = error.code().value() ? -error.code().value() : -EIO;
+            return status;
+        }
+        catch (...)
+        {
+            status = -EIO;
+            return status;
+        }
+        return status;
     }
 
-    void setFormat(Types::ViewFormat fmt)
+    int setFormat(Types::ViewFormat fmt)
     {
+        int status = 0;
         format_ = fmt;
-        refresh();
+        if (format_ == Types::ViewFormat::Disasm) base_ &= ~static_cast<uintptr_t>(3);
+        status = refresh();
+        return status;
     }
 
-    void open(uintptr_t addr, std::optional<Types::ViewFormat> format = std::nullopt)
+    int open(uintptr_t addr, std::optional<Types::ViewFormat> format = std::nullopt)
     {
+        int status = 0;
         if (format.has_value()) format_ = *format;
         if (format_ == Types::ViewFormat::Disasm) addr &= ~static_cast<uintptr_t>(3);
         base_ = addr;
-        refresh();
+        status = refresh();
+        return status;
     }
 
     // 按指定方向应用无符号字节偏移。
-    void applyOffset(uintptr_t offset, bool negative)
+    int applyOffset(uintptr_t offset, bool negative)
     {
+        int status = 0;
         if (negative) base_ = base_ < offset ? 0 : base_ - offset;
         else base_ = offset > std::numeric_limits<uintptr_t>::max() - base_ ? std::numeric_limits<uintptr_t>::max() : base_ + offset;
         if (format_ == Types::ViewFormat::Disasm) base_ &= ~static_cast<uintptr_t>(3);
-        refresh();
+        status = refresh();
+        return status;
     }
 
     // 按有符号字节偏移调整当前浏览基址。
-    void applyOffset(int64_t offset)
+    int applyOffset(int64_t offset)
     {
+        int status = 0;
         const auto magnitude = offset < 0 ? static_cast<uint64_t>(-(offset + 1)) + 1 : static_cast<uint64_t>(offset);
-        applyOffset(static_cast<uintptr_t>(magnitude), offset < 0);
+        status = applyOffset(static_cast<uintptr_t>(magnitude), offset < 0);
+        return status;
     }
 
     // 解析偏移字符串后调整当前浏览基址。
-    bool applyOffset(std::string_view offsetStr)
+    int applyOffset(std::string_view offsetStr)
     {
+        int status = 0;
         auto result = MemUtils::ParseHexOffset(offsetStr);
-        if (!result) return false;
-        applyOffset(result->offset, result->negative);
-        return true;
+        if (!result)
+        {
+            status = -EINVAL;
+            return status;
+        }
+        status = applyOffset(result->offset, result->negative);
+        return status;
     }
 };
+
+inline std::unique_ptr<MemViewer> gMemViewer = nullptr;
