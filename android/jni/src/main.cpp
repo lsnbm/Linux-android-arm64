@@ -124,6 +124,7 @@ namespace Colors
 // ============================================================================
 class MainUI
 {
+    // UI 构建器的样式：布局缩放、边距和透明度。
     float scale = 2.0f, margin = 40.0f, opacity = 1.0f;
     float S(float value) const noexcept { return value * scale; }
 
@@ -2143,6 +2144,9 @@ static bool daemonize(const char *log_path)
     return true;
 }
 
+// ============================================================================
+// 主函数
+// ============================================================================
 int main()
 {
     int status = 0;

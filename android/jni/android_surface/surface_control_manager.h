@@ -2,14 +2,30 @@
 SurfaceControl 私有 ABI（arm64-v8a）。签名以目标 AOSP tag 的 libs/gui/include/gui/
 SurfaceComposerClient.h、SurfaceControl.h 和设备 libgui 的动态导出为准：
 https://android.googlesource.com/platform/frameworks/native/
-Android 12/13 的 apply 和 setLayerStack 参数不同，14+ 使用 physical display token，
-17 的 mirrorSurface 增加参数；同名库可加载并不保证私有对象布局和返回约定相同。
 
+一、Android 12–17 的版本差异
+Functionals 优先读取 ro.build.version.sdk：31/32 对应 12/12L，33–37 对应 13–17；
+未识别的 SDK 才回退解析 ro.build.version.release。接口仍以设备的实际导出为准：
+    12/12L：setLayerStack(uint32_t)，apply(bool)，createSurface 的 android::LayerMetadata 按值传递。
+    13：setLayerStack(ui::LayerStack)，apply(bool, bool)，mirrorSurface 仍为单参数。
+    14–16：createSurface 的 flags 改为 int32_t，metadata 改为 android::gui::LayerMetadata 值参数。
+    17：mirrorSurface(source, stopAt, cropBy) 后两项传 nullptr；createSurface 的 metadata 改为 const 引用。
+12–13 使用 internal display token，14+ 使用 physical display ID。适配新版本时要同时核对
+函数签名、StrongPointer 返回约定、DisplayState 布局和对象对齐；能加载同名库不代表 ABI 兼容。
+
+二、截图与录屏开关
+渲染器的 init(true) 表示允许捕获，不会启动录屏；Create 的 preventCapture 含义相反。
+镜像必须挂到录屏 layerStack 的可见容器；仅有 mirrorSurface 句柄或事务成功，不代表录屏成片有内容。
 display 与 SurfaceFlinger 查询使用 Binder dump，不启动 shell。字段来自显示服务、
 LayerProtoParser 或前端 Layer Hierarchy 的输出，并非稳定 API；metadata 不是 Binder 身份。
-VulkanRenderer 的 allowCapture 与 Create 的 preventCapture 含义相反。镜像投影遵循 AOSP
-ui::Transform 的矩阵顺序，显示服务承担 displayRect 投影，本文件只处理 layerStackRect。
-历史真机验证来自 RMX3888 / Android 14；编译检查不验证其他 ROM 或录屏成片。
+
+三、横竖屏投影与验证边界
+独立镜像不会继承系统 ContentRecorder 对其他镜像根层施加的变换。主屏和录屏方向不同时，
+要先按方向差旋转，再等比缩放并居中到 layerStackRect；displayRect 投影由显示服务处理，不能重复施加。
+历史案例：RMX3888 / Android 14 上，主屏 2376×1080 横屏而 Oplus 录屏仍是 1080×2376 竖屏，
+正确映射为 x'=1080-y、y'=x。旧实现仅挂载镜像后，竖屏正常但横屏仍裁切。
+回归时分别检查接口、图层父子关系、虚拟显示合成条目和最终保存的视频。仅在列表中看见图层，
+或在一台设备上得到正常成片，都不能代替其他 ROM、反向横屏、禁止捕获和录屏重启的实测。
 */
 
 #ifndef SURFACE_CONTROL_MANAGER_H
@@ -925,6 +941,7 @@ namespace android
                 {
                     continue;
                 }
+                // 部分 ROM 不输出 displayRect；退回 layerStackRect。
                 if (!candidate.displayRect.Parse(detail::DisplayField(block, "mCurrentDisplayRect="))) candidate.displayRect = candidate.layerStackRect;
                 const int64_t width = candidate.layerStackRect.Width();
                 const int64_t height = candidate.layerStackRect.Height();
@@ -1045,6 +1062,7 @@ namespace android
             if (!transaction.valid) return false;
             const auto &f = detail::Functionals::GetInstance();
             detail::StrongPointer<void> rootPointer{found->second.root.data};
+            // setMatrix 顺序是 dsdx, dtdx, dtdy, dsdy：x'=dsdx*x+dtdy*y+tx，y'=dtdx*x+dsdy*y+ty。
             if (!f.SurfaceComposerClient__Transaction__SetCrop(transaction.data, rootPointer, {0, 0, source.width, source.height}) || !f.SurfaceComposerClient__Transaction__SetMatrix(transaction.data, rootPointer, diagonal, cross, -cross, diagonal) || !f.SurfaceComposerClient__Transaction__SetPosition(transaction.data, rootPointer, x, y)) return false;
             return transaction.Apply(false, true) == 0;
         }

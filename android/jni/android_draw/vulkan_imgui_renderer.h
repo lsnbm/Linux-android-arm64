@@ -4,24 +4,32 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
+#include <limits>
+#include <memory>
 #include <optional>
+#include <span>
 #include <vector>
 
 #include <android/native_window.h>
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_android.h>
 
+// Android/ImGui 依赖
 #include "android_imgui_input/imgui_touch_input.h"
 #include "android_surface/surface_control_manager.h"
 #include "font/oppo_font.h"
 #include "imgui/backends/imgui_impl_android.h"
 #include "imgui/backends/imgui_impl_vulkan.h"
 #include "imgui/imgui.h"
+#include "imgui/imgui_internal.h" // RegisterUserTexture / UnregisterUserTexture
 #include "logger/logger.h"
 
+// Vulkan 后端实现
 class VulkanRenderer
 {
     std::optional<TouchInput> input;
+    std::vector<std::unique_ptr<ImTextureData>> textures_;
     VkInstance instance_ = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     VkDevice device_ = VK_NULL_HANDLE;
@@ -133,6 +141,7 @@ class VulkanRenderer
         createInfo.imageArrayLayers = 1;
         createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
         createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        // 支持时使用 identity transform，显示方向由系统显示投影处理。
         createInfo.preTransform = capabilities.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR ? VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR : capabilities.currentTransform;
         for (auto alpha : {VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR, VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR, VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR, VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR})
         {
@@ -144,6 +153,7 @@ class VulkanRenderer
         }
         createInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;
         createInfo.clipped = VK_TRUE;
+        // 将旧交换链传给驱动；在新链的创建调用结束前不能销毁旧链。
         createInfo.oldSwapchain = swapchain_;
         VkSwapchainKHR newSwapchain = VK_NULL_HANDLE;
         status = vkCreateSwapchainKHR(device_, &createInfo, nullptr, &newSwapchain);
@@ -289,6 +299,9 @@ class VulkanRenderer
         lastRecordDisplayScan_ = {};
 
         if (vulkan_backend_initialized) ImGui_ImplVulkan_Shutdown();
+        // 后端在设备空闲后释放已上传的纹理；此时才可撤销注册并释放像素和描述对象。
+        for (const auto &texture : textures_) ImGui::UnregisterUserTexture(texture.get());
+        textures_.clear();
         if (android_backend_initialized) ImGui_ImplAndroid_Shutdown();
         if (imgui_context_created) ImGui::DestroyContext();
         vulkan_backend_initialized = false;
@@ -341,6 +354,28 @@ public:
     VulkanRenderer &operator=(const VulkanRenderer &) = delete;
     ~VulkanRenderer() { shutdown(); }
 
+    // init() 成功后可借用；使用此引用的线程必须先于渲染器析构退出。
+    [[nodiscard]] const TouchInput &touchInput() const { return input.value(); }
+
+    // 在渲染线程调用。引用可在本帧立即绘制，有效期至本实例析构。
+    std::optional<ImTextureRef> createRgbaTexture(int width, int height, std::span<const uint8_t> pixels)
+    {
+        if (!vulkan_backend_initialized || width <= 0 || height <= 0) return std::nullopt;
+        if (width > std::numeric_limits<int>::max() / 4 / height) return std::nullopt;
+        if (pixels.size() != static_cast<size_t>(width * height * 4)) return std::nullopt;
+        const auto &platform = ImGui::GetPlatformIO();
+        if ((platform.Renderer_TextureMaxWidth > 0 && width > platform.Renderer_TextureMaxWidth) ||
+            (platform.Renderer_TextureMaxHeight > 0 && height > platform.Renderer_TextureMaxHeight)) return std::nullopt;
+
+        auto texture = std::make_unique<ImTextureData>();
+        texture->Create(ImTextureFormat_RGBA32, width, height);
+        std::memcpy(texture->GetPixels(), pixels.data(), pixels.size());
+        texture->UseColors = true;
+        auto &owned = textures_.emplace_back(std::move(texture));
+        ImGui::RegisterUserTexture(owned.get());
+        return owned->GetTexRef();
+    }
+
     int init(bool allowCapture)
     {
         int status = 0;
@@ -361,8 +396,11 @@ public:
             displayInfo.height = 2340;
             displayInfo.orientation = 0;
         }
-        // SurfaceFlinger 负责旋转投影；方形缓冲不随逻辑屏幕宽高交换。
+        // 主 SurfaceControl 只创建一次，旋转时由系统显示投影改变方向，不重建 layer。
+        // 缓冲保持长边方形：setBuffersGeometry 只改缓冲像素尺寸，不改图层几何，旋转时交换宽高会拉伸画面。
+        // displayInfo.width/height 仍是屏幕逻辑尺寸，用于界面布局和触摸坐标。
         const int max_side = std::max(displayInfo.width, displayInfo.height);
+        // 这是独立绘制层；与系统无障碍容器同名，不代表挂在该容器下，也不代表它是无障碍服务。
         native_window = android::SurfaceControlManager::Create("Accessibility Overlays", max_side, max_side, !allowCapture, 2024);
         if (!native_window)
         {
@@ -509,6 +547,7 @@ public:
             return status;
         }
 
+        // 初始化 ImGui
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
         imgui_context_created = true;
@@ -546,6 +585,7 @@ public:
         font_cfg.FontDataOwnedByAtlas = false;
         io.Fonts->AddFontFromMemoryTTF((void *)OPPOSans_H, OPPOSans_H_size, 31.0f, &font_cfg, io.Fonts->GetGlyphRangesChineseFull());
         ImGui::GetStyle().ScaleAllSizes(3.0f);
+        // 在输入线程启动前设置触摸坐标所用的屏幕尺寸和方向。
         input.emplace().setScreen(displayInfo.width, displayInfo.height, displayInfo.orientation);
         status = input->start();
         if (status != 0)
@@ -579,6 +619,7 @@ public:
                 displayInfo = updated;
                 input->setScreen(displayInfo.width, displayInfo.height, displayInfo.orientation);
                 swapChainRebuild_ = true;
+                // 不等待常规轮询周期，下一次呈现后立即刷新录屏投影。
                 lastRecordDisplayScan_ = {};
             }
         }
@@ -600,6 +641,7 @@ public:
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplAndroid_NewFrame();
         ImGui::NewFrame();
+        // 启动或旋转时只将菜单拉回左上角一帧，之后仍可自由拖拽。
         if (firstFrame_ || rotated) ImGui::SetNextWindowPos(ImVec2(100.0f, 100.0f), ImGuiCond_Always);
         firstFrame_ = false;
         const bool block = draw(displayInfo.width, displayInfo.height);
@@ -681,6 +723,7 @@ public:
             return status;
         }
 
+        // 检测录屏虚拟显示的目标 layerStack，将主绘制层镜像到该显示。
         if (!allowCapture_) return status;
         const auto presentedAt = std::chrono::steady_clock::now();
         if (lastRecordDisplayScan_ == std::chrono::steady_clock::time_point{} || presentedAt - lastRecordDisplayScan_ >= std::chrono::seconds(2))

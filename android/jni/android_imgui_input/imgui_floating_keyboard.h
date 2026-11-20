@@ -32,6 +32,7 @@ private:
         draft.append(text.substr(0, count));
     }
 
+    // ========== 按键渲染 ==========
     static bool KeyButton(const char *label, ImVec2 size, ImVec4 color = ImVec4(0.25f, 0.25f, 0.28f, 1.0f))
     {
         ImGui::PushStyleColor(ImGuiCol_Button, color);
@@ -101,13 +102,17 @@ public:
         return ConsumeResult(buffer) == Result::Accepted;
     }
 
+    // ========== 主绘制函数 ==========
     void Draw()
     {
         if (!target_buffer) return;
 
+        // 键盘固定缩放 1.4 倍，按键高度和间距跟随缩放。
         constexpr float scale = 1.4f, spacing = 5.0f * scale, key_height = 78.0f * scale;
         const ImVec2 display = ImGui::GetIO().DisplaySize;
+        // 确保不超过屏幕宽度。
         const float width = std::min(820.0f * scale, display.x * 0.98f);
+        // 打开键盘或屏幕尺寸变化时，重新定位到水平居中、靠上的位置。
         if (just_opened || last_display.x != display.x || last_display.y != display.y)
         {
             ImGui::SetNextWindowPos(ImVec2(std::max(10.0f, (display.x - width) * 0.5f), std::max(10.0f, display.y * 0.15f)));
@@ -119,6 +124,7 @@ public:
             just_opened = false;
         }
         ImGui::SetNextWindowSize(ImVec2(width, 0));
+        // ===== 样式 =====
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.13f, 0.13f, 0.15f, 0.97f));
         ImGui::PushStyleColor(ImGuiCol_TitleBg, ImVec4(0.18f, 0.18f, 0.22f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_TitleBgActive, ImVec4(0.22f, 0.22f, 0.28f, 1.0f));
@@ -129,12 +135,15 @@ public:
         bool open = true, accepted = false;
         if (ImGui::Begin(window_title.c_str(), &open, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings))
         {
+            // ===== 字体缩放 =====
             ImGui::SetWindowFontScale(scale);
+            // 窗口边界修正
             const ImVec2 pos = ImGui::GetWindowPos(), size = ImGui::GetWindowSize();
             const ImVec2 bounded(std::clamp(pos.x, 0.0f, std::max(0.0f, display.x - size.x)),
                                  std::clamp(pos.y, 0.0f, std::max(0.0f, display.y - size.y)));
             if (pos.x != bounded.x || pos.y != bounded.y) ImGui::SetWindowPos(bounded);
 
+            // ===== 输入预览 + 复制/粘贴/清空按钮 =====
             const float available = ImGui::GetContentRegionAvail().x;
             const ImVec2 edit_size(70.0f * scale, 38.0f * scale);
             ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.08f, 0.08f, 0.1f, 1.0f));
@@ -154,10 +163,12 @@ public:
             if (KeyButton("清空", edit_size, ImVec4(0.5f, 0.25f, 0.2f, 1.0f))) draft.clear();
             ImGui::Separator();
             ImGui::Spacing();
+            // ===== 按键 =====
             ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(spacing, spacing));
 
             const bool letters = mode == Mode::Letters, numbers = mode == Mode::Numbers;
             const bool upper = shift_active || caps_lock_active;
+            // 依次是小写字母、数字与符号、第二页符号、大写字母；每个布局列出前三行字符。
             static constexpr const char *rows[][3] = {
                 {"qwertyuiop", "asdfghjkl", "zxcvbnm"},
                 {"1234567890", "@#$_&-+()/", "*\"':;!?"},
@@ -199,6 +210,7 @@ public:
                 draft.resize(last);
             }
 
+            // 第 4 行各布局共用：模式切换、标点、空格和确认。
             const ImVec2 mode_key(key.x * 1.3f, key_height);
             if (KeyButton(letters ? "?123" : "ABC", mode_key, mode_color)) mode = letters ? Mode::Numbers : Mode::Letters;
             ImGui::SameLine();
