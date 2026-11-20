@@ -5,7 +5,6 @@
 #include <mutex>
 #include <string>
 
-#include "../../android_draw/vulkan_imgui_renderer.h"
 #include "../../driver/driver.h"
 #include "../base/config.h"
 #include "../memory/mem_scanner.h"
@@ -38,34 +37,39 @@ public:
 
         int start()
         {
+            int status = 0;
+            std::lock_guard targetLock(Config::TargetMutex);
             std::lock_guard lock(mutex_);
             const int targetPid = driver_.GetGlobalPid();
-            if (targetPid <= 0) return EINVAL;
+            if (targetPid <= 0) return status = EINVAL;
 
             const int monitoredPid = pid_.load(std::memory_order_acquire);
-            if (monitoredPid == targetPid) return 0;
+            if (monitoredPid == targetPid) return status;
             if (monitoredPid > 0)
             {
-                const int status = kind_ == Kind::Syscall ? driver_.StopSyscallMonitor(monitoredPid) : driver_.StopCntvctMonitor(monitoredPid);
+                status = kind_ == Kind::Syscall ? driver_.StopSyscallMonitor(monitoredPid) : driver_.StopCntvctMonitor(monitoredPid);
                 if (status != 0) return status;
                 pid_.store(0, std::memory_order_release);
             }
 
-            const int status = kind_ == Kind::Syscall ? driver_.StartSyscallMonitor(targetPid) : driver_.StartCntvctMonitor(targetPid);
+            status = kind_ == Kind::Syscall ? driver_.StartSyscallMonitor(targetPid) : driver_.StartCntvctMonitor(targetPid);
             if (status == 0) pid_.store(targetPid, std::memory_order_release);
             return status;
         }
 
         int stop()
         {
+            int status = 0;
             std::lock_guard lock(mutex_);
             const int monitoredPid = pid_.load(std::memory_order_acquire);
-            if (monitoredPid <= 0) return 0;
+            if (monitoredPid <= 0) return status;
 
-            const int status = kind_ == Kind::Syscall ? driver_.StopSyscallMonitor(monitoredPid) : driver_.StopCntvctMonitor(monitoredPid);
+            status = kind_ == Kind::Syscall ? driver_.StopSyscallMonitor(monitoredPid) : driver_.StopCntvctMonitor(monitoredPid);
             if (status == 0) pid_.store(0, std::memory_order_release);
             return status;
         }
+
+        ~ProcessMonitor() { stop(); }
 
         int monitoredPid() const noexcept
         {
@@ -73,111 +77,45 @@ public:
         }
     };
 
-    class ResourceSet
-    {
-    private:
-        Driver &driver_;
-
-    public:
-        MemScanner<Driver> scanner;
-        MemViewer viewer;
-        PointerManager pointer;
-        SavedAddressManager saved;
-        std::string hwbpMode;
-        ProcessMonitor syscallMonitor;
-        ProcessMonitor cntvctMonitor;
-
-        explicit ResourceSet(Driver &driver) : driver_(driver), scanner(driver), syscallMonitor(driver, ProcessMonitor::Kind::Syscall), cntvctMonitor(driver, ProcessMonitor::Kind::Cntvct)
-        {
-        }
-
-        ResourceSet(const ResourceSet &) = delete;
-        ResourceSet &operator=(const ResourceSet &) = delete;
-
-        int startSyscallMonitor()
-        {
-            std::lock_guard targetLock(Config::TargetMutex);
-            return syscallMonitor.start();
-        }
-
-        int startCntvctMonitor()
-        {
-            std::lock_guard targetLock(Config::TargetMutex);
-            return cntvctMonitor.start();
-        }
-
-        bool selectTarget(int pid)
-        {
-            std::lock_guard targetLock(Config::TargetMutex);
-            if (pid <= 0) return false;
-            if (pid == driver_.GetGlobalPid()) return true;
-            if (scanner.isScanning() || pointer.isBusy()) return false;
-            if (syscallMonitor.stop() != 0 || cntvctMonitor.stop() != 0) return false;
-
-            if (hwbpMode == "hwbp") driver_.RemoveProcessHwbpRef();
-            else if (hwbpMode == "ptebp") driver_.RemoveProcessPtebpRef();
-            else if (hwbpMode == "dptbp") driver_.RemoveProcessDptbpRef();
-            else if (hwbpMode == "stepbp") driver_.RemoveProcessStepbpRef();
-
-            hwbpMode.clear();
-            saved.clear();
-            scanner.clear();
-            viewer.clear();
-            pointer.clear();
-            driver_.SetGlobalPid(pid);
-            return true;
-        }
-
-        ~ResourceSet()
-        {
-            syscallMonitor.stop();
-            cntvctMonitor.stop();
-        }
-    };
-
 private:
-    Config::ThreadPools threadPools_;
-    std::unique_ptr<ResourceSet> resources_;
-    bool graphicsInitialized_ = false;
+    Driver &driver_;
 
 public:
-    explicit ApplicationRuntime(Driver &driver)
+    MemScanner<Driver> scanner;
+    MemViewer viewer;
+    PointerManager pointer;
+    SavedAddressManager saved;
+    std::string hwbpMode;
+    ProcessMonitor syscallMonitor;
+    ProcessMonitor cntvctMonitor;
+
+    explicit ApplicationRuntime(Driver &driver) : driver_(driver), scanner(driver), syscallMonitor(driver, ProcessMonitor::Kind::Syscall), cntvctMonitor(driver, ProcessMonitor::Kind::Cntvct)
     {
-        try
-        {
-            Config::InstallThreadPools(threadPools_);
-            resources_ = std::make_unique<ResourceSet>(driver);
-        }
-        catch (...)
-        {
-            Config::UninstallThreadPools(threadPools_);
-            threadPools_.shutdown();
-            throw;
-        }
     }
 
     ApplicationRuntime(const ApplicationRuntime &) = delete;
     ApplicationRuntime &operator=(const ApplicationRuntime &) = delete;
 
-    ~ApplicationRuntime()
+    bool selectTarget(int pid)
     {
-        Config::g_Running = false;
-        if (graphicsInitialized_) RenderVK::shutdown();
-        threadPools_.shutdown();
-        resources_.reset();
-        Config::UninstallThreadPools(threadPools_);
+        std::lock_guard targetLock(Config::TargetMutex);
+        if (pid <= 0) return false;
+        if (pid == driver_.GetGlobalPid()) return true;
+        if (scanner.isScanning() || pointer.isBusy()) return false;
+        if (syscallMonitor.stop() != 0 || cntvctMonitor.stop() != 0) return false;
+
+        if (hwbpMode == "hwbp") driver_.RemoveProcessHwbpRef();
+        else if (hwbpMode == "ptebp") driver_.RemoveProcessPtebpRef();
+        else if (hwbpMode == "dptbp") driver_.RemoveProcessDptbpRef();
+        else if (hwbpMode == "stepbp") driver_.RemoveProcessStepbpRef();
+
+        hwbpMode.clear();
+        saved.clear();
+        scanner.clear();
+        viewer.clear();
+        pointer.clear();
+        driver_.SetGlobalPid(pid);
+        return true;
     }
 
-    ResourceSet &resources() noexcept
-    {
-        return *resources_;
-    }
-
-    int initializeGraphics(bool allowCapture)
-    {
-        int status = 0;
-        status = RenderVK::init(allowCapture);
-        graphicsInitialized_ = status == 0;
-        return status;
-    }
 };

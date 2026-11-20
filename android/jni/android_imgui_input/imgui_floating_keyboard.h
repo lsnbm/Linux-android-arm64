@@ -7,114 +7,106 @@
 #include <string_view>
 #include <utility>
 
-namespace ImGuiFloatingKeyboard
+class FloatingKeyboard
 {
+public:
     enum class Result { None, Accepted, Cancelled };
 
-    namespace Internal
+private:
+    enum class Mode { Letters, Numbers, Symbols };
+    Mode mode = Mode::Letters;
+    std::string draft, window_title;
+    char *target_buffer = nullptr;
+    size_t capacity = 0;
+    const char *result_buffer = nullptr;
+    Result result = Result::None;
+    ImVec2 last_display{};
+    bool just_opened = false, shift_active = false, caps_lock_active = false;
+
+    void Append(std::string_view text)
     {
-        inline char *target_buffer = nullptr;
-        inline size_t target_buffer_size = 0;
-        inline std::string window_title;
-        inline bool just_opened = false;
-        inline bool shift_active = false, caps_lock_active = false;
-        enum class Mode { Letters, Numbers, Symbols };
-        inline Mode mode = Mode::Letters;
-        inline const char *result_buffer = nullptr;
-        inline Result result = Result::None;
+        size_t count = std::min(text.size(), capacity - 1 - draft.size());
+        // ImGui 使用 UTF-8；容量不足时，不拷贝跨越末尾的半个字符。
+        if (count < text.size())
+            while (count && (static_cast<unsigned char>(text[count]) & 0xc0) == 0x80) --count;
+        draft.append(text.substr(0, count));
     }
 
-    inline void Open(char *buffer, size_t buffer_size, const char *title = "Keyboard")
+    static bool KeyButton(const char *label, ImVec2 size, ImVec4 color = ImVec4(0.25f, 0.25f, 0.28f, 1.0f))
     {
-        if (!buffer || !buffer_size) return;
-        buffer[buffer_size - 1] = '\0';
-        Internal::target_buffer = buffer;
-        Internal::target_buffer_size = buffer_size;
-        Internal::window_title = title ? title : "Keyboard";
-        Internal::just_opened = true;
-        Internal::shift_active = Internal::caps_lock_active = false;
-        Internal::mode = Internal::Mode::Letters;
-        Internal::result_buffer = nullptr;
-        Internal::result = Result::None;
+        ImGui::PushStyleColor(ImGuiCol_Button, color);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(color.x + 0.12f, color.y + 0.12f, color.z + 0.12f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(color.x + 0.22f, color.y + 0.22f, color.z + 0.22f, 1.0f));
+        const bool pressed = ImGui::Button(label, size);
+        ImGui::PopStyleColor(3);
+        return pressed;
     }
 
-    inline Result ConsumeResult(const char *buffer)
+    void CharacterRow(const char *keys, ImVec2 size, bool letters)
     {
-        if (Internal::result_buffer != buffer) return Result::None;
-        Internal::result_buffer = nullptr;
-        return std::exchange(Internal::result, Result::None);
+        for (; *keys; ++keys)
+        {
+            char label[] = {*keys, '\0'};
+            if (KeyButton(label, size))
+            {
+                Append({keys, 1});
+                if (letters && !caps_lock_active) shift_active = false;
+            }
+            if (keys[1]) ImGui::SameLine();
+        }
     }
 
-    template <size_t N> inline bool InputButton(char (&buffer)[N], const char *placeholder, ImVec2 size, const char *title = nullptr)
+public:
+    template <size_t N> void Open(char (&buffer)[N], const char *title)
+    {
+        draft.assign(buffer, strnlen(buffer, N - 1));
+        window_title = title ? title : "Keyboard";
+        target_buffer = buffer;
+        capacity = N;
+        just_opened = true;
+        shift_active = caps_lock_active = false;
+        mode = Mode::Letters;
+        result_buffer = nullptr;
+        result = Result::None;
+    }
+
+    Result ConsumeResult(const char *buffer)
+    {
+        if (result_buffer != buffer) return Result::None;
+        result_buffer = nullptr;
+        return std::exchange(result, Result::None);
+    }
+
+    template <size_t N> bool InputButton(char (&buffer)[N], const char *placeholder, ImVec2 size, const char *title = nullptr)
     {
         std::string label = buffer[0] ? buffer : placeholder;
         label += "###keyboard_input";
         ImGui::PushID(static_cast<const void *>(buffer));
-        if (ImGui::Button(label.c_str(), size)) Open(buffer, N, title ? title : placeholder);
+        if (ImGui::Button(label.c_str(), size)) Open(buffer, title ? title : placeholder);
         ImGui::PopID();
         return ConsumeResult(buffer) == Result::Accepted;
     }
 
-    template <size_t N> inline bool ActionButton(const char *label, ImVec2 size, char (&buffer)[N], const char *title, ImVec4 color = {}, bool clearOnOpen = true)
+    template <size_t N> bool ActionButton(const char *label, ImVec2 size, char (&buffer)[N], const char *title, ImVec4 color = {})
     {
         ImGui::PushID(static_cast<const void *>(buffer));
         if (color.w > 0.0f) ImGui::PushStyleColor(ImGuiCol_Button, color);
         if (ImGui::Button(label, size))
         {
-            if (clearOnOpen) buffer[0] = '\0';
-            Open(buffer, N, title);
+            Open(buffer, title);
+            draft.clear();
         }
         if (color.w > 0.0f) ImGui::PopStyleColor();
         ImGui::PopID();
         return ConsumeResult(buffer) == Result::Accepted;
     }
 
-    namespace Internal
+    void Draw()
     {
-        inline void Append(std::string_view text)
-        {
-            const size_t length = std::strlen(target_buffer);
-            size_t count = std::min(text.size(), target_buffer_size - length - 1);
-            // ImGui 使用 UTF-8；容量不足时，不拷贝跨越末尾的半个字符。
-            if (count < text.size())
-                while (count && (static_cast<unsigned char>(text[count]) & 0xc0) == 0x80) --count;
-            std::memmove(target_buffer + length, text.data(), count);
-            target_buffer[length + count] = '\0';
-        }
-
-        inline bool KeyButton(const char *label, ImVec2 size, ImVec4 color = ImVec4(0.25f, 0.25f, 0.28f, 1.0f))
-        {
-            ImGui::PushStyleColor(ImGuiCol_Button, color);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(color.x + 0.12f, color.y + 0.12f, color.z + 0.12f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(color.x + 0.22f, color.y + 0.22f, color.z + 0.22f, 1.0f));
-            const bool pressed = ImGui::Button(label, size);
-            ImGui::PopStyleColor(3);
-            return pressed;
-        }
-
-        inline void CharacterRow(const char *keys, ImVec2 size, bool letters)
-        {
-            for (; *keys; ++keys)
-            {
-                char label[] = {*keys, '\0'};
-                if (KeyButton(label, size))
-                {
-                    Append({keys, 1});
-                    if (letters && !caps_lock_active) shift_active = false;
-                }
-                if (keys[1]) ImGui::SameLine();
-            }
-        }
-    }
-
-    inline void Draw()
-    {
-        using namespace Internal;
         if (!target_buffer) return;
 
         constexpr float scale = 1.4f, spacing = 5.0f * scale, key_height = 78.0f * scale;
         const ImVec2 display = ImGui::GetIO().DisplaySize;
-        static ImVec2 last_display{};
         const float width = std::min(820.0f * scale, display.x * 0.98f);
         if (just_opened || last_display.x != display.x || last_display.y != display.y)
         {
@@ -148,18 +140,18 @@ namespace ImGuiFloatingKeyboard
             ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.08f, 0.08f, 0.1f, 1.0f));
             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(12.0f * scale, 12.0f * scale));
             ImGui::SetNextItemWidth(available - 3 * (edit_size.x + ImGui::GetStyle().ItemSpacing.x));
-            ImGui::InputText("##preview", target_buffer, target_buffer_size, ImGuiInputTextFlags_ReadOnly);
+            ImGui::InputText("##preview", draft.data(), draft.size() + 1, ImGuiInputTextFlags_ReadOnly);
             ImGui::PopStyleVar();
             ImGui::PopStyleColor();
             ImGui::SameLine();
-            if (KeyButton("复制", edit_size, ImVec4(0.2f, 0.4f, 0.5f, 1.0f)) && *target_buffer) ImGui::SetClipboardText(target_buffer);
+            if (KeyButton("复制", edit_size, ImVec4(0.2f, 0.4f, 0.5f, 1.0f)) && !draft.empty()) ImGui::SetClipboardText(draft.c_str());
             ImGui::SameLine();
             if (KeyButton("粘贴", edit_size, ImVec4(0.3f, 0.45f, 0.25f, 1.0f)))
             {
                 if (const char *clipboard = ImGui::GetClipboardText()) Append(clipboard);
             }
             ImGui::SameLine();
-            if (KeyButton("清空", edit_size, ImVec4(0.5f, 0.25f, 0.2f, 1.0f))) target_buffer[0] = '\0';
+            if (KeyButton("清空", edit_size, ImVec4(0.5f, 0.25f, 0.2f, 1.0f))) draft.clear();
             ImGui::Separator();
             ImGui::Spacing();
             ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(spacing, spacing));
@@ -200,11 +192,11 @@ namespace ImGuiFloatingKeyboard
             CharacterRow(layout[2], ImVec2((available - wide.x * 2 - spacing * 8) / 7, key_height), letters);
             ImGui::PopID();
             ImGui::SameLine();
-            if (KeyButton("DEL", wide, ImVec4(0.55f, 0.2f, 0.2f, 1.0f)) && *target_buffer)
+            if (KeyButton("DEL", wide, ImVec4(0.55f, 0.2f, 0.2f, 1.0f)) && !draft.empty())
             {
-                size_t last = std::strlen(target_buffer) - 1;
-                while (last && (static_cast<unsigned char>(target_buffer[last]) & 0xc0) == 0x80) --last;
-                target_buffer[last] = '\0';
+                size_t last = draft.size() - 1;
+                while (last && (static_cast<unsigned char>(draft[last]) & 0xc0) == 0x80) --last;
+                draft.resize(last);
             }
 
             const ImVec2 mode_key(key.x * 1.3f, key_height);
@@ -225,8 +217,9 @@ namespace ImGuiFloatingKeyboard
         ImGui::PopStyleColor(3);
         if (accepted || !open)
         {
+            if (accepted) std::memcpy(target_buffer, draft.c_str(), draft.size() + 1);
             result_buffer = std::exchange(target_buffer, nullptr);
             result = accepted ? Result::Accepted : Result::Cancelled;
         }
     }
-}
+};

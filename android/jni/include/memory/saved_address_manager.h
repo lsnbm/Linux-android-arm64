@@ -1,8 +1,11 @@
 #pragma once
 #include "../base/memory_utils.h"
 #include <atomic>
+#include <chrono>
+#include <future>
 #include <list>
 #include <mutex>
+#include <thread>
 
 class SavedAddressManager
 {
@@ -70,16 +73,15 @@ private:
 public:
     SavedAddressManager()
     {
-        writeTask_ = Config::IoThreadPool().submit_task([this]
+        writeTask_ = std::async(std::launch::async, [this]
         {
-            while (!writeStop_.load(std::memory_order_acquire) && Config::g_Running)
+            while (!writeStop_.load(std::memory_order_acquire))
             {
-                std::vector<LockItem> snapshot;
                 {
                     std::lock_guard lock(mutex_);
-                    snapshot.assign(locks_.begin(), locks_.end());
+                    // clear/remove 返回后，不应再按旧地址提交后台写入。
+                    for (const auto &item : locks_) writeValue(item.addr, item.type, item.kind, item.value);
                 }
-                for (const auto &item : snapshot) writeValue(item.addr, item.type, item.kind, item.value);
                 std::this_thread::sleep_for(std::chrono::milliseconds(20));
             }
         });
@@ -88,7 +90,7 @@ public:
     ~SavedAddressManager()
     {
         writeStop_.store(true, std::memory_order_release);
-        if (writeTask_.valid()) writeTask_.wait();
+        writeTask_.wait();
     }
 
     bool contains(uintptr_t addr) const

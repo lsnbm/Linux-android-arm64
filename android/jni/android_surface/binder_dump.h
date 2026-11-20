@@ -1,4 +1,5 @@
 #pragma once
+#include "../include/base/owned_fd.h"
 
 #include <android/binder_ibinder.h>
 #include <dlfcn.h>
@@ -45,24 +46,10 @@ namespace android::detail
     // 每个服务复用一个 reader。超时不代表事务已取消；未完成请求阻止下一次提交。
     class BinderDumpReader
     {
-        struct FileDescriptor
-        {
-            int value;
-            explicit FileDescriptor(int fd) : value(fd) {}
-            FileDescriptor(const FileDescriptor &) = delete;
-            FileDescriptor &operator=(const FileDescriptor &) = delete;
-            void Close()
-            {
-                if (value >= 0) close(value);
-                value = -1;
-            }
-            ~FileDescriptor() { Close(); }
-        };
-
         struct Request
         {
             std::string service;
-            FileDescriptor writer{-1};
+            Io::Fd writer;
             std::atomic<bool> cancelled{false};
             std::mutex mutex;
             bool done = false;
@@ -95,7 +82,7 @@ namespace android::detail
             try
             {
                 std::shared_ptr<Request> request;
-                FileDescriptor reader{-1};
+                Io::Fd reader;
                 {
                     std::lock_guard lock(mutex);
                     if (auto previous = pending.lock())
@@ -106,10 +93,10 @@ namespace android::detail
                     request = std::make_shared<Request>(service);
                     int fds[2];
                     if (pipe2(fds, O_CLOEXEC) != 0) return status = -errno;
-                    reader.value = fds[0];
-                    request->writer.value = fds[1];
-                    const int flags = fcntl(reader.value, F_GETFL);
-                    if (flags < 0 || fcntl(reader.value, F_SETFL, flags | O_NONBLOCK) < 0) return status = -errno;
+                    reader.reset(fds[0]);
+                    request->writer.reset(fds[1]);
+                    const int flags = fcntl(reader.get(), F_GETFL);
+                    if (flags < 0 || fcntl(reader.get(), F_SETFL, flags | O_NONBLOCK) < 0) return status = -errno;
                     // 仅读端非阻塞；写端维持阻塞语义，服务端不会因 EAGAIN 产生截断输出。
                     pending = request;
                     std::thread([request]
@@ -127,7 +114,7 @@ namespace android::detail
                             else if (!api.checkService || !api.dump || !api.decStrong) status = -ENOSYS;
                             else if (AIBinder *binder = api.checkService(request->service.c_str()))
                             {
-                                status = request->cancelled.load() ? -ETIMEDOUT : api.dump(binder, request->writer.value, nullptr, 0);
+                                status = request->cancelled.load() ? -ETIMEDOUT : api.dump(binder, request->writer.get(), nullptr, 0);
                                 api.decStrong(binder);
                             }
                             else status = -ENOENT;
@@ -136,7 +123,7 @@ namespace android::detail
                         std::lock_guard lock(request->mutex);
                         request->status = status;
                         request->done = true;
-                        request->writer.Close();
+                        request->writer.reset();
                     }).detach();
                 }
                 CancelOnReturn cancel{*request};
@@ -147,7 +134,7 @@ namespace android::detail
                     const auto remaining = deadline - std::chrono::steady_clock::now();
                     if (remaining <= decltype(remaining)::zero()) return status = -ETIMEDOUT;
                     const auto milliseconds = std::chrono::ceil<std::chrono::milliseconds>(remaining).count();
-                    pollfd fd{reader.value, POLLIN, 0};
+                    pollfd fd{reader.get(), POLLIN, 0};
                     const int result = poll(&fd, 1, milliseconds > INT_MAX ? INT_MAX : static_cast<int>(milliseconds));
                     if (result < 0)
                     {
@@ -157,7 +144,7 @@ namespace android::detail
                     if (result == 0) continue;
                     if (fd.revents & POLLNVAL) return status = -EBADF;
                     // POLLHUP 仍可能有尾部数据，必须读到 EOF，而不是看到 HUP 就截断。
-                    const ssize_t count = read(reader.value, buffer, sizeof(buffer));
+                    const ssize_t count = read(reader.get(), buffer, sizeof(buffer));
                     if (count < 0)
                     {
                         if (errno == EINTR || errno == EAGAIN) continue;

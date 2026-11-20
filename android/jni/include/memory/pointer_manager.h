@@ -1,7 +1,10 @@
 #pragma once
 #include "../base/memory_utils.h"
+#include "../base/owned_file.h"
+#include "../../thread-pool/include/BS_thread_pool.hpp"
 #include <atomic>
 #include <functional>
+#include <future>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -106,16 +109,6 @@ public:
     };
 
 private:
-    struct FileCloser
-    {
-        void operator()(FILE *file) const noexcept
-        {
-            if (file) fclose(file);
-        }
-    };
-
-    using FilePtr = std::unique_ptr<FILE, FileCloser>;
-
     std::mutex block_mtx_;
     std::condition_variable block_cv_;
     std::vector<PtrData> pointers_;
@@ -129,6 +122,8 @@ private:
     std::atomic<bool> success_{false};
     mutable std::mutex statusMutex_;
     std::string lastError_;
+    std::optional<BS::thread_pool<>> workers_;
+    std::future<void> task_;
 
     bool beginOperation(Operation operation)
     {
@@ -307,7 +302,7 @@ private:
         int fd = mkstemp(tempPath);
         if (fd < 0) return false;
 
-        FilePtr temp(fdopen(fd, "w+b"));
+        Io::File temp(fdopen(fd, "w+b"));
         if (!temp)
         {
             close(fd);
@@ -470,12 +465,13 @@ private:
         if (curr.empty()) return futures;
         if (prev.size() > std::numeric_limits<uint32_t>::max()) throw std::length_error("指针层节点数量超出格式上限");
         size_t total = curr.size(), pos = 0;
+        futures.reserve(1 + (total - 1) / 10000);
         try
         {
             while (pos < total)
             {
                 size_t chunk = std::min(total - pos, static_cast<size_t>(10000));
-                futures.push_back(Config::CpuThreadPool().submit_task([&prev, nodes = &curr[pos], chunk, offset]
+                futures.push_back(workers_->submit_task([&prev, nodes = &curr[pos], chunk, offset]
                 {
                     for (size_t index = 0; index < chunk; ++index)
                     {
@@ -630,9 +626,6 @@ private:
     }
 
 public:
-    PointerManager() = default;
-    ~PointerManager() = default;
-
     static std::string_view OperationName(Operation operation)
     {
         switch (operation)
@@ -674,6 +667,7 @@ public:
         lastError_.clear();
     }
 
+private:
     // 采集进程可用指针并建立初始集合。
     bool CollectPointers(size_t &pointerCount, int buf_count = 10, int buf_size = 1 << 20)
     {
@@ -682,7 +676,7 @@ public:
         if (regions_.empty() || buf_count <= 0 || buf_size < static_cast<int>(sizeof(uintptr_t))) return false;
         const size_t blockSize = static_cast<size_t>(buf_size) / sizeof(uintptr_t) * sizeof(uintptr_t);
 
-        FilePtr merged(tmpfile());
+        Io::File merged(tmpfile());
         if (!merged)
         {
             LS_LOGE_TAG("Pointer", "无法创建合并临时文件");
@@ -702,14 +696,15 @@ public:
         std::mutex mergedMtx;
         std::atomic<bool> collectionFailed{false};
         std::vector<std::future<void>> futures;
-        const size_t maxPending = std::max<size_t>(1, std::min<size_t>(static_cast<size_t>(buf_count), Config::CpuThreadPool().get_thread_count()));
+        const size_t maxPending = std::min<size_t>(buf_count, workers_->get_thread_count());
+        futures.reserve(maxPending);
         try
         {
             for (auto &[rstart, rend] : regions_)
             {
                 for (uintptr_t pos = rstart; pos < rend; pos += blockSize)
                 {
-                    futures.push_back(Config::CpuThreadPool().submit_task(
+                    futures.push_back(workers_->submit_task(
                         [this, &bufs, &idx, pos, chunk = std::min(static_cast<size_t>(rend - pos), blockSize), file = merged.get(), &mergedMtx, &collectionFailed]
                         {
                             std::vector<PtrData> blockPointers;
@@ -846,7 +841,8 @@ public:
         scanProgress_ = 0.0f;
         try
         {
-            Config::IoThreadPool().detach_task([this, pid, target, depth, maxOffset, useManual, manualBase, useArray, arrayBase, arrayCount, filterModule = std::move(filterModule)]() mutable
+            if (!workers_) workers_.emplace(std::max(4u, std::thread::hardware_concurrency()));
+            task_ = std::async(std::launch::async, [this, pid, target, depth, maxOffset, useManual, manualBase, useArray, arrayBase, arrayCount, filterModule = std::move(filterModule)]() mutable
             {
                 bool succeeded = false;
                 std::string error;
@@ -900,7 +896,7 @@ public:
                     }
                     LS_LOGI_TAG_FMT("Pointer", "内存快照数量: {}", pointerCount);
 
-                    FilePtr outfile(tmpfile());
+                    Io::File outfile(tmpfile());
                     if (!outfile)
                     {
                         LS_LOGE_TAG("Pointer", "无法创建结果临时文件");
@@ -1234,7 +1230,7 @@ public:
         bool save(const std::string &path) const
         {
             if (!validate()) return false;
-            FilePtr file(fopen(path.c_str(), "wb"));
+            Io::File file(fopen(path.c_str(), "wb"));
             if (!file) return false;
 
             bool ok = WriteObject(file.get(), hdr);
@@ -1464,14 +1460,12 @@ public:
     // 合并多轮扫描结果并裁剪失效链。
     bool MergeBins()
     {
-        {
-            std::lock_guard targetLock(Config::TargetMutex);
-            if (!beginOperation(Operation::Merging)) return false;
-        }
+        std::lock_guard targetLock(Config::TargetMutex);
+        if (!beginOperation(Operation::Merging)) return false;
 
         try
         {
-            Config::CpuThreadPool().detach_task(
+            task_ = std::async(std::launch::async,
                 [this]()
                 {
                     RunOperation(Operation::Merging, "指针结果合并失败",
@@ -1567,14 +1561,12 @@ public:
     // 将指针链导出为可读文本。
     bool ExportToTxt()
     {
-        {
-            std::lock_guard targetLock(Config::TargetMutex);
-            if (!beginOperation(Operation::Exporting)) return false;
-        }
+        std::lock_guard targetLock(Config::TargetMutex);
+        if (!beginOperation(Operation::Exporting)) return false;
 
         try
         {
-            Config::CpuThreadPool().detach_task(
+            task_ = std::async(std::launch::async,
                 [this]()
                 {
                     RunOperation(Operation::Exporting, "指针链导出失败",
@@ -1592,7 +1584,7 @@ public:
                                      constexpr const char *tempPath = "Pointer_Export.tmp";
                                      constexpr const char *outputPath = "Pointer_Export.txt";
                                      remove(tempPath);
-                                     FilePtr output(fopen(tempPath, "wb"));
+                                     Io::File output(fopen(tempPath, "wb"));
                                      if (!output)
                                      {
                                          error = std::format("无法创建导出临时文件: {}", std::strerror(errno));

@@ -1,6 +1,7 @@
 #pragma once
 #include <sys/klog.h>
 #include <cerrno>
+#include <charconv>
 #include <string>
 #include <string_view>
 
@@ -47,17 +48,9 @@ namespace SyscallLog
                     if (close > 1 && close <= 4)
                     {
                         unsigned priority = 0;
-                        bool valid = true;
-                        for (size_t i = 1; i < close; ++i)
-                        {
-                            if (line[i] < '0' || line[i] > '9')
-                            {
-                                valid = false;
-                                break;
-                            }
-                            priority = priority * 10 + static_cast<unsigned>(line[i] - '0');
-                        }
-                        if (valid && priority <= 191) line.remove_prefix(close + 1);
+                        const auto end = line.data() + close;
+                        const auto parsed = std::from_chars(line.data() + 1, end, priority);
+                        if (parsed.ec == std::errc{} && parsed.ptr == end && priority <= 191) line.remove_prefix(close + 1);
                     }
                 }
                 out.append(line);

@@ -1,9 +1,11 @@
 #pragma once
 #include "../base/config.h"
+#include "../base/owned_file.h"
 #include "../base/scan_value.h"
 #include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <future>
 #include <mutex>
 #include <numeric>
 #include <optional>
@@ -60,18 +62,8 @@ private:
         size_t size;
     };
 
-    struct FileCloser
-    {
-        void operator()(FILE *file) const noexcept
-        {
-            if (file) fclose(file);
-        }
-    };
-
-    using FilePtr = std::unique_ptr<FILE, FileCloser>;
-
-    FilePtr candidates_;
-    FilePtr snapshot_;
+    Io::File candidates_;
+    Io::File snapshot_;
     std::vector<SnapshotSpan> snapshotSpans_;
 
     size_t candidateCount_ = 0;
@@ -85,6 +77,8 @@ private:
     std::atomic<float> progress_{0.0f};
     std::atomic<bool> scanning_{false};
     std::atomic<size_t> liveCount_{0};
+    std::atomic<bool> stopping_{false};
+    std::future<void> task_;
 
     struct ScanRunGuard
     {
@@ -97,9 +91,9 @@ private:
         }
     };
 
-    static FilePtr createCandidateFile()
+    static Io::File createCandidateFile()
     {
-        FilePtr file(tmpfile());
+        Io::File file(tmpfile());
         if (!file) throw std::runtime_error("无法创建扫描候选临时文件");
         return file;
     }
@@ -180,7 +174,7 @@ private:
         liveCount_ = 0;
     }
 
-    void publishCandidates(FilePtr candidates, size_t count, Types::FuzzyMode mode)
+    void publishCandidates(Io::File candidates, size_t count, Types::FuzzyMode mode)
     {
         std::unique_lock lock(mutex_);
         candidates_ = std::move(candidates);
@@ -206,7 +200,7 @@ private:
 
         for (const auto &[start, end] : regions)
         {
-            for (uintptr_t address = start; address < end && Config::g_Running;)
+            for (uintptr_t address = start; address < end && !stopping_;)
             {
                 const size_t request = std::min(static_cast<size_t>(end - address), batch.size());
                 if (memory_.Read(address, batch.data(), request) == static_cast<int>(request))
@@ -333,7 +327,7 @@ private:
         liveCount_ = 0;
         for (const auto &span : snapshotSpans_)
         {
-            for (size_t offset = 0; offset < span.size && Config::g_Running;)
+            for (size_t offset = 0; offset < span.size && !stopping_;)
             {
                 const size_t advance = std::min(span.size - offset, Config::Constants::BATCH_SIZE);
                 const size_t request = std::min(span.size - offset, oldValues.size());
@@ -401,7 +395,7 @@ private:
         rewind(candidates_.get());
         CandidateRecord record{};
         uintptr_t pageBase = 0;
-        while (Config::g_Running && fread(&record, sizeof(record), 1, candidates_.get()) == 1)
+        while (!stopping_ && fread(&record, sizeof(record), 1, candidates_.get()) == 1)
         {
             const uintptr_t recordPage = record.address & ~static_cast<uintptr_t>(Config::Constants::SCAN_BUFFER - 1);
             if (!pageCandidates.empty() && recordPage != pageBase) processPage(pageBase);
@@ -543,7 +537,7 @@ private:
         rewind(candidates_.get());
         CandidateRecord record{};
         uintptr_t pageBase = 0;
-        while (Config::g_Running && fread(&record, sizeof(record), 1, candidates_.get()) == 1)
+        while (!stopping_ && fread(&record, sizeof(record), 1, candidates_.get()) == 1)
         {
             const uintptr_t recordPage = record.address & ~static_cast<uintptr_t>(Config::Constants::SCAN_BUFFER - 1);
             if (!pageCandidates.empty() && recordPage != pageBase) processPage(pageBase);
@@ -597,7 +591,11 @@ public:
     };
 
     explicit MemScanner(MemoryReader &memory) : memory_(memory) {}
-    ~MemScanner() = default;
+    ~MemScanner()
+    {
+        stopping_ = true;
+        if (task_.valid()) task_.wait();
+    }
     MemScanner(const MemScanner &) = delete;
     MemScanner &operator=(const MemScanner &) = delete;
 
@@ -698,8 +696,9 @@ public:
             }
         }
         std::lock_guard targetLock(Config::TargetMutex);
+        if (scanning_) return false;
+        std::lock_guard operationLock(operationMutex_);
         std::unique_lock lock(mutex_);
-        if (scanning_.exchange(true)) return false;
 
         Types::DataType actualType;
         if constexpr (std::is_same_v<T, int8_t>) actualType = Types::DataType::I8;
@@ -718,27 +717,10 @@ public:
         {
             accepted = accepted && dataType_.has_value() && *dataType_ == dataType && !stringScan_ && mode != Types::FuzzyMode::Unknown && (alignment == 0 || alignment == alignment_) && (candidates_ || snapshot_);
         }
-        if (!accepted)
-        {
-            scanning_ = false;
-            return false;
-        }
-
-        if (isFirst)
-        {
-            clearStorage();
-            alignment_ = alignment == 0 ? std::min(sizeof(T), size_t{4}) : alignment;
-        }
-        dataType_ = dataType;
-        scanMode_ = mode;
-        stringScan_ = false;
-        liveCount_ = 0;
-
-        progress_ = 0.0f;
-        lock.unlock();
+        if (!accepted) return false;
         try
         {
-            Config::IoThreadPool().detach_task([this, target, mode, isFirst, rangeMax, floatRange]
+            task_ = std::async(std::launch::async, [this, target, mode, isFirst, rangeMax, floatRange]
             {
                 run([&]
                 {
@@ -751,49 +733,48 @@ public:
         }
         catch (...)
         {
-            scanning_ = false;
             return false;
         }
+        if (isFirst)
+        {
+            clearStorage();
+            alignment_ = alignment == 0 ? std::min(sizeof(T), size_t{4}) : alignment;
+        }
+        dataType_ = dataType;
+        scanMode_ = mode;
+        stringScan_ = false;
+        liveCount_ = 0;
+        progress_ = 0.0f;
+        scanning_ = true;
         return true;
     }
 
     bool startStringAsync(pid_t pid, std::string needle, bool isFirst)
     {
         std::lock_guard targetLock(Config::TargetMutex);
-        if (pid <= 0 || pid != memory_.GetGlobalPid() || needle.empty() || needle.size() > Config::Constants::SCAN_BUFFER) return false;
+        if (scanning_ || pid <= 0 || pid != memory_.GetGlobalPid() || needle.empty() || needle.size() > Config::Constants::SCAN_BUFFER) return false;
+        std::lock_guard operationLock(operationMutex_);
         std::unique_lock lock(mutex_);
-        if (scanning_.exchange(true)) return false;
-
-        if (!isFirst && (!stringScan_ || !candidates_))
-        {
-            scanning_ = false;
-            return false;
-        }
-
-        if (isFirst)
-        {
-            clearStorage();
-        }
-        dataType_.reset();
-        scanMode_ = Types::FuzzyMode::String;
-        stringScan_ = true;
-        alignment_ = 1;
-        liveCount_ = 0;
-
-        progress_ = 0.0f;
-        lock.unlock();
+        if (!isFirst && (!stringScan_ || !candidates_)) return false;
         try
         {
-            Config::IoThreadPool().detach_task([this, needle = std::move(needle), isFirst]
+            task_ = std::async(std::launch::async, [this, needle = std::move(needle), isFirst]
             {
                 run([&] { isFirst ? scanFirstString(needle) : scanNextString(needle); }, "字符串扫描");
             });
         }
         catch (...)
         {
-            scanning_ = false;
             return false;
         }
+        if (isFirst) clearStorage();
+        dataType_.reset();
+        scanMode_ = Types::FuzzyMode::String;
+        stringScan_ = true;
+        alignment_ = 1;
+        liveCount_ = 0;
+        progress_ = 0.0f;
+        scanning_ = true;
         return true;
     }
 };

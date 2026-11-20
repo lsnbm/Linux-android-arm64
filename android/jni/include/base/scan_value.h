@@ -47,13 +47,13 @@ namespace MemUtils
             if constexpr (std::is_same_v<T, float>) value = std::strtof(temp.c_str(), &end);
             else if constexpr (std::is_same_v<T, double>) value = std::strtod(temp.c_str(), &end);
             else value = std::strtold(temp.c_str(), &end);
-            if (end == temp.c_str() || *end != '\0' || !std::isfinite(value) || (errno == ERANGE && value == T{})) return std::nullopt;
+            if (end != temp.data() + temp.size() || !std::isfinite(value) || (errno == ERANGE && value == T{})) return std::nullopt;
             return value;
         }
         else
         {
             const long long value = std::strtoll(temp.c_str(), &end, 10);
-            if (errno == ERANGE || end == temp.c_str() || *end != '\0') return std::nullopt;
+            if (errno == ERANGE || end != temp.data() + temp.size()) return std::nullopt;
             if (value < static_cast<long long>(std::numeric_limits<T>::min()) || value > static_cast<long long>(std::numeric_limits<T>::max())) return std::nullopt;
             return static_cast<T>(value);
         }

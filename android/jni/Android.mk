@@ -93,16 +93,14 @@ FILE_LIST := $(wildcard $(LOCAL_PATH)/src/main.cpp)
 FILE_LIST += $(wildcard $(LOCAL_PATH)/src/cloudflared_blob.S)
 FILE_LIST += $(wildcard $(LOCAL_PATH)/imgui/*.cpp)
 FILE_LIST += $(LOCAL_PATH)/imgui/backends/imgui_impl_android.cpp
-FILE_LIST += $(LOCAL_PATH)/imgui/backends/imgui_impl_opengl3.cpp
 FILE_LIST += $(LOCAL_PATH)/imgui/backends/imgui_impl_vulkan.cpp
-FILE_LIST += $(wildcard $(LOCAL_PATH)/android_surface/*.cpp)
 LOCAL_SRC_FILES := $(FILE_LIST:$(LOCAL_PATH)/%=%)
 
 
 
 # 链接静态库
 LOCAL_STATIC_LIBRARIES := libcapstone
-LOCAL_LDLIBS := -lvulkan -landroid -llog -lEGL -lGLESv3
+LOCAL_LDLIBS := -lvulkan -landroid -llog
 
 
 include $(BUILD_EXECUTABLE)

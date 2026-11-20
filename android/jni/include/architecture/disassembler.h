@@ -1,7 +1,7 @@
 #pragma once
 #include <algorithm>
+#include <memory>
 #include <vector>
-#include <string>
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
@@ -84,7 +84,7 @@ namespace Disasm
             }
 
             cs_insn *insn = nullptr;
-            size_t count = cs_disasm(m_handle, buffer, size, address, maxCount, &insn);
+            const size_t count = cs_disasm(m_handle, buffer, size, address, maxCount, &insn);
 
             if (count == 0)
             {
@@ -92,19 +92,22 @@ namespace Disasm
                 return results;
             }
 
+            const auto release = [count](cs_insn *items) { cs_free(items, count); };
+            const std::unique_ptr<cs_insn[], decltype(release)> instructions(insn, release);
             if (logInstructions) LS_LOGI_TAG("Disassembler", "反汇编 %zu 条指令", count);
             results.reserve(count);
             for (size_t i = 0; i < count; i++)
             {
-                DisasmLine line{};
+                auto &line = results.emplace_back();
+                const auto &instruction = instructions[i];
                 line.valid = true;
-                line.address = insn[i].address;
-                line.size = insn[i].size;
+                line.address = instruction.address;
+                line.size = instruction.size;
 
-                memcpy(line.bytes, insn[i].bytes, std::min(static_cast<size_t>(insn[i].size), sizeof(line.bytes)));
+                memcpy(line.bytes, instruction.bytes, std::min(line.size, sizeof(line.bytes)));
 
-                strncpy(line.mnemonic, insn[i].mnemonic, sizeof(line.mnemonic) - 1);
-                strncpy(line.op_str, insn[i].op_str, sizeof(line.op_str) - 1);
+                strncpy(line.mnemonic, instruction.mnemonic, sizeof(line.mnemonic) - 1);
+                strncpy(line.op_str, instruction.op_str, sizeof(line.op_str) - 1);
 
                 for (char *p = line.mnemonic; *p; ++p) *p = std::toupper(static_cast<unsigned char>(*p));
                 for (char *p = line.op_str; *p; ++p) *p = std::toupper(static_cast<unsigned char>(*p));
@@ -113,10 +116,10 @@ namespace Disasm
                 {
                     char bytesStr[48] = {};
                     int pos = 0;
-                    const size_t byteCount = std::min(static_cast<size_t>(insn[i].size), (sizeof(bytesStr) - 1) / 3);
+                    const size_t byteCount = std::min(line.size, (sizeof(bytesStr) - 1) / 3);
                     for (size_t j = 0; j < byteCount; ++j)
                     {
-                        const int written = snprintf(bytesStr + pos, sizeof(bytesStr) - static_cast<size_t>(pos), "%02X ", insn[i].bytes[j]);
+                        const int written = snprintf(bytesStr + pos, sizeof(bytesStr) - static_cast<size_t>(pos), "%02X ", instruction.bytes[j]);
                         if (written <= 0) break;
                         pos += std::min(written, static_cast<int>(sizeof(bytesStr) - 1 - static_cast<size_t>(pos)));
                     }
@@ -124,10 +127,8 @@ namespace Disasm
                     LS_LOGI_TAG("Disassembler", "0x%llX: %-12s %-7s %s", (unsigned long long)line.address, bytesStr, line.mnemonic, line.op_str);
                 }
 
-                results.push_back(line);
             }
 
-            cs_free(insn, count);
             return results;
         }
 

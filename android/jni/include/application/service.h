@@ -8,7 +8,7 @@
 class ApplicationService
 {
     using json = nlohmann::json;
-    ApplicationRuntime::ResourceSet &runtime_;
+    ApplicationRuntime &runtime_;
     Driver &driver_;
     std::mutex requestMutex_;
 
@@ -33,7 +33,7 @@ class ApplicationService
         char *end = nullptr;
         errno = 0;
         const auto value = std::strtoll(temp.c_str(), &end, 0);
-        if (errno != 0 || end == temp.c_str() || *end != '\0' || value < std::numeric_limits<int>::min() || value > std::numeric_limits<int>::max()) return std::nullopt;
+        if (errno != 0 || end != temp.data() + temp.size() || value < std::numeric_limits<int>::min() || value > std::numeric_limits<int>::max()) return std::nullopt;
         return static_cast<int>(value);
     }
 
@@ -427,7 +427,7 @@ class ApplicationService
     }
 
 public:
-    ApplicationService(ApplicationRuntime::ResourceSet &runtime, Driver &driver) : runtime_(runtime), driver_(driver) {}
+    ApplicationService(ApplicationRuntime &runtime, Driver &driver) : runtime_(runtime), driver_(driver) {}
 
     json execute(std::string_view op, const json &params)
     {
@@ -530,7 +530,7 @@ public:
         {
             const int pid = driver_.GetGlobalPid();
             if (pid <= 0) return fail("全局PID未设置，请先执行 target.select 或 target.attach");
-            const int status = op == "syscall.start" ? runtime_.startSyscallMonitor() : runtime_.syscallMonitor.stop();
+            const int status = op == "syscall.start" ? runtime_.syscallMonitor.start() : runtime_.syscallMonitor.stop();
             if (status != 0) return fail(std::format("系统调用监听请求失败，状态={}", status));
             return okData({{"pid", pid}, {"active", op == "syscall.start"}, {"status", status}});
         }
@@ -545,7 +545,7 @@ public:
         {
             const int pid = driver_.GetGlobalPid();
             if (pid <= 0) return fail("全局PID未设置，请先执行 target.select 或 target.attach");
-            const int status = op == "cntvct.start" ? runtime_.startCntvctMonitor() : runtime_.cntvctMonitor.stop();
+            const int status = op == "cntvct.start" ? runtime_.cntvctMonitor.start() : runtime_.cntvctMonitor.stop();
             if (status != 0) return fail(std::format("CNTVCT 监听请求失败，状态={}", status));
             return okData({{"pid", pid}, {"active", op == "cntvct.start"}, {"status", status}});
         }

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cerrno>
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
@@ -35,6 +36,7 @@ struct RoundResult
 
 inline int RunReadWriteTest()
 {
+    int status = 0;
     constexpr size_t ARRAY_CAPACITY = 1000000;
     constexpr int TEST_COUNT = static_cast<int>(ARRAY_CAPACITY);
     constexpr int SMALL_ROUND_COUNT = 6;
@@ -188,5 +190,6 @@ inline int RunReadWriteTest()
 
     LS_LOGI_TAG_FMT("ReadWrite", "全部 {} 轮总失败: 读取 {}，写入 {}，合计 {}", ROUND_COUNT, totalReadFail, totalWriteFail, totalReadFail + totalWriteFail);
 
-    return 0;
+    if (totalReadFail || totalWriteFail) return status = -EIO;
+    return status;
 }

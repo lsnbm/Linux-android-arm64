@@ -7,7 +7,7 @@ Android 12/13 的 apply 和 setLayerStack 参数不同，14+ 使用 physical dis
 
 display 与 SurfaceFlinger 查询使用 Binder dump，不启动 shell。字段来自显示服务、
 LayerProtoParser 或前端 Layer Hierarchy 的输出，并非稳定 API；metadata 不是 Binder 身份。
-RenderVK 的 allowCapture 与 Create 的 preventCapture 含义相反。镜像投影遵循 AOSP
+VulkanRenderer 的 allowCapture 与 Create 的 preventCapture 含义相反。镜像投影遵循 AOSP
 ui::Transform 的矩阵顺序，显示服务承担 displayRect 投影，本文件只处理 layerStackRect。
 历史真机验证来自 RMX3888 / Android 14；编译检查不验证其他 ROM 或录屏成片。
 */
@@ -605,8 +605,30 @@ namespace android
             bool Parse(std::string_view value)
             {
                 if (value.starts_with("Rect")) value.remove_prefix(4);
-                const std::string text(value);
-                return std::sscanf(text.c_str(), "(%d, %d - %d, %d)", &left, &top, &right, &bottom) == 4;
+                if (!value.starts_with('(')) return false;
+                value.remove_prefix(1);
+                int32_t coords[4];
+                constexpr char separators[] = {',', '-', ',', ')'};
+                for (size_t i = 0; i < 4; ++i)
+                {
+                    const auto start = value.find_first_not_of(" \t\r\n");
+                    if (start == value.npos) return false;
+                    value.remove_prefix(start);
+                    if (value.starts_with('+'))
+                    {
+                        value.remove_prefix(1);
+                        if (value.empty() || value.front() < '0' || value.front() > '9') return false;
+                    }
+                    const auto parsed = std::from_chars(value.data(), value.data() + value.size(), coords[i]);
+                    if (parsed.ec != std::errc{}) return false;
+                    value.remove_prefix(parsed.ptr - value.data());
+                    const auto separator = value.find_first_not_of(" \t\r\n");
+                    if (separator == value.npos || value[separator] != separators[i]) return false;
+                    value.remove_prefix(separator + 1);
+                }
+                if (value.find_first_not_of(" \t\r\n") != value.npos) return false;
+                *this = {coords[0], coords[1], coords[2], coords[3]};
+                return true;
             }
         };
 

@@ -1,6 +1,9 @@
 #pragma once
+#include <future>
+#include <span>
 #include "../base/memory_utils.h"
 #include "../architecture/disassembler.h"
+#include "../../thread-pool/include/BS_thread_pool.hpp"
 
 class MemViewer
 {
@@ -8,11 +11,10 @@ private:
     uintptr_t base_ = 0;
     Types::ViewFormat format_ = Types::ViewFormat::Hexadecimal;
     std::vector<uint8_t> buffer_;
-    bool readSuccess_ = false;
     int readStatus_ = 0;
     std::vector<Disasm::DisasmLine> disasmCache_;
+    std::optional<BS::thread_pool<>> worker_;
     std::future<std::vector<Disasm::DisasmLine>> disasmFuture_;
-    bool disasmBusy_ = false;
 
 public:
     MemViewer() : buffer_(Config::Constants::MEM_VIEW_DEFAULT_BYTES)
@@ -27,7 +29,7 @@ public:
     // 返回最近一次读取是否成功。
     bool readSuccess() const noexcept
     {
-        return readSuccess_;
+        return readStatus_ > 0;
     }
     int readStatus() const noexcept
     {
@@ -38,9 +40,9 @@ public:
     {
         return base_;
     }
-    const std::vector<uint8_t> &buffer() const noexcept
+    std::span<const uint8_t> buffer() const noexcept
     {
-        return buffer_;
+        return {buffer_.data(), readSuccess() ? std::min(static_cast<size_t>(readStatus_), buffer_.size()) : 0};
     }
     const std::vector<Disasm::DisasmLine> &getDisasm() const noexcept
     {
@@ -48,7 +50,7 @@ public:
     }
     bool disasmBusy() const noexcept
     {
-        return disasmBusy_;
+        return disasmFuture_.valid();
     }
 
     void waitDisasm()
@@ -63,7 +65,6 @@ public:
         {
             disasmCache_.clear();
         }
-        disasmBusy_ = false;
     }
 
     void pollDisasm()
@@ -73,9 +74,9 @@ public:
 
     void clear()
     {
-        waitDisasm();
+        if (worker_) worker_->purge();
+        disasmFuture_ = {};
         base_ = 0;
-        readSuccess_ = false;
         readStatus_ = 0;
         std::ranges::fill(buffer_, 0);
         disasmCache_.clear();
@@ -84,33 +85,33 @@ public:
     // 重新读取并刷新当前浏览缓存。
     void refresh()
     {
-        disasmBusy_ = false;
+        if (worker_) worker_->purge();
+        disasmFuture_ = {};
         disasmCache_.clear();
         if (!MemUtils::IsValidAddr(base_))
         {
-            readSuccess_ = false;
             readStatus_ = -EINVAL;
             return;
         }
         std::ranges::fill(buffer_, 0);
         readStatus_ = dr->Read(base_, buffer_.data(), buffer_.size());
-        readSuccess_ = readStatus_ > 0;
-        if (!readSuccess_ || format_ != Types::ViewFormat::Disasm) return;
+        if (!readSuccess() || format_ != Types::ViewFormat::Disasm) return;
 
         const size_t disasmSize = std::min(static_cast<size_t>(readStatus_), buffer_.size()) & ~static_cast<size_t>(3);
         if (disasmSize == 0) return;
         try
         {
-            disasmFuture_ = Config::CpuThreadPool().submit_task(
+            if (!worker_) worker_.emplace(1);
+            disasmFuture_ = worker_->submit_task(
                 [base = base_, bytes = buffer_, disasmSize]
                 {
                     Disasm::Disassembler disasm;
                     return disasm.Disassemble(base, bytes.data(), disasmSize, Disasm::Disassembler::DEFAULT_MAX_INSTRUCTIONS, true);
                 });
-            disasmBusy_ = true;
         }
-        catch (...)
+        catch (const std::exception &error)
         {
+            LS_LOGE_TAG("Viewer", "无法提交显示任务: %s", error.what());
         }
     }
 

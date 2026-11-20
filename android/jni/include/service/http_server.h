@@ -1,8 +1,6 @@
 #pragma once
 #include <array>
 #include <cerrno>
-#include <charconv>
-#include <cctype>
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
@@ -12,6 +10,7 @@
 #include <format>
 #include <print>
 #include <ifaddrs.h>
+#include <memory>
 #include <arpa/inet.h>
 #include <net/if.h>
 #include <ranges>
@@ -20,9 +19,12 @@
 #include <sys/prctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include "../../thread-pool/include/BS_thread_pool.hpp"
 #include "../../logger/logger.h"
+#include "../base/owned_fd.h"
+#include "http_request.h"
 #include "http_router.h"
 
 // ============================================================================
@@ -41,8 +43,6 @@ namespace
 
     constexpr std::uint16_t kServerPort = 9494;
     constexpr int kListenBacklog = 32;
-    constexpr std::size_t kMaxHttpHeaderBytes = 64 * 1024;
-    constexpr std::size_t kMaxHttpBodyBytes = 16 * 1024 * 1024;
 
     // 打印系统错误信息
     void printErrno(std::string_view action)
@@ -60,8 +60,9 @@ namespace
             return;
         }
 
+        const std::unique_ptr<ifaddrs, decltype(&freeifaddrs)> owned(interfaces, freeifaddrs);
         std::vector<std::string> printedAddresses;
-        for (const ifaddrs *entry = interfaces; entry != nullptr; entry = entry->ifa_next)
+        for (const ifaddrs *entry = owned.get(); entry != nullptr; entry = entry->ifa_next)
         {
             if (entry->ifa_addr == nullptr || entry->ifa_addr->sa_family != AF_INET) continue;
             if ((entry->ifa_flags & IFF_UP) == 0 || (entry->ifa_flags & IFF_LOOPBACK) != 0) continue;
@@ -81,8 +82,6 @@ namespace
             std::println(stderr, "[HTTP] 局域网 RPC [{}]: http://{}:{}/api/rpc", interfaceName, address, kServerPort);
             std::println(stderr, "[MCP] 局域网 MCP [{}]: http://{}:{}/mcp", interfaceName, address, kServerPort);
         }
-        freeifaddrs(interfaces);
-
         if (printedAddresses.empty()) std::println(stderr, "[HTTP] 未检测到局域网 IPv4 地址，HTTP 服务仍监听 http://0.0.0.0:{}", kServerPort);
     }
 
@@ -107,7 +106,25 @@ namespace
         return close(fd) == 0;
     }
 
-    void StartCloudflared(const std::filesystem::path &directory)
+    struct TunnelChild
+    {
+        pid_t pid = -1;
+
+        TunnelChild() = default;
+        TunnelChild(const TunnelChild &) = delete;
+        TunnelChild &operator=(const TunnelChild &) = delete;
+        ~TunnelChild()
+        {
+            if (pid <= 0) return;
+            pid_t result;
+            do { result = waitpid(pid, nullptr, WNOHANG); } while (result < 0 && errno == EINTR);
+            if (result != 0) return;
+            if (kill(pid, SIGKILL) != 0 && errno != ESRCH) return;
+            while (waitpid(pid, nullptr, 0) < 0 && errno == EINTR) {}
+        }
+    };
+
+    void StartCloudflared(const std::filesystem::path &directory, TunnelChild &child)
     {
         const std::size_t blobSize = static_cast<std::size_t>(cloudflared_blob_end - cloudflared_blob_start);
         if (blobSize == 0) return;
@@ -181,11 +198,13 @@ namespace
             _exit(127);
         }
 
+        child.pid = pid;
         std::println(stderr, "[HTTP] cloudflared Tunnel 已启动，PID={}，公网地址将写入 /storage/emulated/0/log.txt", pid);
     }
 
-    bool sendHttpResponse(int fd, int statusCode, std::string_view statusText, std::string_view body, std::string_view extraHeaders = {})
+    int sendHttpResponse(int fd, int statusCode, std::string_view statusText, std::string_view body, std::string_view extraHeaders = {})
     {
+        int status = 0;
         const std::string response = std::format("HTTP/1.1 {} {}\r\n"
                                                  "Content-Type: application/json; charset=utf-8\r\n"
                                                  "Content-Length: {}\r\n"
@@ -201,151 +220,32 @@ namespace
         {
             const ssize_t sent = send(fd, response.data() + sentTotal, response.size() - sentTotal, MSG_NOSIGNAL);
             if (sent < 0 && errno == EINTR) continue;
-            if (sent <= 0) return false;
+            if (sent <= 0) return status = sent < 0 ? -errno : -EPIPE;
             sentTotal += static_cast<std::size_t>(sent);
         }
-        return true;
+        return status;
     }
 
-    bool receiveHttpRequest(int fd, std::string *method, std::string *path, std::string *body, json *headers, int *errorStatus)
-    {
-        std::string request;
-        request.reserve(4096);
-        std::array<char, 4096> chunk{};
-        std::size_t headerEnd = std::string::npos;
-
-        while (headerEnd == std::string::npos)
-        {
-            const ssize_t received = recv(fd, chunk.data(), chunk.size(), 0);
-            if (received == 0) return false;
-            if (received < 0)
-            {
-                if (errno == EINTR) continue;
-                return false;
-            }
-
-            request.append(chunk.data(), static_cast<std::size_t>(received));
-            headerEnd = request.find("\r\n\r\n");
-            if ((headerEnd == std::string::npos ? request.size() : headerEnd + 4) > kMaxHttpHeaderBytes)
-            {
-                *errorStatus = 431;
-                return false;
-            }
-        }
-
-        const std::size_t requestLineEnd = request.find("\r\n");
-        if (requestLineEnd == std::string::npos)
-        {
-            *errorStatus = 400;
-            return false;
-        }
-
-        const std::string_view requestLine(request.data(), requestLineEnd);
-        const std::size_t firstSpace = requestLine.find(' ');
-        const std::size_t secondSpace = firstSpace == std::string_view::npos ? std::string_view::npos : requestLine.find(' ', firstSpace + 1);
-        if (firstSpace == std::string_view::npos || secondSpace == std::string_view::npos)
-        {
-            *errorStatus = 400;
-            return false;
-        }
-        *method = std::string(requestLine.substr(0, firstSpace));
-        *path = std::string(requestLine.substr(firstSpace + 1, secondSpace - firstSpace - 1));
-
-        std::size_t contentLength = 0;
-        std::size_t lineStart = requestLineEnd + 2;
-        while (lineStart < headerEnd)
-        {
-            const std::size_t lineEnd = request.find("\r\n", lineStart);
-            if (lineEnd == std::string::npos || lineEnd > headerEnd) break;
-
-            const std::string_view line(request.data() + lineStart, lineEnd - lineStart);
-            const std::size_t colon = line.find(':');
-            if (colon == std::string_view::npos || colon == 0)
-            {
-                *errorStatus = 400;
-                return false;
-            }
-            std::string name(line.substr(0, colon));
-            std::ranges::transform(name, name.begin(), [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
-            std::string_view value = line.substr(colon + 1);
-            const std::size_t valueStart = value.find_first_not_of(" \t");
-            value = valueStart == std::string_view::npos ? std::string_view{} : value.substr(valueStart, value.find_last_not_of(" \t") - valueStart + 1);
-            if (headers->contains(name))
-            {
-                if (name == "accept") (*headers)[name] = (*headers)[name].get<std::string>() + "," + std::string(value);
-                else
-                {
-                    *errorStatus = 400;
-                    return false;
-                }
-            }
-            else (*headers)[name] = value;
-            if (name == "transfer-encoding")
-            {
-                *errorStatus = 400;
-                return false;
-            }
-            if (name == "content-length")
-            {
-                if (value.empty())
-                {
-                    *errorStatus = 400;
-                    return false;
-                }
-                const auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), contentLength);
-                if (ec != std::errc{} || ptr != value.data() + value.size())
-                {
-                    *errorStatus = 400;
-                    return false;
-                }
-            }
-            lineStart = lineEnd + 2;
-        }
-
-        if (contentLength > kMaxHttpBodyBytes)
-        {
-            *errorStatus = 413;
-            return false;
-        }
-
-        const std::size_t bodyStart = headerEnd + 4;
-        while (request.size() - bodyStart < contentLength)
-        {
-            const ssize_t received = recv(fd, chunk.data(), chunk.size(), 0);
-            if (received == 0)
-            {
-                *errorStatus = 400;
-                return false;
-            }
-            if (received < 0)
-            {
-                if (errno == EINTR) continue;
-                return false;
-            }
-            request.append(chunk.data(), static_cast<std::size_t>(received));
-        }
-
-        body->assign(request.data() + bodyStart, contentLength);
-        return true;
-    }
 
 } // namespace
 
 // 程序入口：初始化 HTTP 服务并处理客户端请求。
-template <typename Dispatch> int http_server(Dispatch dispatch, BS::thread_pool<> &clients, const std::filesystem::path &cloudflaredDirectory)
+template <typename Dispatch> int http_server(Dispatch dispatch, const std::filesystem::path &cloudflaredDirectory)
 {
-    const int serverFd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
-    if (serverFd < 0)
+    int status = 0;
+    const Io::Fd listener(socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0));
+    if (listener.get() < 0)
     {
+        status = -errno;
         printErrno("创建套接字失败");
-        return 1;
+        return status;
     }
     constexpr int enableReuse = 1;
-    if (setsockopt(serverFd, SOL_SOCKET, SO_REUSEADDR, &enableReuse, sizeof(enableReuse)) < 0)
+    if (setsockopt(listener.get(), SOL_SOCKET, SO_REUSEADDR, &enableReuse, sizeof(enableReuse)) < 0)
     {
+        status = -errno;
         printErrno("设置套接字选项失败");
-        close(serverFd);
-        return 1;
+        return status;
     }
 
     sockaddr_in address{};
@@ -353,24 +253,26 @@ template <typename Dispatch> int http_server(Dispatch dispatch, BS::thread_pool<
     address.sin_addr.s_addr = htonl(INADDR_ANY);
     address.sin_port = htons(kServerPort);
 
-    if (bind(serverFd, reinterpret_cast<sockaddr *>(&address), sizeof(address)) < 0)
+    if (bind(listener.get(), reinterpret_cast<sockaddr *>(&address), sizeof(address)) < 0)
     {
+        status = -errno;
         printErrno("绑定端口失败");
-        close(serverFd);
-        return 1;
+        return status;
     }
 
-    if (listen(serverFd, kListenBacklog) < 0)
+    if (listen(listener.get(), kListenBacklog) < 0)
     {
+        status = -errno;
         printErrno("开始监听失败");
-        close(serverFd);
-        return 1;
+        return status;
     }
 
     std::println(stderr, "[HTTP] 服务端已监听 http://0.0.0.0:{}", kServerPort);
     std::println(stderr, "[MCP] Streamable HTTP: http://127.0.0.1:{}/mcp", kServerPort);
+    BS::thread_pool<> clients(std::max(16u, std::thread::hardware_concurrency() * 4));
     PrintLanHttpAddresses();
-    StartCloudflared(cloudflaredDirectory);
+    TunnelChild tunnel;
+    StartCloudflared(cloudflaredDirectory, tunnel);
 
     try
     {
@@ -378,15 +280,20 @@ template <typename Dispatch> int http_server(Dispatch dispatch, BS::thread_pool<
         {
             sockaddr_in clientAddr{};
             socklen_t clientLen = sizeof(clientAddr);
-            const int clientFd = accept(serverFd, reinterpret_cast<sockaddr *>(&clientAddr), &clientLen);
-            if (clientFd < 0)
+            Io::Fd client(accept4(listener.get(), reinterpret_cast<sockaddr *>(&clientAddr), &clientLen, SOCK_CLOEXEC));
+            if (client.get() < 0)
             {
                 if (errno == EINTR) continue;
+                status = -errno;
                 printErrno("接受连接失败");
-                continue;
+                break;
             }
 
-            clients.detach_task([dispatch, clientFd, clientAddr] {
+            // 每个连接只处理一个请求，限制空闲客户端长期占用工作线程。
+            constexpr timeval timeout{15, 0};
+            if (clients.get_tasks_queued() >= kListenBacklog ||
+                setsockopt(client.get(), SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) != 0) continue;
+            clients.detach_task([dispatch, client = std::move(client), clientAddr] {
                 char clientIp[INET_ADDRSTRLEN]{};
                 if (inet_ntop(AF_INET, &clientAddr.sin_addr, clientIp, sizeof(clientIp)) == nullptr)
                 {
@@ -395,32 +302,31 @@ template <typename Dispatch> int http_server(Dispatch dispatch, BS::thread_pool<
                 }
 
                 const auto clientPort = ntohs(clientAddr.sin_port);
-                std::string method;
-                std::string path;
-                std::string body;
-                json headers = json::object();
-                int errorStatus = 0;
-                if (!receiveHttpRequest(clientFd, &method, &path, &body, &headers, &errorStatus))
+                Http::Request request;
+                const int requestStatus = Http::Receive(client.get(), request);
+                if (requestStatus != 0)
                 {
-                    if (errorStatus == 413) sendHttpResponse(clientFd, 413, "Payload Too Large", R"({"ok":false,"error":"请求体过大"})");
-                    else if (errorStatus == 431) sendHttpResponse(clientFd, 431, "Request Header Fields Too Large", R"({"ok":false,"error":"请求头过大"})");
-                    else if (errorStatus != 0) sendHttpResponse(clientFd, 400, "Bad Request", R"({"ok":false,"error":"HTTP 请求格式无效"})");
-                    close(clientFd);
+                    if (requestStatus == 413) sendHttpResponse(client.get(), 413, "Payload Too Large", R"({"ok":false,"error":"请求体过大"})");
+                    else if (requestStatus == 431) sendHttpResponse(client.get(), 431, "Request Header Fields Too Large", R"({"ok":false,"error":"请求头过大"})");
+                    else if (requestStatus == 400) sendHttpResponse(client.get(), 400, "Bad Request", R"({"ok":false,"error":"HTTP 请求格式无效"})");
                     return;
                 }
 
-                LS_LOGD_TAG_FMT("HTTP", "收到请求: {}:{} {} {}", clientIp, clientPort, method, path);
-                const auto response = Http::Route(method, path, headers, body, dispatch);
+                LS_LOGD_TAG_FMT("HTTP", "收到请求: {}:{} {} {}", clientIp, clientPort, request.method, request.path);
+                const auto response = Http::Route(request.method, request.path, request.headers, request.body, dispatch);
                 const std::string responseBody = response.body.is_null() ? "" : response.body.dump(-1, ' ', false, json::error_handler_t::replace);
-                if (!sendHttpResponse(clientFd, response.status, response.reason, responseBody, response.extraHeaders)) printErrno("发送 HTTP 回复失败");
-                close(clientFd);
+                if (const int error = sendHttpResponse(client.get(), response.status, response.reason, responseBody, response.extraHeaders); error != 0)
+                    LS_LOGW_TAG("HTTP", "发送 HTTP 回复失败: %d", error);
             });
         }
     }
     catch (...)
     {
-        close(serverFd);
+        clients.purge();
         clients.wait();
         throw;
     }
+    clients.purge();
+    clients.wait();
+    return status;
 }

@@ -35,14 +35,14 @@ namespace MemUtils
     {
         if (text.empty()) return std::nullopt;
 
-        const auto first = text.find_first_not_of(" \t\r\n");
+        const auto first = text.find_first_not_of(" \t\r\n\f\v");
         if (first == std::string_view::npos || text[first] == '-') return std::nullopt;
 
         std::string temp(text);
         char *end = nullptr;
         errno = 0;
         const auto value = std::strtoull(temp.c_str(), &end, base);
-        if (errno != 0 || end == temp.c_str() || *end != '\0') return std::nullopt;
+        if (errno != 0 || end != temp.data() + temp.size()) return std::nullopt;
         return static_cast<std::uint64_t>(value);
     }
 
