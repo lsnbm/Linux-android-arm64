@@ -35,7 +35,7 @@
 7. cgroup_seqfile_show
    这是四个目标 cgroup 文件共用的 seq show 包装，只过滤指定文件，不影响其他文件。
    v1 的 arg 是 PID 列表元素：tasks 按 PID 查任务，cgroup.procs 按 TGID 对象身份比较。
-   v2 的 arg 是 task_struct：直接读取其 TGID；按当前 cgroup 所属层级区分参数类型。
+   v2 的 arg 是 task_struct：直接读取其 TGID；按目标 cftype 是否使用 pidlist 区分参数类型。
    命中时不调用原 show，返回 0 且不输出字节；seq_file 继续原生 next，不留下空行或
    分页占位，不需要替换 PID 列表、任务迭代器或修改缓存。
 
@@ -256,8 +256,17 @@ static int cgroup_seqfile_show_hook_work(struct pt_regs *regs)
 
     if (!hide_task_match_cgroup_file(cft)) return 0;
 
-    // 核心 v2 文件没有 __CFTYPE_ONLY_ON_DFL；按当前 cgroup 的 root 区分参数类型。
-    if (seq_css(seq)->cgroup->root == &cgrp_dfl_root) hidden = hide_task_match_tgid(READ_ONCE(((struct task_struct *)arg)->tgid));
+    /*
+    当前使用 cft->seq_stop 区分参数类型：它读取目标 cftype 已有字段
+    v1 的 cgroup.procs/tasks 通过 cgroup_pidlist_start/next/stop 遍历 PID 数组，
+    arg 是 pid_t 数组元素指针；procs 保存 TGID，tasks 保存线程 PID，两者均设置 seq_stop。
+    v2 的 cgroup.procs/cgroup.threads 通过 css_task_iter_next() 遍历任务，
+    arg 是 task_struct *，procs 遍历线程组 leader，threads 遍历线程，两者均不设置 seq_stop。
+    因此 !cft->seq_stop 时按任务读取 TGID，否则按 pid_t 解引用，再保留 v1 两种文件的匹配方式。
+    不能用 __CFTYPE_ONLY_ON_DFL：核心 v2 文件直接由 cgroup_init_cftypes() 初始化，没有该标志。
+    不能直接引用 cgrp_dfl_root：它会新增模块导入，KMI 符号表中没有时设备报 Unknown symbol。
+    */
+    if (!cft->seq_stop) hidden = hide_task_match_tgid(READ_ONCE(((struct task_struct *)arg)->tgid));
     else if (__builtin_strcmp(cft->name, "cgroup.procs") == 0) hidden = hide_task_match_cgroup_tgid(*(pid_t *)arg);
     else hidden = hide_task_match_pid(*(pid_t *)arg);
     if (!hidden) return 0;
