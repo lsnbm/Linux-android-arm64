@@ -828,5 +828,7 @@ KMI:
 
     所以说不能只看函数和变量在源码中是否用 EXPORT_SYMBOL 导出了就使用，还要看KMI符号规则表
 
-
-    */
+KGSL:
+    KGSL 常放在独立的厂商模块目录：kernel/msm-modules/graphics或vendor/qcom/opensource/graphics-kernel/
+    不在 GKI 的 common 源码里，
+*/

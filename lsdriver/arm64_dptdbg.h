@@ -51,17 +51,17 @@ mapping_updates 非零时暂停执行视图；受控 VMA 拆分结束校验并�
 struct dptbp_slot
 {
     uint64_t page_vaddr; // 断点所属用户页的页对齐虚拟地址
-    uint64_t hook_addr; // 当前断点地址；为 0 表示该槽位未配置
-    void *shadow_page; // 含 UDF 的执行副本内核地址，由同页槽位共享
-    pte_t orig_pte; // 复制代码时的源 PTE，用于建立私有映射时校验物理页未变
-    uint32_t orig_inst; // 改写 UDF 前缓存的原始指令，命中后用于指令模拟
+    uint64_t hook_addr;  // 当前断点地址；为 0 表示该槽位未配置
+    void *shadow_page;   // 含 UDF 的执行副本内核地址，由同页槽位共享
+    pte_t orig_pte;      // 复制代码时的源 PTE，用于建立私有映射时校验物理页未变
+    uint32_t orig_inst;  // 改写 UDF 前缓存的原始指令，命中后用于指令模拟
     // 按缓存行对齐，避免相邻槽位共享同一缓存行。
 } ____cacheline_aligned;
 
 enum dptbp_ref_type
 {
-    DPTBP_REF_SYNC, // EL0 同步异常路径
-    DPTBP_REF_SWITCH, // 任务切换路径
+    DPTBP_REF_SYNC,     // EL0 同步异常路径
+    DPTBP_REF_SWITCH,   // 任务切换路径
     DPTBP_REF_NOTIFIER, // MMU notifier 回调路径
     DPTBP_REF_MPROTECT,
     DPTBP_REF_NONE, // 不对应任何引用计数
@@ -70,20 +70,20 @@ enum dptbp_ref_type
 // valid 决定资源访问准入，分类引用保证已经进入的使用者退出前资源不会被释放。
 struct dptbp_context
 {
-    struct mm_struct *mm; // 持有 get_mm_by_pid() 返回的一份引用，由控制卸载归还
-    struct break_point *info; // 保留共享配置指针，命中回调直接访问原 points 中的寄存器现场
-    struct dptbp_slot slots[BP_CONFIG_MAX]; // 与共享配置逐槽位对应的断点资源
-    pgd_t *shadow_pgd; // 私有页表根页，目标主线程的断点视图使用此根
+    struct mm_struct *mm;                                     // 持有 get_mm_by_pid() 返回的一份引用，由控制卸载归还
+    struct break_point *info;                                 // 保留共享配置指针，命中回调直接访问原 points 中的寄存器现场
+    struct dptbp_slot slots[BP_CONFIG_MAX];                   // 与共享配置逐槽位对应的断点资源
+    pgd_t *shadow_pgd;                                        // 私有页表根页，目标主线程的断点视图使用此根
     void *table_pages[BP_CONFIG_MAX * CONFIG_PGTABLE_LEVELS]; // 自行复制的下级页表页，集中记录供回收
-    struct mmu_notifier mmu_notifier; // 目标映射失效时撤销视图；ops 用于判断卸载时是否需要注销
+    struct mmu_notifier mmu_notifier;                         // 目标映射失效时撤销视图；ops 用于判断卸载时是否需要注销
 
-    int sync_refs; // 同步异常使用者数量，通过原子操作增减
-    int switch_refs; // 任务切换使用者数量
+    int sync_refs;     // 同步异常使用者数量，通过原子操作增减
+    int switch_refs;   // 任务切换使用者数量
     int notifier_refs; // 映射失效回调使用者数量
     int mprotect_refs;
     struct task_struct *split_task;
     int mapping_updates;
-    int valid; // 非零允许新引用访问已发布资源，不单独表示断点视图仍然启用
+    int valid;     // 非零允许新引用访问已发布资源，不单独表示断点视图仍然启用
     int restoring; // 非零禁止继续切入断点视图，保持到完整卸载结束
 };
 
@@ -404,11 +404,10 @@ __attribute__((no_sanitize("cfi", "kcfi"))) static int dptbp_handle_mprotect(str
             goto handled;
         }
     }
-    if (mmap_write_lock_killable(current->mm))
-    {
-        status = -EINTR;
-        goto handled;
-    }
+    // 内核原生 mprotect 使用 if (mmap_write_lock_killable(current->mm)) return -EINTR;
+    // 部分设备未导出其底层 down_write_killable，改用普通写锁。
+    // 普通锁等待锁期间不再响应致命信号
+    mmap_write_lock(current->mm);
     if (__atomic_load_n(&g_dptbp_current.restoring, __ATOMIC_SEQ_CST))
     {
         mmap_write_unlock(current->mm);
@@ -474,8 +473,7 @@ __attribute__((no_sanitize("cfi", "kcfi"))) static int dptbp_handle_mprotect(str
             for (size_t index = 0; index < ARRAY_SIZE(g_dptbp_current.slots); index++)
             {
                 struct dptbp_slot *slot = &g_dptbp_current.slots[index];
-                if (slot->hook_addr && slot->page_vaddr == page)
-                    WRITE_ONCE(slot->orig_pte, pte_modify(slot->orig_pte, vma->vm_page_prot));
+                if (slot->hook_addr && slot->page_vaddr == page) WRITE_ONCE(slot->orig_pte, pte_modify(slot->orig_pte, vma->vm_page_prot));
             }
         }
         flush_tlb_range_all_asid_all_cpus(cursor, seg_end);
@@ -501,8 +499,7 @@ static void dptbp_mmu_notifier_release(struct mmu_notifier *notifier, struct mm_
     if (!dptbp_try_get_ref(DPTBP_REF_NOTIFIER)) return;
     if (mm == g_dptbp_current.mm)
     {
-        if (dptbp_drop_all_monitors())
-            ls_log_always_tag("dptbp", "monitor cancelled source=mm-release tgid=%d tid=%d\n", READ_ONCE(g_dptbp_current.info->tgid), current->pid);
+        if (dptbp_drop_all_monitors()) ls_log_always_tag("dptbp", "monitor cancelled source=mm-release tgid=%d tid=%d\n", READ_ONCE(g_dptbp_current.info->tgid), current->pid);
         dptbp_restore_thread_views();
     }
     dptbp_put_ref(DPTBP_REF_NOTIFIER);
@@ -555,8 +552,7 @@ static int dptbp_mmu_notifier_invalidate_range_start(struct mmu_notifier *notifi
         }
         else
         {
-            if (dptbp_drop_all_monitors())
-                ls_log_always_tag("dptbp", "monitor cancelled source=mmu-invalidate tgid=%d tid=%d start=0x%lx end=0x%lx event=%u\n", READ_ONCE(g_dptbp_current.info->tgid), current->pid, range->start, range->end, range->event);
+            if (dptbp_drop_all_monitors()) ls_log_always_tag("dptbp", "monitor cancelled source=mmu-invalidate tgid=%d tid=%d start=0x%lx end=0x%lx event=%u\n", READ_ONCE(g_dptbp_current.info->tgid), current->pid, range->start, range->end, range->event);
             dptbp_restore_thread_views();
         }
     }
@@ -584,8 +580,7 @@ static void dptbp_mmu_notifier_invalidate_range_end(struct mmu_notifier *notifie
             if (!slot->hook_addr || slot->page_vaddr != page) continue;
             if (!shadow_ptep || shadow_ptep == source_ptep || !pte_present(source_pte) || pte_pfn(source_pte) != pte_pfn(slot->orig_pte) || (pte_val(source_pte) & PTE_CONT))
             {
-                if (dptbp_drop_all_monitors())
-                    ls_log_always_tag("dptbp", "monitor cancelled source=vma-split tgid=%d page=0x%lx status=%d\n", READ_ONCE(g_dptbp_current.info->tgid), page, -ESTALE);
+                if (dptbp_drop_all_monitors()) ls_log_always_tag("dptbp", "monitor cancelled source=vma-split tgid=%d page=0x%lx status=%d\n", READ_ONCE(g_dptbp_current.info->tgid), page, -ESTALE);
                 goto finish;
             }
             WRITE_ONCE(slot->orig_pte, source_pte);
@@ -639,7 +634,7 @@ static void dptbp_release_shadow_pages(void)
 
         if (!page) continue;
         free_page((unsigned long)page);
-    // 同页断点共享同一分配，清除所有别名，避免后续槽位重复释放。
+        // 同页断点共享同一分配，清除所有别名，避免后续槽位重复释放。
         for (size_t next = index; next < ARRAY_SIZE(g_dptbp_current.slots); next++)
         {
             if (g_dptbp_current.slots[next].shadow_page == page) g_dptbp_current.slots[next].shadow_page = NULL;
