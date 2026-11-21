@@ -395,3 +395,9 @@ cleanup:
     dr.reset();
     return status;
 }
+
+/*
+退出阶段oplus系列：
+main 返回后，exit -> __cxa_finalize 会销毁厂商库 libpenguin_impl.so 的全局互斥锁，
+但该库创建的 VsyncReceiver 线程仍可能访问它，触发 destroyed mutex / SIGABRT。
+*/

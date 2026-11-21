@@ -1,11 +1,13 @@
-
 /*
 外部进程对隐藏线程组的探测手段：
 1. /proc：getdents64 枚举 PID 目录，直接查找或复验已缓存的 PID 目录项。
 2. pidfd：pidfd_open 按 PID 获取进程句柄。
-3. CPU 时钟：clock_gettime/clock_getres 查询进程 PROF、VIRT、SCHED 时钟。
+3. CPU 时钟：clock_gettime/clock_getres 查询进程 PROF、VIRT、SCHED 时钟，
+   timer_create 创建绑定这些进程 CPU 时钟的未启动定时器。
 4. 优先级：getpriority(PRIO_PROCESS, who) 按 PID 查询 nice 值。
 5. cgroup：读取 v1 的 cgroup.procs/tasks 或 v2 的 cgroup.procs/cgroup.threads。
+6. fcntl：私有文件的 F_SETOWN/F_GETOWN，以及 F_OWNER_PID/F_OWNER_TID 的设置/读回。
+7. hwbinder：BINDER_GET_FROZEN_INFO 按 PID 查询驱动中的注册对象。
 
 统一以 TGID 表 g_hidden_tgids 为隐藏依据：
 - 各 hook 收到线程 PID 后，在 RCU 保护下通过 find_task_by_vpid() 查找任务，
@@ -38,6 +40,24 @@
    v2 的 arg 是 task_struct：直接读取其 TGID；按目标 cftype 是否使用 pidlist 区分参数类型。
    命中时不调用原 show，返回 0 且不输出字节；seq_file 继续原生 next，不留下空行或
    分页占位，不需要替换 PID 列表、任务迭代器或修改缓存。
+8. posix_cpu_timer_create
+   timer_create 的 PROF/VIRT/SCHED 进程 CPU 时钟复用相同的 clockid 解码；命中隐藏
+   TGID 时返回 -EINVAL，使外层 do_timer_create 按原生失败路径回收定时器对象。
+   不提前跳过整个 timer_create，保留其 ID 分配、created_timer_id 写入和失败清理顺序。
+9. security_file_fcntl
+   原生及 compat fcntl/fcntl64 均在持有 fd 引用后调用此函数，统一获得 file/cmd/arg。
+   普通 F_SETOWN/F_GETOWN 使用 PIDTYPE_TGID；F_OWNER_PID/F_OWNER_TID 分别使用
+   PIDTYPE_TGID/PIDTYPE_PID。设置隐藏 owner 时返回 -ESRCH；读回时返回原生空 owner：
+   F_GETOWN 为 0，F_GETOWN_EX 为保留原 type 的 pid=0 结构。
+   F_OWNER_PGRP 不是本次探测类型，不将 PGID 数值当 PID；F_GETOWNER_UIDS 不返回 PID，
+   二者均保持原生行为。设置时按 struct pid 对象类型解析；读回时在文件 owner 锁和 RCU
+   内解析保存的对象，不依赖 PID 数值全局匹配，也不访问目标进程自己的文件描述符。
+   未隐藏目标继续执行原生 LSM 分派；隐藏目标跳过剩余 LSM 分派和 do_fcntl，由外层
+   按正常路径释放 fd 引用。无需重复 fget/fput，也不依赖可能被内联的静态 do_fcntl。
+10. binder_ioctl
+   仅处理 BINDER_GET_FROZEN_INFO，不拦截会修改状态的 BINDER_FREEZE。
+   先按 UAPI 结构和 _IOC 大小校验参数，命中隐藏 PID 时按 binder_proc 未找到返回
+   -EINVAL，其他命令及未隐藏 PID 继续原生执行；这不等同于证明 Binder 对象仍在使用。
 
 限制：
 - 32 位 compat 路径的 compat_filldir 未覆盖。
@@ -60,8 +80,12 @@
 #include <linux/kernfs.h>
 #include <linux/seq_file.h>
 #include <linux/pid_namespace.h>
+#include <linux/posix-timers.h>
+#include <linux/fcntl.h>
+#include <linux/uaccess.h>
 #include <uapi/linux/pidfd.h>
 #include <uapi/linux/resource.h>
+#include <uapi/linux/android/binder.h>
 
 #include "export_fun.h"
 #include "inline_hook_frame.h"
@@ -92,6 +116,40 @@ static bool hide_task_match_pid(pid_t pid)
     struct task_struct *task = find_task_by_vpid(pid);
     if (task) matched = hide_task_match_tgid(READ_ONCE(task->tgid));
     rcu_read_unlock();
+
+    return matched;
+}
+
+// 普通 PID/TID 均按任务所属线程组匹配；不把进程组编号当作 PID。
+static bool hide_task_match_pid_type(pid_t pid, enum pid_type type)
+{
+    bool matched = false;
+
+    if (pid <= 0 || (type != PIDTYPE_PID && type != PIDTYPE_TGID)) return false;
+
+    rcu_read_lock();
+    struct task_struct *task = pid_task(find_vpid(pid), type);
+    if (task) matched = hide_task_match_tgid(READ_ONCE(task->tgid));
+    rcu_read_unlock();
+
+    return matched;
+}
+
+// 与 f_getown/f_getown_ex 相同，持锁防止并发设置更换 PID 对象，并快照读回所需类型。
+static bool hide_task_match_f_owner(struct fown_struct *f_owner, enum pid_type *pid_type)
+{
+    bool matched = false;
+
+    read_lock_irq(&f_owner->lock);
+    *pid_type = f_owner->pid_type;
+    if (*pid_type == PIDTYPE_TGID || *pid_type == PIDTYPE_PID)
+    {
+        rcu_read_lock();
+        struct task_struct *task = pid_task(f_owner->pid, *pid_type);
+        if (task) matched = hide_task_match_tgid(READ_ONCE(task->tgid));
+        rcu_read_unlock();
+    }
+    read_unlock_irq(&f_owner->lock);
 
     return matched;
 }
@@ -200,6 +258,16 @@ static int hide_task_cpu_clock_hook_work(struct pt_regs *regs)
     return 1;
 }
 
+// timer_create 在此已分配定时器 ID；拒绝 CPU 时钟初始化后由原生失败出口释放对象。
+static int hide_task_cpu_timer_create_hook_work(struct pt_regs *regs)
+{
+    const struct k_itimer *timer = (const struct k_itimer *)regs->regs[0];
+    if (!timer || !hide_task_match_process_clock(timer->it_clock)) return 0;
+
+    regs->regs[0] = (unsigned long)-EINVAL;
+    return 1;
+}
+
 // PRIO_PROCESS 的 who 是 PID；原生没有目标任务时返回 -ESRCH，而不是 nice 值 20。
 static int getpriority_hook_work(struct pt_regs *regs)
 {
@@ -276,6 +344,82 @@ static int cgroup_seqfile_show_hook_work(struct pt_regs *regs)
     return 1;
 }
 
+// 参数由入口适配器按各原生函数签名传入；返回值 0/1 继续表示执行/跳过原函数。
+static int hide_task_fcntl_owner(struct pt_regs *regs, struct file *file, unsigned int cmd, unsigned long arg)
+{
+    bool set_owner = cmd == F_SETOWN || cmd == F_SETOWN_EX;
+    bool get_owner = cmd == F_GETOWN || cmd == F_GETOWN_EX;
+    struct fown_struct *f_owner;
+    struct f_owner_ex owner = {};
+    enum pid_type pid_type = PIDTYPE_TGID;
+    bool hidden;
+
+    if (!file || (!set_owner && !get_owner)) return 0;
+
+    if (set_owner)
+    {
+        if (cmd == F_SETOWN_EX)
+        {
+            // 此处尚未进入内核原子区，与原生 f_setown_ex 一样允许用户页缺页。
+            if (copy_from_user(&owner, (void __user *)arg, sizeof(owner)))
+            {
+                regs->regs[0] = (unsigned long)-EFAULT;
+                return 1;
+            }
+
+            if (owner.type == F_OWNER_PID) pid_type = PIDTYPE_TGID;
+            else if (owner.type == F_OWNER_TID) pid_type = PIDTYPE_PID;
+            else return 0; // 非本次 F_OWNER_PID/TID 探测，保留 PGRP 和非法 type 的原生处理。
+        }
+
+        pid_t pid = cmd == F_SETOWN ? (pid_t)arg : owner.pid;
+        if (!hide_task_match_pid_type(pid, pid_type)) return 0;
+
+        // 隐藏 owner 按不存在的任务处理；不修改文件已有 owner。
+        regs->regs[0] = (unsigned long)-ESRCH;
+        return 1;
+    }
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
+    f_owner = file_f_owner(file);
+#else
+    f_owner = &file->f_owner;
+#endif
+    if (!f_owner) return 0; // 新版未分配 f_owner 时，原生读回即为空 owner。
+
+    hidden = hide_task_match_f_owner(f_owner, &pid_type);
+    if (!hidden) return 0; // 非目标 PID/TID、PGRP 和失效 PID 均保留原生处理。
+
+    if (cmd == F_GETOWN) regs->regs[0] = 0;
+    else
+    {
+        // 与 f_getown_ex 一致：空 owner 保留已快照类型、pid=0，复制允许缺页。
+        owner.type = pid_type == PIDTYPE_TGID ? F_OWNER_PID : F_OWNER_TID;
+        regs->regs[0] = copy_to_user((void __user *)arg, &owner, sizeof(owner)) ? (unsigned long)-EFAULT : 0;
+    }
+    return 1;
+}
+
+// security_file_fcntl(file, cmd, arg)：调用者已持有 fd 引用，原生与 compat fcntl 共用此入口。
+static int hide_task_security_fcntl_hook_work(struct pt_regs *regs)
+{
+    return hide_task_fcntl_owner(regs, (struct file *)regs->regs[0], (unsigned int)regs->regs[1], regs->regs[2]);
+}
+
+// hwbinder 与 binder 共用驱动入口；只按命令和 UAPI 参数识别 frozen GET 查询。
+static int hide_task_binder_ioctl_hook_work(struct pt_regs *regs)
+{
+    unsigned int cmd = (unsigned int)regs->regs[1];
+    struct binder_frozen_status_info info;
+
+    if (cmd != BINDER_GET_FROZEN_INFO || _IOC_SIZE(cmd) != sizeof(info)) return 0;
+    if (copy_from_user(&info, (void __user *)regs->regs[2], sizeof(info))) return 0;
+    if (!hide_task_match_pid((pid_t)info.pid)) return 0;
+
+    regs->regs[0] = (unsigned long)-EINVAL;
+    return 1;
+}
+
 static struct hook_entry g_hide_task_hooks[] = {
     HOOK_ENTRY("filldir64", filldir64_hook_work), 
     HOOK_ENTRY("proc_pid_lookup", proc_pid_lookup_hook_work), 
@@ -284,7 +428,10 @@ static struct hook_entry g_hide_task_hooks[] = {
     HOOK_ENTRY("__arm64_sys_clock_gettime", hide_task_cpu_clock_hook_work), 
     HOOK_ENTRY("__arm64_sys_clock_getres", hide_task_cpu_clock_hook_work), 
     HOOK_ENTRY("__arm64_sys_getpriority", getpriority_hook_work), 
-    HOOK_ENTRY("cgroup_seqfile_show", cgroup_seqfile_show_hook_work),
+    HOOK_ENTRY("cgroup_seqfile_show", cgroup_seqfile_show_hook_work), 
+    HOOK_ENTRY("posix_cpu_timer_create", hide_task_cpu_timer_create_hook_work), 
+    HOOK_ENTRY("security_file_fcntl", hide_task_security_fcntl_hook_work), 
+    HOOK_ENTRY("binder_ioctl", hide_task_binder_ioctl_hook_work),
 };
 
 // 安装 hook，隐藏目标 TGID 对应的整个线程组。
