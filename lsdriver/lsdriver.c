@@ -610,13 +610,15 @@ static int __init lsdriver_init(void)
         goto fail;
     }
 
-    struct ipv4_ping_diagnostic ping_diagnostic;
-    status = ipv4_ping_detailed("8.211.158.255", IPV4_PING_DEFAULT_TIMEOUT_MS, &ping_diagnostic);
-    if (status < 0)
-    {
-        ls_log_always_tag("core", "初始化 ping 8.211.158.255 失败，错误码: %d，失败阶段: %s(%d)，回复校验: %s(%d)\n", status, ipv4_ping_failure_name(ping_diagnostic.failure), ping_diagnostic.failure, ipv4_ping_reply_mismatch_name(ping_diagnostic.reply_mismatch), ping_diagnostic.reply_mismatch);
-        goto fail;
-    }
+    // 如果驱动跟随早期内核启动如: /init（ksuinit）→ 加载 KO → 执行驱动初始化函数 → 交给 init.real → Android 系统启动
+    // 那么网络服务每准备好就会100%失败
+    // struct ipv4_ping_diagnostic ping_diagnostic;
+    // status = ipv4_ping_detailed("8.211.158.255", IPV4_PING_DEFAULT_TIMEOUT_MS, &ping_diagnostic);
+    // if (status < 0)
+    // {
+    //     ls_log_always_tag("core", "初始化 ping 8.211.158.255 失败，错误码: %d，失败阶段: %s(%d)，回复校验: %s(%d)\n", status, ipv4_ping_failure_name(ping_diagnostic.failure), ping_diagnostic.failure, ipv4_ping_reply_mismatch_name(ping_diagnostic.reply_mismatch), ping_diagnostic.reply_mismatch);
+    //     goto fail;
+    // }
 
     //暂时不用，用户态可以处理
     status = proc_create_block_init();
