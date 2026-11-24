@@ -499,6 +499,56 @@ static int check_file_bytes(int memory_fd, FILE *stream, uintptr_t base,
     return 0;
 }
 
+// 同一请求包含普通前后页和中间两页，检查普通页权限确实更新，而非整次请求被跳过。
+static int test_protection_ranges(int device, uint8_t *mapping, const uint8_t *expected, size_t page_size)
+{
+    const int protections[] = {PROT_NONE, PROT_READ | PROT_WRITE | PROT_EXEC, PROT_READ | PROT_EXEC};
+    for (size_t test = 0; test < sizeof(protections) / sizeof(protections[0]); test++)
+    {
+        int prot = protections[test];
+        if (mprotect(mapping, 4 * page_size, prot) || ioctl(device, PTEBP_EMULATE_FILE_CHECK) != 0) return -1;
+        for (size_t page = 0; page < 4; page += 3)
+        {
+            uint8_t byte = 0;
+            struct iovec local = {.iov_base = &byte, .iov_len = 1};
+            struct iovec remote = {.iov_base = mapping + page * page_size, .iov_len = 1};
+            errno = 0;
+            ssize_t count = process_vm_readv(getpid(), &local, 1, &remote, 1, 0);
+            if (prot & PROT_READ)
+            {
+                if (count != 1 || byte != expected[page * page_size]) return -1;
+            }
+            else if (count != -1 || errno != EFAULT) return -1;
+
+            byte = expected[page * page_size];
+            errno = 0;
+            count = process_vm_writev(getpid(), &local, 1, &remote, 1, 0);
+            if (prot & PROT_WRITE)
+            {
+                if (count != 1) return -1;
+            }
+            else if (count != -1 || errno != EFAULT) return -1;
+        }
+        for (size_t page = 1; page <= 2; page++)
+        {
+            if (*(const volatile uint8_t *)(mapping + page * page_size) != expected[page * page_size]) return -1;
+        }
+        if (ioctl(device, PTEBP_EMULATE_FILE_CHECK) != 0) return -1;
+    }
+
+    // 末端空洞仍返回原生错误，不吞掉普通页错误；前面的成功区间允许保留更新。
+    errno = 0;
+    if (mprotect(mapping, 5 * page_size, PROT_READ) != -1 || errno != ENOMEM ||
+        ioctl(device, PTEBP_EMULATE_FILE_CHECK) != 0) return -1;
+    if (mprotect(mapping, 4 * page_size, PROT_READ | PROT_EXEC)) return -1;
+    errno = 0;
+    if (mprotect(mapping + 1, page_size, PROT_NONE) != -1 || errno != EINVAL) return -1;
+    if (mprotect(mapping + page_size, 0, PROT_NONE) ||
+        ioctl(device, PTEBP_EMULATE_FILE_CHECK) != 0) return -1;
+    printf("ptebp protection test passed mixed_range=PASS ordinary_permissions=PASS managed_unchanged=PASS errors=PASS\n");
+    return 0;
+}
+
 static int test_file_reads(int device)
 {
     size_t page_size = (size_t)sysconf(_SC_PAGESIZE);
@@ -532,6 +582,7 @@ static int test_file_reads(int device)
     if (ioctl(device, PTEBP_EMULATE_FILE_START, &address) < 0) goto out;
     if (ioctl(device, PTEBP_EMULATE_FILE_CHECK) != 0) goto out;
     if (mprotect(mapping + page_size, 2 * page_size, PROT_READ | PROT_WRITE | PROT_EXEC)) goto out;
+    if (test_protection_ranges(device, mapping, expected, page_size)) goto out;
 
     for (int method = 0; method < 2; method++)
     {
@@ -610,10 +661,12 @@ static int test_file_reads(int device)
     remote_vecs[1] = (struct iovec){.iov_base = NULL, .iov_len = 1};
     if (process_vm_readv(getpid(), local_vecs, 1, remote_vecs, 2, 0) != 7 ||
         memcmp(buffer, expected + page_size, 7)) goto out;
-    if (mprotect(mapping + page_size, page_size, PROT_NONE)) goto out;
+    // 普通源页仍遵守 PROT_NONE；受管页的权限请求按当前契约被跳过。
+    remote_vecs[0].iov_base = mapping + 3 * page_size;
+    if (mprotect(mapping + 3 * page_size, page_size, PROT_NONE)) goto out;
     errno = 0;
     if (process_vm_readv(getpid(), local_vecs, 1, remote_vecs, 1, 0) != -1 || errno != EFAULT) goto out;
-    if (mprotect(mapping + page_size, page_size, PROT_READ | PROT_WRITE | PROT_EXEC)) goto out;
+    if (mprotect(mapping + 3 * page_size, page_size, PROT_READ | PROT_EXEC)) goto out;
 
     if (mprotect(mapping + page_size, 2 * page_size, PROT_READ | PROT_EXEC)) goto out;
     if (ioctl(device, PTEBP_EMULATE_FILE_CHECK) != 2) goto out;

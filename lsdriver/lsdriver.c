@@ -331,9 +331,9 @@ static int ConnectThreadFunction(void *data)
             ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0) // 内核 6.12 到 6.18
             ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL);
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)  // 内核 6.5 到 6.12
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)  // 内核 6.6 到 6.12
             ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL);
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)  // 内核 6.1 到 6.5
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)  // 内核 6.1 到 6.6
             ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL, NULL);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0) // 内核 5.15 到 6.1
             ret = get_user_pages_remote(mm, 0x2025827000, num_pages, FOLL_WRITE, pages, NULL, NULL);

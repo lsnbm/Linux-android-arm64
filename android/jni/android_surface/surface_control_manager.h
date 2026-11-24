@@ -9,6 +9,7 @@ Functionals 优先读取 ro.build.version.sdk：31/32 对应 12/12L，33–37 �
     12/12L：setLayerStack(uint32_t)，apply(bool)，createSurface 的 android::LayerMetadata 按值传递。
     13：setLayerStack(ui::LayerStack)，apply(bool, bool)，mirrorSurface 仍为单参数。
     14–16：createSurface 的 flags 改为 int32_t，metadata 改为 android::gui::LayerMetadata 值参数。
+    16 r1/r2：Transaction 不继承 Parcelable、没有虚表；r3/r4 恢复 Parcelable，mirrorSurface 增加 stopAt 参数。
     17：mirrorSurface(source, stopAt, cropBy) 后两项传 nullptr；createSurface 的 metadata 改为 const 引用。
 优先使用实际导出的 internal display token，否则使用 physical display ID，不按版本号硬选。
 适配新版本时要同时核对
@@ -16,9 +17,16 @@ Functionals 优先读取 ro.build.version.sdk：31/32 对应 12/12L，33–37 �
 
 资源释放依据同仓库 android-14.0.0_r1 的 SurfaceComposerClient.cpp 和
 platform/system/core/libutils/RefBase.cpp：最后一次 decStrong 会执行 delete this，
-因此客户端存储使用平台 operator new，不能对成员字节数组做引用计数释放。
-窗口先于客户端释放，事务使用平台 D1 析构；IBinder 按虚表中的虚基类偏移释放 RefBase。
+不能对成员字节数组做引用计数释放。12–17 客户端通过平台 getDefault 获取强引用，
+不自行猜测客户端大小或构造；释放本模块引用不会主动 dispose 平台共享客户端。
+窗口先于客户端释放，事务优先使用 libandroid 的 ASurfaceTransaction_create/delete 成对管理。
+已核对 AOSP 12–17 frameworks/base/native/android/surface_control.cpp：该句柄就是平台
+SurfaceComposerClient::Transaction 指针，创建和删除均由平台完成，不假定对象大小或虚表。
+旧系统无此 API 时仅接受明确的 C2 和 D1/D2 导出；IBinder 按虚表中的虚基类偏移释放 RefBase。
 不依赖 sp<IBinder> 的模板析构/赋值符号：平台 LTO/隐藏可见性可移除这些非承诺导出。
+physical display IDs 按平台 libc++ 的三指针 vector 返回布局读取，缓冲区由平台 delete 释放，
+不交给本程序的 NDK STL 析构。String8/LayerMetadata/Parcel 仍使用对齐的不透明存储，
+其构造/析构和成员操作交给平台；这是已核对源码布局的私有 ABI，不是 OEM 扩展保证。
 dlopen 句柄在模块销毁时归还；RTLD_NODELETE 保留系统 Binder 线程仍可能执行的库映射，
 这些系统线程不属于本模块，不能用 dlclose 冒充线程退出。
 
@@ -43,6 +51,7 @@ LayerProtoParser 或前端 Layer Hierarchy 的输出，并非稳定 API；metada
 #include "../logger/logger.h"
 #include "binder_dump.h"
 #include <android/native_window.h>
+#include <android/surface_control.h>
 #include <dlfcn.h>
 #include <sys/system_properties.h>
 #include <unistd.h>
@@ -152,6 +161,17 @@ namespace android
             {
                 uint64_t value;
             };
+
+            // 平台 libc++ vector<T>（空 allocator）的三个指针；非平凡返回使用 x8。
+            // 仅承接 PhysicalDisplayId，元素无析构；释放必须使用平台 operator delete。
+            struct PhysicalDisplayIds
+            {
+                PhysicalDisplayId *begin = nullptr;
+                PhysicalDisplayId *end = nullptr;
+                PhysicalDisplayId *capacity = nullptr;
+                ~PhysicalDisplayIds() {}
+            };
+            static_assert(sizeof(PhysicalDisplayId) == 8 && sizeof(PhysicalDisplayIds) == 3 * sizeof(void *));
         } // namespace ui
 
     } // namespace detail
@@ -161,6 +181,13 @@ namespace android
         struct Surface
         {
         };
+
+        static ANativeWindow *NativeWindow(Surface *surface)
+        {
+            // AOSP 12–17：Surface 的主多态基类 RefBase 占 vptr+mRefs，
+            // 非多态 ANativeWindow 基类位于其后。不能用 max_align_t 的大小推导偏移。
+            return reinterpret_cast<ANativeWindow *>(reinterpret_cast<char *>(surface) + 2 * sizeof(void *));
+        }
 
         template <typename any_t> struct StrongPointer
         {
@@ -174,9 +201,11 @@ namespace android
 
         struct Functionals
         {
-            void *libgui = nullptr, *libutils = nullptr, *libbinder = nullptr;
+            void *libgui = nullptr, *libutils = nullptr, *libbinder = nullptr, *libandroid = nullptr;
             void *(*Allocate)(size_t) = nullptr;
             void (*Deallocate)(void *) = nullptr;
+            ASurfaceTransaction *(*NativeTransactionCreate)() = nullptr;
+            void (*NativeTransactionDelete)(ASurfaceTransaction *) = nullptr;
 
             size_t systemVersion = 0;
             bool initSuccess = false;
@@ -195,17 +224,19 @@ namespace android
             int32_t (*Parcel__WriteInt32)(void *thiz, int32_t value) = nullptr;
 
             void (*SurfaceComposerClient__Constructor)(void *thiz) = nullptr;
+            StrongPointer<void> (*SurfaceComposerClient__GetDefault)() = nullptr;
             StrongPointer<void> (*SurfaceComposerClient__CreateSurface)(void *thiz, void *name, uint32_t w, uint32_t h, int32_t format, uint32_t flags, void *parentHandle, void *layerMetadata, uint32_t *outTransformHint) = nullptr;
             StrongPointer<void> (*SurfaceComposerClient__CreateSurfaceWithGuiMetadata)(void *thiz, void *name, uint32_t w, uint32_t h, int32_t format, int32_t flags, void *parentHandle, void *layerMetadata, uint32_t *outTransformHint) = nullptr;
             StrongPointer<void> (*SurfaceComposerClient__CreateSurfaceWithMetadataRef)(void *thiz, void *name, uint32_t w, uint32_t h, int32_t format, int32_t flags, void *parentHandle, const void *layerMetadata, uint32_t *outTransformHint) = nullptr;
             StrongPointer<void> (*SurfaceComposerClient__CreateSurface_and9)(void *thiz, void *name, uint32_t w, uint32_t h, int32_t format, uint32_t flags, void *parentHandle, int32_t windowType, int32_t ownerUid) = nullptr;
             StrongPointer<void> (*SurfaceComposerClient__MirrorSurface)(void *thiz, void *surfaceControl) = nullptr;
+            StrongPointer<void> (*SurfaceComposerClient__MirrorSurfaceWithStop)(void *thiz, void *surfaceControl, void *stopAt) = nullptr;
             StrongPointer<void> (*SurfaceComposerClient__MirrorSurfaceWithBounds)(void *thiz, void *surfaceControl, void *stopAt, void *cropBy) = nullptr;
             StrongPointer<void> (*SurfaceComposerClient__GetInternalDisplayToken)() = nullptr;
             StrongPointer<void> (*SurfaceComposerClient__GetBuiltInDisplay)(detail::ui::DisplayType type) = nullptr;
             int32_t (*SurfaceComposerClient__GetDisplayState)(const StrongPointer<void> &display, detail::ui::DisplayState *displayState) = nullptr;
             int32_t (*SurfaceComposerClient__GetDisplayInfo)(const StrongPointer<void> &display, detail::ui::DisplayInfo *displayInfo) = nullptr;
-            std::vector<detail::ui::PhysicalDisplayId> (*SurfaceComposerClient__GetPhysicalDisplayIds)() = nullptr;
+            detail::ui::PhysicalDisplayIds (*SurfaceComposerClient__GetPhysicalDisplayIds)() = nullptr;
             StrongPointer<void> (*SurfaceComposerClient__GetPhysicalDisplayToken)(detail::ui::PhysicalDisplayId displayId) = nullptr;
 
             void (*SurfaceComposerClient__Transaction__Destructor)(void *thiz) = nullptr;
@@ -278,15 +309,23 @@ namespace android
 #ifdef __LP64__
                 libgui = dlopen("/system/lib64/libgui.so", RTLD_NOW | RTLD_LOCAL | RTLD_NODELETE);
                 libutils = dlopen("/system/lib64/libutils.so", RTLD_NOW | RTLD_LOCAL | RTLD_NODELETE);
+                libandroid = dlopen("/system/lib64/libandroid.so", RTLD_NOW | RTLD_LOCAL | RTLD_NODELETE);
 #else
                 libgui = dlopen("/system/lib/libgui.so", RTLD_NOW | RTLD_LOCAL | RTLD_NODELETE);
                 libutils = dlopen("/system/lib/libutils.so", RTLD_NOW | RTLD_LOCAL | RTLD_NODELETE);
+                libandroid = dlopen("/system/lib/libandroid.so", RTLD_NOW | RTLD_LOCAL | RTLD_NODELETE);
 #endif
 
                 if (!libgui || !libutils)
                 {
                     LS_LOGE_TAG("Surface", "无法打开 libgui 或 libutils");
                     return;
+                }
+
+                if (libandroid)
+                {
+                    NativeTransactionCreate = reinterpret_cast<decltype(NativeTransactionCreate)>(dlsym(libandroid, "ASurfaceTransaction_create"));
+                    NativeTransactionDelete = reinterpret_cast<decltype(NativeTransactionDelete)>(dlsym(libandroid, "ASurfaceTransaction_delete"));
                 }
 
                 if (systemVersion >= 12)
@@ -310,11 +349,14 @@ namespace android
                 ResolveMethod(RefBase, DecStrong, libutils, "_ZNK7android7RefBase9decStrongEPKv");
 
                 ResolveMethod(String8, Constructor, libutils, "_ZN7android7String8C2EPKc");
+                if (!String8__Constructor) ResolveMethod(String8, Constructor, libutils, "_ZN7android7String8C1EPKc");
                 ResolveMethod(String8, Destructor, libutils, "_ZN7android7String8D2Ev");
+                if (!String8__Destructor) ResolveMethod(String8, Destructor, libutils, "_ZN7android7String8D1Ev");
 
                 Allocate = reinterpret_cast<decltype(Allocate)>(dlsym(libgui, "_Znwm"));
                 Deallocate = reinterpret_cast<decltype(Deallocate)>(dlsym(libgui, "_ZdlPv"));
                 ResolveMethod(SurfaceComposerClient, Constructor, libgui, "_ZN7android21SurfaceComposerClientC2Ev");
+                ResolveMethod(SurfaceComposerClient, GetDefault, libgui, "_ZN7android21SurfaceComposerClient10getDefaultEv");
                 if (systemVersion >= 12)
                 {
                     SurfaceComposerClient__CreateSurfaceWithMetadataRef = reinterpret_cast<decltype(SurfaceComposerClient__CreateSurfaceWithMetadataRef)>(dlsym(libgui, "_ZN7android21SurfaceComposerClient13createSurfaceERKNS_7String8EjjiiRKNS_2spINS_7IBinderEEERKNS_3gui13LayerMetadataEPj"));
@@ -322,12 +364,14 @@ namespace android
                     if (SurfaceComposerClient__CreateSurfaceWithMetadataRef || SurfaceComposerClient__CreateSurfaceWithGuiMetadata)
                     {
                         ResolveMethod(LayerMetadata, Constructor, libgui, "_ZN7android3gui13LayerMetadataC2Ev");
+                        if (!LayerMetadata__Constructor) ResolveMethod(LayerMetadata, Constructor, libgui, "_ZN7android3gui13LayerMetadataC1Ev");
                         ResolveMethod(LayerMetadata, setInt32, libgui, "_ZN7android3gui13LayerMetadata8setInt32Eji");
                     }
                     else
                     {
                         ResolveMethod(SurfaceComposerClient, CreateSurface, libgui, "_ZN7android21SurfaceComposerClient13createSurfaceERKNS_7String8EjjijRKNS_2spINS_7IBinderEEENS_13LayerMetadataEPj");
                         ResolveMethod(LayerMetadata, Constructor, libgui, "_ZN7android13LayerMetadataC2Ev");
+                        if (!LayerMetadata__Constructor) ResolveMethod(LayerMetadata, Constructor, libgui, "_ZN7android13LayerMetadataC1Ev");
                         ResolveMethod(LayerMetadata, setInt32, libgui, "_ZN7android13LayerMetadata8setInt32Eji");
                     }
                 }
@@ -340,6 +384,10 @@ namespace android
                 SurfaceComposerClient__MirrorSurface = reinterpret_cast<decltype(SurfaceComposerClient__MirrorSurface)>(dlsym(libgui, "_ZN7android21SurfaceComposerClient13mirrorSurfaceEPNS_14SurfaceControlE"));
                 if (!SurfaceComposerClient__MirrorSurface)
                 {
+                    ResolveMethod(SurfaceComposerClient, MirrorSurfaceWithStop, libgui, "_ZN7android21SurfaceComposerClient13mirrorSurfaceEPNS_14SurfaceControlES2_");
+                }
+                if (!SurfaceComposerClient__MirrorSurface && !SurfaceComposerClient__MirrorSurfaceWithStop)
+                {
                     ResolveMethod(SurfaceComposerClient, MirrorSurfaceWithBounds, libgui, "_ZN7android21SurfaceComposerClient13mirrorSurfaceEPNS_14SurfaceControlES2_S2_");
                 }
                 ResolveMethod(SurfaceComposerClient, GetInternalDisplayToken, libgui, "_ZN7android21SurfaceComposerClient23getInternalDisplayTokenEv");
@@ -349,6 +397,10 @@ namespace android
                 ResolveMethod(SurfaceComposerClient, GetPhysicalDisplayToken, libgui, "_ZN7android21SurfaceComposerClient23getPhysicalDisplayTokenENS_17PhysicalDisplayIdE");
                 ResolveMethod(SurfaceComposerClient__Transaction, Constructor, libgui, "_ZN7android21SurfaceComposerClient11TransactionC2Ev");
                 SurfaceComposerClient__Transaction__Destructor = reinterpret_cast<decltype(SurfaceComposerClient__Transaction__Destructor)>(dlsym(libgui, "_ZN7android21SurfaceComposerClient11TransactionD1Ev"));
+                if (!SurfaceComposerClient__Transaction__Destructor)
+                {
+                    ResolveMethod(SurfaceComposerClient__Transaction, Destructor, libgui, "_ZN7android21SurfaceComposerClient11TransactionD2Ev");
+                }
                 ResolveMethod(SurfaceComposerClient__Transaction, SetLayer, libgui, "_ZN7android21SurfaceComposerClient11Transaction8setLayerERKNS_2spINS_14SurfaceControlEEEi");
                 ResolveMethod(SurfaceComposerClient__Transaction, SetTrustedOverlay, libgui, "_ZN7android21SurfaceComposerClient11Transaction17setTrustedOverlayERKNS_2spINS_14SurfaceControlEEEb");
                 SurfaceComposerClient__Transaction__SetLayerStack = reinterpret_cast<decltype(SurfaceComposerClient__Transaction__SetLayerStack)>(dlsym(libgui, "_ZN7android21SurfaceComposerClient11Transaction13setLayerStackERKNS_2spINS_14SurfaceControlEEENS_2ui10LayerStackE"));
@@ -396,19 +448,24 @@ namespace android
                 const bool hasDisplayInfo = systemVersion >= 11 ? SurfaceComposerClient__GetDisplayState != nullptr : SurfaceComposerClient__GetDisplayInfo != nullptr;
                 const bool hasApply = SurfaceComposerClient__Transaction__Apply != nullptr || SurfaceComposerClient__Transaction__ApplyLegacy != nullptr;
                 const bool hasTrustedOverlay = systemVersion < 12 || SurfaceComposerClient__Transaction__SetTrustedOverlay != nullptr;
+                // 目标 12–17 必须使用平台工厂。旧版才允许显式构造/析构的固定存储回退。
+                const bool hasTransactionLifetime = (NativeTransactionCreate && NativeTransactionDelete) ||
+                    (systemVersion < 12 && SurfaceComposerClient__Transaction__Constructor && SurfaceComposerClient__Transaction__Destructor);
+                const bool hasClientLifetime = SurfaceComposerClient__GetDefault ||
+                    (systemVersion < 12 && Allocate && SurfaceComposerClient__Constructor && RefBase__IncStrong);
                 const struct { bool available; const char *name; } required[] = {
-                    {Allocate != nullptr, "platform operator new (_Znwm)"},
+                    {systemVersion >= 12 || Allocate != nullptr, "platform operator new (_Znwm)"},
                     {Deallocate != nullptr, "platform operator delete (_ZdlPv)"},
-                    {RefBase__IncStrong != nullptr, "RefBase::incStrong"},
                     {RefBase__DecStrong != nullptr, "RefBase::decStrong"},
                     {String8__Constructor != nullptr, "String8 constructor"},
                     {String8__Destructor != nullptr, "String8 destructor"},
-                    {SurfaceComposerClient__Constructor != nullptr, "SurfaceComposerClient constructor"},
+                    {hasClientLifetime, "SurfaceComposerClient::getDefault (legacy: constructor + incStrong)"},
                     {SurfaceControl__GetSurface != nullptr, "SurfaceControl::getSurface (const/non-const)"},
                     {SurfaceControl__DisConnect != nullptr, "SurfaceControl::disconnect"},
-                    {SurfaceComposerClient__Transaction__Constructor != nullptr, "Transaction constructor"},
+                    {hasTransactionLifetime, "ASurfaceTransaction_create/delete (legacy: Transaction C2 + D1/D2)"},
                     {SurfaceComposerClient__Transaction__SetLayer != nullptr, "Transaction::setLayer"},
                     {hasLayerMetadata, "LayerMetadata constructor"},
+                    {systemVersion < 12 || LayerMetadata__setInt32 != nullptr, "LayerMetadata::setInt32"},
                     {hasSurfaceCreate, "createSurface (legacy/gui value/gui const reference)"},
                     {hasDisplayToken, "display token (internal or physical IDs+token)"},
                     {hasDisplayInfo, systemVersion >= 11 ? "getDisplayState" : "getDisplayInfo"},
@@ -428,6 +485,7 @@ namespace android
             Functionals &operator=(const Functionals &) = delete;
             ~Functionals()
             {
+                if (libandroid) dlclose(libandroid);
                 if (libbinder) dlclose(libbinder);
                 if (libgui) dlclose(libgui);
                 if (libutils) dlclose(libutils);
@@ -436,6 +494,7 @@ namespace android
 
         struct String8
         {
+            // 已核对的 12–17 String8 只有一个字符串指针；保留对齐余量，由平台管理字符串。
             alignas(std::max_align_t) char data[1024];
 
             const Functionals &api;
@@ -454,6 +513,8 @@ namespace android
 
         struct LayerMetadata
         {
+            // 12–17 均为 Parcelable + unordered_map；与 Transaction 不同，始终有虚析构。
+            // 不在本程序中构造/析构 STL 成员，值参数的隐式引用由下方 ABI 桥传入。
             alignas(std::max_align_t) char data[1024];
             bool valid;
 
@@ -510,26 +571,34 @@ namespace android
 
         struct SurfaceComposerClientTransaction
         {
-            alignas(std::max_align_t) char data[1024];
+            void *data = nullptr;
 
             const Functionals &api;
             explicit SurfaceComposerClientTransaction(const Functionals &api) : api(api)
             {
-                api.SurfaceComposerClient__Transaction__Constructor(data);
+                if (api.NativeTransactionCreate && api.NativeTransactionDelete)
+                {
+                    data = api.NativeTransactionCreate();
+                    if (!data) throw std::bad_alloc();
+                }
+                else
+                {
+                    data = api.Allocate(1024);
+                    if (!data) throw std::bad_alloc();
+                    try { api.SurfaceComposerClient__Transaction__Constructor(data); }
+                    catch (...) { api.Deallocate(data); throw; }
+                }
             }
             SurfaceComposerClientTransaction(const SurfaceComposerClientTransaction &) = delete;
             SurfaceComposerClientTransaction &operator=(const SurfaceComposerClientTransaction &) = delete;
             ~SurfaceComposerClientTransaction()
             {
-                if (api.SurfaceComposerClient__Transaction__Destructor) api.SurfaceComposerClient__Transaction__Destructor(data);
+                if (api.NativeTransactionCreate && api.NativeTransactionDelete)
+                    api.NativeTransactionDelete(static_cast<ASurfaceTransaction *>(data));
                 else
                 {
-                    // AOSP 9/10 Transaction 首个虚函数为析构，11 起继承 Parcelable 的首槽析构。
-                    // inline D1 可不导出，但构造后的虚表仍保留该入口。
-                    // Itanium ABI 虚表首项是非释放析构，不能调用随后会 delete 存储的 D0。
-                    void **vtable;
-                    std::memcpy(&vtable, data, sizeof(vtable));
-                    reinterpret_cast<void (*)(void *)>(vtable[0])(data);
+                    api.SurfaceComposerClient__Transaction__Destructor(data);
+                    api.Deallocate(data);
                 }
             }
 
@@ -544,6 +613,7 @@ namespace android
             int SetMetadata(const StrongPointer<void> &surfaceControl, uint32_t key, int32_t value)
             {
                 int status = 0;
+                // 各代表标签的 Parcel.cpp 均断言 arm64 sizeof(Parcel)==120；此处保留对齐余量。
                 alignas(std::max_align_t) char parcel[1024]{};
                 api.Parcel__Constructor(parcel);
                 struct ParcelGuard
@@ -568,14 +638,22 @@ namespace android
             explicit SurfaceComposerClient(const Functionals &api) : api(api)
             {
                 if (!api.initSuccess) throw std::runtime_error("SurfaceComposerClient ABI 不完整");
-                // RefBase::decStrong 最后一次释放会 delete this；存储必须来自平台的 operator new。
-                // AOSP android-14.0.0_r1: libs/gui/SurfaceComposerClient.cpp 与 libutils/RefBase.cpp。
-                data = api.Allocate(1024);
-                if (!data) throw std::bad_alloc();
-                try { api.SurfaceComposerClient__Constructor(data); }
-                catch (...) { api.Deallocate(data); data = nullptr; throw; }
-                try { api.RefBase__IncStrong(data, this); }
-                catch (...) { api.RefBase__DecStrong(data, this); data = nullptr; throw; }
+                if (api.SurfaceComposerClient__GetDefault)
+                {
+                    // getDefault 已返回持有强引用的 sp；不能再 incStrong，也不能 dispose 共享实例。
+                    data = api.SurfaceComposerClient__GetDefault().pointer;
+                    if (!data) throw std::runtime_error("SurfaceComposerClient::getDefault 返回空客户端");
+                }
+                else
+                {
+                    // 仅为 12 之前的旧接口保留；initSuccess 不允许目标 12–17 走固定大小回退。
+                    data = api.Allocate(1024);
+                    if (!data) throw std::bad_alloc();
+                    try { api.SurfaceComposerClient__Constructor(data); }
+                    catch (...) { api.Deallocate(data); data = nullptr; throw; }
+                    try { api.RefBase__IncStrong(data, this); }
+                    catch (...) { api.RefBase__DecStrong(data, this); data = nullptr; throw; }
+                }
             }
             SurfaceComposerClient(const SurfaceComposerClient &) = delete;
             SurfaceComposerClient &operator=(const SurfaceComposerClient &) = delete;
@@ -630,6 +708,8 @@ namespace android
                 }
                 else if (api.SurfaceComposerClient__CreateSurfaceWithGuiMetadata)
                 {
+                    // AArch64 非平凡值参数按隐式引用传递，参数析构由调用方负责。
+                    // 平台可 move 此实例；仅由 layerMetadata 析构一次，不重复销毁或按 NDK STL 释放。
                     result = api.SurfaceComposerClient__CreateSurfaceWithGuiMetadata(data, windowName.data, width, height, 1, static_cast<int32_t>(flags), parentHandle, layerMetadata.data, nullptr);
                 }
                 else if (api.systemVersion >= 10)
@@ -659,7 +739,14 @@ namespace android
                     if (!displayToken.pointer && api.SurfaceComposerClient__GetPhysicalDisplayIds && api.SurfaceComposerClient__GetPhysicalDisplayToken)
                     {
                         const auto ids = api.SurfaceComposerClient__GetPhysicalDisplayIds();
-                        if (!ids.empty()) displayToken = api.SurfaceComposerClient__GetPhysicalDisplayToken(ids.front());
+                        struct DisplayIdsGuard
+                        {
+                            const Functionals &api;
+                            detail::ui::PhysicalDisplayId *data;
+                            ~DisplayIdsGuard() { if (data) api.Deallocate(data); }
+                        } guard{api, ids.begin};
+                        if (ids.begin && ids.begin != ids.end)
+                            displayToken = api.SurfaceComposerClient__GetPhysicalDisplayToken(*ids.begin);
                     }
                     if (!displayToken.pointer && api.SurfaceComposerClient__GetBuiltInDisplay)
                         displayToken = api.SurfaceComposerClient__GetBuiltInDisplay(detail::ui::DisplayType::DisplayIdMain);
@@ -783,7 +870,7 @@ namespace android
 
         bool SupportsRecordLayerStack() const
         {
-            return api.systemVersion >= 12 && (api.SurfaceComposerClient__MirrorSurface || api.SurfaceComposerClient__MirrorSurfaceWithBounds) && (api.SurfaceComposerClient__Transaction__SetLayerStack || api.SurfaceComposerClient__Transaction__SetLayerStackLegacy) && api.SurfaceComposerClient__Transaction__Show && api.SurfaceComposerClient__Transaction__Reparent && api.SurfaceComposerClient__Transaction__SetMatrix && api.SurfaceComposerClient__Transaction__SetPosition && api.SurfaceComposerClient__Transaction__SetCrop;
+            return api.systemVersion >= 12 && (api.SurfaceComposerClient__MirrorSurface || api.SurfaceComposerClient__MirrorSurfaceWithStop || api.SurfaceComposerClient__MirrorSurfaceWithBounds) && (api.SurfaceComposerClient__Transaction__SetLayerStack || api.SurfaceComposerClient__Transaction__SetLayerStackLegacy) && api.SurfaceComposerClient__Transaction__Show && api.SurfaceComposerClient__Transaction__Reparent && api.SurfaceComposerClient__Transaction__SetMatrix && api.SurfaceComposerClient__Transaction__SetPosition && api.SurfaceComposerClient__Transaction__SetCrop;
         }
 
     public:
@@ -970,7 +1057,7 @@ namespace android
                 return nullptr;
             }
             surfaceControl.surface = surface.pointer;
-            auto nativeWindow = reinterpret_cast<ANativeWindow *>(reinterpret_cast<char *>(surface.pointer) + sizeof(std::max_align_t) / 2);
+            auto nativeWindow = NativeWindow(surface.pointer);
             if (windowType >= 0 && api.systemVersion >= 12)
             {
                 int status = 0;
@@ -1092,7 +1179,13 @@ namespace android
             const auto &description = sourceIt->second.recordDescription;
             auto root = composer.CreateSurface("Display Overlays", 0, 0, false, containerFlags, false, description.windowType, description.ownerUid, description.ownerPid);
             if (!root.data) return status = -EIO;
-            auto mirrored = api.SurfaceComposerClient__MirrorSurface ? api.SurfaceComposerClient__MirrorSurface(composer.data, sourceIt->second.control.data) : api.SurfaceComposerClient__MirrorSurfaceWithBounds(composer.data, sourceIt->second.control.data, nullptr, nullptr);
+            StrongPointer<void> mirrored;
+            if (api.SurfaceComposerClient__MirrorSurface)
+                mirrored = api.SurfaceComposerClient__MirrorSurface(composer.data, sourceIt->second.control.data);
+            else if (api.SurfaceComposerClient__MirrorSurfaceWithStop)
+                mirrored = api.SurfaceComposerClient__MirrorSurfaceWithStop(composer.data, sourceIt->second.control.data, nullptr);
+            else
+                mirrored = api.SurfaceComposerClient__MirrorSurfaceWithBounds(composer.data, sourceIt->second.control.data, nullptr, nullptr);
             if (!mirrored.pointer) return status = -EIO;
             SurfaceControl mirror(api, mirrored.pointer);
 

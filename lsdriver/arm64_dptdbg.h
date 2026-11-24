@@ -657,7 +657,7 @@ static void dptbp_release_shadow_pages(void)
 注销 notifier 后再关闭资源准入，等待各类引用排空，最后释放 hook、页和 mm。
 未发布成功的安装也走此路径，按实际已取得的资源逐项清理。
 */
-__attribute__((no_sanitize("cfi"))) static void dptbp_stop_monitor_locked(void)
+__attribute__((no_sanitize("cfi", "kcfi"))) static void dptbp_stop_monitor_locked(void)
 {
     struct mm_struct *mm = g_dptbp_current.mm;
 
@@ -924,7 +924,7 @@ static int dptbp_prepare_slots(struct break_point *info)
 页表准备、__mmu_notifier_register() 和运行态发布均放在 mmap 写锁内完成。
 最后发布 info 与 valid 并通知各 CPU 应用视图；任一步失败都交给 stop_locked() 清理。
 */
-__attribute__((no_sanitize("cfi"))) static int start_dptbp_monitor(struct break_point *info)
+__attribute__((no_sanitize("cfi", "kcfi"))) static int start_dptbp_monitor(struct break_point *info)
 {
     if (!bp_info_find_configured_type(info, BP_BREAKPOINT_X, NULL))
     {

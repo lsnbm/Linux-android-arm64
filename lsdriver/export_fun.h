@@ -455,7 +455,7 @@ static inline int write_user_pte_value(struct mm_struct *mm, uint64_t addr, ptev
 
 // 分配页对齐的内核 RWX 内存；fixed_address 为 NULL 时随机分配，否则必须传入希望占用的页对齐虚拟地址。
 // size 会向上取整到整页；固定地址已占用或无效时返回 NULL。写入机器码后、首次执行前仍须同步缓存。
-static void *execmem_alloc(void *fixed_address, size_t size)
+__attribute__((no_sanitize("cfi", "kcfi"))) static void *execmem_alloc(void *fixed_address, size_t size)
 {
     if (!size || size > SIZE_MAX - (PAGE_SIZE - 1)) return NULL;
 

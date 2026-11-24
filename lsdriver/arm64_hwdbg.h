@@ -196,7 +196,7 @@ static bool perf_breakpoint_requires_step(struct perf_event *event)
 }
 
 // 执行断异常处理跳板工作函数
-static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
+__attribute__((no_sanitize("cfi", "kcfi"))) static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
 {
     // breakpoint_handler(unused, esr, regs)
     struct break_point *bp_info = g_bp_info;
@@ -252,7 +252,7 @@ static int work_trampoline_breakpoint(struct pt_regs *hook_regs)
 }
 
 // 访问断异常处理跳板工作函数
-static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
+__attribute__((no_sanitize("cfi", "kcfi"))) static int work_trampoline_watchpoint(struct pt_regs *hook_regs)
 {
     // watchpoint_handler(addr, esr, regs)，
     uint64_t fault_addr = hook_regs->regs[0];

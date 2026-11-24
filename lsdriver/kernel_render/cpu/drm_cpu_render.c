@@ -93,7 +93,7 @@ static struct drm_property *plane_property(struct drm_plane *plane, const char *
     return NULL;
 }
 
-static int commit_plane(bool disable)
+__attribute__((no_sanitize("cfi", "kcfi"))) static int commit_plane(bool disable)
 {
     struct drm_modeset_acquire_ctx acquire;
     struct drm_atomic_state *state = drm_cpu_api.state_alloc(drm_cpu_render.client.dev);
@@ -299,13 +299,14 @@ out:
         ret = drm_cpu_api.backoff(&acquire);
         if (!ret) goto retry;
     }
-    kref_put(&state->ref, drm_cpu_api.state_free);
+    // 保持 kref_put 的末引用释放语义；间接调用留在本函数，避免 helper 内部重新插入 CFI 检查。
+    if (refcount_dec_and_test(&state->ref.refcount)) drm_cpu_api.state_free(&state->ref);
     drm_cpu_api.drop_locks(&acquire);
     drm_cpu_api.acquire_fini(&acquire);
     return ret;
 }
 
-static void release_buffers(void)
+__attribute__((no_sanitize("cfi", "kcfi"))) static void release_buffers(void)
 {
     for (unsigned int index = 0; index < ARRAY_SIZE(drm_cpu_render.buffers); index++)
     {
@@ -324,7 +325,7 @@ static void release_buffers(void)
     drm_cpu_render.back = 0;
 }
 
-int drm_cpu_render_init(void)
+__attribute__((no_sanitize("cfi", "kcfi"))) int drm_cpu_render_init(void)
 {
     mutex_lock(&drm_cpu_lock);
     if (drm_cpu_render.initialized)
@@ -463,7 +464,7 @@ int drm_cpu_render_begin_frame(void)
     return 0;
 }
 
-int drm_cpu_render_end_frame(void)
+__attribute__((no_sanitize("cfi", "kcfi"))) int drm_cpu_render_end_frame(void)
 {
     if (READ_ONCE(drm_cpu_render.frame_owner) != current) return -EINVAL;
     wmb();

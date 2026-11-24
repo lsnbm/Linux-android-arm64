@@ -67,7 +67,7 @@ static int resolve_symbols(void)
     return 0;
 }
 
-static struct drm_minor *minor_acquire(unsigned int minor)
+__attribute__((no_sanitize("cfi", "kcfi"))) static struct drm_minor *minor_acquire(unsigned int minor)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
     return drm_cpu_render_api.minor_acquire(drm_cpu_render_api.minors_xa, minor);
@@ -90,7 +90,7 @@ static int acquire_device(void)
     return 0;
 }
 
-static void release_output(void)
+__attribute__((no_sanitize("cfi", "kcfi"))) static void release_output(void)
 {
     drm_cpu_render.attached = false;
     if (drm_cpu_render.mapped)
@@ -118,7 +118,7 @@ static void release_output(void)
     drm_cpu_render.dev = NULL;
 }
 
-static int choose_mode(void)
+__attribute__((no_sanitize("cfi", "kcfi"))) static int choose_mode(void)
 {
     struct drm_mode_set *mode_set;
     u32 width = 0;
@@ -144,7 +144,7 @@ static int choose_mode(void)
     return 0;
 }
 
-static int create_client_buffer(void)
+__attribute__((no_sanitize("cfi", "kcfi"))) static int create_client_buffer(void)
 {
     struct drm_mode_set *mode_set;
     int ret;
@@ -181,7 +181,7 @@ static int create_client_buffer(void)
     return 0;
 }
 
-static int acquire_output(void)
+__attribute__((no_sanitize("cfi", "kcfi"))) static int acquire_output(void)
 {
     int ret;
 
@@ -261,7 +261,7 @@ static int drm_cpu_begin_draw(void)
     return 0;
 }
 
-static int drm_cpu_end_draw(void)
+__attribute__((no_sanitize("cfi", "kcfi"))) static int drm_cpu_end_draw(void)
 {
     int ret;
 
@@ -321,7 +321,7 @@ int drm_cpu_render_text(int left, int top, const char *text, u32 scale, u32 colo
     return drm_cpu_end_draw();
 }
 
-int drm_cpu_render_exit(void)
+__attribute__((no_sanitize("cfi", "kcfi"))) int drm_cpu_render_exit(void)
 {
     int ret = 0;
 
