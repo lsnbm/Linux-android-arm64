@@ -243,7 +243,7 @@ namespace DriverLoader
     namespace Vivo
     {
         // vivo 内核会把厂商标记写入 vermagic，但 uname -r 不会返回这个字段。
-        inline constexpr std::string_view VermagicSuffix = "vivo";
+        inline constexpr std::string_view VermagicToken = "vivo";
 
         inline bool IsDevice()
         {
@@ -290,8 +290,8 @@ namespace DriverLoader
         return true;
     }
 
-    // 通用 vermagic 修补：替换模块内核版本，并按需追加目标内核要求的厂商后缀。
-    inline bool PatchVermagic(std::vector<uint8_t> &module_image, std::string_view required_suffix)
+    // 替换模块内核版本；厂商标记支持放在 aarch64 前或整个 vermagic 末尾。
+    inline bool PatchVermagic(std::vector<uint8_t> &module_image, std::string_view required_token, bool before_arch)
     {
         if (module_image.size() < sizeof(Elf64_Ehdr)) return false;
 
@@ -354,12 +354,45 @@ namespace DriverLoader
 
         std::string target_vermagic = "vermagic=";
         target_vermagic += kernel_info.release;
-        target_vermagic += module_vermagic.substr(release_end);
-        if (!required_suffix.empty())
+        if (required_token.empty()) target_vermagic += module_vermagic.substr(release_end);
+        else
         {
-            const std::string suffix = " " + std::string(required_suffix);
-            if (!target_vermagic.ends_with(suffix) && !target_vermagic.ends_with(suffix + " ")) target_vermagic += suffix + " ";
-            else if (!target_vermagic.ends_with(' ')) target_vermagic += ' ';
+            // 去掉已有厂商 token 和多余空格，其他配置字段保持原顺序。
+            std::string_view flags = std::string_view(module_vermagic).substr(release_end);
+            bool has_arch = false;
+            while (!flags.empty())
+            {
+                const size_t begin = flags.find_first_not_of(' ');
+                if (begin == std::string_view::npos) break;
+                flags.remove_prefix(begin);
+                const size_t end = flags.find(' ');
+                const auto flag = flags.substr(0, end);
+                flags.remove_prefix(end == std::string_view::npos ? flags.size() : end + 1);
+                if (flag == required_token) continue;
+
+                target_vermagic += ' ';
+                if (flag == "aarch64")
+                {
+                    has_arch = true;
+                    if (before_arch)
+                    {
+                        target_vermagic += required_token;
+                        target_vermagic += ' ';
+                    }
+                }
+                target_vermagic += flag;
+            }
+            // 已核对的两种格式："aarch64 vivo " 有尾空格，"vivo aarch64" 无尾空格。
+            if (before_arch)
+            {
+                if (!has_arch) return false;
+            }
+            else
+            {
+                target_vermagic += ' ';
+                target_vermagic += required_token;
+                target_vermagic += ' ';
+            }
         }
 
         const size_t vermagic_offset = static_cast<size_t>(vermagic_begin - module_image.begin());
@@ -508,8 +541,8 @@ namespace DriverLoader
         const std::vector<std::string> candidates = GetModuleCandidates();
         if (candidates.empty()) return -ENOTSUP;
 
-        // vivo 内核要求 vermagic 额外包含厂商 token，而 uname -r 只提供版本主体；
-        // 因此仅对识别出的 vivo 设备修补，其他设备沿用下载模块的原始内容。
+        // vivo 依次尝试 "aarch64 vivo " 和 "vivo aarch64"，成功即返回；
+        // 其他设备仍只加载一次下载模块的原始内容。
         const bool is_vivo_device = Vivo::IsDevice();
         int last_error = -EIO;
         for (const std::string &module_name : candidates)
@@ -531,26 +564,36 @@ namespace DriverLoader
                 continue;
             }
 
-            if (is_vivo_device && !PatchVermagic(module_image, Vivo::VermagicSuffix))
+            for (int attempt = 0; attempt < (is_vivo_device ? 2 : 1); ++attempt)
             {
-                std::println(stderr, "[DriverLoader] vivo 设备模块 vermagic 修补失败: {}", module_name);
-                std::fflush(stderr);
-                last_error = -EINVAL;
-                continue;
-            }
+                // 每种格式都从下载的原始镜像生成，不叠加前一次的 .modinfo 修补。
+                std::vector<uint8_t> patched_image;
+                if (is_vivo_device)
+                {
+                    patched_image = module_image;
+                    if (!PatchVermagic(patched_image, Vivo::VermagicToken, attempt != 0))
+                    {
+                        std::println(stderr, "[DriverLoader] vivo 设备模块 vermagic 修补失败: {}", module_name);
+                        std::fflush(stderr);
+                        last_error = -EINVAL;
+                        continue;
+                    }
+                }
 
-            errno = 0;
-            const long result = syscall(SYS_init_module, module_image.data(), static_cast<unsigned long>(module_image.size()), "");
-            if (result == 0)
-            {
-                std::println(stderr, "[DriverLoader] 内核模块加载成功: {}", module_name);
+                const auto &load_image = is_vivo_device ? patched_image : module_image;
+                errno = 0;
+                const long result = syscall(SYS_init_module, load_image.data(), static_cast<unsigned long>(load_image.size()), "");
+                if (result == 0)
+                {
+                    std::println(stderr, "[DriverLoader] 内核模块加载成功: {}", module_name);
+                    std::fflush(stderr);
+                    return 0;
+                }
+                last_error = -errno;
+                std::println(stderr, "[DriverLoader] 内核模块加载失败: {} errno={} ({})", module_name, -last_error, strerror(-last_error));
                 std::fflush(stderr);
-                return 0;
+                PrintDmesgTail();
             }
-            last_error = -errno;
-            std::println(stderr, "[DriverLoader] 内核模块加载失败: {} errno={} ({})", module_name, -last_error, strerror(-last_error));
-            std::fflush(stderr);
-            PrintDmesgTail();
         }
 
         return last_error;

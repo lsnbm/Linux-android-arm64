@@ -51,10 +51,6 @@
     校验命令及结构大小后用 copy_from_user 读取；TGID 命中返回 -EINVAL，复制失败或
     未命中则放行原生处理。此判断不证明目标 Binder 对象仍活跃。
 
-限制：
-- proc_pid_lookup/pid_revalidate 的数字目录名按调用者 PID namespace 查任务；
-  proc_pid_readdir 直接匹配原生枚举产生的 TGID 数字名称。
-
 */
 #ifndef HIDE_TASK_H
 #define HIDE_TASK_H
