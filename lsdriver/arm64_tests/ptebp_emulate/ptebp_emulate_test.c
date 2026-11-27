@@ -31,10 +31,32 @@ static int target_tgid;
 static unsigned long target_address;
 static unsigned long target_hits;
 
+static int ptebp_target_active_get(char *buffer, const struct kernel_param *parameter)
+{
+    int active = 0;
+    mutex_lock(&g_ptebp_control_lock);
+    if (g_ptebp_current.mm)
+    {
+        mmap_read_lock(g_ptebp_current.mm);
+        const struct ptebp_slot *slot = &g_ptebp_current.slots[0];
+        pteval_t value;
+        active = slot->hook_addr && slot->paddr && !read_user_pte_value(g_ptebp_current.mm, slot->page_vaddr, &value) && value == ptebp_make_data_guard_pte(pte_val(slot->orig_pte)) && READ_ONCE(*(uint32_t *)phys_to_virt(slot->paddr)) == 0;
+        mmap_read_unlock(g_ptebp_current.mm);
+    }
+    mutex_unlock(&g_ptebp_control_lock);
+    struct kernel_param snapshot = *parameter;
+    snapshot.arg = &active;
+    return param_get_int(buffer, &snapshot);
+}
+
+static const struct kernel_param_ops ptebp_target_active_ops = {
+    .get = ptebp_target_active_get,
+};
+
 module_param(target_tgid, int, 0400);
 module_param(target_address, ulong, 0400);
 module_param(target_hits, ulong, 0400);
-module_param_named(target_active, g_ptebp_current.valid, int, 0400);
+module_param_cb(target_active, &ptebp_target_active_ops, NULL, 0400);
 
 static void ptebp_target_hit(void *regs, void *fp_regs, void *point)
 {
@@ -69,55 +91,39 @@ static void ptebp_file_hit(void *regs, void *fp_regs, void *point)
     ptebp_file_hits++;
 }
 
-static int ptebp_file_restore_lock_selftest(void)
+static int ptebp_file_restore_selftest(void)
 {
     struct mm_struct *mm = g_ptebp_current.mm;
-    int status = 0;
-
-    // 用真实写锁阻止异常路径取得读锁；这里只调用 handler，不触发持锁睡眠。
-    mmap_write_lock(mm);
-    if (!ptebp_try_get_ref(PTEBP_REF_DATA_ABORT)) status = -EINVAL;
-    else
+    const struct ptebp_slot *slot = &g_ptebp_current.slots[0];
+    mmap_read_lock(mm);
+    int status = write_user_pte_value(mm, slot->page_vaddr, pte_val(slot->orig_pte) | PTE_UXN);
+    if (!status)
     {
-        int result = ptebp_drop_all_monitors(false, PTEBP_REF_DATA_ABORT);
-        ptebp_put_ref(PTEBP_REF_DATA_ABORT);
-        if (result != -EAGAIN) status = -EINVAL;
+        uint32_t changed_inst = slot->orig_inst == 0xd503201f ? 0xd503203f : 0xd503201f;
+        status = ptebp_write_inst(&g_ptebp_current.slots[0], changed_inst);
     }
+    mmap_read_unlock(mm);
+    if (status) return status;
 
-    for (int kernel = 0; !status && kernel < 2; kernel++)
-    {
-        struct pt_regs regs = {
-            .pc = g_ptebp_current.slots[0].hook_addr,
-            .pstate = kernel ? PSR_MODE_EL1h : PSR_MODE_EL0t,
-        };
-        struct pt_regs hook_regs = {};
-        hook_regs.regs[0] = g_ptebp_current.slots[0].page_vaddr;
-        hook_regs.regs[1] = ((kernel ? ESR_ELx_EC_DABT_CUR : ESR_ELx_EC_DABT_LOW) << ESR_ELx_EC_SHIFT) |
-                            ESR_ELx_FSC_PERM | ESR_ELx_FSC_LEVEL | ESR_ELx_WNR;
-        hook_regs.regs[2] = (unsigned long)&regs;
-        if (ptebp_handle_data_abort(&hook_regs) != 0 ||
-            hook_regs.regs[0] != g_ptebp_current.slots[0].page_vaddr ||
-            regs.pc != g_ptebp_current.slots[0].hook_addr)
-            status = -EINVAL;
-    }
-
-    if (!ptebp_context_valid() || g_ptebp_current.info != ptebp_file_info ||
-        g_ptebp_current.restoring || g_ptebp_current.data_abort_refs ||
-        g_ptebp_current.undef_refs || g_ptebp_current.mprotect_refs ||
-        g_ptebp_current.remote_read_refs || g_ptebp_current.page_copy_refs)
-        status = -EINVAL;
+    for (enum ptebp_ref_type ref_type = PTEBP_REF_DATA_ABORT; ref_type < PTEBP_REF_COUNT; ref_type++) ptebp_get_ref(ref_type);
+    status = ptebp_drop_all_monitors(false);
+    if (!status) status = ptebp_drop_all_monitors(false);
+    mmap_read_lock(mm);
     for (size_t index = 0; !status && index < ARRAY_SIZE(ptebp_file_guard); index++)
     {
-        const struct ptebp_slot *slot = &g_ptebp_current.slots[index];
+        slot = &g_ptebp_current.slots[index];
         pteval_t value;
-        if (read_user_pte_value(mm, slot->page_vaddr, &value) ||
-            value != ptebp_file_guard[index] ||
-            READ_ONCE(*(uint32_t *)phys_to_virt(slot->paddr)) != 0)
-            status = -ESTALE;
+        if (!slot->hook_addr || !slot->shadow_page || !slot->paddr || READ_ONCE(*(uint32_t *)phys_to_virt(slot->paddr)) != slot->orig_inst || read_user_pte_value(mm, slot->page_vaddr, &value) || value != pte_val(slot->orig_pte)) status = -ESTALE;
     }
-    mmap_write_unlock(mm);
-    if (status) ls_log_always_tag("test", "PTEBP restore lock selftest failed status=%d\n", status);
-    return status;
+    mmap_read_unlock(mm);
+    if (g_ptebp_current.mm != mm || g_ptebp_current.info != ptebp_file_info || !g_ptebp_mprotect_hook || !g_ptebp_read_hook) status = -ESTALE;
+    for (enum ptebp_ref_type ref_type = PTEBP_REF_DATA_ABORT; ref_type < PTEBP_REF_COUNT; ref_type++)
+    {
+        if (__atomic_load_n(ptebp_context_refs(ref_type), __ATOMIC_SEQ_CST) != 1) status = -EINVAL;
+        ptebp_put_ref(ref_type);
+    }
+    if (status) ls_log_always_tag("test", "PTEBP restore selftest failed status=%d\n", status);
+    return status ? status : start_ptebp_monitor(ptebp_file_info);
 }
 
 static int ptebp_file_start(uint64_t address)
@@ -125,8 +131,7 @@ static int ptebp_file_start(uint64_t address)
     if (ptebp_emulate_pending || ptebp_file_info) return -EBUSY;
     if (address & ~PAGE_MASK) return -EINVAL;
 
-    if (!fn_aarch64_insn_patch_text)
-        fn_aarch64_insn_patch_text = (void *)generic_kallsyms_lookup_name("aarch64_insn_patch_text");
+    if (!fn_aarch64_insn_patch_text) fn_aarch64_insn_patch_text = (void *)generic_kallsyms_lookup_name("aarch64_insn_patch_text");
     if (!fn_aarch64_insn_patch_text) return -ENOENT;
 
     ptebp_file_info = kvzalloc(sizeof(*ptebp_file_info), GFP_KERNEL);
@@ -143,6 +148,8 @@ static int ptebp_file_start(uint64_t address)
     }
     int status = start_ptebp_monitor(ptebp_file_info);
     if (status) return status;
+    status = ptebp_file_restore_selftest();
+    if (status) return status;
     mmap_read_lock(g_ptebp_current.mm);
     for (size_t index = 0; index < ARRAY_SIZE(ptebp_file_guard); index++)
     {
@@ -150,23 +157,18 @@ static int ptebp_file_start(uint64_t address)
         if (status) break;
     }
     mmap_read_unlock(g_ptebp_current.mm);
-    return status ? status : ptebp_file_restore_lock_selftest();
+    return status;
 }
 
 static int ptebp_file_check(void)
 {
-    if (!ptebp_file_info || !ptebp_context_valid() ||
-        g_ptebp_current.info != ptebp_file_info ||
-        g_ptebp_current.remote_read_refs) return -EINVAL;
+    if (!ptebp_file_info || g_ptebp_current.info != ptebp_file_info || g_ptebp_current.remote_read_refs) return -EINVAL;
 
     for (size_t index = 0; index < 3; index++)
     {
         const struct ptebp_slot *slot = &g_ptebp_current.slots[index];
         pteval_t value;
-        if (READ_ONCE(*(uint32_t *)phys_to_virt(slot->paddr)) != 0 ||
-            read_user_pte_value(g_ptebp_current.mm, slot->page_vaddr, &value) ||
-            value != ptebp_file_guard[index] ||
-            value != ptebp_make_data_guard_pte(pte_val(slot->orig_pte))) return -ESTALE;
+        if (READ_ONCE(*(uint32_t *)phys_to_virt(slot->paddr)) != 0 || read_user_pte_value(g_ptebp_current.mm, slot->page_vaddr, &value) || value != ptebp_file_guard[index] || value != ptebp_make_data_guard_pte(pte_val(slot->orig_pte))) return -ESTALE;
     }
     return ptebp_file_hits;
 }
@@ -175,27 +177,38 @@ static int ptebp_file_stop(void)
 {
     if (!ptebp_file_info) return 0;
 
+    int check_status = 0;
     mutex_lock(&g_ptebp_control_lock);
+    if (g_ptebp_current.mm)
+    {
+        if (g_ptebp_current.info != ptebp_file_info || !g_ptebp_mprotect_hook || !g_ptebp_read_hook) check_status = -ESTALE;
+        for (size_t index = 0; index < ARRAY_SIZE(ptebp_file_info->points); index++)
+        {
+            if (!bp_point_is_configured_type(&ptebp_file_info->points[index], BP_BREAKPOINT_X)) continue;
+            const struct ptebp_slot *slot = &g_ptebp_current.slots[index];
+            if (!slot->hook_addr || !slot->shadow_page || !slot->paddr) check_status = -ESTALE;
+        }
+    }
+
     int status = ptebp_stop_locked();
+    if (!status && (g_ptebp_current.info || g_ptebp_current.mm || g_ptebp_mprotect_hook || g_ptebp_read_hook || g_ptebp_current.data_abort_refs || g_ptebp_current.undef_refs || g_ptebp_current.mprotect_refs || g_ptebp_current.remote_read_refs || g_ptebp_current.page_copy_refs || memchr_inv(g_ptebp_current.slots, 0, sizeof(g_ptebp_current.slots)))) status = -ESTALE;
     mutex_unlock(&g_ptebp_control_lock);
     if (!status)
     {
         kvfree(ptebp_file_info);
         ptebp_file_info = NULL;
     }
-    return status;
+    return status ? status : check_status;
 }
 
 static void ptebp_emulate_clear_slots(void)
 {
-    for (size_t index = 0; index < ARRAY_SIZE(g_ptebp_current.slots); index++)
-        g_ptebp_current.slots[index] = (struct ptebp_slot){};
+    for (size_t index = 0; index < ARRAY_SIZE(g_ptebp_current.slots); index++) g_ptebp_current.slots[index] = (struct ptebp_slot){};
 }
 
 static void ptebp_emulate_release_pending(void)
 {
-    if (!ptebp_emulate_pending)
-        return;
+    if (!ptebp_emulate_pending) return;
 
     kfree(ptebp_emulate_pending->code_shadow);
     kfree(ptebp_emulate_pending->data_shadow);
@@ -211,12 +224,10 @@ static int ptebp_emulate_prepare(const struct ptebp_emulate_case *request)
     struct ptebp_emulate_pending *pending;
     bool emulated;
 
-    if (ptebp_emulate_pending)
-        return -EBUSY;
+    if (ptebp_emulate_pending) return -EBUSY;
 
     pending = kzalloc(sizeof(*pending), GFP_KERNEL);
-    if (!pending)
-        return -ENOMEM;
+    if (!pending) return -ENOMEM;
     pending->code_shadow = kmalloc(PAGE_SIZE, GFP_KERNEL);
     pending->data_shadow = kmalloc(PAGE_SIZE, GFP_KERNEL);
     if (!pending->code_shadow || !pending->data_shadow)
@@ -262,38 +273,32 @@ static int ptebp_emulate_prepare(const struct ptebp_emulate_case *request)
     pending->completion.raw = request->raw;
     pending->completion.emulated = emulated ? 1U : 0U;
     pending->completion.status = emulated ? 0U : 1U;
-    memcpy(pending->completion.emulator_state.regs, regs.regs,
-           sizeof(pending->completion.emulator_state.regs));
+    memcpy(pending->completion.emulator_state.regs, regs.regs, sizeof(pending->completion.emulator_state.regs));
     pending->completion.emulator_state.sp = regs.sp;
     pending->completion.emulator_state.pc = regs.pc;
     pending->completion.emulator_state.pstate = regs.pstate;
-    memcpy(pending->completion.emulator_state.q, fp_regs.q,
-           sizeof(pending->completion.emulator_state.q));
+    memcpy(pending->completion.emulator_state.q, fp_regs.q, sizeof(pending->completion.emulator_state.q));
     pending->completion.emulator_state.fpcr = fp_regs.fpcr;
     pending->completion.emulator_state.fpsr = fp_regs.fpsr;
-    memcpy(pending->completion.emulator_memory, request->memory,
-           sizeof(pending->completion.emulator_memory));
+    memcpy(pending->completion.emulator_memory, request->memory, sizeof(pending->completion.emulator_memory));
     ptebp_emulate_pending = pending;
     return 0;
 }
 
-static long ptebp_emulate_ioctl(struct file *file, unsigned int command,
-                                unsigned long argument)
+static long ptebp_emulate_ioctl(struct file *file, unsigned int command, unsigned long argument)
 {
     struct ptebp_emulate_case *request = NULL;
     struct ptebp_emulate_completion *completion = NULL;
     int status;
 
     (void)file;
-    if (_IOC_TYPE(command) != PTEBP_EMULATE_IOC_MAGIC)
-        return -ENOTTY;
+    if (_IOC_TYPE(command) != PTEBP_EMULATE_IOC_MAGIC) return -ENOTTY;
 
     mutex_lock(&ptebp_emulate_lock);
     if (command == PTEBP_EMULATE_FILE_START)
     {
         uint64_t address;
-        status = copy_from_user(&address, (void __user *)argument, sizeof(address)) ?
-                     -EFAULT : ptebp_file_start(address);
+        status = copy_from_user(&address, (void __user *)argument, sizeof(address)) ? -EFAULT : ptebp_file_start(address);
         goto out;
     }
     if (command == PTEBP_EMULATE_FILE_CHECK)
@@ -319,8 +324,7 @@ static long ptebp_emulate_ioctl(struct file *file, unsigned int command,
             status = -EFAULT;
             goto out;
         }
-        if (request->version != PTEBP_EMULATE_PROTOCOL_VERSION ||
-            request->reserved != 0U)
+        if (request->version != PTEBP_EMULATE_PROTOCOL_VERSION || request->reserved != 0U)
         {
             status = -EINVAL;
             goto out;
@@ -341,23 +345,18 @@ static long ptebp_emulate_ioctl(struct file *file, unsigned int command,
             status = -EINVAL;
             goto out;
         }
-        if (copy_from_user(completion, (void __user *)argument,
-                           sizeof(*completion)))
+        if (copy_from_user(completion, (void __user *)argument, sizeof(*completion)))
         {
             status = -EFAULT;
             goto out;
         }
-        if (completion->version != PTEBP_EMULATE_PROTOCOL_VERSION ||
-            completion->index != ptebp_emulate_pending->completion.index ||
-            completion->raw != ptebp_emulate_pending->completion.raw ||
-            completion->reserved != 0U)
+        if (completion->version != PTEBP_EMULATE_PROTOCOL_VERSION || completion->index != ptebp_emulate_pending->completion.index || completion->raw != ptebp_emulate_pending->completion.raw || completion->reserved != 0U)
         {
             status = -EINVAL;
             goto out;
         }
         *completion = ptebp_emulate_pending->completion;
-        status = copy_to_user((void __user *)argument, completion,
-                              sizeof(*completion)) ? -EFAULT : 0;
+        status = copy_to_user((void __user *)argument, completion, sizeof(*completion)) ? -EFAULT : 0;
         ptebp_emulate_release_pending();
         goto out;
     }
@@ -398,15 +397,7 @@ static int ptebp_emulate_abort_selftest(void)
         uint32_t raw;
         uint64_t expected;
     } cases[] = {
-        {0x385ff820, 0x80ULL},
-        {0x785ff820, 0x8080ULL},
-        {0xb85ff820, 0x80808080ULL},
-        {0xf85ff820, 0x8080808080808080ULL},
-        {0x38dff820, 0xffffff80ULL},
-        {0x389ff820, 0xffffffffffffff80ULL},
-        {0x78dff820, 0xffff8080ULL},
-        {0x789ff820, 0xffffffffffff8080ULL},
-        {0xb89ff820, 0xffffffff80808080ULL},
+        {0x385ff820, 0x80ULL}, {0x785ff820, 0x8080ULL}, {0xb85ff820, 0x80808080ULL}, {0xf85ff820, 0x8080808080808080ULL}, {0x38dff820, 0xffffff80ULL}, {0x389ff820, 0xffffffffffffff80ULL}, {0x78dff820, 0xffff8080ULL}, {0x789ff820, 0xffffffffffff8080ULL}, {0xb89ff820, 0xffffffff80808080ULL},
     };
     void *shadow = kmalloc(PAGE_SIZE, GFP_KERNEL);
     if (!shadow) return -ENOMEM;
@@ -419,7 +410,6 @@ static int ptebp_emulate_abort_selftest(void)
         .hook_addr = PTEBP_EMULATE_DATA_ADDRESS,
         .shadow_page = shadow,
     };
-    g_ptebp_current.valid = 1;
 
     struct pt_regs regs = {};
     struct pt_regs hook_regs = {};
@@ -439,11 +429,7 @@ static int ptebp_emulate_abort_selftest(void)
         regs = (struct pt_regs){.pc = (unsigned long)&cases[index].raw, .pstate = PSR_MODE_EL1h};
         regs.regs[1] = PTEBP_EMULATE_DATA_ADDRESS + 33;
         hook_regs.regs[0] = PTEBP_EMULATE_DATA_ADDRESS + 32;
-        if (ptebp_handle_data_abort(&hook_regs) != 1 ||
-            regs.regs[0] != cases[index].expected ||
-            regs.regs[1] != PTEBP_EMULATE_DATA_ADDRESS + 33 ||
-            regs.pc != (unsigned long)&cases[index].raw + 4 ||
-            g_ptebp_current.data_abort_refs || !g_ptebp_current.valid)
+        if (ptebp_handle_data_abort(&hook_regs) != 1 || regs.regs[0] != cases[index].expected || regs.regs[1] != PTEBP_EMULATE_DATA_ADDRESS + 33 || regs.pc != (unsigned long)&cases[index].raw + 4 || g_ptebp_current.data_abort_refs)
         {
             status = -EINVAL;
             goto out;
@@ -454,9 +440,7 @@ static int ptebp_emulate_abort_selftest(void)
     regs.regs[1] = PTEBP_EMULATE_DATA_ADDRESS + 32;
     hook_regs.regs[0] = PTEBP_EMULATE_DATA_ADDRESS + 32;
     hook_regs.regs[1] = (ESR_ELx_EC_DABT_LOW << ESR_ELx_EC_SHIFT) | ESR_ELx_FSC_PERM | ESR_ELx_FSC_LEVEL;
-    if (ptebp_handle_data_abort(&hook_regs) != 1 ||
-        regs.regs[0] != 0x8080808080808080ULL ||
-        regs.pc != PTEBP_EMULATE_DATA_ADDRESS + 4 || g_ptebp_current.data_abort_refs)
+    if (ptebp_handle_data_abort(&hook_regs) != 1 || regs.regs[0] != 0x8080808080808080ULL || regs.pc != PTEBP_EMULATE_DATA_ADDRESS + 4 || g_ptebp_current.data_abort_refs)
     {
         status = -EINVAL;
         goto out;
@@ -476,9 +460,7 @@ static int ptebp_emulate_abort_selftest(void)
     pagefault_disable();
     int disabled_before = current->pagefault_disabled;
     int handled = ptebp_handle_data_abort(&hook_regs);
-    if (handled != 1 || regs.pc != (~0ULL & PAGE_MASK) ||
-        current->pagefault_disabled != disabled_before || g_ptebp_current.data_abort_refs)
-        status = -EINVAL;
+    if (handled != 0 || regs.pc != (~0ULL & PAGE_MASK) || current->pagefault_disabled != disabled_before || g_ptebp_current.data_abort_refs || g_ptebp_current.mm != current->mm || g_ptebp_current.slots[0].shadow_page != shadow) status = -EINVAL;
     pagefault_enable();
 
 out:
@@ -499,14 +481,11 @@ static int __init ptebp_emulate_init(void)
 
     int status = ptebp_emulate_abort_selftest();
 
-    if (status)
-        return status;
+    if (status) return status;
     status = misc_register(&ptebp_emulate_device);
 
-    if (status)
-        return status;
-    ptebp_emulate_proc_entry = proc_create(PTEBP_EMULATE_DEVICE_NAME, 0600,
-                                           NULL, &ptebp_emulate_proc_ops);
+    if (status) return status;
+    ptebp_emulate_proc_entry = proc_create(PTEBP_EMULATE_DEVICE_NAME, 0600, NULL, &ptebp_emulate_proc_ops);
     if (!ptebp_emulate_proc_entry)
     {
         misc_deregister(&ptebp_emulate_device);
@@ -519,12 +498,12 @@ static int __init ptebp_emulate_init(void)
 static void __exit ptebp_emulate_exit(void)
 {
     mutex_lock(&ptebp_emulate_lock);
-    ptebp_file_stop();
+    int status = ptebp_file_stop();
+    if (status) ls_log_always_tag("test", "PTEBP stop failed status=%d\n", status);
     ptebp_emulate_release_pending();
     mutex_unlock(&ptebp_emulate_lock);
     if (target_tgid) return;
-    if (ptebp_emulate_proc_entry)
-        proc_remove(ptebp_emulate_proc_entry);
+    if (ptebp_emulate_proc_entry) proc_remove(ptebp_emulate_proc_entry);
     misc_deregister(&ptebp_emulate_device);
 }
 

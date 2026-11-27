@@ -66,7 +66,7 @@ mnt/oplus/op2/media/log/criticalLog/persist/critical.log
 
 它不适合直接作为完整内核调用栈。必须继续关联对应的 minidump 或 boot log。
 
-### 2.2 `SYSTEM_LAST_KMSG*.dat.gz`：确认内核首现场
+### 2.2 `SYSTEM_LAST_KMSG*.dat.gz` / `AEE_SYSTEM_LAST_KMSG*.dat.gz`：确认内核首现场
 
 主要目录：
 
@@ -157,10 +157,11 @@ rg -n -i -C 5 -- 'kernel_panic|<android-crash-begin>|system_restart_|watchdog|re
 
 ## 4. 按事件时间关联转储文件
 
-在文件清单中找到 `SYSTEM_LAST_KMSG*` 等候选。某些文件使用下面的命名格式：
+在文件清单中找到 `SYSTEM_LAST_KMSG*`、联发科常见的 `AEE_SYSTEM_LAST_KMSG*` 等候选。某些文件使用下面的命名格式：
 
 ```text
 SYSTEM_LAST_KMSG@<id>@<build>@YYYY_MM_DD_HH_MM_SS.dat.gz
+AEE_SYSTEM_LAST_KMSG@<id>@<build>@YYYY_MM_DD_HH_MM_SS.dat.gz
 ```
 
 对于这种格式，应提取末尾时间，而不是按完整文件名排序；前面的标识会干扰排序。下面列出时间候选，无法识别时间的文件也保留：
@@ -169,7 +170,7 @@ SYSTEM_LAST_KMSG@<id>@<build>@YYYY_MM_DD_HH_MM_SS.dat.gz
 $minidumps = @(
     foreach ($file in $files) {
         $name = [IO.Path]::GetFileName($file)
-        if ($name -notlike 'SYSTEM_LAST_KMSG*') { continue }
+        if ($name -notmatch '^(?:AEE_)?SYSTEM_LAST_KMSG') { continue }
         $time = $null
         if ($name -match '@(?<stamp>\d{4}(?:_\d{2}){5})\.dat\.gz$') {
             $parsedTime = [datetime]::MinValue
@@ -214,6 +215,12 @@ tar -xOzf $archive -- $member
 此命令只用于文本成员。需要解包时使用独立分析目录，保留原始包，不覆盖原 dump。不要通过 PowerShell 文本重定向提取二进制现场，以免改变原始字节。
 
 如果包内只有二进制现场，应记录完整包路径、设备平台及系统版本，再用匹配格式的解析工具导出内核文本。普通解包工具不一定能解析内部现场；不能因文本搜索没有命中就判定没有崩溃。本指南不假设统一的二进制布局。
+
+### 联发科 AEE 分支
+
+在联发科设备上，`AEE_SYSTEM_LAST_KMSG*.dat.gz` 外层可能仍是 gzip/tar，但内部 `.dbg` 并非直接可读的内核日志；部分布局包含混淆头、加密压缩成员和 printk 环形缓冲区。先记录实际成员和完整性，再按 [联发科 AEE 专题](mediatek_aee_guide.md) 使用 [解密脚本](../scripts/decode_mtk_aee.py)。
+
+本次 MT6895 包虽然尾部截断，仍有 54 个完整成员通过长度和 CRC 校验并恢复出内核现场；
 
 ## 6. 确认找到的是哪类日志
 
@@ -262,6 +269,7 @@ $files | Where-Object {
 | 没有事件摘要，但有内核现场 | 从现场内容和启动日志重建时间对应关系 |
 | 只有事件摘要 | 记录异常时间和摘要，继续找转储、文本内核日志或用户态报告 |
 | 有归档，但只有二进制现场 | 保留原包，确认格式与匹配的解析工具 |
+| 联发科 AEE 包受保护或尾部截断 | 先确认 AEE 布局，参考专题提取完整成员并逐个校验，不把部分恢复当成完整包 |
 | 只有启动或 recovery 日志 | 只能记录已见的重启线索，注明故障前现场缺失 |
 | 只剩旧日志 | 明确旧日志时间，请求补采本次现场，不将旧事件当成新故障 |
 

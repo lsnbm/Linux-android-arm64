@@ -2,9 +2,6 @@
 
 obj-m += lsdriver.o
 lsdriver-y := lsdriver_main.o \
-		      kernel_render/cpu/cpu_render.o \
-		      kernel_render/cpu/drm_cpu_render.o \
-		      kernel_render/cpu/cpu_raster.o \
 			  arm64_encode/arm64_encode.o \
 			  arm64_decode/arm64_decode.o \
 			  arm64_decode/arm64_decode_immediate.o \
@@ -110,9 +107,9 @@ ccflags-y += -foptimize-sibling-calls
 # -mbranch-protection=none      PAC 和 BTI 都关闭
 
 # 仅关闭返回地址 PAC，保留 BTI；覆盖 Kbuild 继承的 pac-ret 分支保护模式。
-# 原因是部分设备如oppo find x9 pro使用漏洞解锁root权限
-# 不知道是那个函数的返回地址、栈指针或栈内容被漏洞修改
-# 然后autiasp 验证失败，LR 会变成无效地址，随后 ret 跳转异常，导致 kernel panic, panic原因变成普通的空指针访问
+# 原因是部分设备如oppo find x9 pro，天玑 OPPO等内核未启用 CONFIG_ARM64_PTR_AUTH_KERNEL，
+# -march=armv8.6-a 会让 Clang 默认启用 PAC，函数返回生成 retaa (0xd65f0bff)。
+# retaa 在内核态是未定义指令 → do_undefinstr → panic
 ccflags-y += -mbranch-protection=bti
 
 

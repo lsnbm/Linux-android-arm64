@@ -209,6 +209,11 @@ static bool hide_task_dir_actor(struct dir_context *ctx, const char *name, int n
 */
 __attribute__((no_sanitize("cfi", "kcfi"))) static int proc_pid_readdir_hook_work(struct pt_regs *regs)
 {
+    int (*replay)(struct file *file, struct dir_context *ctx) = READ_ONCE(fn_proc_pid_readdir);
+    // 首次安装时，本 hook 可能已生效，但整组安装尚未返回，回放指针仍为空。
+    // 此时不做过滤、不修改现场，返回 0 由框架回放原函数，避免空指针调用。
+    if (!replay) return 0;
+
     struct dir_context *ctx = (struct dir_context *)regs->regs[1];
     struct hide_task_dir_context hide_ctx = {
         .ctx = *ctx,
@@ -216,7 +221,7 @@ __attribute__((no_sanitize("cfi", "kcfi"))) static int proc_pid_readdir_hook_wor
     };
     hide_ctx.ctx.actor = hide_task_dir_actor;
 
-    int ret = fn_proc_pid_readdir((struct file *)regs->regs[0], &hide_ctx.ctx);
+    int ret = replay((struct file *)regs->regs[0], &hide_ctx.ctx);
     ctx->pos = hide_ctx.ctx.pos;
     regs->regs[0] = (unsigned long)ret;
     return 1;
@@ -490,6 +495,8 @@ static int hide_task_install(pid_t tgid)
 
     if (!has_hidden_tgid)
     {
+        // 首次安装时，首个 hook 在整组安装返回前就已生效，回放指针此时尚未赋值。
+        // 并发命中由 work 的空指针检查返回 0，不做过滤，交给框架回放原函数。
         ret = inline_hook_install(g_hide_task_hooks);
         if (ret)
         {
@@ -497,7 +504,7 @@ static int hide_task_install(pid_t tgid)
             goto out_unlock;
         }
 
-        // 回放必须进入本 hook 的跳板，直接调用原符号会递归进入 hook。
+        // 调用原函数从回放区开始执行覆盖的入口指令，再跳回原函数正文，避免递归进入本 hook。
         fn_proc_pid_readdir = (void *)(g_hide_task_hooks[0].trampoline + TRAMP_REPLAY_INST_INDEX);
     }
 
